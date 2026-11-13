@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,12 @@
 #include <utility>
 
 #include "core/fxcrt/fx_system.h"
+#include "core/fxcrt/span_util.h"
 #include "core/fxge/cfx_defaultrenderdevice.h"
 #include "core/fxge/cfx_renderdevice.h"
 #include "core/fxge/cfx_unicodeencoding.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
 #include "third_party/base/check.h"
-#include "third_party/base/notreached.h"
 #include "xfa/fgas/graphics/cfgas_gecolor.h"
 #include "xfa/fgas/graphics/cfgas_gepath.h"
 #include "xfa/fgas/graphics/cfgas_gepattern.h"
@@ -128,10 +128,7 @@ void CFGAS_GEGraphics::SaveGraphState() {
 
 void CFGAS_GEGraphics::RestoreGraphState() {
   m_renderDevice->RestoreState(false);
-  if (m_infoStack.empty()) {
-    NOTREACHED();
-    return;
-  }
+  CHECK(!m_infoStack.empty());
   m_info = *m_infoStack.back();
   m_infoStack.pop_back();
   return;
@@ -245,7 +242,7 @@ void CFGAS_GEGraphics::FillPathWithPattern(
     const CFGAS_GEPath& path,
     const CFX_FillRenderOptions& fill_options,
     const CFX_Matrix& matrix) {
-  RetainPtr<CFX_DIBitmap> bitmap = m_renderDevice->GetBitmap();
+  RetainPtr<const CFX_DIBitmap> bitmap = m_renderDevice->GetBitmap();
   int32_t width = bitmap->GetWidth();
   int32_t height = bitmap->GetHeight();
   auto bmp = pdfium::MakeRetain<CFX_DIBitmap>();
@@ -259,7 +256,9 @@ void CFGAS_GEGraphics::FillPathWithPattern(
 
   auto mask = pdfium::MakeRetain<CFX_DIBitmap>();
   mask->Create(data.width, data.height, FXDIB_Format::k1bppMask);
-  memcpy(mask->GetBuffer(), data.maskBits, mask->GetPitch() * data.height);
+  fxcrt::spancpy(
+      mask->GetWritableBuffer(),
+      pdfium::make_span(data.maskBits).first(mask->GetPitch() * data.height));
   const CFX_FloatRect rectf =
       matrix.TransformRect(path.GetPath().GetBoundingBox());
   const FX_RECT rect = rectf.ToRoundedFxRect();
@@ -282,7 +281,7 @@ void CFGAS_GEGraphics::FillPathWithShading(
     const CFGAS_GEPath& path,
     const CFX_FillRenderOptions& fill_options,
     const CFX_Matrix& matrix) {
-  RetainPtr<CFX_DIBitmap> bitmap = m_renderDevice->GetBitmap();
+  RetainPtr<const CFX_DIBitmap> bitmap = m_renderDevice->GetBitmap();
   int32_t width = bitmap->GetWidth();
   int32_t height = bitmap->GetHeight();
   float start_x = m_info.fillColor.GetShading()->GetBeginPoint().x;
@@ -300,7 +299,8 @@ void CFGAS_GEGraphics::FillPathWithShading(
       float axis_len_square = (x_span * x_span) + (y_span * y_span);
       for (int32_t row = 0; row < height; row++) {
         uint32_t* dib_buf =
-            reinterpret_cast<uint32_t*>(bmp->GetWritableScanline(row).data());
+            fxcrt::reinterpret_span<uint32_t>(bmp->GetWritableScanline(row))
+                .data();
         for (int32_t column = 0; column < width; column++) {
           float scale = 0.0f;
           if (axis_len_square) {
@@ -334,7 +334,8 @@ void CFGAS_GEGraphics::FillPathWithShading(
                 ((start_r - end_r) * (start_r - end_r));
       for (int32_t row = 0; row < height; row++) {
         uint32_t* dib_buf =
-            reinterpret_cast<uint32_t*>(bmp->GetWritableScanline(row).data());
+            fxcrt::reinterpret_span<uint32_t>(bmp->GetWritableScanline(row))
+                .data();
         for (int32_t column = 0; column < width; column++) {
           float x = (float)(column);
           float y = (float)(row);
@@ -387,10 +388,6 @@ void CFGAS_GEGraphics::FillPathWithShading(
       result = true;
       break;
     }
-    default: {
-      result = false;
-      break;
-    }
   }
   if (result) {
     CFX_RenderDevice::StateRestorer restorer(m_renderDevice);
@@ -417,22 +414,10 @@ void CFGAS_GEGraphics::SetDIBitsWithMatrix(RetainPtr<CFX_DIBBase> source,
 
 CFGAS_GEGraphics::TInfo::TInfo() = default;
 
-CFGAS_GEGraphics::TInfo::TInfo(const TInfo& info)
-    : graphState(info.graphState),
-      CTM(info.CTM),
-      isActOnDash(info.isActOnDash),
-      strokeColor(info.strokeColor),
-      fillColor(info.fillColor) {}
+CFGAS_GEGraphics::TInfo::TInfo(const TInfo& info) = default;
 
 CFGAS_GEGraphics::TInfo& CFGAS_GEGraphics::TInfo::operator=(
-    const TInfo& other) {
-  graphState = other.graphState;
-  CTM = other.CTM;
-  isActOnDash = other.isActOnDash;
-  strokeColor = other.strokeColor;
-  fillColor = other.fillColor;
-  return *this;
-}
+    const TInfo& other) = default;
 
 CFGAS_GEGraphics::StateRestorer::StateRestorer(CFGAS_GEGraphics* graphics)
     : graphics_(graphics) {

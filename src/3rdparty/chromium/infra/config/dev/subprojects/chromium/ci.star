@@ -2,8 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/builders.star", "builder", "cpu", "defaults", "goma", "os")
+load("//lib/builders.star", "builder", "cpu", "defaults", "os", "reclient")
 load("//lib/builder_config.star", "builder_config")
+load("//lib/gn_args.star", "gn_args")
 
 luci.bucket(
     name = "ci",
@@ -26,6 +27,22 @@ luci.bucket(
     ],
 )
 
+luci.bucket(
+    name = "ci.shadow",
+    shadows = "ci",
+    constraints = luci.bucket_constraints(
+        pools = ["luci.chromium.ci"],
+        service_accounts = ["chromium-ci-builder-dev@chops-service-accounts.iam.gserviceaccount.com"],
+    ),
+    bindings = [
+        luci.binding(
+            roles = "role/buildbucket.creator",
+            groups = "mdb/chrome-troopers",
+        ),
+    ],
+    dynamic = True,
+)
+
 luci.gitiles_poller(
     name = "chromium-gitiles-trigger",
     bucket = "ci",
@@ -43,9 +60,14 @@ defaults.build_numbers.set(True)
 defaults.builder_group.set("chromium.dev")
 defaults.builderless.set(None)
 defaults.cpu.set(cpu.X86_64)
-defaults.executable.set("recipe:swarming/staging")
+defaults.executable.set("recipe:chromium")
 defaults.execution_timeout.set(3 * time.hour)
 defaults.os.set(os.LINUX_DEFAULT)
+defaults.properties.set({
+    "$build/chromium_swarming": {
+        "verbose": True,
+    },
+})
 defaults.service_account.set(
     "chromium-ci-builder-dev@chops-service-accounts.iam.gserviceaccount.com",
 )
@@ -64,45 +86,249 @@ def ci_builder(*, name, resultdb_bigquery_exports = None, **kwargs):
         name = name,
         triggered_by = ["chromium-gitiles-trigger"],
         resultdb_bigquery_exports = resultdb_bigquery_exports,
-        goma_backend = goma.backend.RBE_PROD,
+        reclient_instance = reclient.instance.DEFAULT_TRUSTED,
+        reclient_jobs = reclient.jobs.DEFAULT,
         resultdb_index_by_timestamp = True,
         **kwargs
     )
 
-ci_builder(
-    name = "android-marshmallow-arm64-rel-swarming",
-)
+###############################################################################
+# NOTE: If you change any of the following builders, please make sure the
+# GCE image roller that watches these builders is similarly up-to-date. See
+# http://shortn/_F1oktuhGEV.
+###############################################################################
 
 ci_builder(
-    name = "linux-rel-swarming",
+    name = "android-pie-arm64-rel-dev",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(
+            config = "chromium",
+            apply_configs = [
+                "android",
+            ],
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "android",
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.ANDROID,
+        ),
+        android_config = builder_config.android_config(
+            config = "main_builder_mb",
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "android_builder",
+            "release_builder",
+            "reclient",
+            "minimal_symbols",
+            "arm64",
+            "strip_debug_info",
+            "webview_monochrome",
+        ],
+    ),
+)
+
+# TODO(crbug.com/1412588): Delete this builder when bionic image rolls are
+# disabled.
+ci_builder(
+    name = "linux-rel-dev",
     description_html = "Test description. <b>Test HTML</b>.",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "devtools_do_typecheck",
+        ],
+    ),
+    os = os.LINUX_BIONIC,
 )
 
 ci_builder(
-    name = "linux-ssd-rel-swarming",
+    name = "linux-rel-jammy-dev",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "devtools_do_typecheck",
+        ],
+    ),
+)
+
+ci_builder(
+    name = "linux-local-ssd-rel-dev",
     description_html = "Ensures builders are using available local SSDs",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "devtools_do_typecheck",
+        ],
+    ),
     builderless = False,
+    ssd = True,
 )
 
 ci_builder(
-    name = "mac-rel-swarming",
+    name = "linux-remote-ssd-rel-dev",
+    description_html = "Ensures builders are using available remote SSDs. See b/279078023 for context.",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "devtools_do_typecheck",
+        ],
+    ),
+    builderless = False,
+    ssd = True,
+)
+
+ci_builder(
+    name = "mac-rel-dev",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "minimal_symbols",
+            "disable_nacl",
+        ],
+    ),
     os = os.MAC_DEFAULT,
 )
 
 ci_builder(
-    name = "mac-arm-rel-swarming",
+    name = "mac-arm-rel-dev",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "minimal_symbols",
+            "disable_nacl",
+        ],
+    ),
+    os = os.MAC_DEFAULT,
     cpu = cpu.ARM64,
-    os = os.MAC_DEFAULT,
 )
 
 ci_builder(
-    name = "win-rel-swarming",
+    name = "win-local-ssd-rel-dev",
+    description_html = "Ensures mounting local SSDs on Windows works.",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "minimal_symbols",
+        ],
+    ),
+    builderless = False,
     os = os.WINDOWS_10,
-    goma_enable_ats = True,
+    ssd = 1,
 )
 
 ci_builder(
-    name = "win11-rel-swarming",
+    name = "win-rel-dev",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "minimal_symbols",
+        ],
+    ),
+    os = os.WINDOWS_10,
+    ssd = 0,
+)
+
+ci_builder(
+    name = "win11-rel-dev",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_builder",
+            "reclient",
+            "minimal_symbols",
+        ],
+    ),
     os = os.WINDOWS_11,
-    goma_enable_ats = True,
 )

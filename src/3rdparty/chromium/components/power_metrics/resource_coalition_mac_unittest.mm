@@ -82,7 +82,8 @@ void BurnCPU() {
 
 }  // namespace
 
-TEST(ResourceCoalitionMacTest, Busy) {
+// TODO(crbug.com/328102500): Test failing on Mac builders, hence disabled.
+TEST(ResourceCoalitionMacTest, DISABLED_Busy) {
   absl::optional<uint64_t> coalition_id =
       GetProcessCoalitionId(base::GetCurrentProcId());
   ASSERT_TRUE(coalition_id.has_value());
@@ -96,17 +97,8 @@ TEST(ResourceCoalitionMacTest, Busy) {
   ASSERT_TRUE(begin);
   ASSERT_TRUE(end);
 
-  // Waterfall suggests that `cpu_instructions` and `cpu_cycles` are not
-  // populated prior to macOS 10.15.
-  if (@available(macOS 10.15, *)) {
-    EXPECT_GT(end->cpu_instructions, begin->cpu_instructions);
-    EXPECT_GT(end->cpu_cycles, begin->cpu_cycles);
-  } else {
-    EXPECT_EQ(0u, begin->cpu_instructions);
-    EXPECT_EQ(0u, begin->cpu_cycles);
-    EXPECT_EQ(0u, end->cpu_instructions);
-    EXPECT_EQ(0u, end->cpu_cycles);
-  }
+  EXPECT_GT(end->cpu_instructions, begin->cpu_instructions);
+  EXPECT_GT(end->cpu_cycles, begin->cpu_cycles);
   EXPECT_GT(end->cpu_time, begin->cpu_time);
 }
 

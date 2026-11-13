@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include "fxjs/xfa/fxjse.h"
 #include "fxjs/xfa/jse_define.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 #include "v8/include/cppgc/garbage-collected.h"
 #include "v8/include/cppgc/member.h"
 #include "v8/include/v8-forward.h"
@@ -35,7 +35,7 @@ class CXFA_Object;
 using CJX_MethodCall =
     CJS_Result (*)(CJX_Object* obj,
                    CFXJSE_Engine* runtime,
-                   const std::vector<v8::Local<v8::Value>>& params);
+                   pdfium::span<v8::Local<v8::Value>> params);
 
 struct CJX_MethodSpec {
   const char* pName;
@@ -110,7 +110,7 @@ class CJX_Object : public cppgc::GarbageCollected<CJX_Object>,
 
   CXFA_Document* GetDocument() const;
   CXFA_Node* GetXFANode() const;
-  CXFA_Object* GetXFAObject() const { return object_.Get(); }
+  CXFA_Object* GetXFAObject() const { return object_; }
 
   void SetCalcRecursionCount(size_t count) { calc_recursion_count_ = count; }
   size_t GetCalcRecursionCount() const { return calc_recursion_count_; }
@@ -119,8 +119,9 @@ class CJX_Object : public cppgc::GarbageCollected<CJX_Object>,
   CXFA_LayoutItem* GetLayoutItem() const { return layout_item_; }
 
   bool HasMethod(const WideString& func) const;
-  CJS_Result RunMethod(const WideString& func,
-                       const std::vector<v8::Local<v8::Value>>& params);
+  CJS_Result RunMethod(CFXJSE_Engine* pScriptContext,
+                       const WideString& func,
+                       pdfium::span<v8::Local<v8::Value>> params);
 
   bool HasAttribute(XFA_Attribute eAttr) const;
   WideString GetAttributeByString(WideStringView attr) const;

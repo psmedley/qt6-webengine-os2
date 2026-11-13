@@ -6,8 +6,8 @@
 
 #include <utility>
 
-#include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "base/ranges/algorithm.h"
 #include "device/base/features.h"
 #include "device/fido/ctap2_device_operation.h"
@@ -165,7 +165,6 @@ bool MakeCredentialTask::WillUseCTAP2(const FidoDevice* device,
                                       const CtapMakeCredentialRequest& request,
                                       const MakeCredentialOptions& options) {
   return device->supported_protocol() == ProtocolVersion::kCtap2 &&
-         !options.make_u2f_api_credential &&
          !CtapDeviceShouldUseU2fBecauseClientPinIsSet(device, request);
 }
 

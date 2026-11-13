@@ -10,8 +10,6 @@
 
 #include "include/core/SkTypes.h"
 
-#if defined(SKSL_STANDALONE) || SK_SUPPORT_GPU || defined(SK_GRAPHITE_ENABLED)
-
 #include <string>
 
 namespace SkSL {
@@ -64,7 +62,5 @@ namespace PipelineStage {
 }  // namespace PipelineStage
 
 }  // namespace SkSL
-
-#endif
 
 #endif

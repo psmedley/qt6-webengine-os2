@@ -126,9 +126,6 @@ struct Limitations
     // Unable to support different values for front and back faces for stencil refs and masks
     bool noSeparateStencilRefsAndMasks = false;
 
-    // Renderer doesn't support non-constant indexing loops in fragment shader
-    bool shadersRequireIndexedLoopValidation = false;
-
     // Renderer doesn't support Simultaneous use of GL_CONSTANT_ALPHA/GL_ONE_MINUS_CONSTANT_ALPHA
     // and GL_CONSTANT_COLOR/GL_ONE_MINUS_CONSTANT_COLOR blend functions.
     bool noSimultaneousConstantColorAndAlphaBlendFunc = false;
@@ -369,7 +366,7 @@ struct Caps
     GLuint maxDebugGroupStackDepth = 0;
     GLuint maxLabelLength          = 0;
 
-    // GL_APPLE_clip_distance/GL_EXT_clip_cull_distance
+    // GL_APPLE_clip_distance / GL_EXT_clip_cull_distance / GL_ANGLE_clip_cull_distance
     GLuint maxClipDistances                = 0;
     GLuint maxCullDistances                = 0;
     GLuint maxCombinedClipAndCullDistances = 0;
@@ -378,6 +375,9 @@ struct Caps
     GLuint maxPixelLocalStoragePlanes                       = 0;
     GLuint maxColorAttachmentsWithActivePixelLocalStorage   = 0;
     GLuint maxCombinedDrawBuffersAndPixelLocalStoragePlanes = 0;
+
+    // GL_EXT_shader_pixel_local_storage.
+    GLuint maxShaderPixelLocalStorageFastSizeEXT = 0;
 
     // GLES1 emulation: Caps for ES 1.1. Taken from Table 6.20 / 6.22 in the OpenGL ES 1.1 spec.
     GLuint maxMultitextureUnits                 = 0;
@@ -395,6 +395,9 @@ struct Caps
     // ES 3.2 Table 20.41: Implementation Dependent Values (cont.)
     GLint maxTextureBufferSize         = 0;
     GLint textureBufferOffsetAlignment = 0;
+
+    // GL_ARM_shader_framebuffer_fetch
+    bool fragmentShaderFramebufferFetchMRT = false;
 };
 
 Caps GenerateMinimumCaps(const Version &clientVersion, const Extensions &extensions);
@@ -408,10 +411,10 @@ struct Caps
     Caps();
 
     // Support for NPOT surfaces
-    bool textureNPOT;
+    bool textureNPOT = false;
 
     // Support for Stencil8 configs
-    bool stencil8;
+    bool stencil8 = false;
 };
 
 struct DisplayExtensions
@@ -568,6 +571,9 @@ struct DisplayExtensions
     // EGL_ANGLE_power_preference
     bool powerPreference = false;
 
+    // EGL_ANGLE_wait_until_work_scheduled
+    bool waitUntilWorkScheduled = false;
+
     // EGL_ANGLE_image_d3d11_texture
     bool imageD3D11Texture = false;
 
@@ -615,6 +621,15 @@ struct DisplayExtensions
 
     // EGL_ANGLE_colorspace_attribute_passthrough
     bool eglColorspaceAttributePassthroughANGLE = false;
+
+    // EGL_EXT_gl_colorspace_bt2020_linear
+    bool glColorspaceBt2020Linear = false;
+
+    // EGL_EXT_gl_colorspace_bt2020_pq
+    bool glColorspaceBt2020Pq = false;
+
+    // EGL_EXT_gl_colorspace_bt2020_hlg
+    bool glColorspaceBt2020Hlg = false;
 
     // EGL_ANDROID_framebuffer_target
     bool framebufferTargetANDROID = false;
@@ -692,6 +707,12 @@ struct DeviceExtensions
 
     // EGL_ANGLE_device_vulkan
     bool deviceVulkan = false;
+
+    // EGL_EXT_device_drm
+    bool deviceDrmEXT = false;
+
+    // EGL_EXT_device_drm_render_node
+    bool deviceDrmRenderNodeEXT = false;
 };
 
 struct ClientExtensions
@@ -716,6 +737,9 @@ struct ClientExtensions
 
     // EGL_EXT_platform_wayland
     bool platformWaylandEXT = false;
+
+    // EGL_MESA_platform_surfaceless
+    bool platformSurfacelessMESA = false;
 
     // EGL_ANGLE_platform_angle
     bool platformANGLE = false;

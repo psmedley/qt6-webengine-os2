@@ -5,19 +5,21 @@
 #ifndef COMPONENTS_SESSION_PROTO_DB_SESSION_PROTO_DB_H_
 #define COMPONENTS_SESSION_PROTO_DB_SESSION_PROTO_DB_H_
 
+#include <memory>
 #include <queue>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "components/commerce/core/proto/persisted_state_db_content.pb.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/leveldb_proto/public/proto_database.h"
@@ -95,6 +97,10 @@ class SessionProtoDB : public KeyedService, public SessionProtoStorage<T> {
 
   void DeleteOneEntry(const std::string& key,
                       OperationCallback callback) override;
+
+  void UpdateEntries(std::unique_ptr<ContentEntry> entries_to_update,
+                     std::unique_ptr<std::vector<std::string>> keys_to_remove,
+                     OperationCallback callback) override;
 
   void DeleteContentWithPrefix(const std::string& key_prefix,
                                OperationCallback callback) override;
@@ -320,6 +326,27 @@ void SessionProtoDB<T>::DeleteOneEntry(const std::string& key,
   }
 }
 
+template <typename T>
+void SessionProtoDB<T>::UpdateEntries(
+    std::unique_ptr<ContentEntry> entries_to_update,
+    std::unique_ptr<std::vector<std::string>> keys_to_remove,
+    OperationCallback callback) {
+  if (InitStatusUnknown()) {
+    deferred_operations_.push_back(base::BindOnce(
+        &SessionProtoDB::UpdateEntries, weak_ptr_factory_.GetWeakPtr(),
+        std::move(entries_to_update), std::move(keys_to_remove),
+        std::move(callback)));
+  } else if (FailedToInit()) {
+    ui_thread_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), false));
+  } else {
+    storage_database_->UpdateEntries(
+        std::move(entries_to_update), std::move(keys_to_remove),
+        base::BindOnce(&SessionProtoDB::OnOperationCommitted,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+}
+
 // Deletes content in the database, matching all keys which have a prefix
 // that matches the key.
 template <typename T>
@@ -336,7 +363,7 @@ void SessionProtoDB<T>::DeleteContentWithPrefix(const std::string& key_prefix,
   } else {
     storage_database_->UpdateEntriesWithRemoveFilter(
         std::make_unique<ContentEntry>(),
-        std::move(base::BindRepeating(&DatabasePrefixFilter, key_prefix)),
+        base::BindRepeating(&DatabasePrefixFilter, key_prefix),
         base::BindOnce(&SessionProtoDB::OnOperationCommitted,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }

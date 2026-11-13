@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 
 #include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/data_vector.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 namespace fxcrt {
 
@@ -38,9 +38,11 @@ class BinaryBuffer {
   void SetAllocStep(size_t step) { m_AllocStep = step; }
   void EstimateSize(size_t size);
   void AppendSpan(pdfium::span<const uint8_t> span);
-  void AppendBlock(const void* pBuf, size_t size);
   void AppendString(const ByteString& str);
-  void AppendByte(uint8_t byte);
+  void AppendUint8(uint8_t value);
+  void AppendUint16(uint16_t value);
+  void AppendUint32(uint32_t value);
+  void AppendDouble(double value);
 
   // Releases ownership of `m_pBuffer` and returns it.
   DataVector<uint8_t> DetachBuffer();

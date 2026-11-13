@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,12 @@
 #include <chrono>
 #include <utility>
 
+#include "platform/base/span.h"
 #include "util/chrono_helpers.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
-using openscreen::operator<<;  // To pretty-print chrono values.
+using clock_operators::operator<<;
 
 namespace {
 
@@ -85,12 +85,18 @@ void StreamingOpusEncoder::UseHighQuality() {
 
 void StreamingOpusEncoder::EncodeAndSend(const float* interleaved_samples,
                                          int num_samples,
+                                         Clock::time_point capture_begin_time,
+                                         Clock::time_point capture_end_time,
                                          Clock::time_point reference_time) {
   OSP_DCHECK(interleaved_samples);
   OSP_DCHECK_GT(num_samples, 0);
 
   ResolveTimestampsAndMaybeSkip(reference_time);
 
+  if (frame_.capture_begin_time == Clock::time_point::min()) {
+    frame_.capture_begin_time = capture_begin_time;
+  }
+  frame_.capture_end_time = capture_end_time;
   while (num_samples > 0) {
     const int samples_copied =
         FillInputBuffer(interleaved_samples, num_samples);
@@ -117,7 +123,7 @@ void StreamingOpusEncoder::EncodeAndSend(const float* interleaved_samples,
     // Note: It's possible for Opus to encode a zero byte packet. Send a Cast
     // audio frame anyway, to represent the passage of silence and to send other
     // stream metadata.
-    frame_.data = absl::Span<uint8_t>(output_.get(), packet_size_or_error);
+    frame_.data = ByteView(output_.get(), packet_size_or_error);
     last_sent_frame_reference_time_ = frame_.reference_time;
     switch (sender_->EnqueueFrame(frame_)) {
       case Sender::OK:
@@ -218,5 +224,4 @@ constexpr int StreamingOpusEncoder::kDefaultCastAudioFramesPerSecond;
 // static
 constexpr int StreamingOpusEncoder::kOpusMaxPayloadSize;
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

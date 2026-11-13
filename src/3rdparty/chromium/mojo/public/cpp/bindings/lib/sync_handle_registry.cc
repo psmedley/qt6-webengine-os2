@@ -5,16 +5,16 @@
 #include "mojo/public/cpp/bindings/sync_handle_registry.h"
 
 #include <algorithm>
+#include <map>
 #include <utility>
 
 #include "base/auto_reset.h"
 #include "base/check_op.h"
 #include "base/containers/contains.h"
-#include "base/containers/cxx20_erase.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequence_local_storage_slot.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/types/pass_key.h"
 #include "mojo/public/c/system/core.h"
 
@@ -40,7 +40,7 @@ scoped_refptr<SyncHandleRegistry> SyncHandleRegistry::current() {
 
   // SyncMessageFilter can be used on threads without sequence-local storage
   // being available. Those receive a unique, standalone SyncHandleRegistry.
-  if (!base::SequencedTaskRunnerHandle::IsSet()) {
+  if (!base::SequencedTaskRunner::HasCurrentDefault()) {
     return base::MakeRefCounted<SyncHandleRegistry>(
         base::PassKey<SyncHandleRegistry>());
   }
@@ -159,7 +159,7 @@ bool SyncHandleRegistry::Wait(const bool* should_stop[], size_t count) {
       // any event.  If we're in the outermost frame, prune any empty map
       // entries to avoid unbounded growth.
       if (!in_nested_wait_) {
-        base::EraseIf(events_,
+        std::erase_if(events_,
                       [](const auto& entry) { return entry.second->empty(); });
       }
     }

@@ -1,11 +1,13 @@
 #include "quiche/http2/core/http2_trace_logging.h"
 
 #include <cstdint>
+#include <memory>
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_bug_tracker.h"
 #include "quiche/common/platform/api/quiche_logging.h"
+#include "quiche/common/quiche_callbacks.h"
 #include "quiche/spdy/core/http2_header_block.h"
 #include "quiche/spdy/core/spdy_protocol.h"
 
@@ -113,7 +115,7 @@ struct LogAlternativeService {
 
 Http2TraceLogger::Http2TraceLogger(SpdyFramerVisitorInterface* parent,
                                    absl::string_view perspective,
-                                   std::function<bool()> is_enabled,
+                                   quiche::MultiUseCallback<bool()> is_enabled,
                                    const void* connection_id)
     : wrapped_(parent),
       perspective_(perspective),
@@ -192,7 +194,7 @@ spdy::SpdyHeadersHandlerInterface* Http2TraceLogger::OnHeaderFrameStart(
       wrapped_->OnHeaderFrameStart(stream_id);
   if (is_enabled_()) {
     recording_headers_handler_ =
-        absl::make_unique<spdy::RecordingHeadersHandler>(result);
+        std::make_unique<spdy::RecordingHeadersHandler>(result);
     result = recording_headers_handler_.get();
   } else {
     recording_headers_handler_ = nullptr;

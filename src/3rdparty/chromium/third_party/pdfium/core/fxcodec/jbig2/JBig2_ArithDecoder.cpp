@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,8 +66,7 @@ CJBig2_ArithDecoder::CJBig2_ArithDecoder(CJBig2_BitStream* pStream)
 CJBig2_ArithDecoder::~CJBig2_ArithDecoder() = default;
 
 int CJBig2_ArithDecoder::Decode(JBig2ArithCtx* pCX) {
-  DCHECK(pCX);
-  DCHECK_LT(pCX->I(), std::size(kQeTable));
+  CHECK_LT(pCX->I(), std::size(kQeTable));
 
   const JBig2ArithCtx::JBig2ArithQe& qe = kQeTable[pCX->I()];
   m_A -= qe.Qe;

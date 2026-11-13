@@ -12,9 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
-import {assertExists, assertFalse, assertTrue} from '../base/logging';
+import {Trash} from '../base/disposable';
+import {getScrollbarWidth} from '../base/dom_utils';
+import {assertExists, assertFalse} from '../base/logging';
+import {SimpleResizeObserver} from '../base/resize_observer';
+import {time} from '../base/time';
+import {
+  debugNow,
+  perfDebug,
+  perfDisplay,
+  PerfStatsSource,
+  RunningStatistics,
+  runningStatStr,
+} from '../core/perf';
+import {raf} from '../core/raf_scheduler';
+import {SliceRect} from '../public';
 
 import {
   SELECTION_STROKE_COLOR,
@@ -26,39 +40,50 @@ import {
   FlowEventsRendererArgs,
 } from './flow_events_renderer';
 import {globals} from './globals';
-import {isPanelVNode, Panel, PanelSize} from './panel';
-import {
-  debugNow,
-  perfDebug,
-  perfDisplay,
-  RunningStatistics,
-  runningStatStr,
-} from './perf';
-import {TrackGroupAttrs} from './viewer_page';
+import {PanelSize} from './panel';
 
 // If the panel container scrolls, the backing canvas height is
 // SCROLLING_CANVAS_OVERDRAW_FACTOR * parent container height.
 const SCROLLING_CANVAS_OVERDRAW_FACTOR = 1.2;
 
-// We need any here so we can accept vnodes with arbitrary attrs.
-export type AnyAttrsVnode = m.Vnode<any, any>;
+export interface Panel {
+  kind: 'panel';
+  mithril: m.Children;
+  selectable: boolean;
+  key: string;
+  trackKey?: string;
+  trackGroupId?: string;
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void;
+  getSliceRect?(tStart: time, tDur: time, depth: number): SliceRect|undefined;
+}
+
+export interface PanelGroup {
+  kind: 'group';
+  collapsed: boolean;
+  header: Panel;
+  childTracks: Panel[];
+  trackGroupId: string;
+}
+
+export type PanelOrGroup = Panel|PanelGroup;
 
 export interface Attrs {
-  panels: AnyAttrsVnode[];
+  panels: PanelOrGroup[];
   doesScroll: boolean;
-  kind: 'TRACKS'|'OVERVIEW'|'DETAILS';
+  kind: 'TRACKS'|'OVERVIEW';
 }
 
 interface PanelInfo {
   id: string;  // Can be == '' for singleton panels.
-  vnode: AnyAttrsVnode;
+  panel: Panel;
   height: number;
   width: number;
   x: number;
   y: number;
 }
 
-export class PanelContainer implements m.ClassComponent<Attrs> {
+export class PanelContainer implements m.ClassComponent<Attrs>,
+                                       PerfStatsSource {
   // These values are updated with proper values in oncreate.
   private parentWidth = 0;
   private parentHeight = 0;
@@ -66,7 +91,7 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
   private panelInfos: PanelInfo[] = [];
   private panelContainerTop = 0;
   private panelContainerHeight = 0;
-  private panelByKey = new Map<string, AnyAttrsVnode>();
+  private panelByKey = new Map<string, Panel>();
   private totalPanelHeight = 0;
   private canvasHeight = 0;
 
@@ -86,28 +111,25 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
 
   private ctx?: CanvasRenderingContext2D;
 
-  private onResize: () => void = () => {};
-  private parentOnScroll: () => void = () => {};
-  private canvasRedrawer: () => void;
+  private trash: Trash;
 
   get canvasOverdrawFactor() {
     return this.attrs.doesScroll ? SCROLLING_CANVAS_OVERDRAW_FACTOR : 1;
   }
 
   getPanelsInRegion(startX: number, endX: number, startY: number, endY: number):
-      AnyAttrsVnode[] {
+      Panel[] {
     const minX = Math.min(startX, endX);
     const maxX = Math.max(startX, endX);
     const minY = Math.min(startY, endY);
     const maxY = Math.max(startY, endY);
-    const panels: AnyAttrsVnode[] = [];
+    const panels: Panel[] = [];
     for (let i = 0; i < this.panelInfos.length; i++) {
       const pos = this.panelInfos[i];
       const realPosX = pos.x - TRACK_SHELL_WIDTH;
       if (realPosX + pos.width >= minX && realPosX <= maxX &&
-          pos.y + pos.height >= minY && pos.y <= maxY &&
-          pos.vnode.attrs.selectable) {
-        panels.push(pos.vnode);
+          pos.y + pos.height >= minY && pos.y <= maxY && pos.panel.selectable) {
+        panels.push(pos.panel);
       }
     }
     return panels;
@@ -116,10 +138,9 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
   // This finds the tracks covered by the in-progress area selection. When
   // editing areaY is not set, so this will not be used.
   handleAreaSelection() {
-    const area = globals.frontendLocalState.selectedArea;
-    if (area === undefined ||
-        globals.frontendLocalState.areaY.start === undefined ||
-        globals.frontendLocalState.areaY.end === undefined ||
+    const area = globals.timeline.selectedArea;
+    if (area === undefined || globals.timeline.areaY.start === undefined ||
+        globals.timeline.areaY.end === undefined ||
         this.panelInfos.length === 0) {
       return;
     }
@@ -128,130 +149,128 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
     const panelContainerTop = this.panelInfos[0].y;
     const panelContainerBottom = this.panelInfos[this.panelInfos.length - 1].y +
         this.panelInfos[this.panelInfos.length - 1].height;
-    if (globals.frontendLocalState.areaY.start + TOPBAR_HEIGHT <
-            panelContainerTop ||
-        globals.frontendLocalState.areaY.start + TOPBAR_HEIGHT >
-            panelContainerBottom) {
+    if (globals.timeline.areaY.start + TOPBAR_HEIGHT < panelContainerTop ||
+        globals.timeline.areaY.start + TOPBAR_HEIGHT > panelContainerBottom) {
       return;
     }
+
+    const {visibleTimeScale} = globals.timeline;
 
     // The Y value is given from the top of the pan and zoom region, we want it
     // from the top of the panel container. The parent offset corrects that.
     const panels = this.getPanelsInRegion(
-        globals.frontendLocalState.timeScale.timeToPx(area.startSec),
-        globals.frontendLocalState.timeScale.timeToPx(area.endSec),
-        globals.frontendLocalState.areaY.start + TOPBAR_HEIGHT,
-        globals.frontendLocalState.areaY.end + TOPBAR_HEIGHT);
+        visibleTimeScale.timeToPx(area.start),
+        visibleTimeScale.timeToPx(area.end),
+        globals.timeline.areaY.start + TOPBAR_HEIGHT,
+        globals.timeline.areaY.end + TOPBAR_HEIGHT);
     // Get the track ids from the panels.
     const tracks = [];
     for (const panel of panels) {
-      if (panel.attrs.id !== undefined) {
-        tracks.push(panel.attrs.id);
+      if (panel.trackKey !== undefined) {
+        tracks.push(panel.trackKey);
         continue;
       }
-      if (panel.attrs.trackGroupId !== undefined) {
-        const trackGroup = globals.state.trackGroups[panel.attrs.trackGroupId];
+      if (panel.trackGroupId !== undefined) {
+        const trackGroup = globals.state.trackGroups[panel.trackGroupId];
         // Only select a track group and all child tracks if it is closed.
         if (trackGroup.collapsed) {
-          tracks.push(panel.attrs.trackGroupId);
+          tracks.push(panel.trackGroupId);
           for (const track of trackGroup.tracks) {
             tracks.push(track);
           }
         }
       }
     }
-    globals.frontendLocalState.selectArea(area.startSec, area.endSec, tracks);
+    globals.timeline.selectArea(area.start, area.end, tracks);
   }
 
   constructor(vnode: m.CVnode<Attrs>) {
     this.attrs = vnode.attrs;
-    this.canvasRedrawer = () => this.redrawCanvas();
-    globals.rafScheduler.addRedrawCallback(this.canvasRedrawer);
-    perfDisplay.addContainer(this);
     this.flowEventsRenderer = new FlowEventsRenderer();
+    this.trash = new Trash();
+
+    const onRedraw = () => this.redrawCanvas();
+    raf.addRedrawCallback(onRedraw);
+    this.trash.addCallback(() => {
+      raf.removeRedrawCallback(onRedraw);
+    });
+
+    perfDisplay.addContainer(this);
+    this.trash.addCallback(() => {
+      perfDisplay.removeContainer(this);
+    });
   }
 
-  oncreate(vnodeDom: m.CVnodeDOM<Attrs>) {
+  oncreate({dom}: m.CVnodeDOM<Attrs>) {
     // Save the canvas context in the state.
-    const canvas =
-        vnodeDom.dom.querySelector('.main-canvas') as HTMLCanvasElement;
+    const canvas = dom.querySelector('.main-canvas') as HTMLCanvasElement;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       throw Error('Cannot create canvas context');
     }
     this.ctx = ctx;
 
-    this.readParentSizeFromDom(vnodeDom.dom);
-    this.readPanelHeightsFromDom(vnodeDom.dom);
+    this.readParentSizeFromDom(dom);
+    this.readPanelHeightsFromDom(dom);
 
     this.updateCanvasDimensions();
     this.repositionCanvas();
 
-    // Save the resize handler in the state so we can remove it later.
-    // TODO: Encapsulate resize handling better.
-    this.onResize = () => {
-      this.readParentSizeFromDom(vnodeDom.dom);
-      this.updateCanvasDimensions();
-      this.repositionCanvas();
-      globals.rafScheduler.scheduleFullRedraw();
-    };
-
-    // Once ResizeObservers are out, we can stop accessing the window here.
-    window.addEventListener('resize', this.onResize);
+    this.trash.add(new SimpleResizeObserver(dom, () => {
+      const parentSizeChanged = this.readParentSizeFromDom(dom);
+      if (parentSizeChanged) {
+        this.updateCanvasDimensions();
+        this.repositionCanvas();
+        this.redrawCanvas();
+      }
+    }));
 
     // TODO(dproy): Handle change in doesScroll attribute.
     if (this.attrs.doesScroll) {
-      this.parentOnScroll = () => {
-        this.scrollTop = assertExists(vnodeDom.dom.parentElement).scrollTop;
+      const parentOnScroll = () => {
+        this.scrollTop = dom.parentElement!.scrollTop;
         this.repositionCanvas();
-        globals.rafScheduler.scheduleRedraw();
+        raf.scheduleRedraw();
       };
-      vnodeDom.dom.parentElement!.addEventListener(
-          'scroll', this.parentOnScroll, {passive: true});
+      dom.parentElement!.addEventListener(
+          'scroll', parentOnScroll, {passive: true});
+      this.trash.addCallback(() => {
+        dom.parentElement!.removeEventListener('scroll', parentOnScroll);
+      });
     }
   }
 
-  onremove({attrs, dom}: m.CVnodeDOM<Attrs>) {
-    window.removeEventListener('resize', this.onResize);
-    globals.rafScheduler.removeRedrawCallback(this.canvasRedrawer);
-    if (attrs.doesScroll) {
-      dom.parentElement!.removeEventListener('scroll', this.parentOnScroll);
-    }
-    perfDisplay.removeContainer(this);
+  onremove() {
+    this.trash.dispose();
   }
 
-  isTrackGroupAttrs(attrs: unknown): attrs is TrackGroupAttrs {
-    return (attrs as {collapsed?: boolean}).collapsed !== undefined;
-  }
-
-  renderPanel(node: AnyAttrsVnode, key: string, extraClass = ''): m.Vnode {
+  renderPanel(node: Panel, key: string, extraClass = ''): m.Vnode {
     assertFalse(this.panelByKey.has(key));
     this.panelByKey.set(key, node);
+    const mithril = node.mithril;
 
     return m(
         `.panel${extraClass}`,
         {key, 'data-key': key},
         perfDebug() ?
-            [node, m('.debug-panel-border', {key: 'debug-panel-border'})] :
-            node);
+            [mithril, m('.debug-panel-border', {key: 'debug-panel-border'})] :
+            mithril);
   }
 
   // Render a tree of panels into one vnode. Argument `path` is used to build
   // `key` attribute for intermediate tree vnodes: otherwise Mithril internals
   // will complain about keyed and non-keyed vnodes mixed together.
-  renderTree(node: AnyAttrsVnode, path: string): m.Vnode {
-    if (this.isTrackGroupAttrs(node.attrs)) {
+  renderTree(node: PanelOrGroup, path: string): m.Vnode {
+    if (node.kind === 'group') {
       return m(
           'div',
           {key: path},
           this.renderPanel(
-              node.attrs.header,
-              `${path}-header`,
-              node.attrs.collapsed ? '' : '.sticky'),
-          ...node.attrs.childTracks.map(
+              node.header, `${path}-header`, node.collapsed ? '' : '.sticky'),
+          ...node.childTracks.map(
               (child, index) => this.renderTree(child, `${path}-${index}`)));
     }
-    return this.renderPanel(node, assertExists(node.key) as string);
+    return this.renderPanel(node, assertExists(node.key));
   }
 
   view({attrs}: m.CVnode<Attrs>) {
@@ -269,16 +288,16 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
     ];
   }
 
-  onupdate(vnodeDom: m.CVnodeDOM<Attrs>) {
-    const totalPanelHeightChanged = this.readPanelHeightsFromDom(vnodeDom.dom);
-    const parentSizeChanged = this.readParentSizeFromDom(vnodeDom.dom);
+  onupdate({dom}: m.CVnodeDOM<Attrs>) {
+    const totalPanelHeightChanged = this.readPanelHeightsFromDom(dom);
+    const parentSizeChanged = this.readParentSizeFromDom(dom);
     const canvasSizeShouldChange =
         parentSizeChanged || !this.attrs.doesScroll && totalPanelHeightChanged;
     if (canvasSizeShouldChange) {
       this.updateCanvasDimensions();
       this.repositionCanvas();
       if (this.attrs.kind === 'TRACKS') {
-        globals.frontendLocalState.updateLocalLimits(
+        globals.timeline.updateLocalLimits(
             0, this.parentWidth - TRACK_SHELL_WIDTH);
       }
       this.redrawCanvas();
@@ -324,8 +343,7 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
     // On non-MacOS if there is a solid scroll bar it can cover important
     // pixels, reduce the size of the canvas so it doesn't overlap with
     // the scroll bar.
-    this.parentWidth =
-        clientRect.width - globals.frontendLocalState.getScrollbarWidth();
+    this.parentWidth = clientRect.width - getScrollbarWidth();
     this.parentHeight = clientRect.height;
     return this.parentHeight !== oldHeight || this.parentWidth !== oldWidth;
   }
@@ -340,20 +358,20 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
     this.panelContainerTop = domRect.y;
     this.panelContainerHeight = domRect.height;
 
-    dom.parentElement!.querySelectorAll('.panel').forEach((panel) => {
-      const key = assertExists(panel.getAttribute('data-key'));
-      const vnode = assertExists(this.panelByKey.get(key));
+    dom.parentElement!.querySelectorAll('.panel').forEach((panelElement) => {
+      const key = assertExists(panelElement.getAttribute('data-key'));
+      const panel = assertExists(this.panelByKey.get(key));
 
       // NOTE: the id can be undefined for singletons like overview timeline.
-      const id = vnode.attrs.id || vnode.attrs.trackGroupId || '';
-      const rect = panel.getBoundingClientRect();
+      const id = panel.trackKey || panel.trackGroupId || '';
+      const rect = panelElement.getBoundingClientRect();
       this.panelInfos.push({
         id,
         height: rect.height,
         width: rect.width,
         x: rect.x,
         y: rect.y,
-        vnode,
+        panel,
       });
       this.totalPanelHeight += rect.height;
     });
@@ -379,13 +397,9 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
     const flowEventsRendererArgs =
         new FlowEventsRendererArgs(this.parentWidth, this.canvasHeight);
     for (let i = 0; i < this.panelInfos.length; i++) {
-      const panel = this.panelInfos[i].vnode;
+      const panel = this.panelInfos[i].panel;
       const panelHeight = this.panelInfos[i].height;
       const yStartOnCanvas = panelYStart - canvasYStart;
-
-      if (!isPanelVNode(panel)) {
-        throw new Error('Vnode passed to panel container is not a panel');
-      }
 
       flowEventsRendererArgs.registerPanel(panel, yStartOnCanvas, panelHeight);
 
@@ -403,9 +417,9 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
       clipRect.rect(0, 0, size.width, size.height);
       this.ctx.clip(clipRect);
       const beforeRender = debugNow();
-      panel.state.renderCanvas(this.ctx, size, panel);
+      panel.renderCanvas(this.ctx, size);
       this.updatePanelStats(
-          i, panel.state, debugNow() - beforeRender, this.ctx, size);
+          i, panel, debugNow() - beforeRender, this.ctx, size);
       this.ctx.restore();
       panelYStart += panelHeight;
     }
@@ -421,10 +435,9 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
   // the whole canvas rather than per panel.
   private drawTopLayerOnCanvas() {
     if (!this.ctx) return;
-    const area = globals.frontendLocalState.selectedArea;
-    if (area === undefined ||
-        globals.frontendLocalState.areaY.start === undefined ||
-        globals.frontendLocalState.areaY.end === undefined) {
+    const area = globals.timeline.selectedArea;
+    if (area === undefined || globals.timeline.areaY.start === undefined ||
+        globals.timeline.areaY.end === undefined) {
       return;
     }
     if (this.panelInfos.length === 0 || area.tracks.length === 0) return;
@@ -449,8 +462,9 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
       return;
     }
 
-    const startX = globals.frontendLocalState.timeScale.timeToPx(area.startSec);
-    const endX = globals.frontendLocalState.timeScale.timeToPx(area.endSec);
+    const {visibleTimeScale} = globals.timeline;
+    const startX = visibleTimeScale.timeToPx(area.start);
+    const endX = visibleTimeScale.timeToPx(area.end);
     // To align with where to draw on the canvas subtract the first panel Y.
     selectedTracksMinY -= this.panelContainerTop;
     selectedTracksMaxY -= this.panelContainerTop;
@@ -495,15 +509,13 @@ export class PanelContainer implements m.ClassComponent<Attrs> {
     this.perfStats.panelsOnCanvas = panelsOnCanvas;
   }
 
-  renderPerfStats(index: number) {
-    assertTrue(perfDebug());
-    return [m(
-        'section',
-        m('div', `Panel Container ${index + 1}`),
-        m('div',
-          `${this.perfStats.totalPanels} panels, ` +
-              `${this.perfStats.panelsOnCanvas} on canvas.`),
-        m('div', runningStatStr(this.perfStats.renderStats)))];
+  renderPerfStats() {
+    return [
+      m('div',
+        `${this.perfStats.totalPanels} panels, ` +
+            `${this.perfStats.panelsOnCanvas} on canvas.`),
+      m('div', runningStatStr(this.perfStats.renderStats)),
+    ];
   }
 
   private getCanvasOverdrawHeightPerSide() {

@@ -1,4 +1,4 @@
-// Copyright 2019 PDFium Authors. All rights reserved.
+// Copyright 2019 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,8 @@ using testing::DoAll;
 using testing::Return;
 using testing::SaveArg;
 
+namespace {
+
 class MockTimerScheduler : public CFX_Timer::HandlerIface {
  public:
   MOCK_METHOD2(SetTimer, int(int32_t uElapse, TimerCallback lpTimerFunc));
@@ -25,7 +27,14 @@ class MockTimerCallback : public CFX_Timer::CallbackIface {
   MOCK_METHOD0(OnTimerFired, void());
 };
 
-TEST(CFX_Timer, ValidTimers) {
+}  // namespace
+
+class CFXTimer : public testing::Test {
+  void SetUp() override { CFX_Timer::InitializeGlobals(); }
+  void TearDown() override { CFX_Timer::DestroyGlobals(); }
+};
+
+TEST_F(CFXTimer, ValidTimers) {
   CFX_Timer::HandlerIface::TimerCallback fn1 = nullptr;
   CFX_Timer::HandlerIface::TimerCallback fn2 = nullptr;
 
@@ -56,7 +65,7 @@ TEST(CFX_Timer, ValidTimers) {
   (*fn1)(1002);
 }
 
-TEST(CFX_Timer, MisbehavingEmbedder) {
+TEST_F(CFXTimer, MisbehavingEmbedder) {
   CFX_Timer::HandlerIface::TimerCallback fn1 = nullptr;
 
   MockTimerScheduler scheduler;

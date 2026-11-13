@@ -4,7 +4,7 @@
 
 #include "src/snapshot/embedded/platform-embedded-file-writer-mac.h"
 
-#include "src/objects/code.h"
+#include "src/objects/instruction-stream.h"
 
 namespace v8 {
 namespace internal {
@@ -80,7 +80,7 @@ void PlatformEmbeddedFileWriterMac::AlignToPageSizeIfNeeded() {
 }
 
 void PlatformEmbeddedFileWriterMac::AlignToDataAlignment() {
-  static_assert(8 >= Code::kMetadataAlignment);
+  static_assert(8 >= InstructionStream::kMetadataAlignment);
   fprintf(fp_, ".balign 8\n");
 }
 

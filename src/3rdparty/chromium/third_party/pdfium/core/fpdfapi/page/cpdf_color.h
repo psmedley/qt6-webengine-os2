@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "core/fxcrt/retain_ptr.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CPDF_ColorSpace;
 class CPDF_Pattern;
@@ -40,7 +40,7 @@ class CPDF_Color {
   bool GetRGB(int* R, int* G, int* B) const;
 
   // Should only be called if IsPattern() returns true.
-  CPDF_Pattern* GetPattern() const;
+  RetainPtr<CPDF_Pattern> GetPattern() const;
 
  protected:
   bool IsPatternInternal() const;

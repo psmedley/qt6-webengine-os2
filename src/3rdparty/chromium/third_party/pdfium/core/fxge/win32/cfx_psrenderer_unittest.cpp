@@ -1,8 +1,10 @@
-// Copyright 2021 PDFium Authors. All rights reserved.
+// Copyright 2021 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "core/fxge/win32/cfx_psrenderer.h"
+
+#include <utility>
 
 #include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/data_vector.h"
@@ -14,7 +16,7 @@
 #include "core/fxge/win32/cfx_psfonttracker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 namespace {
 
@@ -27,9 +29,8 @@ class TestWriteStream final : public IFX_RetainableWriteStream {
   CONSTRUCT_VIA_MAKE_RETAIN;
 
   // IFX_RetainableWriteStream:
-  bool WriteBlock(const void* pData, size_t size) override {
-    const uint8_t* data_as_uint8 = static_cast<const uint8_t*>(pData);
-    data_.insert(data_.end(), data_as_uint8, data_as_uint8 + size);
+  bool WriteBlock(pdfium::span<const uint8_t> buffer) override {
+    data_.insert(data_.end(), buffer.begin(), buffer.end());
     return true;
   }
 
@@ -205,9 +206,8 @@ restore
     auto bitmap = pdfium::MakeRetain<CFX_DIBitmap>();
     bool result = bitmap->Create(kWidth, kHeight, FXDIB_Format::k1bppRgb);
     ASSERT_TRUE(result);
-    bitmap->Clear(0);
-    ASSERT_TRUE(renderer.DrawDIBits(bitmap, /*color=*/0, CFX_Matrix(),
-                                    FXDIB_ResampleOptions()));
+    ASSERT_TRUE(renderer.DrawDIBits(std::move(bitmap), /*color=*/0,
+                                    CFX_Matrix(), FXDIB_ResampleOptions()));
   }
 
   ByteString output(output_stream->GetSpan());

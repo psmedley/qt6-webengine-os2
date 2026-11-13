@@ -1,18 +1,8 @@
 "use strict";
 /**
- * Copyright 2020 Google Inc. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * @license
+ * Copyright 2020 Google Inc.
+ * SPDX-License-Identifier: Apache-2.0
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -38,7 +28,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.debug = exports.importDebug = void 0;
+exports.getCapturedLogs = exports.setLogCapture = exports.debug = exports.importDebug = void 0;
 const environment_js_1 = require("../environment.js");
 /**
  * @internal
@@ -95,6 +85,9 @@ exports.importDebug = importDebug;
 const debug = (prefix) => {
     if (environment_js_1.isNode) {
         return async (...logArgs) => {
+            if (captureLogs) {
+                capturedLogs.push(prefix + logArgs);
+            }
             (await importDebug())(prefix)(logArgs);
         };
     }
@@ -121,4 +114,27 @@ const debug = (prefix) => {
     };
 };
 exports.debug = debug;
+/**
+ * @internal
+ */
+let capturedLogs = [];
+/**
+ * @internal
+ */
+let captureLogs = false;
+/**
+ * @internal
+ */
+function setLogCapture(value) {
+    capturedLogs = [];
+    captureLogs = value;
+}
+exports.setLogCapture = setLogCapture;
+/**
+ * @internal
+ */
+function getCapturedLogs() {
+    return capturedLogs;
+}
+exports.getCapturedLogs = getCapturedLogs;
 //# sourceMappingURL=Debug.js.map

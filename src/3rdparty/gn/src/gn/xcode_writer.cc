@@ -11,18 +11,21 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "base/environment.h"
+#include "base/files/file_enumerator.h"
 #include "base/logging.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "gn/args.h"
 #include "gn/build_settings.h"
 #include "gn/builder.h"
+#include "gn/bundle_data.h"
 #include "gn/commands.h"
 #include "gn/deps_iterator.h"
 #include "gn/filesystem_utils.h"
@@ -40,67 +43,14 @@
 
 namespace {
 
-// This is the template of the script used to build the target. It invokes
-// ninja (supporting --ninja-executable parameter), parsing ninja's output
-// using a regular expression looking for relative path to the source root
-// from root_build_dir that are at the start of a path and converting them
-// to absolute paths (use str.replace(rel_root_src, abs_root_src) would be
-// simpler but would fail if rel_root_src is present multiple time in the
-// path).
-const char kBuildScriptTemplate[] = R"(
-import re
-import os
-import subprocess
-import sys
-
-rel_root_src = '%s'
-abs_root_src = os.path.abspath(rel_root_src) + '/'
-
-build_target = '%s'
-ninja_binary = '%s'
-ninja_params = [ '-C', '.' ]
-
-%s
-
-if build_target:
-  ninja_params.append(build_target)
-  print('Compile "' + build_target + '" via ninja')
-else:
-  print('Compile "all" via ninja')
-
-process = subprocess.Popen(
-    [ ninja_binary ] + ninja_params,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.STDOUT,
-    universal_newlines=True,
-    encoding='utf-8',
-    env=environ)
-
-pattern = re.compile('(?<!/)' + re.escape(rel_root_src))
-
-for line in iter(process.stdout.readline, ''):
-  while True:
-    match = pattern.search(line)
-    if not match:
-      break
-    span = match.span()
-    print(line[:span[0]], end='')
-    print(abs_root_src, end='')
-    line = line[span[1]:]
-  print(line, flush=True, end='')
-
-process.wait()
-
-sys.exit(process.returncode)
-)";
-
 enum TargetOsType {
   WRITER_TARGET_OS_IOS,
   WRITER_TARGET_OS_MACOS,
 };
 
 const char* kXCTestFileSuffixes[] = {
-    "egtest.m", "egtest.mm", "xctest.m", "xctest.mm", "UITests.m", "UITests.mm",
+    "egtest.m",     "egtest.mm", "egtest.swift", "xctest.m",      "xctest.mm",
+    "xctest.swift", "UITests.m", "UITests.mm",   "UITests.swift",
 };
 
 const char kXCTestModuleTargetNamePostfix[] = "_module";
@@ -131,35 +81,50 @@ TargetOsType GetTargetOs(const Args& args) {
   return WRITER_TARGET_OS_MACOS;
 }
 
-std::string GetNinjaExecutable(const std::string& ninja_executable) {
-  return ninja_executable.empty() ? "ninja" : ninja_executable;
-}
-
-std::string ComputeScriptEnviron(base::Environment* environment) {
+std::string GetBuildScript(const std::string& target_name,
+                           const std::string& ninja_executable,
+                           const std::string& build_dir,
+                           base::Environment* environment) {
+  // Launch ninja with a sanitized environment (Xcode sets many environment
+  // variables overridding settings, including the SDK, thus breaking hermetic
+  // build).
   std::stringstream buffer;
-  buffer << "environ = {}";
+  buffer << "exec env -i ";
+
+  // Write environment.
   for (const auto& variable : kSafeEnvironmentVariables) {
-    buffer << "\nenviron['" << variable.name << "'] = ";
+    buffer << variable.name << "=";
     if (variable.capture_at_generation) {
       std::string value;
       environment->GetVar(variable.name, &value);
       buffer << "'" << value << "'";
     } else {
-      buffer << "os.environ.get('" << variable.name << "', '')";
+      buffer << "\"${" << variable.name << "}\"";
     }
+    buffer << " ";
+  }
+
+  if (ninja_executable.empty()) {
+    buffer << "ninja";
+  } else {
+    buffer << ninja_executable;
+  }
+
+  buffer << " -C " << build_dir;
+
+  if (!target_name.empty()) {
+    buffer << " '" << target_name << "'";
   }
   return buffer.str();
 }
 
-std::string GetBuildScript(const std::string& target_name,
+std::string GetBuildScript(const Label& target_label,
                            const std::string& ninja_executable,
-                           const std::string& root_src_dir,
+                           const std::string& build_dir,
                            base::Environment* environment) {
-  std::string environ_script = ComputeScriptEnviron(environment);
-  std::string ninja = GetNinjaExecutable(ninja_executable);
-  return base::StringPrintf(kBuildScriptTemplate, root_src_dir.c_str(),
-                            target_name.c_str(), ninja.c_str(),
-                            environ_script.c_str());
+  std::string target_name = target_label.GetUserVisibleName(false);
+  base::TrimString(target_name, "/", &target_name);
+  return GetBuildScript(target_name, ninja_executable, build_dir, environment);
 }
 
 bool IsApplicationTarget(const Target* target) {
@@ -170,32 +135,27 @@ bool IsApplicationTarget(const Target* target) {
 
 bool IsXCUITestRunnerTarget(const Target* target) {
   return IsApplicationTarget(target) &&
-         base::EndsWith(target->label().name(),
-                        kXCUITestRunnerTargetNamePostfix,
-                        base::CompareCase::SENSITIVE);
+         target->label().name().ends_with(kXCUITestRunnerTargetNamePostfix);
 }
 
 bool IsXCTestModuleTarget(const Target* target) {
   return target->output_type() == Target::CREATE_BUNDLE &&
          target->bundle_data().product_type() ==
              "com.apple.product-type.bundle.unit-test" &&
-         base::EndsWith(target->label().name(), kXCTestModuleTargetNamePostfix,
-                        base::CompareCase::SENSITIVE);
+         target->label().name().ends_with(kXCTestModuleTargetNamePostfix);
 }
 
 bool IsXCUITestModuleTarget(const Target* target) {
   return target->output_type() == Target::CREATE_BUNDLE &&
          target->bundle_data().product_type() ==
              "com.apple.product-type.bundle.ui-testing" &&
-         base::EndsWith(target->label().name(), kXCTestModuleTargetNamePostfix,
-                        base::CompareCase::SENSITIVE);
+         target->label().name().ends_with(kXCTestModuleTargetNamePostfix);
 }
 
 bool IsXCTestFile(const SourceFile& file) {
   std::string file_name = file.GetName();
   for (size_t i = 0; i < std::size(kXCTestFileSuffixes); ++i) {
-    if (base::EndsWith(file_name, kXCTestFileSuffixes[i],
-                       base::CompareCase::SENSITIVE)) {
+    if (file_name.ends_with(kXCTestFileSuffixes[i])) {
       return true;
     }
   }
@@ -239,6 +199,49 @@ void AddPBXTargetDependency(const PBXTarget* base_pbxtarget,
       base_pbxtarget, std::move(container_item_proxy));
 
   dependent_pbxtarget->AddDependency(std::move(dependency));
+}
+
+// Returns a SourceFile for absolute path `file_path` below `//`.
+SourceFile FilePathToSourceFile(const BuildSettings* build_settings,
+                                const base::FilePath& file_path) {
+  const std::string file_path_utf8 = FilePathToUTF8(file_path);
+  return SourceFile("//" + file_path_utf8.substr(
+                               build_settings->root_path_utf8().size() + 1));
+}
+
+// Returns the list of patterns to use when looking for additional files
+// from `options`.
+std::vector<base::FilePath::StringType> GetAdditionalFilesPatterns(
+    const XcodeWriter::Options& options) {
+  return base::SplitString(options.additional_files_patterns,
+                           FILE_PATH_LITERAL(";"), base::TRIM_WHITESPACE,
+                           base::SPLIT_WANT_ALL);
+}
+
+// Returns the list of roots to use when looking for additional files
+// from `options`.
+std::vector<base::FilePath> GetAdditionalFilesRoots(
+    const BuildSettings* build_settings,
+    const XcodeWriter::Options& options) {
+  if (options.additional_files_roots.empty()) {
+    return {build_settings->root_path()};
+  }
+
+  const std::vector<base::FilePath::StringType> roots =
+      base::SplitString(options.additional_files_roots, FILE_PATH_LITERAL(";"),
+                        base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+
+  std::vector<base::FilePath> root_paths;
+  for (const base::FilePath::StringType& root : roots) {
+    const std::string rebased_root =
+        RebasePath(FilePathToUTF8(root), SourceDir("//"),
+                   build_settings->root_path_utf8());
+
+    root_paths.push_back(
+        build_settings->root_path().Append(UTF8ToFilePath(rebased_root)));
+  }
+
+  return root_paths;
 }
 
 // Helper class to resolve list of XCTest files per target.
@@ -373,21 +376,17 @@ void RecursivelyAssignIds(PBXProject* project) {
   project->Visit(visitor);
 }
 
-// Returns a configuration name derived from the build directory. This gives
-// standard names if using the Xcode convention of naming the build directory
-// out/$configuration-$platform (e.g. out/Debug-iphonesimulator).
-std::string ConfigNameFromBuildSettings(const BuildSettings* build_settings) {
-  std::string config_name = FilePathToUTF8(build_settings->build_dir()
-                                               .Resolve(base::FilePath())
-                                               .StripTrailingSeparators()
-                                               .BaseName());
+// Returns a list of configuration names from the options passed to the
+// generator. If no configuration names have been passed, return default
+// value.
+std::vector<std::string> ConfigListFromOptions(const std::string& configs) {
+  std::vector<std::string> result = base::SplitString(
+      configs, ";", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
 
-  std::string::size_type separator = config_name.find('-');
-  if (separator != std::string::npos)
-    config_name = config_name.substr(0, separator);
+  if (result.empty())
+    result.push_back(std::string("Release"));
 
-  DCHECK(!config_name.empty());
-  return config_name;
+  return result;
 }
 
 // Returns the path to root_src_dir from settings.
@@ -447,6 +446,63 @@ PBXAttributes ProjectAttributesFromBuildSettings(
   attributes["ONLY_ACTIVE_ARCH"] = "YES";
 
   return attributes;
+}
+
+// Helper class used to collect the source files that will be added to
+// and PBXProject.
+class WorkspaceSources {
+ public:
+  WorkspaceSources(const BuildSettings* build_settings);
+  ~WorkspaceSources();
+
+  // Records `source` as part of the project. The source may be dropped if
+  // it should not be listed in the project (e.g. a generated file). Also
+  // for files in an assets catalog, only the catalog itself will be added.
+  void AddSourceFile(const SourceFile& source);
+
+  // Insert all the recorded source into `project`.
+  void AddToProject(PBXProject& project) const;
+
+ private:
+  const SourceDir build_dir_;
+  const std::string root_dir_;
+  SourceFileSet source_files_;
+};
+
+WorkspaceSources::WorkspaceSources(const BuildSettings* build_settings)
+    : build_dir_(build_settings->build_dir()),
+      root_dir_(build_settings->root_path_utf8()) {}
+
+WorkspaceSources::~WorkspaceSources() = default;
+
+void WorkspaceSources::AddSourceFile(const SourceFile& source) {
+  if (IsStringInOutputDir(build_dir_, source.value())) {
+    return;
+  }
+
+  if (IsPathAbsolute(source.value())) {
+    return;
+  }
+
+  SourceFile assets_catalog_dir = BundleData::GetAssetsCatalogDirectory(source);
+  if (!assets_catalog_dir.is_null()) {
+    source_files_.insert(assets_catalog_dir);
+  } else {
+    source_files_.insert(source);
+  }
+}
+
+void WorkspaceSources::AddToProject(PBXProject& project) const {
+  // Sort the files to ensure a deterministic generation of the project file.
+  std::vector<SourceFile> sources(source_files_.begin(), source_files_.end());
+  std::sort(sources.begin(), sources.end());
+
+  const SourceDir source_dir("//");
+  for (const SourceFile& source : sources) {
+    const std::string source_path =
+        RebasePath(source.value(), source_dir, root_dir_);
+    project.AddSourceFileToIndexingTarget(source_path, source_path);
+  }
 }
 
 }  // namespace
@@ -535,8 +591,7 @@ bool XcodeWorkspace::WriteSettingsFile(const std::string& name,
       break;
   }
 
-  out << "</dict>\n"
-      << "</plist>\n";
+  out << "</dict>\n" << "</plist>\n";
 
   return storage.WriteToFileIfChanged(build_settings_->GetFullPath(source_file),
                                       err);
@@ -600,6 +655,10 @@ class XcodeProject {
       const std::map<const Target*, PBXNativeTarget*>& bundle_targets,
       Err* err);
 
+  // Tweak `output_dir` to be relative to the configuration specific output
+  // directory (see --xcode-config-build-dir=... flag).
+  std::string GetConfigOutputDir(std::string_view output_dir);
+
   // Generates the content of the .xcodeproj file into |out|.
   void WriteFileContent(std::ostream& out) const;
 
@@ -616,7 +675,7 @@ XcodeProject::XcodeProject(const BuildSettings* build_settings,
     : build_settings_(build_settings),
       options_(options),
       project_(options.project_name,
-               ConfigNameFromBuildSettings(build_settings),
+               ConfigListFromOptions(options.configurations),
                SourcePathFromBuildSettings(build_settings),
                ProjectAttributesFromBuildSettings(build_settings)) {}
 
@@ -633,34 +692,30 @@ bool XcodeProject::ShouldIncludeFileInProject(const SourceFile& source) const {
 }
 
 bool XcodeProject::AddSourcesFromBuilder(const Builder& builder, Err* err) {
-  SourceFileSet sources;
+  WorkspaceSources sources(build_settings_);
 
   // Add sources from all targets.
   for (const Target* target : builder.GetAllResolvedTargets()) {
     for (const SourceFile& source : target->sources()) {
-      if (ShouldIncludeFileInProject(source))
-        sources.insert(source);
+      sources.AddSourceFile(source);
     }
 
     for (const SourceFile& source : target->config_values().inputs()) {
-      if (ShouldIncludeFileInProject(source))
-        sources.insert(source);
+      sources.AddSourceFile(source);
     }
 
     for (const SourceFile& source : target->public_headers()) {
-      if (ShouldIncludeFileInProject(source))
-        sources.insert(source);
+      sources.AddSourceFile(source);
     }
 
     const SourceFile& bridge_header = target->swift_values().bridge_header();
-    if (!bridge_header.is_null() && ShouldIncludeFileInProject(bridge_header)) {
-      sources.insert(bridge_header);
+    if (!bridge_header.is_null()) {
+      sources.AddSourceFile(bridge_header);
     }
 
     if (target->output_type() == Target::ACTION ||
         target->output_type() == Target::ACTION_FOREACH) {
-      if (ShouldIncludeFileInProject(target->action_values().script()))
-        sources.insert(target->action_values().script());
+      sources.AddSourceFile(target->action_values().script());
     }
   }
 
@@ -670,13 +725,11 @@ bool XcodeProject::AddSourcesFromBuilder(const Builder& builder, Err* err) {
       continue;
 
     const SourceFile build = builder.loader()->BuildFileForLabel(item->label());
-    if (ShouldIncludeFileInProject(build))
-      sources.insert(build);
+    sources.AddSourceFile(build);
 
     for (const SourceFile& source :
          item->settings()->import_manager().GetImportedFiles()) {
-      if (ShouldIncludeFileInProject(source))
-        sources.insert(source);
+      sources.AddSourceFile(source);
     }
   }
 
@@ -685,37 +738,43 @@ bool XcodeProject::AddSourcesFromBuilder(const Builder& builder, Err* err) {
     if (!build_settings_->root_path().IsParent(path))
       continue;
 
-    const std::string as8bit = path.As8Bit();
-    const SourceFile source(
-        "//" + as8bit.substr(build_settings_->root_path().value().size() + 1));
-
-    if (ShouldIncludeFileInProject(source))
-      sources.insert(source);
+    const SourceFile source = FilePathToSourceFile(build_settings_, path);
+    sources.AddSourceFile(source);
   }
 
-  // Sort files to ensure deterministic generation of the project file (and
-  // nicely sorted file list in Xcode).
-  std::vector<SourceFile> sorted_sources(sources.begin(), sources.end());
-  std::sort(sorted_sources.begin(), sorted_sources.end());
+  // Add any files from --xcode-additional-files-patterns, using the root
+  // listed in --xcode-additional-files-roots.
+  if (!options_.additional_files_patterns.empty()) {
+    const std::vector<base::FilePath::StringType> patterns =
+        GetAdditionalFilesPatterns(options_);
+    const std::vector<base::FilePath> roots =
+        GetAdditionalFilesRoots(build_settings_, options_);
 
-  const SourceDir source_dir("//");
-  for (const SourceFile& source : sorted_sources) {
-    const std::string source_file = RebasePath(
-        source.value(), source_dir, build_settings_->root_path_utf8());
-    project_.AddSourceFileToIndexingTarget(source_file, source_file);
+    for (const base::FilePath& root : roots) {
+      for (const base::FilePath::StringType& pattern : patterns) {
+        base::FileEnumerator it(root, /*recursive*/ true,
+                                base::FileEnumerator::FILES, pattern,
+                                base::FileEnumerator::FolderSearchPolicy::ALL);
+
+        for (base::FilePath path = it.Next(); !path.empty(); path = it.Next()) {
+          const SourceFile source = FilePathToSourceFile(build_settings_, path);
+          sources.AddSourceFile(source);
+        }
+      }
+    }
   }
 
+  sources.AddToProject(project_);
   return true;
 }
 
 bool XcodeProject::AddTargetsFromBuilder(const Builder& builder, Err* err) {
   std::unique_ptr<base::Environment> env(base::Environment::Create());
 
-  const std::string root_src_dir =
-      RebasePath("//", build_settings_->build_dir());
-  project_.AddAggregateTarget("All", GetBuildScript(options_.root_target_name,
-                                                    options_.ninja_executable,
-                                                    root_src_dir, env.get()));
+  project_.AddAggregateTarget(
+      "All", GetConfigOutputDir("."),
+      GetBuildScript(options_.root_target_name, options_.ninja_executable,
+                     GetConfigOutputDir("."), env.get()));
 
   const std::optional<std::vector<const Target*>> targets =
       GetTargetsFromBuilder(builder, err);
@@ -946,15 +1005,13 @@ PBXNativeTarget* XcodeProject::AddBinaryTarget(const Target* target,
     output_dir = RebasePath(output_dir, build_settings_->build_dir());
   }
 
-  const std::string root_src_dir =
-      RebasePath("//", build_settings_->build_dir());
   return project_.AddNativeTarget(
       target->label().name(), "compiled.mach-o.executable",
       target->output_name().empty() ? target->label().name()
                                     : target->output_name(),
-      "com.apple.product-type.tool", output_dir,
-      GetBuildScript(target->label().name(), options_.ninja_executable,
-                     root_src_dir, env));
+      "com.apple.product-type.tool", GetConfigOutputDir(output_dir),
+      GetBuildScript(target->label(), options_.ninja_executable,
+                     GetConfigOutputDir("."), env));
 }
 
 PBXNativeTarget* XcodeProject::AddBundleTarget(const Target* target,
@@ -978,17 +1035,31 @@ PBXNativeTarget* XcodeProject::AddBundleTarget(const Target* target,
   const std::string& target_output_name = RebasePath(
       target->bundle_data().GetBundleRootDirOutput(target->settings()).value(),
       build_settings_->build_dir());
+
   const std::string output_dir =
       RebasePath(target->bundle_data().GetBundleDir(target->settings()).value(),
                  build_settings_->build_dir());
-  const std::string root_src_dir =
-      RebasePath("//", build_settings_->build_dir());
+
   return project_.AddNativeTarget(
       pbxtarget_name, std::string(), target_output_name,
-      target->bundle_data().product_type(), output_dir,
-      GetBuildScript(pbxtarget_name, options_.ninja_executable, root_src_dir,
-                     env),
+      target->bundle_data().product_type(), GetConfigOutputDir(output_dir),
+      GetBuildScript(target->label(), options_.ninja_executable,
+                     GetConfigOutputDir("."), env),
       xcode_extra_attributes);
+}
+
+std::string XcodeProject::GetConfigOutputDir(std::string_view output_dir) {
+  if (options_.configuration_build_dir.empty())
+    return std::string(output_dir);
+
+  base::FilePath config_output_dir(options_.configuration_build_dir);
+  if (output_dir != ".") {
+    config_output_dir = config_output_dir.Append(UTF8ToFilePath(output_dir));
+  }
+
+  return RebasePath(FilePathToUTF8(config_output_dir.StripTrailingSeparators()),
+                    build_settings_->build_dir(),
+                    build_settings_->root_path_utf8());
 }
 
 void XcodeProject::WriteFileContent(std::ostream& out) const {
@@ -1001,8 +1072,7 @@ void XcodeProject::WriteFileContent(std::ostream& out) const {
       << "\tobjects = {\n";
 
   for (auto& pair : CollectPBXObjectsPerClass(&project_)) {
-    out << "\n"
-        << "/* Begin " << ToString(pair.first) << " section */\n";
+    out << "\n" << "/* Begin " << ToString(pair.first) << " section */\n";
     std::sort(pair.second.begin(), pair.second.end(),
               [](const PBXObject* a, const PBXObject* b) {
                 return a->id() < b->id();

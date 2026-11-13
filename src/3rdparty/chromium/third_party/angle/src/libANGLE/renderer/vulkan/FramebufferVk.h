@@ -103,13 +103,16 @@ class FramebufferVk : public FramebufferImpl
     gl::Rectangle getNonRotatedCompleteRenderArea() const;
     gl::Rectangle getRotatedCompleteRenderArea(ContextVk *contextVk) const;
     gl::Rectangle getRotatedScissoredRenderArea(ContextVk *contextVk) const;
+    // Returns render area with deferred clears in consideration. When deferred clear is used
+    // in the render pass, the render area must cover the whole framebuffer.
+    gl::Rectangle getRenderArea(ContextVk *contextVk) const;
 
     const gl::DrawBufferMask &getEmulatedAlphaAttachmentMask() const;
-    RenderTargetVk *getColorDrawRenderTarget(size_t colorIndex) const;
+    RenderTargetVk *getColorDrawRenderTarget(size_t colorIndexGL) const;
     RenderTargetVk *getColorReadRenderTarget() const;
 
     angle::Result startNewRenderPass(ContextVk *contextVk,
-                                     const gl::Rectangle &scissoredRenderArea,
+                                     const gl::Rectangle &renderArea,
                                      vk::RenderPassCommandBuffer **commandBufferOut,
                                      bool *renderPassDescChangedOut);
 
@@ -129,15 +132,10 @@ class FramebufferVk : public FramebufferImpl
 
     bool hasDeferredClears() const { return !mDeferredClears.empty(); }
     angle::Result flushDeferredClears(ContextVk *contextVk);
-    void setReadOnlyDepthFeedbackLoopMode(bool readOnlyDepthFeedbackModeEnabled)
-    {
-        mReadOnlyDepthFeedbackLoopMode = readOnlyDepthFeedbackModeEnabled;
-    }
-    bool isReadOnlyDepthFeedbackLoopMode() const { return mReadOnlyDepthFeedbackLoopMode; }
-    void updateRenderPassReadOnlyDepthMode(ContextVk *contextVk,
-                                           vk::RenderPassCommandBufferHelper *renderPass);
 
     void switchToFramebufferFetchMode(ContextVk *contextVk, bool hasFramebufferFetch);
+
+    bool updateLegacyDither(ContextVk *contextVk);
 
     void removeColorResolveAttachment(uint32_t colorIndexGL);
 
@@ -146,7 +144,14 @@ class FramebufferVk : public FramebufferImpl
 
     void releaseCurrentFramebuffer(ContextVk *contextVk);
 
-    vk::RenderPassSerial getLastRenderPassSerial() const { return mLastRenderPassSerial; }
+    const QueueSerial &getLastRenderPassQueueSerial() const { return mLastRenderPassQueueSerial; }
+
+    bool hasAnyExternalAttachments() const { return mIsExternalColorAttachments.any(); }
+
+    bool hasFrontBufferUsage() const
+    {
+        return (mAttachmentHasFrontBufferUsage & mState.getColorAttachmentsMask()).any();
+    }
 
     enum class RenderTargetImage
     {
@@ -174,6 +179,12 @@ class FramebufferVk : public FramebufferImpl
         vk::FramebufferAttachmentsVector<RenderTargetInfo> *renderTargetsInfoOut);
 
   private:
+    enum class ClearWithCommand
+    {
+        Always,
+        OptimizeWithLoadOp,
+    };
+
     // The 'in' rectangles must be clipped to the scissor and FBO. The clipping is done in 'blit'.
     angle::Result blitWithCommand(ContextVk *contextVk,
                                   const gl::Rectangle &sourceArea,
@@ -203,11 +214,12 @@ class FramebufferVk : public FramebufferImpl
                             const VkClearColorValue &clearColorValue,
                             const VkClearDepthStencilValue &clearDepthStencilValue);
 
-    void mergeClearsWithDeferredClears(gl::DrawBufferMask clearColorBuffers,
-                                       bool clearDepth,
-                                       bool clearStencil,
-                                       const VkClearColorValue &clearColorValue,
-                                       const VkClearDepthStencilValue &clearDepthStencilValue);
+    void mergeClearsWithDeferredClears(
+        gl::DrawBufferMask clearColorBuffers,
+        bool clearDepth,
+        bool clearStencil,
+        const gl::DrawBuffersArray<VkClearColorValue> &clearColorValues,
+        const VkClearDepthStencilValue &clearDepthStencilValue);
     angle::Result clearWithDraw(ContextVk *contextVk,
                                 const gl::Rectangle &clearArea,
                                 gl::DrawBufferMask clearColorBuffers,
@@ -215,12 +227,15 @@ class FramebufferVk : public FramebufferImpl
                                 bool clearStencil,
                                 gl::BlendStateExt::ColorMaskStorage::Type colorMasks,
                                 uint8_t stencilMask,
-                                const VkClearColorValue &clearColorValue,
+                                const gl::DrawBuffersArray<VkClearColorValue> &clearColorValues,
                                 const VkClearDepthStencilValue &clearDepthStencilValue);
-    void redeferClears(ContextVk *contextVk);
-    void redeferClearsForReadFramebuffer(ContextVk *contextVk);
-    void redeferClearsImpl(ContextVk *contextVk);
-    void clearWithCommand(ContextVk *contextVk, const gl::Rectangle &scissoredRenderArea);
+    void restageDeferredClears(ContextVk *contextVk);
+    void restageDeferredClearsForReadFramebuffer(ContextVk *contextVk);
+    void restageDeferredClearsImpl(ContextVk *contextVk);
+    void clearWithCommand(ContextVk *contextVk,
+                          const gl::Rectangle &scissoredRenderArea,
+                          ClearWithCommand behavior,
+                          vk::ClearValuesArray *clears);
     void clearWithLoadOp(ContextVk *contextVk);
     void updateActiveColorMasks(size_t colorIndex, bool r, bool g, bool b, bool a);
     void updateRenderPassDesc(ContextVk *contextVk);
@@ -274,17 +289,17 @@ class FramebufferVk : public FramebufferImpl
 
     vk::ClearValuesArray mDeferredClears;
 
-    // Tracks if we are in depth feedback loop. Depth read only feedback loop is a special kind of
-    // depth stencil read only mode. When we are in feedback loop, we must flush renderpass to exit
-    // the loop instead of update the layout.
-    bool mReadOnlyDepthFeedbackLoopMode;
-
-    gl::DrawBufferMask mIsAHBColorAttachments;
+    // Whether any of the color attachments are an external image such as dmabuf, AHB etc.  In such
+    // cases, some optimizations are disabled such as deferred clears because the results need to be
+    // made externally available.
+    gl::DrawBufferMask mIsExternalColorAttachments;
+    gl::DrawBufferMask mAttachmentHasFrontBufferUsage;
 
     bool mIsCurrentFramebufferCached;
+    bool mIsYUVResolve;
 
     // Serial of the render pass this framebuffer has opened, if any.
-    vk::RenderPassSerial mLastRenderPassSerial;
+    QueueSerial mLastRenderPassQueueSerial;
 };
 }  // namespace rx
 

@@ -27,7 +27,7 @@ namespace hwy {
 // changed without also changing the associated code.
 struct SortConstants {
 // SortingNetwork reshapes its input into a matrix. This is the maximum number
-// of *keys* per vector.
+// of *lanes* per vector.
 #if HWY_COMPILER_MSVC || HWY_IS_DEBUG_BUILD
   static constexpr size_t kMaxCols = 8;  // avoid build timeout/stack overflow
 #else
@@ -63,15 +63,16 @@ struct SortConstants {
   }
 
   // Chunk := group of keys loaded for sampling a pivot. Matches the typical
-  // cache line size of 64 bytes to get maximum benefit per L2 miss. If vectors
-  // are larger, use entire vectors to ensure we do not overrun the array.
-  static constexpr HWY_INLINE size_t LanesPerChunk(size_t sizeof_t, size_t N) {
-    return HWY_MAX(64 / sizeof_t, N);
+  // cache line size of 64 bytes to get maximum benefit per L2 miss. Sort()
+  // ensures vectors are no larger than that, so this can be independent of the
+  // vector size and thus constexpr.
+  static constexpr HWY_INLINE size_t LanesPerChunk(size_t sizeof_t) {
+    return 64 / sizeof_t;
   }
 
   static constexpr HWY_INLINE size_t PivotBufNum(size_t sizeof_t, size_t N) {
     // 3 chunks of medians, 1 chunk of median medians plus two padding vectors.
-    return (3 + 1) * LanesPerChunk(sizeof_t, N) + 2 * N;
+    return (3 + 1) * LanesPerChunk(sizeof_t) + 2 * N;
   }
 
   template <typename T>

@@ -46,7 +46,7 @@ class StringBuilder {
     return result;
   }
   // Convenience wrappers.
-  void write(const byte* data, size_t n) {
+  void write(const uint8_t* data, size_t n) {
     char* ptr = allocate(n);
     memcpy(ptr, data, n);
   }
@@ -69,6 +69,11 @@ class StringBuilder {
   // Useful for subclasses that divide the text into ranges, e.g. lines.
   explicit StringBuilder(OnGrowth on_growth) : on_growth_(on_growth) {}
   void start_here() { start_ = cursor_; }
+
+  size_t approximate_size_mb() {
+    static_assert(kChunkSize == size_t{MB});
+    return chunks_.size();
+  }
 
  private:
   void Grow(size_t requested) {

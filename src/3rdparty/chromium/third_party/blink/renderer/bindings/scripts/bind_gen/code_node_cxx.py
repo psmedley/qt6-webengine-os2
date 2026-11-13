@@ -369,6 +369,15 @@ class CxxFuncDefNode(CompositeNode):
         assert isinstance(const, bool)
         assert isinstance(override, bool)
 
+        self._function_name = name
+        self._arg_decls = arg_decls
+        self._return_type = return_type
+        self._const = const
+
+        # Presence of some attributes only makes sense on inline defitintions,
+        # in which case a separate declaration does not make sense.
+        self._inhibit_make_decl = template_params or inline or explicit or constexpr
+
         template_format = ("{template}"
                            "{static}{inline}{explicit}{constexpr}"
                            "{return_type} "
@@ -404,7 +413,6 @@ class CxxFuncDefNode(CompositeNode):
                 separator=", ",
                 head=" : ")
 
-        self._function_name = name
         self._body_node = SymbolScopeNode()
 
         CompositeNode.__init__(
@@ -433,25 +441,51 @@ class CxxFuncDefNode(CompositeNode):
     def body(self):
         return self._body_node
 
+    def make_decl(self,
+                  static=False,
+                  explicit=False,
+                  override=False,
+                  nodiscard=False):
+        assert not self._inhibit_make_decl
+        return CxxFuncDeclNode(name=self._function_name,
+                               arg_decls=self._arg_decls,
+                               return_type=self._return_type,
+                               const=self._const,
+                               static=static,
+                               explicit=explicit,
+                               override=override,
+                               nodiscard=nodiscard)
 
 class CxxClassDefNode(CompositeNode):
-    def __init__(self, name, base_class_names=None, final=False, export=None):
+    def __init__(self,
+                 name,
+                 base_class_names=None,
+                 template_params=None,
+                 final=False,
+                 export=None):
         """
         Args:
             name: The class name to be defined.
             base_class_names: The list of base class names.
+            template_params: List of template parameters or None.
             final: True makes this a final class.
             export: Class export annotation.
         """
         assert isinstance(final, bool)
 
-        template_format = ("class{export} {name}{final}{base_clause} {{\n"
+        template_format = ("{template}"
+                           "class{export} {name}{final}{base_clause} {{\n"
                            "  {top_section}\n"
                            "  {public_section}\n"
                            "  {protected_section}\n"
                            "  {private_section}\n"
                            "  {bottom_section}\n"
                            "}};")
+
+        if template_params is None:
+            template = ""
+        else:
+            template = "template <{}>\n".format(", ".join(template_params))
 
         if export is None:
             export = ""
@@ -478,18 +512,18 @@ class CxxClassDefNode(CompositeNode):
         self._private_section = ListNode(head="private:\n", tail="\n")
         self._bottom_section = ListNode()
 
-        CompositeNode.__init__(
-            self,
-            template_format,
-            name=_to_maybe_text_node(name),
-            base_clause=base_clause,
-            final=final,
-            export=export,
-            top_section=self._top_section,
-            public_section=self._public_section,
-            protected_section=self._protected_section,
-            private_section=self._private_section,
-            bottom_section=self._bottom_section)
+        CompositeNode.__init__(self,
+                               template_format,
+                               name=_to_maybe_text_node(name),
+                               base_clause=base_clause,
+                               template=template,
+                               final=final,
+                               export=export,
+                               top_section=self._top_section,
+                               public_section=self._public_section,
+                               protected_section=self._protected_section,
+                               private_section=self._private_section,
+                               bottom_section=self._bottom_section)
 
     @property
     def top_section(self):

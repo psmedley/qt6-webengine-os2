@@ -49,7 +49,8 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
   WriteResult WritePacket(const char* buffer, size_t buf_len,
                           const QuicIpAddress& self_address,
                           const QuicSocketAddress& peer_address,
-                          PerPacketOptions* options) override;
+                          PerPacketOptions* options,
+                          const QuicPacketWriterParams& params) override;
 
   bool IsWriteBlocked() const override;
 
@@ -81,6 +82,15 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
   void set_fake_packet_loss_percentage(int32_t fake_packet_loss_percentage) {
     QuicWriterMutexLock lock(&config_mutex_);
     fake_packet_loss_percentage_ = fake_packet_loss_percentage;
+  }
+
+  // Once called, the next |passthrough_for_next_n_packets_| WritePacket() calls
+  // will always send the packets immediately, without being affected by the
+  // simulated error conditions.
+  void set_passthrough_for_next_n_packets(
+      uint32_t passthrough_for_next_n_packets) {
+    QuicWriterMutexLock lock(&config_mutex_);
+    passthrough_for_next_n_packets_ = passthrough_for_next_n_packets;
   }
 
   // Simulate dropping the first n packets unconditionally.
@@ -142,7 +152,8 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
     DelayedWrite(const char* buffer, size_t buf_len,
                  const QuicIpAddress& self_address,
                  const QuicSocketAddress& peer_address,
-                 std::unique_ptr<PerPacketOptions> options, QuicTime send_time);
+                 std::unique_ptr<PerPacketOptions> options,
+                 const QuicPacketWriterParams& params, QuicTime send_time);
     DelayedWrite(const DelayedWrite&) = delete;
     DelayedWrite(DelayedWrite&&) = default;
     DelayedWrite& operator=(const DelayedWrite&) = delete;
@@ -153,6 +164,7 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
     QuicIpAddress self_address;
     QuicSocketAddress peer_address;
     std::unique_ptr<PerPacketOptions> options;
+    QuicPacketWriterParams params;
     QuicTime send_time;
   };
 
@@ -167,6 +179,7 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
   DelayedPacketList delayed_packets_;
   QuicByteCount cur_buffer_size_;
   uint64_t num_calls_to_write_;
+  uint32_t passthrough_for_next_n_packets_ QUIC_GUARDED_BY(config_mutex_);
   int32_t num_consecutive_succesful_writes_;
 
   QuicMutex config_mutex_;

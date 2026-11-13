@@ -1,5 +1,4 @@
-// Copyright (c) 2012, Google Inc.
-// All rights reserved.
+// Copyright 2012 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -35,6 +34,10 @@
 // process. Since this code may run in a compromised address space, the same
 // rules apply as detailed at the top of minidump_writer.h: no libc calls and
 // use the alternative allocator.
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
+#endif
 
 #include "client/linux/minidump_writer/linux_ptrace_dumper.h"
 
@@ -176,6 +179,13 @@ bool LinuxPtraceDumper::ReadRegisters(ThreadInfo* info, pid_t tid) {
     return false;
   }
 
+  // When running on arm processors the binary may be built with softfp or
+  // hardfp. If built with softfp we have no hardware registers to read from,
+  // so the following read will always fail. gcc defines __SOFTFP__ macro,
+  // clang13 does not do so. see: https://reviews.llvm.org/D135680.
+  // If you are using clang and the macro is NOT defined, please include the
+  // macro define for applicable targets.
+#if !defined(__SOFTFP__)
 #if !(defined(__ANDROID__) && defined(__ARM_EABI__))
   // When running an arm build on an arm64 device, attempting to get the
   // floating point registers fails. On Android, the floating point registers
@@ -187,6 +197,7 @@ bool LinuxPtraceDumper::ReadRegisters(ThreadInfo* info, pid_t tid) {
     return false;
   }
 #endif  // !(defined(__ANDROID__) && defined(__ARM_EABI__))
+#endif  // !defined(__SOFTFP__)
   return true;
 #else  // PTRACE_GETREGS
   return false;
@@ -298,8 +309,11 @@ bool LinuxPtraceDumper::GetThreadInfoByIndex(size_t index, ThreadInfo* info) {
 #elif defined(__mips__)
   stack_pointer =
       reinterpret_cast<uint8_t*>(info->mcontext.gregs[MD_CONTEXT_MIPS_REG_SP]);
+#elif defined(__riscv)
+  stack_pointer = reinterpret_cast<uint8_t*>(
+      info->mcontext.__gregs[MD_CONTEXT_RISCV_REG_SP]);
 #else
-#error "This code hasn't been ported to your platform yet."
+# error "This code hasn't been ported to your platform yet."
 #endif
   info->stack_pointer = reinterpret_cast<uintptr_t>(stack_pointer);
 

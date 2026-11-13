@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "base/files/scoped_temp_dir.h"
+#include "base/task/sequenced_task_runner.h"
 #include "services/tracing/perfetto/test_utils.h"
 #include "services/tracing/public/cpp/perfetto/perfetto_traced_process.h"
 #include "third_party/perfetto/include/perfetto/ext/tracing/core/commit_data_request.h"
@@ -21,14 +22,14 @@ MockSystemService::MockSystemService(const std::string& consumer_socket,
       consumer_(consumer_socket),
       producer_(producer_socket),
       task_runner_(std::make_unique<base::tracing::PerfettoTaskRunner>(
-          base::SequencedTaskRunnerHandle::Get())) {
+          base::SequencedTaskRunner::GetCurrentDefault())) {
   StartService();
 }
 
 MockSystemService::MockSystemService(const base::ScopedTempDir& tmp_dir)
     : MockSystemService(tmp_dir,
                         std::make_unique<base::tracing::PerfettoTaskRunner>(
-                            base::SequencedTaskRunnerHandle::Get())) {}
+                            base::SequencedTaskRunner::GetCurrentDefault())) {}
 
 MockSystemService::MockSystemService(
     const base::ScopedTempDir& tmp_dir,
@@ -43,7 +44,10 @@ MockSystemService::MockSystemService(
   // multiple tests run we need to restore the value so each test is
   // hermetic.
 
-  old_tmpdir_ = getenv("TMPDIR");
+  const auto* old_tmpdir = getenv("TMPDIR");
+  if (old_tmpdir) {
+    old_tmpdir_ = old_tmpdir;
+  }
   setenv("TMPDIR", tmp_dir.GetPath().value().c_str(), true);
   // Set up the system socket locations in a valid tmp directory.
   producer_ = tmp_dir.GetPath().Append(FILE_PATH_LITERAL("producer")).value();
@@ -58,7 +62,7 @@ MockSystemService::~MockSystemService() {
   if (used_tmpdir_) {
     if (old_tmpdir_) {
       // Restore the old value back to its initial value.
-      setenv("TMPDIR", old_tmpdir_, true);
+      setenv("TMPDIR", old_tmpdir_->c_str(), true);
     } else {
       // TMPDIR wasn't set originally so unset it.
       unsetenv("TMPDIR");

@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:execute-external-code
 
 // Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -9,15 +10,20 @@
 #include "gl_ozone_glx_qt.h"
 #include "gl_surface_glx_qt.h"
 #include "gl_context_qt.h"
+
+#include "media/gpu/buildflags.h"
 #include "ui/gl/gl_context_glx.h"
 #include "ui/gl/gl_gl_api_implementation.h"
 #include "ui/gl/gl_glx_api_implementation.h"
+#include "ui/gl/presenter.h"
+
 #include <dlfcn.h>
 
 namespace ui {
 
-gl::GLDisplay *GLOzoneGLXQt::InitializeGLOneOffPlatform(uint64_t system_device_id) {
-    return gl::GLSurfaceGLXQt::InitializeOneOff(system_device_id);
+gl::GLDisplay *GLOzoneGLXQt::InitializeGLOneOffPlatform(bool, std::vector<gl::DisplayType>, gl::GpuPreference preference)
+{
+    return gl::GLSurfaceGLXQt::InitializeOneOff(preference);
 }
 
 bool GLOzoneGLXQt::InitializeStaticGLBindings(
@@ -87,7 +93,7 @@ scoped_refptr<gl::GLSurface> GLOzoneGLXQt::CreateViewGLSurface(
     return nullptr;
 }
 
-scoped_refptr<gl::GLSurface> GLOzoneGLXQt::CreateSurfacelessViewGLSurface(
+scoped_refptr<gl::Presenter> GLOzoneGLXQt::CreateSurfacelessViewGLSurface(
         gl::GLDisplay* display,
         gfx::AcceleratedWidget window) {
     return nullptr;
@@ -109,8 +115,8 @@ bool GLOzoneGLXQt::CanImportNativePixmap()
 }
 
 std::unique_ptr<ui::NativePixmapGLBinding> GLOzoneGLXQt::ImportNativePixmap(
-        scoped_refptr<gfx::NativePixmap>, gfx::BufferFormat, gfx::BufferPlane,
-        gfx::Size, const gfx::ColorSpace&, GLenum, GLuint)
+        scoped_refptr<gfx::NativePixmap> pixmap, gfx::BufferFormat plane_format, gfx::BufferPlane plane,
+        gfx::Size plane_size, const gfx::ColorSpace &, GLenum target, GLuint texture_id)
 {
     return nullptr;
 }

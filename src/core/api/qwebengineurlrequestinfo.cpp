@@ -1,10 +1,12 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:network-protocol
 
 #include "qwebengineurlrequestinfo.h"
 #include "qwebengineurlrequestinfo_p.h"
 
 #include "web_contents_adapter_client.h"
+#include "net/resource_request_body_qt.h"
 
 #include <memory>
 #include <utility>
@@ -79,7 +81,8 @@ ASSERT_ENUMS_MATCH(QtWebEngineCore::WebContentsAdapterClient::RedirectNavigation
 QWebEngineUrlRequestInfoPrivate::QWebEngineUrlRequestInfoPrivate(
         QWebEngineUrlRequestInfo::ResourceType resource,
         QWebEngineUrlRequestInfo::NavigationType navigation, const QUrl &u, const QUrl &fpu,
-        const QUrl &i, const QByteArray &m, const QHash<QByteArray, QByteArray> &h)
+        const QUrl &i, const QByteArray &m, QtWebEngineCore::ResourceRequestBody *const rb,
+        const QHash<QByteArray, QByteArray> &h)
     : resourceType(resource)
     , navigationType(navigation)
     , shouldBlockRequest(false)
@@ -90,6 +93,7 @@ QWebEngineUrlRequestInfoPrivate::QWebEngineUrlRequestInfoPrivate(
     , method(m)
     , changed(false)
     , extraHeaders(h)
+    , resourceRequestBody(rb)
 {}
 
 /*!
@@ -158,6 +162,7 @@ QWebEngineUrlRequestInfo::QWebEngineUrlRequestInfo(QWebEngineUrlRequestInfoPriva
     \value ResourceTypeNavigationPreloadSubFrame  A sub-frame service worker navigation preload request. (Added in Qt 5.14)
     \value ResourceTypeWebSocket  A WebSocket request. (Added in Qt 6.4)
     \value ResourceTypeUnknown  Unknown request type.
+    \value ResourceTypeJson A JSON module. (Added in Qt 6.8)
 
     \note For forward compatibility all values not matched should be treated as unknown,
     not just \c ResourceTypeUnknown.
@@ -240,6 +245,20 @@ QByteArray QWebEngineUrlRequestInfo::requestMethod() const
 }
 
 /*!
+    Returns a pointer to a QIODevice that gives access to the request body.
+    The request body can contain data for example when the request is
+    a POST request. If the request body is empty the QIODevice reflects this
+    and does not return any data when performing read operations on it.
+
+    \since 6.7
+*/
+
+QIODevice *QWebEngineUrlRequestInfo::requestBody() const
+{
+    return d_ptr->resourceRequestBody;
+}
+
+/*!
     \internal
 */
 bool QWebEngineUrlRequestInfo::changed() const
@@ -257,7 +276,6 @@ void QWebEngineUrlRequestInfo::resetChanged()
 
 /*!
     Redirects this request to \a url.
-    It is only possible to redirect requests that do not have payload data, such as GET requests.
 */
 
 void QWebEngineUrlRequestInfo::redirect(const QUrl &url)
@@ -285,8 +303,6 @@ void QWebEngineUrlRequestInfo::block(bool shouldBlock)
 
 void QWebEngineUrlRequestInfo::setHttpHeader(const QByteArray &name, const QByteArray &value)
 {
-    d_ptr->changed = true;
-
     // Headers are case insentive, so we need to compare manually
     for (auto it = d_ptr->extraHeaders.begin(); it != d_ptr->extraHeaders.end(); ++it) {
         if (it.key().compare(name, Qt::CaseInsensitive) == 0) {
@@ -308,6 +324,15 @@ void QWebEngineUrlRequestInfo::setHttpHeader(const QByteArray &name, const QByte
 QHash<QByteArray, QByteArray> QWebEngineUrlRequestInfo::httpHeaders() const
 {
     return d_ptr->extraHeaders;
+}
+
+/*!
+    \internal
+*/
+void QWebEngineUrlRequestInfoPrivate::appendFileToResourceRequestBodyForTest(const QString &path)
+{
+    if (resourceRequestBody)
+        resourceRequestBody->appendFilesForTest(path);
 }
 
 QT_END_NAMESPACE

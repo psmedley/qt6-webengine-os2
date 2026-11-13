@@ -5,18 +5,19 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkCanvas.h"
-#include "include/core/SkPath.h"
 #include "src/core/SkClipStack.h"
+
+#include "include/core/SkBlendMode.h"
+#include "include/core/SkPath.h"
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkScalar.h"
+#include "include/private/base/SkDebug.h"
 #include "src/core/SkRectPriv.h"
 #include "src/shaders/SkShaderBase.h"
 
+#include <array>
 #include <atomic>
 #include <new>
-
-#if SK_SUPPORT_GPU
-#include "src/gpu/ganesh/GrProxyProvider.h"
-#endif
 
 SkClipStack::Element::Element(const Element& that) {
     switch (that.getDeviceSpaceType()) {
@@ -52,14 +53,7 @@ SkClipStack::Element::Element(const Element& that) {
     fGenID = that.fGenID;
 }
 
-SkClipStack::Element::~Element() {
-#if SK_SUPPORT_GPU
-    for (int i = 0; i < fKeysToInvalidate.count(); ++i) {
-        fProxyProvider->processInvalidUniqueKey(fKeysToInvalidate[i], nullptr,
-                                                GrProxyProvider::InvalidateGPUResource::kYes);
-    }
-#endif
-}
+SkClipStack::Element::~Element() = default;
 
 bool SkClipStack::Element::operator== (const Element& element) const {
     if (this == &element) {
@@ -623,7 +617,7 @@ void SkClipStack::getBounds(SkRect* canvFiniteBound,
                             bool* isIntersectionOfRects) const {
     SkASSERT(canvFiniteBound && boundType);
 
-    Element* element = (Element*)fDeque.back();
+    const Element* element = (const Element*)fDeque.back();
 
     if (nullptr == element) {
         // the clip is wide open - the infinite plane w/ no pixels un-writeable

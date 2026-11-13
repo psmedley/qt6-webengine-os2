@@ -4,8 +4,9 @@
 
 #include "components/feed/core/v2/feedstore_util.h"
 
-#include "base/base64.h"
+#include "base/base64url.h"
 #include "base/hash/hash.h"
+#include "base/strings/strcat.h"
 #include "components/feed/core/proto/v2/store.pb.h"
 #include "components/feed/core/proto/v2/wire/consistency_token.pb.h"
 #include "components/feed/core/v2/config.h"
@@ -16,30 +17,97 @@ namespace feedstore {
 using feed::LocalActionId;
 using feed::StreamType;
 
+// This returns a string version of StreamType which can be used in datastore
+// keys.
 std::string StreamKey(const StreamType& stream_type) {
   if (stream_type.IsForYou())
     return kForYouStreamKey;
   if (stream_type.IsWebFeed())
     return kFollowStreamKey;
-  DCHECK(stream_type.IsChannelFeed());
+  if (stream_type.IsForSupervisedUser()) {
+    return kSupervisedUserStreamKey;
+  }
+  DCHECK(stream_type.IsSingleWebFeed());
   std::string encoding;
-  base::Base64Encode(stream_type.GetWebFeedId(), &encoding);
-  return encoding;
+  base::Base64UrlEncode(stream_type.GetWebFeedId(),
+                        base::Base64UrlEncodePolicy::INCLUDE_PADDING,
+                        &encoding);
+  if (stream_type.IsSingleWebFeedEntryMenu()) {
+    return base::StrCat({std::string(kSingleWebFeedStreamKeyPrefix), "/",
+                         std::string(kSingleWebFeedMenuStreamKeyPrefix),
+                         encoding});
+  } else {
+    return base::StrCat({std::string(kSingleWebFeedStreamKeyPrefix), "/",
+                         std::string(kSingleWebFeedOtherStreamKeyPrefix),
+                         encoding});
+  }
 }
 
-StreamType StreamTypeFromKey(std::string key) {
-  if (key == kForYouStreamKey)
+base::StringPiece StreamPrefix(feed::StreamKind stream_kind) {
+  switch (stream_kind) {
+    case feed::StreamKind::kForYou:
+      return kForYouStreamKey;
+    case feed::StreamKind::kFollowing:
+      return kFollowStreamKey;
+    case feed::StreamKind::kSupervisedUser:
+      return kSupervisedUserStreamKey;
+    case feed::StreamKind::kSingleWebFeed:
+      return kSingleWebFeedStreamKeyPrefix;
+    case feed::StreamKind::kUnknown:
+      NOTREACHED();
+      return kSingleWebFeedStreamKeyPrefix;
+  }
+}
+
+StreamType DecodeSingleWebFeedKeySuffix(
+    base::StringPiece suffix,
+    feed::SingleWebFeedEntryPoint entry_point,
+    base::StringPiece prefix) {
+  if (base::StartsWith(suffix, prefix, base::CompareCase::SENSITIVE)) {
+    suffix.remove_prefix(prefix.size());
+    std::string single_web_feed_key;
+    if (base::Base64UrlDecode(suffix,
+                              base::Base64UrlDecodePolicy::IGNORE_PADDING,
+                              &single_web_feed_key)) {
+      return StreamType(feed::StreamKind::kSingleWebFeed, single_web_feed_key,
+                        entry_point);
+    }
+  }
+  return {};
+}
+
+StreamType StreamTypeFromKey(base::StringPiece id) {
+  if (id == kForYouStreamKey)
     return StreamType(feed::StreamKind::kForYou);
-  if (key == kFollowStreamKey)
+  if (id == kFollowStreamKey)
     return StreamType(feed::StreamKind::kFollowing);
-  std::string channel_key;
-  if (base::Base64Decode(key, &channel_key))
-    return StreamType(feed::StreamKind::kChannel, channel_key);
+  if (id == kSupervisedUserStreamKey) {
+    return StreamType(feed::StreamKind::kSupervisedUser);
+  }
+  if (base::StartsWith(id, kSingleWebFeedStreamKeyPrefix,
+                       base::CompareCase::SENSITIVE)) {
+    if ((id.size() < (kSingleWebFeedStreamKeyPrefix.size() +
+                      kSingleWebFeedMenuStreamKeyPrefix.size() + 1))) {
+      return {};
+    }
+    // add  +1 to account for the '/' separating the c/[mo]/webid
+    base::StringPiece substr =
+        id.substr(kSingleWebFeedStreamKeyPrefix.size() + 1);
+    StreamType result = DecodeSingleWebFeedKeySuffix(
+        substr, feed::SingleWebFeedEntryPoint::kMenu,
+        kSingleWebFeedMenuStreamKeyPrefix);
+    if (!result.IsValid()) {
+      result = DecodeSingleWebFeedKeySuffix(
+          substr, feed::SingleWebFeedEntryPoint::kOther,
+          kSingleWebFeedOtherStreamKeyPrefix);
+    }
+    return result;
+  }
   return {};
 }
 
 int64_t ToTimestampMillis(base::Time t) {
-  return (t - base::Time::UnixEpoch()).InMilliseconds();
+  return t.is_null() ? 0L : (t - base::Time::UnixEpoch()).InMilliseconds();
 }
 
 base::Time FromTimestampMillis(int64_t millis) {
@@ -47,7 +115,7 @@ base::Time FromTimestampMillis(int64_t millis) {
 }
 
 int64_t ToTimestampNanos(base::Time t) {
-  return (t - base::Time::UnixEpoch()).InNanoseconds();
+  return t.is_null() ? 0L : (t - base::Time::UnixEpoch()).InNanoseconds();
 }
 
 base::Time FromTimestampMicros(int64_t micros) {
@@ -145,7 +213,8 @@ void SetStreamViewContentHashes(Metadata& metadata,
       MetadataForStream(metadata, stream_type);
   stream_metadata.clear_view_content_hashes();
   stream_metadata.mutable_view_content_hashes()->Add(
-      content_hashes.values().begin(), content_hashes.values().end());
+      content_hashes.original_hashes().begin(),
+      content_hashes.original_hashes().end());
 }
 
 bool IsKnownStale(const Metadata& metadata, const StreamType& stream_type) {
@@ -174,6 +243,13 @@ feedstore::Metadata MakeMetadata(const std::string& gaia) {
   md.set_stream_schema_version(feed::FeedStore::kCurrentStreamSchemaVersion);
   md.set_gaia(gaia);
   return md;
+}
+
+feedstore::DocView CreateDocView(uint64_t docid, base::Time timestamp) {
+  feedstore::DocView doc_view;
+  doc_view.set_docid(docid);
+  doc_view.set_view_time_millis(feedstore::ToTimestampMillis(timestamp));
+  return doc_view;
 }
 
 absl::optional<Metadata> SetStreamViewContentHashes(
@@ -215,6 +291,18 @@ void SetLastServerResponseTime(Metadata& metadata,
 int32_t ContentHashFromPrefetchMetadata(
     const feedwire::PrefetchMetadata& prefetch_metadata) {
   return base::PersistentHash(prefetch_metadata.uri());
+}
+
+base::flat_set<uint32_t> GetViewedContentHashes(const Metadata& metadata,
+                                                const StreamType& stream_type) {
+  const Metadata::StreamMetadata* stream_metadata =
+      FindMetadataForStream(metadata, stream_type);
+  if (stream_metadata) {
+    return base::flat_set<uint32_t>(
+        stream_metadata->viewed_content_hashes().begin(),
+        stream_metadata->viewed_content_hashes().end());
+  }
+  return {};
 }
 
 }  // namespace feedstore

@@ -4,7 +4,9 @@
 
 #include "components/sessions/core/session_id_generator.h"
 
-#include "base/bind.h"
+#include <ostream>
+
+#include "base/functional/bind.h"
 #include "base/rand_util.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -59,16 +61,7 @@ void SessionIdGenerator::Shutdown() {
 
 SessionID SessionIdGenerator::NewUnique() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // Init() should have been called in production (which initializes
-  // |local_state_|), but for test convenience, we allow operating even without
-  // underlying prefs.
-  if (local_state_) {
-    IncrementValueBy(1);
-    local_state_->SetInt64(kLastValuePref, last_value_);
-  } else {
-    // Test-only path. Will CHECK-fail if Init() is called later.
-    ++last_value_;
-  }
+  IncrementValueBy(1);
   DCHECK(SessionID::IsValidValue(last_value_));
   return SessionID::FromSerializedValue(last_value_);
 }
@@ -98,6 +91,12 @@ void SessionIdGenerator::IncrementValueBy(int increment) {
     last_value_ = 0;
   }
   last_value_ += increment;
+  // Init() should have been called in production (which initializes
+  // |local_state_|), but for test convenience, we allow operating even without
+  // underlying prefs.
+  if (local_state_) {
+    local_state_->SetInt64(kLastValuePref, last_value_);
+  }
 }
 
 bool SessionIdGenerator::IsInitializedForTest() const {

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,10 @@
 
 #include "cast/streaming/frame_id.h"
 #include "cast/streaming/rtp_defines.h"
+#include "platform/base/span.h"
 #include "util/osp_logging.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 namespace {
 
@@ -138,7 +138,7 @@ const EncryptedFrame& FrameCollector::PeekAtAssembledFrame() {
       frame_.owned_data_.insert(frame_.owned_data_.end(), chunk.payload.begin(),
                                 chunk.payload.end());
     }
-    frame_.data = absl::Span<uint8_t>(frame_.owned_data_);
+    frame_.data = frame_.owned_data_;
   }
 
   return frame_;
@@ -149,12 +149,11 @@ void FrameCollector::Reset() {
   frame_.frame_id = FrameId();
   frame_.owned_data_.clear();
   frame_.owned_data_.shrink_to_fit();
-  frame_.data = absl::Span<uint8_t>();
+  frame_.data = ByteView();
   chunks_.clear();
 }
 
 FrameCollector::PayloadChunk::PayloadChunk() = default;
 FrameCollector::PayloadChunk::~PayloadChunk() = default;
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

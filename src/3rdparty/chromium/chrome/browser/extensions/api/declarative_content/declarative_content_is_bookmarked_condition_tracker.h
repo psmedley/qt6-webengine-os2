@@ -8,7 +8,7 @@
 #include <map>
 #include <memory>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/scoped_observation.h"
@@ -54,7 +54,7 @@ class DeclarativeContentIsBookmarkedPredicate : public ContentPredicate {
       bool is_bookmarked);
 
   // Weak.
-  const raw_ptr<ContentPredicateEvaluator> evaluator_;
+  const raw_ptr<ContentPredicateEvaluator, DanglingUntriaged> evaluator_;
 
   scoped_refptr<const Extension> extension_;
   bool is_bookmarked_;

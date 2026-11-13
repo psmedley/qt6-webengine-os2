@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// #include "logs/proto/location/nearby/nearby_client_log.proto.h"
 #include "google/protobuf/descriptor.h"
 #include "gtest/gtest.h"
 #include "internal/platform/logging.h"
 #include "internal/proto/analytics/connections_log.pb.h"
 #include "proto/connections_enums.pb.h"
 
-namespace location {
 namespace nearby {
 namespace analytics {
 namespace proto {
@@ -122,4 +122,3 @@ TEST(ConnectionsLogTest, TwoMessagesAreIdentical) {
 }  // namespace proto
 }  // namespace analytics
 }  // namespace nearby
-}  // namespace location

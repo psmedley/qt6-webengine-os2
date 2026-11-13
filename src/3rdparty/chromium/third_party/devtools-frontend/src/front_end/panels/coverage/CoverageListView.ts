@@ -5,107 +5,109 @@
 import * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
-import * as Formatter from '../../models/formatter/formatter.js';
 import * as TextUtils from '../../models/text_utils/text_utils.js';
 import * as Workspace from '../../models/workspace/workspace.js';
 import * as DataGrid from '../../ui/legacy/components/data_grid/data_grid.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
 import coverageListViewStyles from './coverageListView.css.js';
-
-import {CoverageType, type URLCoverageInfo} from './CoverageModel.js';
+import {
+  CoverageType,
+  SourceURLCoverageInfo,
+  type URLCoverageInfo,
+} from './CoverageModel.js';
 
 const UIStrings = {
   /**
-  *@description Text that appears on a button for the css resource type filter.
-  */
+   *@description Text that appears on a button for the css resource type filter.
+   */
   css: 'CSS',
   /**
-  *@description Text in Coverage List View of the Coverage tab
-  */
+   *@description Text in Coverage List View of the Coverage tab
+   */
   jsPerFunction: 'JS (per function)',
   /**
-  *@description Text in Coverage List View of the Coverage tab
-  */
+   *@description Text in Coverage List View of the Coverage tab
+   */
   jsPerBlock: 'JS (per block)',
   /**
-  *@description Text for web URLs
-  */
+   *@description Text for web URLs
+   */
   url: 'URL',
   /**
-  *@description Text that refers to some types
-  */
+   *@description Text that refers to some types
+   */
   type: 'Type',
   /**
-  *@description Text in Coverage List View of the Coverage tab
-  */
+   *@description Text in Coverage List View of the Coverage tab
+   */
   totalBytes: 'Total Bytes',
   /**
-  *@description Text in Coverage List View of the Coverage tab
-  */
+   *@description Text in Coverage List View of the Coverage tab
+   */
   unusedBytes: 'Unused Bytes',
   /**
-  *@description Text in the Coverage List View of the Coverage Tab
-  */
+   *@description Text in the Coverage List View of the Coverage Tab
+   */
   usageVisualization: 'Usage Visualization',
   /**
-  *@description Data grid name for Coverage data grids
-  */
+   *@description Data grid name for Coverage data grids
+   */
   codeCoverage: 'Code Coverage',
   /**
-  *@description Cell title in Coverage List View of the Coverage tab. The coverage tool tells
-  *developers which functions (logical groups of lines of code) were actually run/executed. If a
-  *function does get run, then it is marked in the UI to indicate that it was covered.
-  */
+   *@description Cell title in Coverage List View of the Coverage tab. The coverage tool tells
+   *developers which functions (logical groups of lines of code) were actually run/executed. If a
+   *function does get run, then it is marked in the UI to indicate that it was covered.
+   */
   jsCoverageWithPerFunction:
       'JS coverage with per function granularity: Once a function was executed, the whole function is marked as covered.',
   /**
-  *@description Cell title in Coverage List View of the Coverage tab. The coverage tool tells
-  *developers which blocks (logical groups of lines of code, smaller than a function) were actually
-  *run/executed. If a block does get run, then it is marked in the UI to indicate that it was
-  *covered.
-  */
+   *@description Cell title in Coverage List View of the Coverage tab. The coverage tool tells
+   *developers which blocks (logical groups of lines of code, smaller than a function) were actually
+   *run/executed. If a block does get run, then it is marked in the UI to indicate that it was
+   *covered.
+   */
   jsCoverageWithPerBlock:
       'JS coverage with per block granularity: Once a block of JavaScript was executed, that block is marked as covered.',
   /**
-  *@description Accessible text for the value in bytes in memory allocation or coverage view.
-  */
+   *@description Accessible text for the value in bytes in memory allocation or coverage view.
+   */
   sBytes: '{n, plural, =1 {# byte} other {# bytes}}',
   /**
-  *@description Accessible text for the unused bytes column in the coverage tool that describes the total unused bytes and percentage of the file unused.
-  *@example {88%} percentage
-  */
+   *@description Accessible text for the unused bytes column in the coverage tool that describes the total unused bytes and percentage of the file unused.
+   *@example {88%} percentage
+   */
   sBytesS: '{n, plural, =1 {# byte, {percentage}} other {# bytes, {percentage}}}',
   /**
-  *@description Tooltip text for the bar in the coverage list view of the coverage tool that illustrates the relation between used and unused bytes.
-  *@example {1000} PH1
-  *@example {12.34} PH2
-  */
+   *@description Tooltip text for the bar in the coverage list view of the coverage tool that illustrates the relation between used and unused bytes.
+   *@example {1000} PH1
+   *@example {12.34} PH2
+   */
   sBytesSBelongToFunctionsThatHave: '{PH1} bytes ({PH2}) belong to functions that have not (yet) been executed.',
   /**
-  *@description Tooltip text for the bar in the coverage list view of the coverage tool that illustrates the relation between used and unused bytes.
-  *@example {1000} PH1
-  *@example {12.34} PH2
-  */
+   *@description Tooltip text for the bar in the coverage list view of the coverage tool that illustrates the relation between used and unused bytes.
+   *@example {1000} PH1
+   *@example {12.34} PH2
+   */
   sBytesSBelongToBlocksOf: '{PH1} bytes ({PH2}) belong to blocks of JavaScript that have not (yet) been executed.',
   /**
-  *@description Message in Coverage View of the Coverage tab
-  *@example {1000} PH1
-  *@example {12.34} PH2
-  */
+   *@description Message in Coverage View of the Coverage tab
+   *@example {1000} PH1
+   *@example {12.34} PH2
+   */
   sBytesSBelongToFunctionsThatHaveExecuted: '{PH1} bytes ({PH2}) belong to functions that have executed at least once.',
   /**
-  *@description Message in Coverage View of the Coverage tab
-  *@example {1000} PH1
-  *@example {12.34} PH2
-  */
+   *@description Message in Coverage View of the Coverage tab
+   *@example {1000} PH1
+   *@example {12.34} PH2
+   */
   sBytesSBelongToBlocksOfJavascript:
       '{PH1} bytes ({PH2}) belong to blocks of JavaScript that have executed at least once.',
   /**
-  *@description Accessible text for the visualization column of coverage tool. Contains percentage of unused bytes to used bytes.
-  *@example {12.3} PH1
-  *@example {12.3} PH2
-  */
+   *@description Accessible text for the visualization column of coverage tool. Contains percentage of unused bytes to used bytes.
+   *@example {12.3} PH1
+   *@example {12.3} PH2
+   */
   sOfFileUnusedSOfFileUsed: '{PH1} % of file unused, {PH2} % of file used',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/coverage/CoverageListView.ts', UIStrings);
@@ -136,11 +138,20 @@ export class CoverageListView extends UI.Widget.VBox {
     this.isVisibleFilter = isVisibleFilter;
     this.highlightRegExp = null;
 
-    const columns: DataGrid.DataGrid.ColumnDescriptor[] = [
-      {id: 'url', title: i18nString(UIStrings.url), width: '250px', weight: 3, fixedWidth: false, sortable: true},
-      {id: 'type', title: i18nString(UIStrings.type), width: '45px', weight: 1, fixedWidth: true, sortable: true},
+    const k = Platform.StringUtilities.kebab;
+    const columns = [
       {
-        id: 'size',
+        id: k('url'),
+        title: i18nString(UIStrings.url),
+        width: '250px',
+        weight: 3,
+        fixedWidth: false,
+        sortable: true,
+        disclosure: true,
+      },
+      {id: k('type'), title: i18nString(UIStrings.type), width: '45px', weight: 1, fixedWidth: true, sortable: true},
+      {
+        id: k('size'),
         title: i18nString(UIStrings.totalBytes),
         width: '60px',
         fixedWidth: true,
@@ -149,7 +160,7 @@ export class CoverageListView extends UI.Widget.VBox {
         weight: 1,
       },
       {
-        id: 'unusedSize',
+        id: k('unused-size'),
         title: i18nString(UIStrings.unusedBytes),
         width: '100px',
         fixedWidth: true,
@@ -159,7 +170,7 @@ export class CoverageListView extends UI.Widget.VBox {
         weight: 1,
       },
       {
-        id: 'bars',
+        id: k('bars'),
         title: i18nString(UIStrings.usageVisualization),
         width: '250px',
         fixedWidth: false,
@@ -175,6 +186,7 @@ export class CoverageListView extends UI.Widget.VBox {
       deleteCallback: undefined,
     });
     this.dataGrid.setResizeMethod(DataGrid.DataGrid.ResizeMethod.Last);
+    this.dataGrid.setStriped(true);
     this.dataGrid.element.classList.add('flex-auto');
     this.dataGrid.element.addEventListener('keydown', this.onKeyDown.bind(this), false);
     this.dataGrid.addEventListener(DataGrid.DataGrid.Events.OpenedNode, this.onOpenedNode, this);
@@ -194,6 +206,9 @@ export class CoverageListView extends UI.Widget.VBox {
       if (node) {
         if (this.isVisibleFilter(node.coverageInfo)) {
           hadUpdates = node.refreshIfNeeded(maxSize) || hadUpdates;
+          if (entry.sourcesURLCoverageInfo.size > 0) {
+            this.updateSourceNodes(entry.sourcesURLCoverageInfo, maxSize, node);
+          }
         }
         continue;
       }
@@ -201,11 +216,42 @@ export class CoverageListView extends UI.Widget.VBox {
       this.nodeForCoverageInfo.set(entry, node);
       if (this.isVisibleFilter(node.coverageInfo)) {
         rootNode.appendChild(node);
+        if (entry.sourcesURLCoverageInfo.size > 0) {
+          void this.createSourceNodes(entry.sourcesURLCoverageInfo, maxSize, node);
+        }
         hadUpdates = true;
       }
     }
     if (hadUpdates) {
       this.sortingChanged();
+    }
+  }
+
+  updateSourceNodes(
+      sourcesURLCoverageInfo: Map<Platform.DevToolsPath.UrlString, SourceURLCoverageInfo>, maxSize: number,
+      node: GridNode): void {
+    let shouldCreateSourceNodes = false;
+    for (const coverageInfo of sourcesURLCoverageInfo.values()) {
+      const sourceNode = this.nodeForCoverageInfo.get(coverageInfo);
+      if (sourceNode) {
+        sourceNode.refreshIfNeeded(maxSize);
+      } else {
+        shouldCreateSourceNodes = true;
+        break;
+      }
+    }
+    if (shouldCreateSourceNodes) {
+      void this.createSourceNodes(sourcesURLCoverageInfo, maxSize, node);
+    }
+  }
+
+  async createSourceNodes(
+      sourcesURLCoverageInfo: Map<Platform.DevToolsPath.UrlString, SourceURLCoverageInfo>, maxSize: number,
+      node: GridNode): Promise<void> {
+    for (const coverageInfo of sourcesURLCoverageInfo.values()) {
+      const sourceNode = new GridNode(coverageInfo, maxSize);
+      node.appendChild(sourceNode);
+      this.nodeForCoverageInfo.set(coverageInfo, sourceNode);
     }
   }
 
@@ -230,11 +276,20 @@ export class CoverageListView extends UI.Widget.VBox {
       if (!shouldBeVisible) {
         node.remove();
       } else {
-        this.dataGrid.rootNode().appendChild(node);
+        this.appendNodeByType(node);
       }
     }
     if (hadTreeUpdates) {
       this.sortingChanged();
+    }
+  }
+
+  private appendNodeByType(node: GridNode): void {
+    if (node.coverageInfo instanceof SourceURLCoverageInfo) {
+      const parentNode = this.nodeForCoverageInfo.get(node.coverageInfo.generatedURLCoverageInfo);
+      parentNode?.appendChild(node);
+    } else {
+      this.dataGrid.rootNode().appendChild(node);
     }
   }
 
@@ -265,13 +320,10 @@ export class CoverageListView extends UI.Widget.VBox {
       return;
     }
     const coverageInfo = (node as GridNode).coverageInfo;
-    let sourceCode = Workspace.Workspace.WorkspaceImpl.instance().uiSourceCodeForURL(coverageInfo.url());
+    const sourceCode = Workspace.Workspace.WorkspaceImpl.instance().uiSourceCodeForURL(coverageInfo.url());
     if (!sourceCode) {
       return;
     }
-
-    const formatData = await Formatter.SourceFormatter.SourceFormatter.instance().format(sourceCode);
-    sourceCode = formatData.formattedSourceCode;
 
     if (this.dataGrid.selectedNode !== node) {
       return;
@@ -293,7 +345,7 @@ export class CoverageListView extends UI.Widget.VBox {
     }
     this.dataGrid.sortNodes(sortFunction, !this.dataGrid.isSortOrderAscending());
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([coverageListViewStyles]);
   }
@@ -344,7 +396,7 @@ export class GridNode extends DataGrid.SortableDataGrid.SortableDataGridNode<Gri
     return true;
   }
 
-  createCell(columnId: string): HTMLElement {
+  override createCell(columnId: string): HTMLElement {
     const cell = this.createTD(columnId);
     switch (columnId) {
       case 'url': {
@@ -377,7 +429,7 @@ export class GridNode extends DataGrid.SortableDataGrid.SortableDataGridNode<Gri
         this.setCellAccessibleName(sizeAccessibleName, cell, columnId);
         break;
       }
-      case 'unusedSize': {
+      case 'unused-size': {
         const unusedSize = this.coverageInfo.unusedSize() || 0;
         const unusedSizeSpan = cell.createChild('span');
         const unusedPercentsSpan = cell.createChild('span', 'percent-value');
@@ -458,7 +510,7 @@ export class GridNode extends DataGrid.SortableDataGrid.SortableDataGridNode<Gri
       case 'size':
         return (a: GridNode, b: GridNode): number => a.coverageInfo.size() - b.coverageInfo.size() || compareURL(a, b);
       case 'bars':
-      case 'unusedSize':
+      case 'unused-size':
         return (a: GridNode, b: GridNode): number =>
                    a.coverageInfo.unusedSize() - b.coverageInfo.unusedSize() || compareURL(a, b);
       default:

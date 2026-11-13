@@ -18,12 +18,14 @@
 #include "src/codegen/signature.h"
 #include "src/common/globals.h"
 #include "src/handles/handles.h"
+#include "src/trap-handler/trap-handler.h"
 #include "src/wasm/branch-hint-map.h"
 #include "src/wasm/constant-expression.h"
 #include "src/wasm/struct-types.h"
 #include "src/wasm/wasm-constants.h"
 #include "src/wasm/wasm-init-expr.h"
 #include "src/wasm/wasm-limits.h"
+#include "src/wasm/well-known-imports.h"
 
 namespace v8::internal {
 class WasmModuleObject;
@@ -35,6 +37,7 @@ using WasmName = base::Vector<const char>;
 
 struct AsmJsOffsets;
 class ErrorThrower;
+class WellKnownImportsList;
 
 // Reference to a string in the wire bytes.
 class WireBytesRef {
@@ -59,13 +62,13 @@ class WireBytesRef {
 
 // Static representation of a wasm function.
 struct WasmFunction {
-  const FunctionSig* sig;  // signature of the function.
-  uint32_t func_index;     // index into the function table.
-  uint32_t sig_index;      // index into the signature table.
-  WireBytesRef code;       // code of this function.
-  bool imported;
-  bool exported;
-  bool declared;
+  const FunctionSig* sig = nullptr;  // signature of the function.
+  uint32_t func_index = 0;           // index into the function table.
+  uint32_t sig_index = 0;            // index into the signature table.
+  WireBytesRef code = {};            // code of this function.
+  bool imported = false;
+  bool exported = false;
+  bool declared = false;
 };
 
 // Static representation of a wasm global variable.
@@ -90,11 +93,80 @@ using WasmTagSig = FunctionSig;
 
 // Static representation of a wasm tag type.
 struct WasmTag {
-  explicit WasmTag(const WasmTagSig* sig) : sig(sig) {}
+  explicit WasmTag(const WasmTagSig* sig, uint32_t sig_index)
+      : sig(sig), sig_index(sig_index) {}
   const FunctionSig* ToFunctionSig() const { return sig; }
 
   const WasmTagSig* sig;  // type signature of the tag.
+  uint32_t sig_index;
 };
+
+enum ModuleOrigin : uint8_t {
+  kWasmOrigin,
+  kAsmJsSloppyOrigin,
+  kAsmJsStrictOrigin
+};
+
+enum BoundsCheckStrategy : int8_t {
+  // Emit protected instructions, use the trap handler for OOB detection.
+  kTrapHandler,
+  // Emit explicit bounds checks.
+  kExplicitBoundsChecks,
+  // Emit no bounds checks at all (for testing only).
+  kNoBoundsChecks
+};
+
+// Static representation of a wasm memory.
+struct WasmMemory {
+  uint32_t index = 0;              // index into the memory table
+  uint32_t initial_pages = 0;      // initial size of the memory in 64k pages
+  uint32_t maximum_pages = 0;      // maximum size of the memory in 64k pages
+  bool is_shared = false;          // true if memory is a SharedArrayBuffer
+  bool has_maximum_pages = false;  // true if there is a maximum memory size
+  bool is_memory64 = false;        // true if the memory is 64 bit
+  bool imported = false;           // true if the memory is imported
+  bool exported = false;           // true if the memory is exported
+  // Computed information, cached here for faster compilation.
+  // Updated via {UpdateComputedInformation}.
+  uintptr_t min_memory_size = 0;  // smallest size of any memory in bytes
+  uintptr_t max_memory_size = 0;  // largest size of any memory in bytes
+  BoundsCheckStrategy bounds_checks = kExplicitBoundsChecks;
+
+  inline int GetMemory64GuardsShift() const {
+    return GetMemory64GuardsShift(maximum_pages * kWasmPageSize);
+  }
+  static int GetMemory64GuardsShift(uint64_t max_memory_size);
+};
+
+inline void UpdateComputedInformation(WasmMemory* memory, ModuleOrigin origin) {
+  const uintptr_t platform_max_pages =
+      memory->is_memory64 ? kV8MaxWasmMemory64Pages : kV8MaxWasmMemory32Pages;
+  memory->min_memory_size =
+      std::min(platform_max_pages, uintptr_t{memory->initial_pages}) *
+      kWasmPageSize;
+  memory->max_memory_size =
+      std::min(platform_max_pages, uintptr_t{memory->maximum_pages}) *
+      kWasmPageSize;
+
+  if (!v8_flags.wasm_bounds_checks) {
+    memory->bounds_checks = kNoBoundsChecks;
+  } else if (v8_flags.wasm_enforce_bounds_checks) {
+    // Explicit bounds checks requested via flag (for testing).
+    memory->bounds_checks = kExplicitBoundsChecks;
+  } else if (origin != kWasmOrigin) {
+    // Asm.js modules can't use trap handling.
+    memory->bounds_checks = kExplicitBoundsChecks;
+  } else if (memory->is_memory64 && !v8_flags.wasm_memory64_trap_handling) {
+    // Memory64 currently always requires explicit bounds checks.
+    memory->bounds_checks = kExplicitBoundsChecks;
+  } else if (trap_handler::IsTrapHandlerEnabled()) {
+    if constexpr (kSystemPointerSize == 4) UNREACHABLE();
+    memory->bounds_checks = kTrapHandler;
+  } else {
+    // If the trap handler is not enabled, fall back to explicit bounds checks.
+    memory->bounds_checks = kExplicitBoundsChecks;
+  }
+}
 
 // Static representation of a wasm literal stringref.
 struct WasmStringRefLiteral {
@@ -104,16 +176,21 @@ struct WasmStringRefLiteral {
 
 // Static representation of a wasm data segment.
 struct WasmDataSegment {
-  // Construct an active segment.
-  explicit WasmDataSegment(ConstantExpression dest_addr)
-      : dest_addr(dest_addr), active(true) {}
+  explicit WasmDataSegment(bool is_active, uint32_t memory_index,
+                           ConstantExpression dest_addr, WireBytesRef source)
+      : active(is_active),
+        memory_index(memory_index),
+        dest_addr(dest_addr),
+        source(source) {}
 
-  // Construct a passive segment, which has no dest_addr.
-  WasmDataSegment() : active(false) {}
+  static WasmDataSegment PassiveForTesting() {
+    return WasmDataSegment{false, 0, {}, {}};
+  }
 
-  ConstantExpression dest_addr;  // destination memory address of the data.
+  bool active = true;     // true if copied automatically during instantiation.
+  uint32_t memory_index;  // memory index (if active).
+  ConstantExpression dest_addr;  // destination memory address (if active).
   WireBytesRef source;           // start offset in the module bytes.
-  bool active = true;  // true if copied automatically during instantiation.
 };
 
 // Static representation of wasm element segment (table initializer).
@@ -127,17 +204,26 @@ struct WasmElemSegment {
 
   // Construct an active segment.
   WasmElemSegment(ValueType type, uint32_t table_index,
-                  ConstantExpression offset, ElementType element_type)
+                  ConstantExpression offset, ElementType element_type,
+                  uint32_t element_count, uint32_t elements_wire_bytes_offset)
       : status(kStatusActive),
         type(type),
         table_index(table_index),
         offset(std::move(offset)),
-        element_type(element_type) {}
+        element_type(element_type),
+        element_count(element_count),
+        elements_wire_bytes_offset(elements_wire_bytes_offset) {}
 
   // Construct a passive or declarative segment, which has no table index or
   // offset.
-  WasmElemSegment(ValueType type, Status status, ElementType element_type)
-      : status(status), type(type), table_index(0), element_type(element_type) {
+  WasmElemSegment(ValueType type, Status status, ElementType element_type,
+                  uint32_t element_count, uint32_t elements_wire_bytes_offset)
+      : status(status),
+        type(type),
+        table_index(0),
+        element_type(element_type),
+        element_count(element_count),
+        elements_wire_bytes_offset(elements_wire_bytes_offset) {
     DCHECK_NE(status, kStatusActive);
   }
 
@@ -146,7 +232,9 @@ struct WasmElemSegment {
       : status(kStatusActive),
         type(kWasmBottom),
         table_index(0),
-        element_type(kFunctionIndexElements) {}
+        element_type(kFunctionIndexElements),
+        element_count(0),
+        elements_wire_bytes_offset(0) {}
 
   WasmElemSegment(const WasmElemSegment&) = delete;
   WasmElemSegment(WasmElemSegment&&) V8_NOEXCEPT = default;
@@ -158,7 +246,8 @@ struct WasmElemSegment {
   uint32_t table_index;
   ConstantExpression offset;
   ElementType element_type;
-  std::vector<ConstantExpression> entries;
+  uint32_t element_count;
+  uint32_t elements_wire_bytes_offset;
 };
 
 // Static representation of a wasm import.
@@ -194,12 +283,6 @@ struct WasmCompilationHint {
   WasmCompilationHintStrategy strategy;
   WasmCompilationHintTier baseline_tier;
   WasmCompilationHintTier top_tier;
-};
-
-enum ModuleOrigin : uint8_t {
-  kWasmOrigin,
-  kAsmJsSloppyOrigin,
-  kAsmJsStrictOrigin
 };
 
 #define SELECT_WASM_COUNTER(counters, origin, prefix, suffix)     \
@@ -270,6 +353,8 @@ class AdaptiveMap {
     }
   }
 
+  size_t EstimateCurrentMemoryConsumption() const;
+
  private:
   static constexpr uint32_t kLoadFactor = 4;
   using MapType = std::map<uint32_t, Value>;
@@ -286,23 +371,25 @@ struct ModuleWireBytes;
 
 class V8_EXPORT_PRIVATE LazilyGeneratedNames {
  public:
-  WireBytesRef LookupFunctionName(const ModuleWireBytes& wire_bytes,
+  WireBytesRef LookupFunctionName(ModuleWireBytes wire_bytes,
                                   uint32_t function_index);
 
   void AddForTesting(int function_index, WireBytesRef name);
   bool Has(uint32_t function_index);
 
+  size_t EstimateCurrentMemoryConsumption() const;
+
  private:
   // Lazy loading must guard against concurrent modifications from multiple
   // {WasmModuleObject}s.
-  base::Mutex mutex_;
+  mutable base::Mutex mutex_;
   bool has_functions_{false};
   NameMap function_names_;
 };
 
 class V8_EXPORT_PRIVATE AsmJsOffsetInformation {
  public:
-  explicit AsmJsOffsetInformation(base::Vector<const byte> encoded_offsets);
+  explicit AsmJsOffsetInformation(base::Vector<const uint8_t> encoded_offsets);
 
   // Destructor defined in wasm-module.cc, where the definition of
   // {AsmJsOffsets} is available.
@@ -332,43 +419,51 @@ class V8_EXPORT_PRIVATE AsmJsOffsetInformation {
 constexpr uint32_t kNoSuperType = std::numeric_limits<uint32_t>::max();
 
 struct TypeDefinition {
-  enum Kind { kFunction, kStruct, kArray };
+  enum Kind : int8_t { kFunction, kStruct, kArray };
 
-  TypeDefinition(const FunctionSig* sig, uint32_t supertype)
-      : function_sig(sig), supertype(supertype), kind(kFunction) {}
-  TypeDefinition(const StructType* type, uint32_t supertype)
-      : struct_type(type), supertype(supertype), kind(kStruct) {}
-  TypeDefinition(const ArrayType* type, uint32_t supertype)
-      : array_type(type), supertype(supertype), kind(kArray) {}
-  TypeDefinition()
-      : function_sig(nullptr), supertype(kNoSuperType), kind(kFunction) {}
-
-  union {
-    const FunctionSig* function_sig;
-    const StructType* struct_type;
-    const ArrayType* array_type;
-  };
+  constexpr TypeDefinition(const FunctionSig* sig, uint32_t supertype,
+                           bool is_final)
+      : function_sig(sig),
+        supertype(supertype),
+        kind(kFunction),
+        is_final(is_final) {}
+  constexpr TypeDefinition(const StructType* type, uint32_t supertype,
+                           bool is_final)
+      : struct_type(type),
+        supertype(supertype),
+        kind(kStruct),
+        is_final(is_final) {}
+  constexpr TypeDefinition(const ArrayType* type, uint32_t supertype,
+                           bool is_final)
+      : array_type(type),
+        supertype(supertype),
+        kind(kArray),
+        is_final(is_final) {}
+  constexpr TypeDefinition() = default;
 
   bool operator==(const TypeDefinition& other) const {
-    if (supertype != other.supertype || kind != other.kind) {
-      return false;
-    }
-    switch (kind) {
-      case kFunction:
-        return *function_sig == *other.function_sig;
-      case kStruct:
-        return *struct_type == *other.struct_type;
-      case kArray:
-        return *array_type == *other.array_type;
-    }
+    if (supertype != other.supertype) return false;
+    if (kind != other.kind) return false;
+    if (is_final != other.is_final) return false;
+    if (kind == kFunction) return *function_sig == *other.function_sig;
+    if (kind == kStruct) return *struct_type == *other.struct_type;
+    DCHECK_EQ(kArray, kind);
+    return *array_type == *other.array_type;
   }
 
   bool operator!=(const TypeDefinition& other) const {
     return !(*this == other);
   }
 
-  uint32_t supertype;
-  Kind kind;
+  union {
+    const FunctionSig* function_sig = nullptr;
+    const StructType* struct_type;
+    const ArrayType* array_type;
+  };
+  uint32_t supertype = kNoSuperType;
+  Kind kind = kFunction;
+  bool is_final = false;
+  uint8_t subtyping_depth = 0;
 };
 
 struct V8_EXPORT_PRIVATE WasmDebugSymbols {
@@ -473,30 +568,41 @@ struct FunctionTypeFeedback {
 struct TypeFeedbackStorage {
   std::unordered_map<uint32_t, FunctionTypeFeedback> feedback_for_function;
   // Accesses to {feedback_for_function} are guarded by this mutex.
-  mutable base::Mutex mutex;
+  // Multiple reads are allowed (shared lock), but only exclusive writes.
+  // Currently known users of the mutex are:
+  // - LiftoffCompiler: writes {call_targets}.
+  // - TransitiveTypeFeedbackProcessor: reads {call_targets},
+  //   writes {feedback_vector}, reads {feedback_vector.size()}.
+  // - TriggerTierUp: increments {tierup_priority}.
+  // - WasmGraphBuilder: reads {feedback_vector}.
+  // - Feedback vector allocation: reads {call_targets.size()}.
+  // - PGO ProfileGenerator: reads everything.
+  // - PGO deserializer: writes everything, currently not locked, relies on
+  //   being called before multi-threading enters the picture.
+  mutable base::SharedMutex mutex;
+
+  WellKnownImportsList well_known_imports;
+
+  size_t EstimateCurrentMemoryConsumption() const;
 };
 
 struct WasmTable;
 
 // Static representation of a module.
 struct V8_EXPORT_PRIVATE WasmModule {
-  std::unique_ptr<Zone> signature_zone;
-  uint32_t initial_pages = 0;      // initial size of the memory in 64k pages
-  uint32_t maximum_pages = 0;      // maximum size of the memory in 64k pages
-  bool has_shared_memory = false;  // true if memory is a SharedArrayBuffer
-  bool has_maximum_pages = false;  // true if there is a maximum memory size
-  bool is_memory64 = false;        // true if the memory is 64 bit
-  bool has_memory = false;         // true if the memory was defined or imported
-  bool mem_export = false;         // true if the memory is exported
+  // ================ Fields ===================================================
+  Zone signature_zone;
   int start_function_index = -1;   // start function, >= 0 if any
 
   // Size of the buffer required for all globals that are not imported and
   // mutable.
   uint32_t untagged_globals_buffer_size = 0;
   uint32_t tagged_globals_buffer_size = 0;
+  uint32_t num_imported_globals = 0;
   uint32_t num_imported_mutable_globals = 0;
   uint32_t num_imported_functions = 0;
   uint32_t num_imported_tables = 0;
+  uint32_t num_imported_tags = 0;
   uint32_t num_declared_functions = 0;  // excluding imported
   uint32_t num_exported_functions = 0;
   uint32_t num_declared_data_segments = 0;  // From the DataCount section.
@@ -507,54 +613,126 @@ struct V8_EXPORT_PRIVATE WasmModule {
   // Position and size of the name section (payload only, i.e. without section
   // ID and length).
   WireBytesRef name_section = {0, 0};
+  // Set to true if this module has wasm-gc types in its type section.
+  bool is_wasm_gc = false;
 
-  void add_type(TypeDefinition type) {
+  std::vector<TypeDefinition> types;  // by type index
+  // Maps each type index to its global (cross-module) canonical index as per
+  // isorecursive type canonicalization.
+  std::vector<uint32_t> isorecursive_canonical_type_ids;
+  // First index -> size. Used for fuzzing only.
+  std::unordered_map<uint32_t, uint32_t> explicit_recursive_type_groups;
+  std::vector<WasmFunction> functions;
+  std::vector<WasmGlobal> globals;
+  std::vector<WasmDataSegment> data_segments;
+  std::vector<WasmTable> tables;
+  std::vector<WasmMemory> memories;
+  std::vector<WasmImport> import_table;
+  std::vector<WasmExport> export_table;
+  std::vector<WasmTag> tags;
+  std::vector<WasmStringRefLiteral> stringref_literals;
+  std::vector<WasmElemSegment> elem_segments;
+  std::vector<WasmCompilationHint> compilation_hints;
+  BranchHintInfo branch_hints;
+  // Pairs of module offsets and mark id.
+  std::vector<std::pair<uint32_t, uint32_t>> inst_traces;
+
+  // This is the only member of {WasmModule} where we store dynamic information
+  // that's not a decoded representation of the wire bytes.
+  // TODO(jkummerow): Rename.
+  mutable TypeFeedbackStorage type_feedback;
+
+  const ModuleOrigin origin;
+  mutable LazilyGeneratedNames lazily_generated_names;
+  WasmDebugSymbols debug_symbols;
+
+  // Asm.js source position information. Only available for modules compiled
+  // from asm.js.
+  std::unique_ptr<AsmJsOffsetInformation> asm_js_offset_information;
+
+  // {validated_functions} is atomically updated when functions get validated
+  // (during compilation, streaming decoding, or via explicit validation).
+  static_assert(sizeof(std::atomic<uint8_t>) == 1);
+  static_assert(alignof(std::atomic<uint8_t>) == 1);
+  mutable std::unique_ptr<std::atomic<uint8_t>[]> validated_functions;
+
+  // ================ Constructors =============================================
+  explicit WasmModule(ModuleOrigin = kWasmOrigin);
+  WasmModule(const WasmModule&) = delete;
+  WasmModule& operator=(const WasmModule&) = delete;
+
+  // ================ Interface for tests ======================================
+  // Tests sometimes add times iteratively instead of all at once via module
+  // decoding.
+  void AddTypeForTesting(TypeDefinition type) {
     types.push_back(type);
+    if (type.supertype != kNoSuperType) {
+      // Set the subtyping depth. Outside of unit tests this is done by the
+      // module decoder.
+      DCHECK_GT(types.size(), 0);
+      DCHECK_LT(type.supertype, types.size() - 1);
+      types.back().subtyping_depth = types[type.supertype].subtyping_depth + 1;
+    }
     // Isorecursive canonical type will be computed later.
     isorecursive_canonical_type_ids.push_back(kNoSuperType);
   }
 
+  void AddSignatureForTesting(const FunctionSig* sig, uint32_t supertype,
+                              bool is_final) {
+    DCHECK_NOT_NULL(sig);
+    AddTypeForTesting(TypeDefinition(sig, supertype, is_final));
+  }
+
+  void AddStructTypeForTesting(const StructType* type, uint32_t supertype,
+                               bool is_final) {
+    DCHECK_NOT_NULL(type);
+    AddTypeForTesting(TypeDefinition(type, supertype, is_final));
+  }
+
+  void AddArrayTypeForTesting(const ArrayType* type, uint32_t supertype,
+                              bool is_final) {
+    DCHECK_NOT_NULL(type);
+    AddTypeForTesting(TypeDefinition(type, supertype, is_final));
+  }
+
+  // ================ Accessors ================================================
   bool has_type(uint32_t index) const { return index < types.size(); }
 
-  void add_signature(const FunctionSig* sig, uint32_t supertype) {
-    DCHECK_NOT_NULL(sig);
-    add_type(TypeDefinition(sig, supertype));
-  }
   bool has_signature(uint32_t index) const {
     return index < types.size() &&
            types[index].kind == TypeDefinition::kFunction;
   }
   const FunctionSig* signature(uint32_t index) const {
     DCHECK(has_signature(index));
+    size_t num_types = types.size();
+    V8_ASSUME(index < num_types);
     return types[index].function_sig;
   }
 
-  void add_struct_type(const StructType* type, uint32_t supertype) {
-    DCHECK_NOT_NULL(type);
-    add_type(TypeDefinition(type, supertype));
-  }
   bool has_struct(uint32_t index) const {
     return index < types.size() && types[index].kind == TypeDefinition::kStruct;
   }
+
   const StructType* struct_type(uint32_t index) const {
     DCHECK(has_struct(index));
+    size_t num_types = types.size();
+    V8_ASSUME(index < num_types);
     return types[index].struct_type;
   }
 
-  void add_array_type(const ArrayType* type, uint32_t supertype) {
-    DCHECK_NOT_NULL(type);
-    add_type(TypeDefinition(type, supertype));
-  }
   bool has_array(uint32_t index) const {
     return index < types.size() && types[index].kind == TypeDefinition::kArray;
   }
   const ArrayType* array_type(uint32_t index) const {
     DCHECK(has_array(index));
+    size_t num_types = types.size();
+    V8_ASSUME(index < num_types);
     return types[index].array_type;
   }
 
   uint32_t supertype(uint32_t index) const {
-    DCHECK(index < types.size());
+    size_t num_types = types.size();
+    V8_ASSUME(index < num_types);
     return types[index].supertype;
   }
   bool has_supertype(uint32_t index) const {
@@ -568,36 +746,50 @@ struct V8_EXPORT_PRIVATE WasmModule {
                              isorecursive_canonical_type_ids.end());
   }
 
-  std::vector<TypeDefinition> types;  // by type index
-  // Maps each type index to its global (cross-module) canonical index as per
-  // isorecursive type canonicalization.
-  std::vector<uint32_t> isorecursive_canonical_type_ids;
-  std::vector<WasmFunction> functions;
-  std::vector<WasmGlobal> globals;
-  std::vector<WasmDataSegment> data_segments;
-  std::vector<WasmTable> tables;
-  std::vector<WasmImport> import_table;
-  std::vector<WasmExport> export_table;
-  std::vector<WasmTag> tags;
-  std::vector<WasmStringRefLiteral> stringref_literals;
-  std::vector<WasmElemSegment> elem_segments;
-  std::vector<WasmCompilationHint> compilation_hints;
-  BranchHintInfo branch_hints;
-  // Pairs of module offsets and mark id.
-  std::vector<std::pair<uint32_t, uint32_t>> inst_traces;
-  mutable TypeFeedbackStorage type_feedback;
+  bool function_was_validated(int func_index) const {
+    DCHECK_NOT_NULL(validated_functions);
+    static_assert(sizeof(validated_functions[0]) == 1);
+    DCHECK_LE(num_imported_functions, func_index);
+    int pos = func_index - num_imported_functions;
+    DCHECK_LE(pos, num_declared_functions);
+    uint8_t byte =
+        validated_functions[pos >> 3].load(std::memory_order_relaxed);
+    DCHECK_IMPLIES(origin != kWasmOrigin, byte == 0xff);
+    return byte & (1 << (pos & 7));
+  }
 
-  ModuleOrigin origin = kWasmOrigin;  // origin of the module
-  mutable LazilyGeneratedNames lazily_generated_names;
-  WasmDebugSymbols debug_symbols;
+  void set_function_validated(int func_index) const {
+    DCHECK_EQ(kWasmOrigin, origin);
+    DCHECK_NOT_NULL(validated_functions);
+    DCHECK_LE(num_imported_functions, func_index);
+    int pos = func_index - num_imported_functions;
+    DCHECK_LE(pos, num_declared_functions);
+    std::atomic<uint8_t>* atomic_byte = &validated_functions[pos >> 3];
+    uint8_t old_byte = atomic_byte->load(std::memory_order_relaxed);
+    uint8_t new_bit = 1 << (pos & 7);
+    while ((old_byte & new_bit) == 0 &&
+           !atomic_byte->compare_exchange_weak(old_byte, old_byte | new_bit,
+                                               std::memory_order_relaxed)) {
+      // Retry with updated {old_byte}.
+    }
+  }
 
-  // Asm.js source position information. Only available for modules compiled
-  // from asm.js.
-  std::unique_ptr<AsmJsOffsetInformation> asm_js_offset_information;
+  void set_all_functions_validated() const {
+    DCHECK_EQ(kWasmOrigin, origin);
+    if (num_declared_functions == 0) return;
+    DCHECK_NOT_NULL(validated_functions);
+    size_t num_words = (num_declared_functions + 7) / 8;
+    for (size_t i = 0; i < num_words; ++i) {
+      validated_functions[i].store(0xff, std::memory_order_relaxed);
+    }
+  }
 
-  explicit WasmModule(std::unique_ptr<Zone> signature_zone = nullptr);
-  WasmModule(const WasmModule&) = delete;
-  WasmModule& operator=(const WasmModule&) = delete;
+  base::Vector<const WasmFunction> declared_functions() const {
+    return base::VectorOf(functions) + num_imported_functions;
+  }
+
+  size_t EstimateStoredSize() const;                // No tracing.
+  size_t EstimateCurrentMemoryConsumption() const;  // With tracing.
 };
 
 // Static representation of a wasm indirect call table.
@@ -616,8 +808,6 @@ struct WasmTable {
 inline bool is_asmjs_module(const WasmModule* module) {
   return module->origin != kWasmOrigin;
 }
-
-size_t EstimateStoredSize(const WasmModule* module);
 
 // Returns the wrapper index for a function with isorecursive canonical
 // signature index {canonical_sig_index}, and origin defined by {is_import}.
@@ -649,10 +839,12 @@ V8_EXPORT_PRIVATE int GetSubtypingDepth(const WasmModule* module,
 // It is illegal for anyone receiving a ModuleWireBytes to store pointers based
 // on module_bytes, as this storage is only guaranteed to be alive as long as
 // this struct is alive.
+// As {ModuleWireBytes} is just a wrapper around a {base::Vector<const
+// uint8_t>}, it should generally be passed by value.
 struct V8_EXPORT_PRIVATE ModuleWireBytes {
-  explicit ModuleWireBytes(base::Vector<const byte> module_bytes)
+  explicit ModuleWireBytes(base::Vector<const uint8_t> module_bytes)
       : module_bytes_(module_bytes) {}
-  ModuleWireBytes(const byte* start, const byte* end)
+  ModuleWireBytes(const uint8_t* start, const uint8_t* end)
       : module_bytes_(start, static_cast<int>(end - start)) {
     DCHECK_GE(kMaxInt, end - start);
   }
@@ -661,8 +853,7 @@ struct V8_EXPORT_PRIVATE ModuleWireBytes {
   WasmName GetNameOrNull(WireBytesRef ref) const;
 
   // Get a string stored in the module bytes representing a function name.
-  WasmName GetNameOrNull(const WasmFunction* function,
-                         const WasmModule* module) const;
+  WasmName GetNameOrNull(int func_index, const WasmModule* module) const;
 
   // Checks the given reference is contained within the module bytes.
   bool BoundsCheck(WireBytesRef ref) const {
@@ -670,27 +861,28 @@ struct V8_EXPORT_PRIVATE ModuleWireBytes {
     return ref.offset() <= size && ref.length() <= size - ref.offset();
   }
 
-  base::Vector<const byte> GetFunctionBytes(
+  base::Vector<const uint8_t> GetFunctionBytes(
       const WasmFunction* function) const {
     return module_bytes_.SubVector(function->code.offset(),
                                    function->code.end_offset());
   }
 
-  base::Vector<const byte> module_bytes() const { return module_bytes_; }
-  const byte* start() const { return module_bytes_.begin(); }
-  const byte* end() const { return module_bytes_.end(); }
+  base::Vector<const uint8_t> module_bytes() const { return module_bytes_; }
+  const uint8_t* start() const { return module_bytes_.begin(); }
+  const uint8_t* end() const { return module_bytes_.end(); }
   size_t length() const { return module_bytes_.length(); }
 
  private:
-  base::Vector<const byte> module_bytes_;
+  base::Vector<const uint8_t> module_bytes_;
 };
+ASSERT_TRIVIALLY_COPYABLE(ModuleWireBytes);
 
 // A helper for printing out the names of functions.
 struct WasmFunctionName {
-  WasmFunctionName(const WasmFunction* function, WasmName name)
-      : function_(function), name_(name) {}
+  WasmFunctionName(int func_index, WasmName name)
+      : func_index_(func_index), name_(name) {}
 
-  const WasmFunction* function_;
+  const int func_index_;
   const WasmName name_;
 };
 
@@ -698,7 +890,7 @@ V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
                                            const WasmFunctionName& name);
 
 V8_EXPORT_PRIVATE bool IsWasmCodegenAllowed(Isolate* isolate,
-                                            Handle<Context> context);
+                                            Handle<NativeContext> context);
 V8_EXPORT_PRIVATE Handle<String> ErrorStringForCodegen(Isolate* isolate,
                                                        Handle<Context> context);
 
@@ -708,7 +900,7 @@ Handle<JSObject> GetTypeForGlobal(Isolate* isolate, bool is_mutable,
                                   ValueType type);
 Handle<JSObject> GetTypeForMemory(Isolate* isolate, uint32_t min_size,
                                   base::Optional<uint32_t> max_size,
-                                  bool shared);
+                                  bool shared, bool is_memory64);
 Handle<JSObject> GetTypeForTable(Isolate* isolate, ValueType type,
                                  uint32_t min_size,
                                  base::Optional<uint32_t> max_size);
@@ -749,7 +941,7 @@ class TruncatedUserString {
   explicit TruncatedUserString(base::Vector<T> name)
       : TruncatedUserString(name.begin(), name.length()) {}
 
-  TruncatedUserString(const byte* start, size_t len)
+  TruncatedUserString(const uint8_t* start, size_t len)
       : TruncatedUserString(reinterpret_cast<const char*>(start), len) {}
 
   TruncatedUserString(const char* start, size_t len)

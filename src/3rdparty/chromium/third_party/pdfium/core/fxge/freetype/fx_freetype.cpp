@@ -1,10 +1,15 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "core/fxge/freetype/fx_freetype.h"
+
+#include <stdint.h>
+
+#include "core/fxge/cfx_fontmgr.h"
+#include "core/fxge/cfx_gemodule.h"
 
 #define DEFINE_PS_TABLES
 #include "third_party/freetype/include/pstables.h"
@@ -55,7 +60,35 @@ int xyq_search_node(char* glyph_name,
   return 0;
 }
 
+FT_MM_Var* GetVariationDescriptor(FXFT_FaceRec* face) {
+  FT_MM_Var* variation_desc = nullptr;
+  FT_Get_MM_Var(face, &variation_desc);
+  return variation_desc;
+}
+
 }  // namespace
+
+void FXFTMMVarDeleter::operator()(FT_MM_Var* variation_desc) {
+  FT_Done_MM_Var(CFX_GEModule::Get()->GetFontMgr()->GetFTLibrary(),
+                 variation_desc);
+}
+
+ScopedFXFTMMVar::ScopedFXFTMMVar(FXFT_FaceRec* face)
+    : variation_desc_(GetVariationDescriptor(face)) {}
+
+ScopedFXFTMMVar::~ScopedFXFTMMVar() = default;
+
+FT_Pos ScopedFXFTMMVar::GetAxisDefault(size_t index) const {
+  return variation_desc_->axis[index].def;
+}
+
+FT_Long ScopedFXFTMMVar::GetAxisMin(size_t index) const {
+  return variation_desc_->axis[index].minimum;
+}
+
+FT_Long ScopedFXFTMMVar::GetAxisMax(size_t index) const {
+  return variation_desc_->axis[index].maximum;
+}
 
 int FXFT_unicode_from_adobe_name(const char* glyph_name) {
   /* If the name begins with `uni', then the glyph name may be a */

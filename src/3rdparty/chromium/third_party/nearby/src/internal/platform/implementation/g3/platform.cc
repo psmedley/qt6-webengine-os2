@@ -21,7 +21,9 @@
 
 #include "file/base/path.h"
 #include "absl/memory/memory.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "internal/platform/implementation/atomic_boolean.h"
 #include "internal/platform/implementation/atomic_reference.h"
@@ -30,6 +32,7 @@
 #include "internal/platform/implementation/condition_variable.h"
 #include "internal/platform/implementation/log_message.h"
 #include "internal/platform/implementation/mutex.h"
+#include "internal/platform/implementation/preferences_manager.h"
 #include "internal/platform/implementation/scheduled_executor.h"
 #include "internal/platform/implementation/server_sync.h"
 #include "internal/platform/implementation/shared/count_down_latch.h"
@@ -46,23 +49,32 @@
 #include "internal/platform/implementation/g3/bluetooth_classic.h"
 #include "internal/platform/implementation/g3/condition_variable.h"
 #include "internal/platform/implementation/g3/credential_storage_impl.h"
+#include "internal/platform/implementation/g3/device_info.h"
 #include "internal/platform/implementation/g3/log_message.h"
 #include "internal/platform/implementation/g3/multi_thread_executor.h"
 #include "internal/platform/implementation/g3/mutex.h"
+#include "internal/platform/implementation/g3/preferences_manager.h"
 #include "internal/platform/implementation/g3/scheduled_executor.h"
 #include "internal/platform/implementation/g3/single_thread_executor.h"
+#include "internal/platform/implementation/g3/timer.h"
+#include "internal/platform/implementation/g3/wifi.h"
+#include "internal/platform/implementation/g3/wifi_direct.h"
 #include "internal/platform/implementation/g3/wifi_hotspot.h"
 #include "internal/platform/implementation/g3/wifi_lan.h"
 #include "internal/platform/implementation/shared/file.h"
 #include "internal/platform/implementation/wifi.h"
 #include "internal/platform/medium_environment.h"
 
-namespace location {
 namespace nearby {
 namespace api {
 
+std::string ImplementationPlatform::GetCustomSavePath(
+    const std::string& parent_folder, const std::string& file_name) {
+  return file::JoinPath(parent_folder, file_name);
+}
+
 std::string ImplementationPlatform::GetDownloadPath(
-    absl::string_view parent_folder, absl::string_view file_name) {
+    const std::string& parent_folder, const std::string& file_name) {
   std::string fullPath("/tmp");
 
   return file::JoinPath("/tmp", file_name);
@@ -120,7 +132,7 @@ std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
 }
 
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
-    absl::string_view file_path, size_t size) {
+    const std::string& file_path, size_t size) {
   return shared::IOFile::CreateInputFile(file_path, size);
 }
 
@@ -135,7 +147,7 @@ std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
 }
 
 std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
-    absl::string_view file_path) {
+    const std::string& file_path) {
   return shared::IOFile::CreateOutputFile(file_path);
 }
 
@@ -171,7 +183,7 @@ ImplementationPlatform::CreateServerSyncMedium() {
 }
 
 std::unique_ptr<WifiMedium> ImplementationPlatform::CreateWifiMedium() {
-  return std::unique_ptr<WifiMedium>();
+  return std::make_unique<g3::WifiMedium>();
 }
 
 std::unique_ptr<WifiLanMedium> ImplementationPlatform::CreateWifiLanMedium() {
@@ -183,6 +195,11 @@ ImplementationPlatform::CreateWifiHotspotMedium() {
   return std::make_unique<g3::WifiHotspotMedium>();
 }
 
+std::unique_ptr<WifiDirectMedium>
+ImplementationPlatform::CreateWifiDirectMedium() {
+  return std::make_unique<g3::WifiDirectMedium>();
+}
+
 #ifndef NO_WEBRTC
 std::unique_ptr<WebRtcMedium> ImplementationPlatform::CreateWebRtcMedium() {
   if (MediumEnvironment::Instance().GetEnvironmentConfig().webrtc_enabled) {
@@ -192,6 +209,11 @@ std::unique_ptr<WebRtcMedium> ImplementationPlatform::CreateWebRtcMedium() {
   }
 }
 #endif
+
+absl::StatusOr<WebResponse> ImplementationPlatform::SendRequest(
+    const api::WebRequest& request) {
+  return absl::UnimplementedError("");
+}
 
 std::unique_ptr<Mutex> ImplementationPlatform::CreateMutex(Mutex::Mode mode) {
   if (mode == Mutex::Mode::kRecursive)
@@ -206,6 +228,19 @@ ImplementationPlatform::CreateConditionVariable(Mutex* mutex) {
       new g3::ConditionVariable(static_cast<g3::Mutex*>(mutex)));
 }
 
+std::unique_ptr<Timer> ImplementationPlatform::CreateTimer() {
+  return std::make_unique<g3::Timer>();
+}
+
+std::unique_ptr<nearby::api::DeviceInfo>
+ImplementationPlatform::CreateDeviceInfo() {
+  return std::make_unique<g3::DeviceInfo>();
+}
+
+std::unique_ptr<nearby::api::PreferencesManager>
+ImplementationPlatform::CreatePreferencesManager(absl::string_view path) {
+  return std::make_unique<g3::PreferencesManager>(path);
+}
+
 }  // namespace api
 }  // namespace nearby
-}  // namespace location

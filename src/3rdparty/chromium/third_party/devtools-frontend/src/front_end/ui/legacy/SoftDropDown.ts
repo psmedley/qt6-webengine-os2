@@ -4,24 +4,23 @@
 
 import type * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
-import * as ThemeSupport from './theme_support/theme_support.js';
-import * as Utils from './utils/utils.js';
+import * as IconButton from '../components/icon_button/icon_button.js';
+import * as VisualLogging from '../visual_logging/visual_logging.js';
 
 import * as ARIAUtils from './ARIAUtils.js';
 import {Size} from './Geometry.js';
 import {AnchorBehavior, GlassPane, MarginBehavior, PointerEventsBehavior} from './GlassPane.js';
-import {Icon} from './Icon.js';
-
-import {ListControl, ListMode, type ListDelegate} from './ListControl.js';
-
+import {ListControl, type ListDelegate, ListMode} from './ListControl.js';
 import {Events as ListModelEvents, type ItemsReplacedEvent, type ListModel} from './ListModel.js';
 import softDropDownStyles from './softDropDown.css.legacy.js';
 import softDropDownButtonStyles from './softDropDownButton.css.legacy.js';
+import * as ThemeSupport from './theme_support/theme_support.js';
+import * as Utils from './utils/utils.js';
 
 const UIStrings = {
   /**
-  *@description Placeholder text in Soft Drop Down
-  */
+   *@description Placeholder text in Soft Drop Down
+   */
   noItemSelected: '(no item selected)',
 };
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/SoftDropDown.ts', UIStrings);
@@ -40,7 +39,7 @@ export class SoftDropDown<T> implements ListDelegate<T> {
   private width: number;
   private listWasShowing200msAgo: boolean;
 
-  constructor(model: ListModel<T>, delegate: Delegate<T>) {
+  constructor(model: ListModel<T>, delegate: Delegate<T>, jslogContext?: string) {
     this.delegate = delegate;
     this.selectedItem = null;
     this.model = model;
@@ -48,10 +47,16 @@ export class SoftDropDown<T> implements ListDelegate<T> {
     this.placeholderText = i18nString(UIStrings.noItemSelected);
 
     this.element = document.createElement('button');
+    if (jslogContext) {
+      this.element.setAttribute(
+          'jslog',
+          `${VisualLogging.dropDown().track({click: true, keydown: 'ArrowUp|ArrowDown|Enter'}).context(jslogContext)}`,
+      );
+    }
     this.element.classList.add('soft-dropdown');
     ThemeSupport.ThemeSupport.instance().appendStyle(this.element, softDropDownButtonStyles);
     this.titleElement = this.element.createChild('span', 'title');
-    const dropdownArrowIcon = Icon.create('smallicon-triangle-down');
+    const dropdownArrowIcon = IconButton.Icon.create('triangle-down');
     this.element.appendChild(dropdownArrowIcon);
     ARIAUtils.setExpanded(this.element, false);
 
@@ -244,6 +249,10 @@ export class SoftDropDown<T> implements ListDelegate<T> {
       this.selectHighlightedItem();
     }
     this.updateGlasspaneSize();
+  }
+
+  getSelectedItem(): T|null {
+    return this.selectedItem;
   }
 
   selectItem(item: T|null): void {

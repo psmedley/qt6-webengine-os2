@@ -26,7 +26,7 @@
 #include "src/gpu/ganesh/ops/TessellationPathRenderer.h"
 #include "src/gpu/ganesh/ops/TriangulatingPathRenderer.h"
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 PathRendererChain::PathRendererChain(GrRecordingContext* context, const Options& options) {
     const GrCaps& caps = *context->priv().caps();
@@ -49,12 +49,14 @@ PathRendererChain::PathRendererChain(GrRecordingContext* context, const Options&
             fChain.push_back(std::move(atlasPathRenderer));
         }
     }
+#if !defined(SK_ENABLE_OPTIMIZE_SIZE)
     if (options.fGpuPathRenderers & GpuPathRenderers::kSmall) {
         fChain.push_back(sk_make_sp<SmallPathRenderer>());
     }
     if (options.fGpuPathRenderers & GpuPathRenderers::kTriangulating) {
         fChain.push_back(sk_make_sp<TriangulatingPathRenderer>());
     }
+#endif
     if (options.fGpuPathRenderers & GpuPathRenderers::kTessellation) {
         if (TessellationPathRenderer::IsSupported(caps)) {
             auto tess = sk_make_sp<TessellationPathRenderer>();
@@ -116,4 +118,4 @@ PathRenderer* PathRendererChain::getPathRenderer(const PathRenderer::CanDrawPath
     return bestPathRenderer;
 }
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh

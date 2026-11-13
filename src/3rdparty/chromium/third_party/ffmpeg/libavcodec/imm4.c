@@ -51,9 +51,8 @@ typedef struct IMM4Context {
     unsigned lo;
     unsigned hi;
 
-    ScanTable intra_scantable;
-    DECLARE_ALIGNED(32, int16_t, block)[6][64];
     IDCTDSPContext idsp;
+    DECLARE_ALIGNED(32, int16_t, block)[6][64];
 } IMM4Context;
 
 static const uint8_t intra_cb[] = {
@@ -109,16 +108,16 @@ static const uint8_t block_bits[] = {
      6,  5,  5,  5,  4,  2,  3,  4,  4,
 };
 
-static VLC cbplo_tab;
-static VLC cbphi_tab;
-static VLC blktype_tab;
-static VLC block_tab;
+static VLCElem cbplo_tab[1 << CBPLO_VLC_BITS];
+static VLCElem cbphi_tab[1 << CBPHI_VLC_BITS];
+static VLCElem blktype_tab[1 << BLKTYPE_VLC_BITS];
+static VLCElem block_tab[1 << BLOCK_VLC_BITS];
 
 static int get_cbphi(GetBitContext *gb, int x)
 {
     int value;
 
-    value = get_vlc2(gb, cbphi_tab.table, CBPHI_VLC_BITS, 1);
+    value = get_vlc2(gb, cbphi_tab, CBPHI_VLC_BITS, 1);
     if (value < 0)
         return AVERROR_INVALIDDATA;
 
@@ -129,13 +128,13 @@ static int decode_block(AVCodecContext *avctx, GetBitContext *gb,
                         int block, int factor, int flag, int offset, int flag2)
 {
     IMM4Context *s = avctx->priv_data;
-    const uint8_t *scantable = s->intra_scantable.permutated;
+    const uint8_t *idct_permutation = s->idsp.idct_permutation;
     int i, last, len, factor2;
 
     for (i = !flag; i < 64; i++) {
         int value;
 
-        value = get_vlc2(gb, block_tab.table, BLOCK_VLC_BITS, 1);
+        value = get_vlc2(gb, block_tab, BLOCK_VLC_BITS, 1);
         if (value < 0)
             return AVERROR_INVALIDDATA;
         if (value == 0) {
@@ -152,17 +151,17 @@ static int decode_block(AVCodecContext *avctx, GetBitContext *gb,
         i += len;
         if (i >= 64)
             break;
-        s->block[block][scantable[i]] = offset * (factor2 < 0 ? -1 : 1) + factor * factor2;
+        s->block[block][idct_permutation[i]] = offset * (factor2 < 0 ? -1 : 1) + factor * factor2;
         if (last)
             break;
     }
 
     if (s->hi == 2 && flag2 && block < 4) {
         if (flag)
-            s->block[block][scantable[0]]  *= 2;
-        s->block[block][scantable[1]]  *= 2;
-        s->block[block][scantable[8]]  *= 2;
-        s->block[block][scantable[16]] *= 2;
+            s->block[block][idct_permutation[0]]  *= 2;
+        s->block[block][idct_permutation[1]]  *= 2;
+        s->block[block][idct_permutation[8]]  *= 2;
+        s->block[block][idct_permutation[16]] *= 2;
     }
 
     return 0;
@@ -172,7 +171,7 @@ static int decode_blocks(AVCodecContext *avctx, GetBitContext *gb,
                          unsigned cbp, int flag, int offset, unsigned flag2)
 {
     IMM4Context *s = avctx->priv_data;
-    const uint8_t *scantable = s->intra_scantable.permutated;
+    const uint8_t *idct_permutation = s->idsp.idct_permutation;
     int ret, i;
 
     memset(s->block, 0, sizeof(s->block));
@@ -185,7 +184,7 @@ static int decode_blocks(AVCodecContext *avctx, GetBitContext *gb,
                 x = 128;
             x *= 8;
 
-            s->block[i][scantable[0]] = x;
+            s->block[i][idct_permutation[0]] = x;
         }
 
         if (cbp & (1 << (5 - i))) {
@@ -222,7 +221,7 @@ static int decode_intra(AVCodecContext *avctx, GetBitContext *gb, AVFrame *frame
         for (x = 0; x < avctx->width; x += 16) {
             unsigned flag, cbphi, cbplo;
 
-            cbplo = get_vlc2(gb, cbplo_tab.table, CBPLO_VLC_BITS, 1);
+            cbplo = get_vlc2(gb, cbplo_tab, CBPLO_VLC_BITS, 1);
             flag = get_bits1(gb);
 
             cbphi = get_cbphi(gb, 1);
@@ -288,7 +287,7 @@ static int decode_inter(AVCodecContext *avctx, GetBitContext *gb,
                 continue;
             }
 
-            value = get_vlc2(gb, blktype_tab.table, BLKTYPE_VLC_BITS, 1);
+            value = get_vlc2(gb, blktype_tab, BLKTYPE_VLC_BITS, 1);
             if (value < 0)
                 return AVERROR_INVALIDDATA;
 
@@ -421,11 +420,11 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
 
     switch (type) {
     case 0x19781977:
-        frame->key_frame = 1;
+        frame->flags |= AV_FRAME_FLAG_KEY;
         frame->pict_type = AV_PICTURE_TYPE_I;
         break;
     case 0x12250926:
-        frame->key_frame = 0;
+        frame->flags &= ~AV_FRAME_FLAG_KEY;
         frame->pict_type = AV_PICTURE_TYPE_P;
         break;
     default:
@@ -435,7 +434,7 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
 
     if (avctx->width  != width ||
         avctx->height != height) {
-        if (!frame->key_frame) {
+        if (!(frame->flags & AV_FRAME_FLAG_KEY)) {
             av_log(avctx, AV_LOG_ERROR, "Frame size change is unsupported.\n");
             return AVERROR_INVALIDDATA;
         }
@@ -446,16 +445,15 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
     if (ret < 0)
         return ret;
 
-    if ((ret = ff_get_buffer(avctx, frame, frame->key_frame ? AV_GET_BUFFER_FLAG_REF : 0)) < 0)
+    if ((ret = ff_get_buffer(avctx, frame, (frame->flags & AV_FRAME_FLAG_KEY) ? AV_GET_BUFFER_FLAG_REF : 0)) < 0)
         return ret;
 
-    if (frame->key_frame) {
+    if (frame->flags & AV_FRAME_FLAG_KEY) {
         ret = decode_intra(avctx, gb, frame);
         if (ret < 0)
             return ret;
 
-        av_frame_unref(s->prev_frame);
-        if ((ret = av_frame_ref(s->prev_frame, frame)) < 0)
+        if ((ret = av_frame_replace(s->prev_frame, frame)) < 0)
             return ret;
     } else {
         if (!s->prev_frame->data[0]) {
@@ -475,34 +473,29 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
 
 static av_cold void imm4_init_static_data(void)
 {
-    INIT_VLC_STATIC_FROM_LENGTHS(&cbplo_tab, CBPLO_VLC_BITS, FF_ARRAY_ELEMS(cbplo),
-                                 &cbplo[0][1], 2, &cbplo[0][0], 2, 1,
-                                 0, 0, 1 << CBPLO_VLC_BITS);
+    VLC_INIT_STATIC_TABLE_FROM_LENGTHS(cbplo_tab, CBPLO_VLC_BITS, FF_ARRAY_ELEMS(cbplo),
+                                       &cbplo[0][1], 2, &cbplo[0][0], 2, 1,
+                                       0, 0);
 
-    INIT_VLC_SPARSE_STATIC(&cbphi_tab, CBPHI_VLC_BITS, FF_ARRAY_ELEMS(cbphi_bits),
-                           cbphi_bits, 1, 1, cbphi_codes, 1, 1, NULL, 0, 0, 64);
+    VLC_INIT_STATIC_TABLE(cbphi_tab, CBPHI_VLC_BITS, FF_ARRAY_ELEMS(cbphi_bits),
+                          cbphi_bits, 1, 1, cbphi_codes, 1, 1, 0);
 
-    INIT_VLC_STATIC_FROM_LENGTHS(&blktype_tab, BLKTYPE_VLC_BITS, FF_ARRAY_ELEMS(blktype),
-                                 &blktype[0][1], 2, &blktype[0][0], 2, 1,
-                                 0, 0, 1 << BLKTYPE_VLC_BITS);
+    VLC_INIT_STATIC_TABLE_FROM_LENGTHS(blktype_tab, BLKTYPE_VLC_BITS, FF_ARRAY_ELEMS(blktype),
+                                       &blktype[0][1], 2, &blktype[0][0], 2, 1,
+                                       0, 0);
 
-    INIT_VLC_STATIC_FROM_LENGTHS(&block_tab, BLOCK_VLC_BITS, FF_ARRAY_ELEMS(block_bits),
-                                 block_bits, 1, block_symbols, 2, 2,
-                                 0, 0, 1 << BLOCK_VLC_BITS);
+    VLC_INIT_STATIC_TABLE_FROM_LENGTHS(block_tab, BLOCK_VLC_BITS, FF_ARRAY_ELEMS(block_bits),
+                                       block_bits, 1, block_symbols, 2, 2,
+                                       0, 0);
 }
 
 static av_cold int decode_init(AVCodecContext *avctx)
 {
     static AVOnce init_static_once = AV_ONCE_INIT;
     IMM4Context *s = avctx->priv_data;
-    uint8_t table[64];
-
-    for (int i = 0; i < 64; i++)
-        table[i] = i;
 
     ff_bswapdsp_init(&s->bdsp);
     ff_idctdsp_init(&s->idsp, avctx);
-    ff_init_scantable(s->idsp.idct_permutation, &s->intra_scantable, table);
 
     s->prev_frame = av_frame_alloc();
     if (!s->prev_frame)

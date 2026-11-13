@@ -4,24 +4,34 @@
 
 import * as i18n from '../../../core/i18n/i18n.js';
 import type * as SDK from '../../../core/sdk/sdk.js';
+import type * as Protocol from '../../../generated/protocol.js';
 import * as ExpandableList from '../../../ui/components/expandable_list/expandable_list.js';
 import * as ComponentHelpers from '../../../ui/components/helpers/helpers.js';
 import * as Components from '../../../ui/legacy/components/utils/utils.js';
 import * as LitHtml from '../../../ui/lit-html/lit-html.js';
-import type * as Protocol from '../../../generated/protocol.js';
+import * as VisualLogging from '../../../ui/visual_logging/visual_logging.js';
 
-import stackTraceRowStyles from './stackTraceRow.css.js';
 import stackTraceLinkButtonStyles from './stackTraceLinkButton.css.js';
+import stackTraceRowStyles from './stackTraceRow.css.js';
 
 const UIStrings = {
   /**
-  *@description Error message stating that something went wrong when tring to render stack trace
-  */
+   *@description Error message stating that something went wrong when tring to render stack trace
+   */
   cannotRenderStackTrace: 'Cannot render stack trace',
   /**
-  *@description A link to show more frames in the stack trace if more are available. Never 0.
-  */
+   *@description A link to show more frames in the stack trace if more are available. Never 0.
+   */
   showSMoreFrames: '{n, plural, =1 {Show # more frame} other {Show # more frames}}',
+  /**
+   *@description A link to rehide frames that are by default hidden.
+   */
+  showLess: 'Show less',
+  /**
+   *@description Label for a stack trace. If a frame is created programmatically (i.e. via JavaScript), there is a
+   * stack trace for the line of code which caused the creation of the iframe. This is the stack trace we are showing here.
+   */
+  creationStackTrace: 'Frame Creation `Stack Trace`',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/components/StackTrace.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -82,6 +92,7 @@ export class StackTraceRow extends HTMLElement {
 interface StackTraceLinkButtonData {
   onShowAllClick: () => void;
   hiddenCallFramesCount: number;
+  expandedView: boolean;
 }
 
 export class StackTraceLinkButton extends HTMLElement {
@@ -90,10 +101,12 @@ export class StackTraceLinkButton extends HTMLElement {
 
   #onShowAllClick: () => void = () => {};
   #hiddenCallFramesCount: number|null = null;
+  #expandedView: boolean = false;
 
   set data(data: StackTraceLinkButtonData) {
     this.#onShowAllClick = data.onShowAllClick;
     this.#hiddenCallFramesCount = data.hiddenCallFramesCount;
+    this.#expandedView = data.expandedView;
     this.#render();
   }
 
@@ -105,14 +118,13 @@ export class StackTraceLinkButton extends HTMLElement {
     if (!this.#hiddenCallFramesCount) {
       return;
     }
-
+    const linkText = this.#expandedView ? i18nString(UIStrings.showLess) :
+                                          i18nString(UIStrings.showSMoreFrames, {n: this.#hiddenCallFramesCount});
     LitHtml.render(
         LitHtml.html`
       <div class="stack-trace-row">
           <button class="link" @click=${(): void => this.#onShowAllClick()}>
-            ${i18nString(UIStrings.showSMoreFrames, {
-          n: this.#hiddenCallFramesCount,
-        })}
+            ${linkText}
           </button>
         </div>
     `,
@@ -146,8 +158,8 @@ export class StackTrace extends HTMLElement {
     this.#render();
   }
 
-  #onShowAllClick(): void {
-    this.#showHidden = true;
+  #onToggleShowAllClick(): void {
+    this.#showHidden = !this.#showHidden;
     this.#render();
   }
 
@@ -168,7 +180,7 @@ export class StackTrace extends HTMLElement {
           `);
         }
       }
-      if (!this.#showHidden && 'functionName' in item && item.ignoreListHide) {
+      if ('functionName' in item && item.ignoreListHide) {
         hiddenCallFramesCount++;
       }
     }
@@ -176,7 +188,7 @@ export class StackTrace extends HTMLElement {
       // Disabled until https://crbug.com/1079231 is fixed.
       // clang-format off
       expandableRows.push(LitHtml.html`
-      <${StackTraceLinkButton.litTagName} data-stack-trace-row .data=${{onShowAllClick: this.#onShowAllClick.bind(this), hiddenCallFramesCount: hiddenCallFramesCount} as StackTraceLinkButtonData}></${StackTraceLinkButton.litTagName}>
+      <${StackTraceLinkButton.litTagName} data-stack-trace-row .data=${{onShowAllClick: this.#onToggleShowAllClick.bind(this), hiddenCallFramesCount, expandedView: this.#showHidden} as StackTraceLinkButtonData}></${StackTraceLinkButton.litTagName}>
       `);
       // clang-format on
     }
@@ -195,12 +207,14 @@ export class StackTrace extends HTMLElement {
         this.#shadow, {host: this});
       return;
     }
+
     const expandableRows = this.createRowTemplates();
     LitHtml.render(
       LitHtml.html`
         <${ExpandableList.ExpandableList.ExpandableList.litTagName} .data=${{
-          rows: expandableRows,
+          rows: expandableRows, title: i18nString(UIStrings.creationStackTrace),
         } as ExpandableList.ExpandableList.ExpandableListData}>
+        jslog=${VisualLogging.tree()}>
         </${ExpandableList.ExpandableList.ExpandableList.litTagName}>
       `,
       this.#shadow, {host: this});

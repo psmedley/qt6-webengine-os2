@@ -19,9 +19,9 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
-#include "components/autofill/core/browser/autofill_client.h"
+#include "base/containers/span.h"
+#include "components/autofill/content/browser/content_autofill_client.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_user_data.h"
 
 #include <QScopedPointer>
 
@@ -30,12 +30,13 @@ namespace QtWebEngineCore {
 class AutofillPopupController;
 class WebContentsAdapterClient;
 
-class AutofillClientQt : public autofill::AutofillClient,
-                         public content::WebContentsUserData<AutofillClientQt>,
+class AutofillClientQt : public autofill::ContentAutofillClient,
                          public content::WebContentsObserver
 {
 public:
     ~AutofillClientQt() override;
+
+    static void CreateForWebContents(content::WebContents *contents);
 
     // autofill::AutofillClient overrides:
     autofill::PersonalDataManager *GetPersonalDataManager() override;
@@ -45,18 +46,20 @@ public:
 
     void ShowAutofillPopup(const autofill::AutofillClient::PopupOpenArgs &open_args,
                            base::WeakPtr<autofill::AutofillPopupDelegate> delegate) override;
-    void UpdateAutofillPopupDataListValues(const std::vector<std::u16string> &values,
-                                           const std::vector<std::u16string> &labels) override;
+    void UpdateAutofillPopupDataListValues(
+            base::span<const autofill::SelectOption> datalist) override;
     void PinPopupView() override;
-    autofill::AutofillClient::PopupOpenArgs GetReopenPopupArgs() const override;
-    base::span<const autofill::Suggestion> GetPopupSuggestions() const override;
-    void UpdatePopup(const std::vector<autofill::Suggestion> &, autofill::PopupType) override;
+    PopupOpenArgs GetReopenPopupArgs(
+            autofill::AutofillSuggestionTriggerSource trigger_source) const override;
+    std::vector<autofill::Suggestion> GetPopupSuggestions() const override;
+    void UpdatePopup(const std::vector<autofill::Suggestion> &suggestions,
+                     autofill::FillingProduct main_filling_product,
+                     autofill::AutofillSuggestionTriggerSource trigger_source) override{};
     void HideAutofillPopup(autofill::PopupHidingReason reason) override;
-    bool IsAutocompleteEnabled() override;
+    bool IsAutocompleteEnabled() const override;
     bool IsPasswordManagerEnabled() override;
-    void PropagateAutofillPredictions(autofill::AutofillDriver *,
-                                      const std::vector<autofill::FormStructure *> &) override;
-
+    bool IsOffTheRecord() override;
+    scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
 
 private:
     explicit AutofillClientQt(content::WebContents *webContents);
@@ -64,9 +67,6 @@ private:
     WebContentsAdapterClient *adapterClient();
 
     QScopedPointer<AutofillPopupController> m_popupController;
-
-    WEB_CONTENTS_USER_DATA_KEY_DECL();
-    friend class content::WebContentsUserData<AutofillClientQt>;
 };
 
 } // namespace QtWebEngineCore

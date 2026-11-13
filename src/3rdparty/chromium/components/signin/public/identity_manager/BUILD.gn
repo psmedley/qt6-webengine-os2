@@ -20,6 +20,8 @@ source_set("identity_manager") {
     "account_capabilities.h",
     "account_info.cc",
     "account_info.h",
+    "account_managed_status_finder.cc",
+    "account_managed_status_finder.h",
     "accounts_cookie_mutator.h",
     "accounts_in_cookie_jar_info.cc",
     "accounts_in_cookie_jar_info.h",
@@ -44,8 +46,6 @@ source_set("identity_manager") {
     "set_accounts_in_cookie_result.h",
     "tribool.cc",
     "tribool.h",
-    "ubertoken_fetcher.cc",
-    "ubertoken_fetcher.h",
   ]
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
@@ -62,6 +62,7 @@ source_set("identity_manager") {
   deps = [
     "//build:chromeos_buildflags",
     "//components/image_fetcher/core",
+    "//components/plus_addresses:features",
     "//components/prefs",
     "//components/signin/internal/identity_manager",
     "//components/signin/public/webdata",
@@ -100,6 +101,7 @@ source_set("unit_tests") {
     "access_token_fetcher_unittest.cc",
     "account_capabilities_unittest.cc",
     "account_info_unittest.cc",
+    "account_managed_status_finder_unittest.cc",
     "accounts_cookie_mutator_unittest.cc",
     "accounts_mutator_unittest.cc",
     "diagnostics_provider_unittest.cc",

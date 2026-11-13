@@ -175,11 +175,15 @@ drmGetFormatModifierNameFromAmd(uint64_t modifier);
 static char *
 drmGetFormatModifierNameFromAmlogic(uint64_t modifier);
 
+static char *
+drmGetFormatModifierNameFromVivante(uint64_t modifier);
+
 static const struct drmVendorInfo modifier_format_vendor_table[] = {
     { DRM_FORMAT_MOD_VENDOR_ARM, drmGetFormatModifierNameFromArm },
     { DRM_FORMAT_MOD_VENDOR_NVIDIA, drmGetFormatModifierNameFromNvidia },
     { DRM_FORMAT_MOD_VENDOR_AMD, drmGetFormatModifierNameFromAmd },
     { DRM_FORMAT_MOD_VENDOR_AMLOGIC, drmGetFormatModifierNameFromAmlogic },
+    { DRM_FORMAT_MOD_VENDOR_VIVANTE, drmGetFormatModifierNameFromVivante },
 };
 
 #ifndef AFBC_FORMAT_MOD_MODE_VALUE_MASK
@@ -261,6 +265,7 @@ drmGetAfbcFormatModifierNameFromArm(uint64_t modifier, FILE *fp)
 static bool
 drmGetAfrcFormatModifierNameFromArm(uint64_t modifier, FILE *fp)
 {
+    bool scan_layout;
     for (unsigned int i = 0; i < 2; ++i) {
         uint64_t coding_unit_block =
           (modifier >> (i * 4)) & AFRC_FORMAT_MOD_CU_SIZE_MASK;
@@ -292,7 +297,7 @@ drmGetAfrcFormatModifierNameFromArm(uint64_t modifier, FILE *fp)
         }
     }
 
-    bool scan_layout =
+    scan_layout =
         (modifier & AFRC_FORMAT_MOD_LAYOUT_SCAN) == AFRC_FORMAT_MOD_LAYOUT_SCAN;
     if (scan_layout) {
         fprintf(fp, "SCAN");
@@ -473,6 +478,9 @@ drmGetFormatModifierNameFromAmd(uint64_t modifier)
     case AMD_FMT_MOD_TILE_VER_GFX10_RBPLUS:
         str_tile_version = "GFX10_RBPLUS";
         break;
+    case AMD_FMT_MOD_TILE_VER_GFX11:
+        str_tile_version = "GFX11";
+        break;
     }
 
     if (str_tile_version) {
@@ -499,6 +507,9 @@ drmGetFormatModifierNameFromAmd(uint64_t modifier)
         break;
     case AMD_FMT_MOD_TILE_GFX9_64K_R_X:
         str_tile = "GFX9_64K_R_X";
+        break;
+    case AMD_FMT_MOD_TILE_GFX11_256K_R_X:
+        str_tile = "GFX11_256K_R_X";
         break;
     }
 
@@ -544,6 +555,70 @@ drmGetFormatModifierNameFromAmlogic(uint64_t modifier)
 
     asprintf(&mod_amlogic, "FBC,LAYOUT=%s,OPTIONS=%s", layout_str, opts_str);
     return mod_amlogic;
+}
+
+static char *
+drmGetFormatModifierNameFromVivante(uint64_t modifier)
+{
+    const char *color_tiling, *tile_status, *compression;
+    char *mod_vivante = NULL;
+
+    switch (modifier & VIVANTE_MOD_TS_MASK) {
+    case 0:
+        tile_status = "";
+        break;
+    case VIVANTE_MOD_TS_64_4:
+        tile_status = ",TS=64B_4";
+        break;
+    case VIVANTE_MOD_TS_64_2:
+        tile_status = ",TS=64B_2";
+        break;
+    case VIVANTE_MOD_TS_128_4:
+        tile_status = ",TS=128B_4";
+        break;
+    case VIVANTE_MOD_TS_256_4:
+        tile_status = ",TS=256B_4";
+        break;
+    default:
+        tile_status = ",TS=UNKNOWN";
+        break;
+    }
+
+    switch (modifier & VIVANTE_MOD_COMP_MASK) {
+    case 0:
+        compression = "";
+        break;
+    case VIVANTE_MOD_COMP_DEC400:
+        compression = ",COMP=DEC400";
+        break;
+    default:
+        compression = ",COMP=UNKNOWN";
+	break;
+    }
+
+    switch (modifier & ~VIVANTE_MOD_EXT_MASK) {
+    case 0:
+        color_tiling = "LINEAR";
+	break;
+    case DRM_FORMAT_MOD_VIVANTE_TILED:
+        color_tiling = "TILED";
+	break;
+    case DRM_FORMAT_MOD_VIVANTE_SUPER_TILED:
+        color_tiling = "SUPER_TILED";
+	break;
+    case DRM_FORMAT_MOD_VIVANTE_SPLIT_TILED:
+        color_tiling = "SPLIT_TILED";
+	break;
+    case DRM_FORMAT_MOD_VIVANTE_SPLIT_SUPER_TILED:
+        color_tiling = "SPLIT_SUPER_TILED";
+	break;
+    default:
+        color_tiling = "UNKNOWN";
+	break;
+    }
+
+    asprintf(&mod_vivante, "%s%s%s", color_tiling, tile_status, compression);
+    return mod_vivante;
 }
 
 static unsigned log2_int(unsigned x)
@@ -848,7 +923,7 @@ wait_for_udev:
     }
 #endif
 
-    fd = open(buf, O_RDWR | O_CLOEXEC, 0);
+    fd = open(buf, O_RDWR | O_CLOEXEC);
     drmMsg("drmOpenDevice: open result is %d, (%s)\n",
            fd, fd < 0 ? strerror(errno) : "OK");
     if (fd >= 0)
@@ -868,7 +943,7 @@ wait_for_udev:
             chmod(buf, devmode);
         }
     }
-    fd = open(buf, O_RDWR | O_CLOEXEC, 0);
+    fd = open(buf, O_RDWR | O_CLOEXEC);
     drmMsg("drmOpenDevice: open result is %d, (%s)\n",
            fd, fd < 0 ? strerror(errno) : "OK");
     if (fd >= 0)
@@ -906,7 +981,7 @@ static int drmOpenMinor(int minor, int create, int type)
         return -EINVAL;
 
     sprintf(buf, dev_name, DRM_DIR_NAME, minor);
-    if ((fd = open(buf, O_RDWR | O_CLOEXEC, 0)) >= 0)
+    if ((fd = open(buf, O_RDWR | O_CLOEXEC)) >= 0)
         return fd;
     return -errno;
 }
@@ -1134,7 +1209,7 @@ static int drmOpenByName(const char *name, int type)
         int  retcode;
 
         sprintf(proc_name, "/proc/dri/%d/name", i);
-        if ((fd = open(proc_name, O_RDONLY, 0)) >= 0) {
+        if ((fd = open(proc_name, O_RDONLY)) >= 0) {
             retcode = read(fd, buf, sizeof(buf)-1);
             close(fd);
             if (retcode) {
@@ -3891,7 +3966,7 @@ static int drmParsePciDeviceInfo(int maj, int min,
     if (get_sysctl_pci_bus_info(maj, min, &info) != 0)
         return -EINVAL;
 
-    fd = open("/dev/pci", O_RDONLY, 0);
+    fd = open("/dev/pci", O_RDONLY);
     if (fd < 0)
         return -errno;
 
@@ -5104,4 +5179,44 @@ drmGetFormatModifierName(uint64_t modifier)
         return drmGetFormatModifierFromSimpleTokens(modifier);
 
     return modifier_found;
+}
+
+/**
+ * Get a human-readable name for a DRM FourCC format.
+ *
+ * \param format The format.
+ * \return A malloc'ed string containing the format name. Caller is responsible
+ * for freeing it.
+ */
+drm_public char *
+drmGetFormatName(uint32_t format)
+{
+    char *str, code[5];
+    const char *be;
+    size_t str_size, i;
+
+    be = (format & DRM_FORMAT_BIG_ENDIAN) ? "_BE" : "";
+    format &= ~DRM_FORMAT_BIG_ENDIAN;
+
+    if (format == DRM_FORMAT_INVALID)
+        return strdup("INVALID");
+
+    code[0] = (char) ((format >> 0) & 0xFF);
+    code[1] = (char) ((format >> 8) & 0xFF);
+    code[2] = (char) ((format >> 16) & 0xFF);
+    code[3] = (char) ((format >> 24) & 0xFF);
+    code[4] = '\0';
+
+    /* Trim spaces at the end */
+    for (i = 3; i > 0 && code[i] == ' '; i--)
+        code[i] = '\0';
+
+    str_size = strlen(code) + strlen(be) + 1;
+    str = malloc(str_size);
+    if (!str)
+        return NULL;
+
+    snprintf(str, str_size, "%s%s", code, be);
+
+    return str;
 }

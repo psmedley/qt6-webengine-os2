@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,7 @@
 
 CPDF_ColorState::CPDF_ColorState() = default;
 
-CPDF_ColorState::CPDF_ColorState(const CPDF_ColorState& that)
-    : m_Ref(that.m_Ref) {}
+CPDF_ColorState::CPDF_ColorState(const CPDF_ColorState& that) = default;
 
 CPDF_ColorState::~CPDF_ColorState() = default;
 
@@ -34,7 +33,9 @@ FX_COLORREF CPDF_ColorState::GetFillColorRef() const {
 }
 
 void CPDF_ColorState::SetFillColorRef(FX_COLORREF colorref) {
-  m_Ref.GetPrivateCopy()->m_FillColorRef = colorref;
+  if (!m_Ref || GetFillColorRef() != colorref) {
+    m_Ref.GetPrivateCopy()->m_FillColorRef = colorref;
+  }
 }
 
 FX_COLORREF CPDF_ColorState::GetStrokeColorRef() const {
@@ -42,7 +43,9 @@ FX_COLORREF CPDF_ColorState::GetStrokeColorRef() const {
 }
 
 void CPDF_ColorState::SetStrokeColorRef(FX_COLORREF colorref) {
-  m_Ref.GetPrivateCopy()->m_StrokeColorRef = colorref;
+  if (!m_Ref || GetStrokeColorRef() != colorref) {
+    m_Ref.GetPrivateCopy()->m_StrokeColorRef = colorref;
+  }
 }
 
 const CPDF_Color* CPDF_ColorState::GetFillColor() const {

@@ -8,7 +8,8 @@
 #include <stddef.h>            // For size_t.
 #include <stdint.h>            // For uint32_t.
 #include <xnnpack.h>           // For xnn_status.
-#include <xnnpack/allocator.h> // For xnn_code_buffer.
+#include <xnnpack/common.h>    // For XNN_INLINE.
+#include <xnnpack/memory.h>    // For xnn_code_buffer.
 #include <xnnpack/mutex.h>     // For xnn_mutex.
 
 #ifdef __cplusplus
@@ -70,6 +71,10 @@ enum xnn_status xnn_release_code_cache(struct xnn_code_cache* cache);
 // reuse the same section of the buffer.
 size_t xnn_get_or_insert_code_cache(struct xnn_code_cache* cache, void* ptr, size_t size);
 
+XNN_INLINE static bool xnn_code_cache_valid(struct xnn_code_cache* code_cache) {
+  return code_cache != NULL && code_cache->cache.type == xnn_cache_type_code;
+}
+
 // The state of weights cache finalization.
 enum xnn_cache_state {
   // Not finalized.
@@ -105,11 +110,6 @@ void* xnn_reserve_space_in_weights_cache(struct xnn_weights_cache* cache, size_t
 // must already be locked before calling this, it will be unlocked at the end of this function.
 size_t xnn_get_or_insert_weights_cache(struct xnn_weights_cache* cache, void* ptr, size_t size);
 bool xnn_weights_cache_is_finalized(struct xnn_weights_cache* cache);
-
-struct xnn_caches {
-  struct xnn_code_cache *code_cache;
-  struct xnn_weights_cache *weights_cache;
-};
 
 #ifdef __cplusplus
 } // extern "C"

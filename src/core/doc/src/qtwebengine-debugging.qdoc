@@ -49,6 +49,12 @@
     interface on, so that you can access the developer tools from a remote
     device.
 
+    To avoid WebSocket errors during remote debugging, add an additional command-line
+    argument \c {--remote-allow-origins=<origin>[,<origin>, ...]}, where \c <origin> refers to the request origin.
+    Use \c {--remote-allow-origins=*} to allow connections from all origins. If nothing is specified,
+    \QWE will add \c {--remote-allow-origins=*} to command-line arguments when remote-debugging is enabled,
+    thereby allowing requests from all origins.
+
     For a detailed explanation of the capabilities of developer tools, see the
     \l {Chrome DevTools} page.
 
@@ -83,6 +89,14 @@
             not QtWebEngineProcess. It means losing the security of
             sandboxing of the network service though.
     \endlist
+
+    Any WebEngine command line options should be specified after the
+    \c {--webEngineArgs} option, which is used to separate the user's application
+    specific options from the WebEngine's ones.
+
+    \badcode
+    --webEngineArgs [WebEngine specific options]
+    \endcode
 
     Alternatively, the environment variable QTWEBENGINE_CHROMIUM_FLAGS can be
     set. For example, the following value could be set to disable logging while

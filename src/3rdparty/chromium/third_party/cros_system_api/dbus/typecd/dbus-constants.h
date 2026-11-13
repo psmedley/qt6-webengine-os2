@@ -15,6 +15,11 @@ constexpr char kTypecdServicePath[] = "/org/chromium/typecd";
 constexpr char kTypecdDeviceConnected[] = "DeviceConnected";
 constexpr char kTypecdCableWarning[] = "CableWarning";
 
+// Methods.
+constexpr char kTypecdSetPeripheralDataAccessMethod[] =
+    "SetPeripheralDataAccess";
+constexpr char kTypecdSetPortsUsingDisplaysMethod[] = "SetPortsUsingDisplays";
+
 enum class DeviceConnectedType {
   kThunderboltOnly = 0,
   // Device supports both Thunderbolt & DisplayPort alternate modes.

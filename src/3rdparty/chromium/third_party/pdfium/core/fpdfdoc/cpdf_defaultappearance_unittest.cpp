@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "core/fpdfapi/parser/cpdf_simple_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/test_support.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 TEST(CPDFDefaultAppearanceTest, FindTagParamFromStart) {
   static const struct FindTagTestStruct {

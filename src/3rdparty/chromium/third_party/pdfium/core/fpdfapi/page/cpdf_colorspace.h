@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CPDF_Document;
 class CPDF_IndexedCS;
@@ -49,7 +49,7 @@ class PatternValue {
 
  private:
   RetainPtr<CPDF_Pattern> m_pRetainedPattern;
-  std::array<float, kMaxPatternColorComps> m_Comps;
+  std::array<float, kMaxPatternColorComps> m_Comps{};
 };
 
 class CPDF_ColorSpace : public Retainable, public Observable {
@@ -69,6 +69,14 @@ class CPDF_ColorSpace : public Retainable, public Observable {
     kPattern = 11,
   };
 
+  static void InitializeGlobals();
+  static void DestroyGlobals();
+
+  // `family` must be one of the following:
+  // - `kDeviceGray`
+  // - `kDeviceRGB`
+  // - `kDeviceCMYK`
+  // - `kPattern`
   static RetainPtr<CPDF_ColorSpace> GetStockCS(Family family);
   static RetainPtr<CPDF_ColorSpace> GetStockCSForName(const ByteString& name);
   static RetainPtr<CPDF_ColorSpace> Load(
@@ -81,7 +89,6 @@ class CPDF_ColorSpace : public Retainable, public Observable {
       uint32_t family_id);
 
   static uint32_t ComponentsForFamily(Family family);
-  static bool IsValidIccComponents(int components);
 
   // Should only be called if this colorspace is not a pattern.
   std::vector<float> CreateBufAndSetDefaultColor() const;

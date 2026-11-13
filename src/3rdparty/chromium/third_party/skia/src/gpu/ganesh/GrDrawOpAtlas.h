@@ -126,7 +126,7 @@ public:
     }
 
     /** To ensure the atlas does not evict a given entry, the client must set the last use token. */
-    void setLastUseToken(const skgpu::AtlasLocator& atlasLocator, skgpu::DrawToken token) {
+    void setLastUseToken(const skgpu::AtlasLocator& atlasLocator, skgpu::AtlasToken token) {
         SkASSERT(this->hasID(atlasLocator.plotLocator()));
         uint32_t plotIdx = atlasLocator.plotIndex();
         SkASSERT(plotIdx < fNumPlots);
@@ -140,7 +140,7 @@ public:
     uint32_t numActivePages() { return fNumActivePages; }
 
     void setLastUseTokenBulk(const skgpu::BulkUsePlotUpdater& updater,
-                             skgpu::DrawToken token) {
+                             skgpu::AtlasToken token) {
         int count = updater.count();
         for (int i = 0; i < count; i++) {
             const skgpu::BulkUsePlotUpdater::PlotData& pd = updater.plotData(i);
@@ -154,7 +154,7 @@ public:
         }
     }
 
-    void compact(skgpu::DrawToken startTokenForNextFlush);
+    void compact(skgpu::AtlasToken startTokenForNextFlush);
 
     void instantiate(GrOnFlushResourceProvider*);
 
@@ -162,10 +162,9 @@ public:
         return fMaxPages;
     }
 
-    int numAllocated_TestingOnly() const;
-    void setMaxPages_TestingOnly(uint32_t maxPages);
-
 private:
+    friend class GrDrawOpAtlasTools;
+
     GrDrawOpAtlas(GrProxyProvider*, const GrBackendFormat& format, SkColorType, size_t bpp,
                   int width, int height, int plotWidth, int plotHeight,
                   skgpu::AtlasGenerationCounter* generationCounter,
@@ -173,7 +172,7 @@ private:
 
     inline bool updatePlot(GrDeferredUploadTarget*, skgpu::AtlasLocator*, skgpu::Plot*);
 
-    inline void makeMRU(skgpu::Plot* plot, int pageIdx) {
+    inline void makeMRU(skgpu::Plot* plot, uint32_t pageIdx) {
         if (fPages[pageIdx].fPlotList.head() == plot) {
             return;
         }
@@ -220,8 +219,8 @@ private:
     skgpu::AtlasGenerationCounter* const fGenerationCounter;
     uint64_t                      fAtlasGeneration;
 
-    // nextTokenToFlush() value at the end of the previous flush
-    skgpu::DrawToken fPrevFlushToken;
+    // nextFlushToken() value at the end of the previous flush
+    skgpu::AtlasToken fPrevFlushToken;
 
     // the number of flushes since this atlas has been last used
     int                   fFlushesSinceLastUse;

@@ -27,14 +27,13 @@
 //   default-initialized.
 // - callbacks may be initialized with lambdas; lambda definitions are concize.
 
+#include "absl/functional/any_invocable.h"
 #include "connections/connection_options.h"
 #include "connections/payload.h"
 #include "connections/status.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/byte_utils.h"
-#include "internal/platform/listeners.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -43,12 +42,9 @@ namespace connections {
 // This is not the same as completion of the associated process,
 // which may have many states, and multiple async jobs, and be still ongoing.
 // Progress on the overall process is reported by the associated listener.
-struct ResultCallback {
-  // Callback to access the status of the operation when available.
-  // status - result of job execution;
-  //   Status::kSuccess, if successful; anything else indicates failure.
-  std::function<void(Status)> result_cb = DefaultCallback<Status>();
-};
+// status - result of job execution;
+//   Status::kSuccess, if successful; anything else indicates failure.
+using ResultCallback = absl::AnyInvocable<void(Status)>;
 
 struct ConnectionResponseInfo {
   std::string GetAuthenticationDigits() {
@@ -101,8 +97,7 @@ struct ConnectionListener {
   // info -  Other relevant information about the connection.
   std::function<void(const std::string& endpoint_id,
                      const ConnectionResponseInfo& info)>
-      initiated_cb =
-          DefaultCallback<const std::string&, const ConnectionResponseInfo&>();
+      initiated_cb = [](const std::string&, const ConnectionResponseInfo&) {};
 
   // Called after both sides have accepted the connection.
   // Both sides may now send Payloads to each other.
@@ -110,7 +105,7 @@ struct ConnectionListener {
   //
   // endpoint_id - The identifier for the remote endpoint.
   std::function<void(const std::string& endpoint_id)> accepted_cb =
-      DefaultCallback<const std::string&>();
+      [](const std::string&) {};
 
   // Called when either side rejected the connection.
   // Payloads can not be exchaged. Call Core::DisconnectFromEndpoint()
@@ -118,21 +113,21 @@ struct ConnectionListener {
   //
   // endpoint_id - The identifier for the remote endpoint.
   std::function<void(const std::string& endpoint_id, Status status)>
-      rejected_cb = DefaultCallback<const std::string&, Status>();
+      rejected_cb = [](const std::string&, Status) {};
 
   // Called when a remote endpoint is disconnected or has become unreachable.
   // At this point service (re-)discovery may start again.
   //
   // endpoint_id - The identifier for the remote endpoint.
   std::function<void(const std::string& endpoint_id)> disconnected_cb =
-      DefaultCallback<const std::string&>();
+      [](const std::string&) {};
 
   // Called when the connection's available bandwidth has changed.
   //
   // endpoint_id - The identifier for the remote endpoint.
   // medium      - Medium we upgraded to.
   std::function<void(const std::string& endpoint_id, Medium medium)>
-      bandwidth_changed_cb = DefaultCallback<const std::string&, Medium>();
+      bandwidth_changed_cb = [](const std::string&, Medium) {};
 };
 
 struct DiscoveryListener {
@@ -141,28 +136,27 @@ struct DiscoveryListener {
   // endpoint_id   - The ID of the remote endpoint that was discovered.
   // endpoint_info - The info of the remote endpoint representd by ByteArray.
   // service_id    - The ID of the service advertised by the remote endpoint.
-  std::function<void(const std::string& endpoint_id,
-                     const ByteArray& endpoint_info,
-                     const std::string& service_id)>
-      endpoint_found_cb = DefaultCallback<const std::string&, const ByteArray&,
-                                          const std::string&>();
+  absl::AnyInvocable<void(const std::string& endpoint_id,
+                          const ByteArray& endpoint_info,
+                          const std::string& service_id)>
+      endpoint_found_cb =
+          [](const std::string&, const ByteArray&, const std::string&) {};
 
   // Called when a remote endpoint is no longer discoverable; only called for
   // endpoints that previously had been passed to {@link
   // #onEndpointFound(String, DiscoveredEndpointInfo)}.
   //
   // endpoint_id - The ID of the remote endpoint that was lost.
-  std::function<void(const std::string& endpoint_id)> endpoint_lost_cb =
-      DefaultCallback<const std::string&>();
+  absl::AnyInvocable<void(const std::string& endpoint_id)> endpoint_lost_cb =
+      [](const std::string&) {};
 
   // Called when a remote endpoint is found with an updated distance.
   //
   // arguments:
   //   endpoint_id - The ID of the remote endpoint that was lost.
   //   info        - The distance info, encoded as enum value.
-  std::function<void(const std::string& endpoint_id, DistanceInfo info)>
-      endpoint_distance_changed_cb =
-          DefaultCallback<const std::string&, DistanceInfo>();
+  absl::AnyInvocable<void(const std::string& endpoint_id, DistanceInfo info)>
+      endpoint_distance_changed_cb = [](const std::string&, DistanceInfo) {};
 };
 
 struct PayloadListener {
@@ -174,8 +168,8 @@ struct PayloadListener {
   // endpoint_id - The identifier for the remote endpoint that sent the
   //               payload.
   // payload     - The Payload object received.
-  std::function<void(const std::string& endpoint_id, Payload payload)>
-      payload_cb = DefaultCallback<const std::string&, Payload>();
+  absl::AnyInvocable<void(absl::string_view endpoint_id, Payload payload) const>
+      payload_cb = [](absl::string_view, Payload) {};
 
   // Called with progress information about an active Payload transfer, either
   // incoming or outgoing.
@@ -184,14 +178,13 @@ struct PayloadListener {
   //               receiving this payload.
   // info -  The PayloadProgressInfo structure describing the status of
   //         the transfer.
-  std::function<void(const std::string& endpoint_id,
-                     const PayloadProgressInfo& info)>
+  absl::AnyInvocable<void(absl::string_view endpoint_id,
+                          const PayloadProgressInfo& info)>
       payload_progress_cb =
-          DefaultCallback<const std::string&, const PayloadProgressInfo&>();
+          [](absl::string_view, const PayloadProgressInfo&) {};
 };
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_LISTENERS_H_

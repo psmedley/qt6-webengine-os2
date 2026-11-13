@@ -5,8 +5,17 @@
 #include "content/browser/file_system_access/features.h"
 
 #include "base/feature_list.h"
+#include "build/build_config.h"
 
 namespace content::features {
+
+// When enabled, pages in the BFCache can be evicted when they hold
+// FileSystemAccessLockManager Locks that are contentious with the Locks of an
+// active page. blink::features::kFileSystemAccessLockingScheme must be enabled
+// as well for this to have any effect.
+BASE_FEATURE(kFileSystemAccessBFCache,
+             "FileSystemAccessBFCache",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // TODO(crbug.com/1370433): Remove this flag eventually.
 // When enabled, drag-and-dropped files and directories will be checked against
@@ -15,5 +24,21 @@ namespace content::features {
 BASE_FEATURE(kFileSystemAccessDragAndDropCheckBlocklist,
              "FileSystemAccessDragAndDropCheckBlocklist",
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+// TODO(crbug.com/1421735): Remove this flag eventually.
+// When enabled, GetFile() and GetEntries() on a directory handle performs
+// the blocklist check on child file handles.
+#if BUILDFLAG(IS_WIN)
+BASE_FEATURE(kFileSystemAccessDirectoryIterationBlocklistCheck,
+             "FileSystemAccessDirectoryIterationBlocklistCheck",
+             // On Windows, resolving a symlink by getting an absolute path does
+             // not work, and it requires a different implementation approach.
+             // Enable it on Windows once available.
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#else
+BASE_FEATURE(kFileSystemAccessDirectoryIterationBlocklistCheck,
+             "FileSystemAccessDirectoryIterationBlocklistCheck",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace content::features

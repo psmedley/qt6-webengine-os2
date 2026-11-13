@@ -9,21 +9,42 @@
 #define GrSurfaceProxy_DEFINED
 
 #include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSize.h"
+#include "include/core/SkString.h"
+#include "include/core/SkTypes.h"
 #include "include/gpu/GrBackendSurface.h"
-#include "include/private/SkNoncopyable.h"
+#include "include/gpu/GrTypes.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkTo.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/gpu/ResourceKey.h"
 #include "src/gpu/ganesh/GrGpuResource.h"
 #include "src/gpu/ganesh/GrSurface.h"
-#include "src/gpu/ganesh/GrTexture.h"
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <string_view>
+#include <utility>
 
 class GrCaps;
 class GrContext_Base;
 class GrRecordingContext;
+class GrRenderTarget;
 class GrRenderTargetProxy;
 class GrRenderTask;
 class GrResourceProvider;
 class GrSurfaceProxyPriv;
-class GrSurfaceProxyView;
+class GrTexture;
 class GrTextureProxy;
+enum class SkBackingFit;
+namespace skgpu {
+enum class Budgeted : bool;
+enum class Mipmapped : bool;
+}
 
 class GrSurfaceProxy : public SkNVRefCnt<GrSurfaceProxy> {
 public:
@@ -67,12 +88,12 @@ public:
         SkISize fDimensions;
         SkBackingFit fFit;
         GrRenderable fRenderable;
-        GrMipmapped fMipmapped;
+        skgpu::Mipmapped fMipmapped;
         int fSampleCnt;
         const GrBackendFormat& fFormat;
         GrTextureType fTextureType;
         GrProtected fProtected;
-        SkBudgeted fBudgeted;
+        skgpu::Budgeted fBudgeted;
         std::string_view fLabel;
     };
 
@@ -82,10 +103,8 @@ public:
         LazyCallbackResult(LazyCallbackResult&& that) = default;
         LazyCallbackResult(sk_sp<GrSurface> surf,
                            bool releaseCallback = true,
-                           LazyInstantiationKeyMode mode = LazyInstantiationKeyMode::kSynced)
-                : fSurface(std::move(surf)), fKeyMode(mode), fReleaseCallback(releaseCallback) {}
-        LazyCallbackResult(sk_sp<GrTexture> tex)
-                : LazyCallbackResult(sk_sp<GrSurface>(std::move(tex))) {}
+                           LazyInstantiationKeyMode mode = LazyInstantiationKeyMode::kSynced);
+        LazyCallbackResult(sk_sp<GrTexture> tex);
 
         LazyCallbackResult& operator=(const LazyCallbackResult&) = default;
         LazyCallbackResult& operator=(LazyCallbackResult&&) = default;
@@ -262,7 +281,7 @@ public:
     /**
      * Does the resource count against the resource budget?
      */
-    SkBudgeted isBudgeted() const { return fBudgeted; }
+    skgpu::Budgeted isBudgeted() const { return fBudgeted; }
 
     /**
      * The pixel values of this proxy's surface cannot be modified (e.g. doesn't support write
@@ -321,10 +340,10 @@ public:
     static sk_sp<GrSurfaceProxy> Copy(GrRecordingContext*,
                                       sk_sp<GrSurfaceProxy> src,
                                       GrSurfaceOrigin,
-                                      GrMipmapped,
+                                      skgpu::Mipmapped,
                                       SkIRect srcRect,
                                       SkBackingFit,
-                                      SkBudgeted,
+                                      skgpu::Budgeted,
                                       std::string_view label,
                                       RectsMustMatch = RectsMustMatch::kNo,
                                       sk_sp<GrRenderTask>* outTask = nullptr);
@@ -333,13 +352,13 @@ public:
     static sk_sp<GrSurfaceProxy> Copy(GrRecordingContext*,
                                       sk_sp<GrSurfaceProxy> src,
                                       GrSurfaceOrigin,
-                                      GrMipmapped,
+                                      skgpu::Mipmapped,
                                       SkBackingFit,
-                                      SkBudgeted,
+                                      skgpu::Budgeted,
                                       std::string_view label,
                                       sk_sp<GrRenderTask>* outTask = nullptr);
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     int32_t testingOnly_getBackingRefCnt() const;
     GrInternalSurfaceFlags testingOnly_getFlags() const;
     SkString dump() const;
@@ -368,7 +387,7 @@ protected:
     GrSurfaceProxy(const GrBackendFormat&,
                    SkISize,
                    SkBackingFit,
-                   SkBudgeted,
+                   skgpu::Budgeted,
                    GrProtected,
                    GrInternalSurfaceFlags,
                    UseAllocator,
@@ -378,7 +397,7 @@ protected:
                    const GrBackendFormat&,
                    SkISize,
                    SkBackingFit,
-                   SkBudgeted,
+                   skgpu::Budgeted,
                    GrProtected,
                    GrInternalSurfaceFlags,
                    UseAllocator,
@@ -401,8 +420,10 @@ protected:
     virtual sk_sp<GrSurface> createSurface(GrResourceProvider*) const = 0;
     void assign(sk_sp<GrSurface> surface);
 
-    sk_sp<GrSurface> createSurfaceImpl(GrResourceProvider*, int sampleCnt, GrRenderable,
-                                       GrMipmapped) const;
+    sk_sp<GrSurface> createSurfaceImpl(GrResourceProvider*,
+                                       int sampleCnt,
+                                       GrRenderable,
+                                       skgpu::Mipmapped) const;
 
     // Once the dimensions of a fully-lazy proxy are decided, and before it gets instantiated, the
     // client can use this optional method to specify the proxy's dimensions. (A proxy's dimensions
@@ -414,8 +435,11 @@ protected:
         fDimensions = dimensions;
     }
 
-    bool instantiateImpl(GrResourceProvider* resourceProvider, int sampleCnt, GrRenderable,
-                         GrMipmapped, const skgpu::UniqueKey*);
+    bool instantiateImpl(GrResourceProvider* resourceProvider,
+                         int sampleCnt,
+                         GrRenderable,
+                         skgpu::Mipmapped,
+                         const skgpu::UniqueKey*);
 
     // For deferred proxies this will be null until the proxy is instantiated.
     // For wrapped proxies it will point to the wrapped resource.
@@ -437,10 +461,10 @@ private:
 
     SkBackingFit           fFit;      // always kApprox for lazy-callback resources
                                       // always kExact for wrapped resources
-    mutable SkBudgeted     fBudgeted; // always kYes for lazy-callback resources
-                                      // set from the backing resource for wrapped resources
-                                      // mutable bc of SkSurface/SkImage wishy-washiness
-                                      // Only meaningful if fLazyInstantiateCallback is non-null.
+    mutable skgpu::Budgeted fBudgeted;  // always kYes for lazy-callback resources
+                                        // set from the backing resource for wrapped resources
+                                        // mutable bc of SkSurface/SkImage wishy-washiness
+                                        // Only meaningful if fLazyInstantiateCallback is non-null.
     UseAllocator           fUseAllocator;
 
     const UniqueID         fUniqueID; // set from the backing resource for wrapped resources

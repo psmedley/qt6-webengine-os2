@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Time} from '../base/time';
 import {createEmptyRecordConfig} from '../controller/record_config_types';
+import {featureFlags} from '../core/feature_flags';
 import {
   Aggregation,
-} from '../frontend/pivot_table_redux_types';
+} from '../frontend/pivot_table_types';
 import {
   autosaveConfigStore,
   recordTargetStore,
 } from '../frontend/record_config';
+import {SqlTables} from '../frontend/sql_table/well_known_tables';
 
-import {featureFlags} from './feature_flags';
 import {
   defaultTraceTime,
   NonSerializableState,
@@ -57,28 +59,29 @@ export const COUNT_AGGREGATION: Aggregation = {
 
 export function createEmptyNonSerializableState(): NonSerializableState {
   return {
-    pivotTableRedux: {
+    pivotTable: {
       queryResult: null,
-      selectedSlicePivots: [{kind: 'regular', table: 'slice', column: 'name'}],
-      selectedPivots: [],
+      selectedPivots:
+          [{kind: 'regular', table: SqlTables.slice.name, column: 'name'}],
       selectedAggregations: [
         {
           aggregationFunction: 'SUM',
-          column: {kind: 'regular', table: 'slice', column: 'dur'},
+          column: {kind: 'regular', table: SqlTables.slice.name, column: 'dur'},
+          sortDirection: 'DESC',
         },
         {
           aggregationFunction: 'SUM',
-          column: {kind: 'regular', table: 'slice', column: 'thread_dur'},
+          column: {
+            kind: 'regular',
+            table: SqlTables.slice.name,
+            column: 'thread_dur',
+          },
         },
         COUNT_AGGREGATION,
       ],
       constrainToArea: true,
       queryRequested: false,
       argumentNames: [],
-      sortCriteria: {
-        column: {kind: 'regular', table: 'slice', column: 'dur'},
-        order: 'DESC',
-      },
     },
   };
 }
@@ -86,25 +89,20 @@ export function createEmptyNonSerializableState(): NonSerializableState {
 export function createEmptyState(): State {
   return {
     version: STATE_VERSION,
-    currentEngineId: undefined,
     nextId: '-1',
     newEngineMode: 'USE_HTTP_RPC_IF_AVAILABLE',
-    engines: {},
     traceTime: {...defaultTraceTime},
     tracks: {},
-    uiTrackIdByTraceTrackId: {},
+    trackKeyByTrackId: {},
     utidToThreadSortKey: {},
     aggregatePreferences: {},
     trackGroups: {},
-    visibleTracks: [],
     pinnedTracks: [],
     scrollingTracks: [],
     areas: {},
     queries: {},
-    metrics: {},
     permalink: {},
     notes: {},
-    visualisedArgs: [],
 
     recordConfig: AUTOLOAD_STARTED_CONFIG_FLAG.get() ?
         autosaveConfigStore.get() :
@@ -113,22 +111,30 @@ export function createEmptyState(): State {
     lastLoadedConfig: {type: 'NONE'},
 
     frontendLocalState: {
-      omniboxState: {
-        lastUpdate: 0,
-        omnibox: '',
-        mode: 'SEARCH',
-      },
-
       visibleState: {
         ...defaultTraceTime,
         lastUpdate: 0,
-        resolution: 0,
+        resolution: 0n,
       },
+    },
+
+    omniboxState: {
+      omnibox: '',
+      mode: 'SEARCH',
     },
 
     logsPagination: {
       offset: 0,
       count: 0,
+    },
+
+    ftracePagination: {
+      offset: 0,
+      count: 0,
+    },
+
+    ftraceFilter: {
+      excludedNames: [],
     },
 
     status: {msg: '', timestamp: 0},
@@ -140,8 +146,8 @@ export function createEmptyState(): State {
     sidebarVisible: true,
     hoveredUtid: -1,
     hoveredPid: -1,
-    hoveredLogsTimestamp: -1,
-    hoveredNoteTimestamp: -1,
+    hoverCursorTimestamp: Time.INVALID,
+    hoveredNoteTimestamp: Time.INVALID,
     highlightedSliceId: -1,
     focusedFlowIdLeft: -1,
     focusedFlowIdRight: -1,
@@ -157,5 +163,16 @@ export function createEmptyState(): State {
     fetchChromeCategories: false,
     chromeCategories: undefined,
     nonSerializableState: createEmptyNonSerializableState(),
+
+    logFilteringCriteria: {
+      // The first two log priorities are ignored.
+      minimumLevel: 2,
+      tags: [],
+      textEntry: '',
+      hideNonMatching: true,
+    },
+
+    // Somewhere to store plugins' persistent state.
+    plugins: {},
   };
 }

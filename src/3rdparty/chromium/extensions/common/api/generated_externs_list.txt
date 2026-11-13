@@ -6,8 +6,12 @@ automation.idl
 bluetooth.idl
 bluetooth_private.idl
 clipboard.idl
-management.json
+events.json
+extension_types.json
 metrics_private.json
-mime_handler_private.idl
+metrics_private_individual_apis.json
+mojo_private.idl
 networking_private.idl
-system_display.idl
+runtime.json
+test.json
+virtual_keyboard_private.json

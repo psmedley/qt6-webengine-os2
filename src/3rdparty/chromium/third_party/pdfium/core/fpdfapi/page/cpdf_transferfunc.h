@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,11 @@
 
 #include <stdint.h>
 
-#include "core/fxcrt/fixed_uninit_data_vector.h"
+#include "core/fxcrt/fixed_size_data_vector.h"
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/dib/fx_dib.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CFX_DIBBase;
 
@@ -35,15 +35,15 @@ class CPDF_TransferFunc final : public Retainable, public Observable {
 
  private:
   CPDF_TransferFunc(bool bIdentify,
-                    FixedUninitDataVector<uint8_t> samples_r,
-                    FixedUninitDataVector<uint8_t> samples_g,
-                    FixedUninitDataVector<uint8_t> samples_b);
+                    FixedSizeDataVector<uint8_t> samples_r,
+                    FixedSizeDataVector<uint8_t> samples_g,
+                    FixedSizeDataVector<uint8_t> samples_b);
   ~CPDF_TransferFunc() override;
 
   const bool m_bIdentity;
-  const FixedUninitDataVector<uint8_t> m_SamplesR;
-  const FixedUninitDataVector<uint8_t> m_SamplesG;
-  const FixedUninitDataVector<uint8_t> m_SamplesB;
+  const FixedSizeDataVector<uint8_t> m_SamplesR;
+  const FixedSizeDataVector<uint8_t> m_SamplesG;
+  const FixedSizeDataVector<uint8_t> m_SamplesB;
 };
 
 #endif  // CORE_FPDFAPI_PAGE_CPDF_TRANSFERFUNC_H_

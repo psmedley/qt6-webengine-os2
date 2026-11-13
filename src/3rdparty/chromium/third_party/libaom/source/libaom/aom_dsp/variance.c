@@ -25,24 +25,6 @@
 #include "av1/common/filter.h"
 #include "av1/common/reconinter.h"
 
-uint32_t aom_get4x4sse_cs_c(const uint8_t *a, int a_stride, const uint8_t *b,
-                            int b_stride) {
-  int distortion = 0;
-  int r, c;
-
-  for (r = 0; r < 4; ++r) {
-    for (c = 0; c < 4; ++c) {
-      int diff = a[c] - b[c];
-      distortion += diff * diff;
-    }
-
-    a += a_stride;
-    b += b_stride;
-  }
-
-  return distortion;
-}
-
 uint32_t aom_get_mb_ss_c(const int16_t *a) {
   unsigned int i, sum = 0;
 
@@ -198,25 +180,41 @@ void aom_var_filter_block2d_bil_second_pass_c(const uint16_t *a, uint8_t *b,
     return aom_variance##W##x##H(temp3, W, b, b_stride, sse);                  \
   }
 
-/* Identical to the variance call except it takes an additional parameter, sum,
- * and returns that value using pass-by-reference instead of returning
- * sse - sum^2 / w*h
- */
-#define GET_VAR(W, H)                                                         \
-  void aom_get##W##x##H##var_c(const uint8_t *a, int a_stride,                \
-                               const uint8_t *b, int b_stride, uint32_t *sse, \
-                               int *sum) {                                    \
-    variance(a, a_stride, b, b_stride, W, H, sse, sum);                       \
-  }
-
-void aom_get_sse_sum_8x8_quad_c(const uint8_t *a, int a_stride,
-                                const uint8_t *b, int b_stride, uint32_t *sse,
-                                int *sum) {
+void aom_get_var_sse_sum_8x8_quad_c(const uint8_t *a, int a_stride,
+                                    const uint8_t *b, int b_stride,
+                                    uint32_t *sse8x8, int *sum8x8,
+                                    unsigned int *tot_sse, int *tot_sum,
+                                    uint32_t *var8x8) {
   // Loop over 4 8x8 blocks. Process one 8x32 block.
   for (int k = 0; k < 4; k++) {
-    variance(a + (k * 8), a_stride, b + (k * 8), b_stride, 8, 8, &sse[k],
-             &sum[k]);
+    variance(a + (k * 8), a_stride, b + (k * 8), b_stride, 8, 8, &sse8x8[k],
+             &sum8x8[k]);
   }
+
+  // Calculate variance at 8x8 level and total sse, sum of 8x32 block.
+  *tot_sse += sse8x8[0] + sse8x8[1] + sse8x8[2] + sse8x8[3];
+  *tot_sum += sum8x8[0] + sum8x8[1] + sum8x8[2] + sum8x8[3];
+  for (int i = 0; i < 4; i++)
+    var8x8[i] = sse8x8[i] - (uint32_t)(((int64_t)sum8x8[i] * sum8x8[i]) >> 6);
+}
+
+void aom_get_var_sse_sum_16x16_dual_c(const uint8_t *src_ptr, int source_stride,
+                                      const uint8_t *ref_ptr, int ref_stride,
+                                      uint32_t *sse16x16, unsigned int *tot_sse,
+                                      int *tot_sum, uint32_t *var16x16) {
+  int sum16x16[2] = { 0 };
+  // Loop over two consecutive 16x16 blocks and process as one 16x32 block.
+  for (int k = 0; k < 2; k++) {
+    variance(src_ptr + (k * 16), source_stride, ref_ptr + (k * 16), ref_stride,
+             16, 16, &sse16x16[k], &sum16x16[k]);
+  }
+
+  // Calculate variance at 16x16 level and total sse, sum of 16x32 block.
+  *tot_sse += sse16x16[0] + sse16x16[1];
+  *tot_sum += sum16x16[0] + sum16x16[1];
+  for (int i = 0; i < 2; i++)
+    var16x16[i] =
+        sse16x16[i] - (uint32_t)(((int64_t)sum16x16[i] * sum16x16[i]) >> 8);
 }
 
 /* Identical to the variance call except it does not calculate the
@@ -254,9 +252,6 @@ VARIANCES(8, 8)
 VARIANCES(8, 4)
 VARIANCES(4, 8)
 VARIANCES(4, 4)
-VARIANCES(4, 2)
-VARIANCES(2, 4)
-VARIANCES(2, 2)
 
 // Realtime mode doesn't use rectangular blocks.
 #if !CONFIG_REALTIME_ONLY
@@ -267,9 +262,6 @@ VARIANCES(32, 8)
 VARIANCES(16, 64)
 VARIANCES(64, 16)
 #endif
-
-GET_VAR(16, 16)
-GET_VAR(8, 8)
 
 MSE(16, 16)
 MSE(16, 8)
@@ -399,25 +391,6 @@ static void highbd_12_variance(const uint8_t *a8, int a_stride,
     highbd_12_variance(a, a_stride, b, b_stride, W, H, sse, &sum);             \
     var = (int64_t)(*sse) - (((int64_t)sum * sum) / (W * H));                  \
     return (var >= 0) ? (uint32_t)var : 0;                                     \
-  }
-
-#define HIGHBD_GET_VAR(S)                                                    \
-  void aom_highbd_8_get##S##x##S##var_c(const uint8_t *src, int src_stride,  \
-                                        const uint8_t *ref, int ref_stride,  \
-                                        uint32_t *sse, int *sum) {           \
-    highbd_8_variance(src, src_stride, ref, ref_stride, S, S, sse, sum);     \
-  }                                                                          \
-                                                                             \
-  void aom_highbd_10_get##S##x##S##var_c(const uint8_t *src, int src_stride, \
-                                         const uint8_t *ref, int ref_stride, \
-                                         uint32_t *sse, int *sum) {          \
-    highbd_10_variance(src, src_stride, ref, ref_stride, S, S, sse, sum);    \
-  }                                                                          \
-                                                                             \
-  void aom_highbd_12_get##S##x##S##var_c(const uint8_t *src, int src_stride, \
-                                         const uint8_t *ref, int ref_stride, \
-                                         uint32_t *sse, int *sum) {          \
-    highbd_12_variance(src, src_stride, ref, ref_stride, S, S, sse, sum);    \
   }
 
 #define HIGHBD_MSE(W, H)                                                      \
@@ -679,9 +652,6 @@ HIGHBD_VARIANCES(8, 8)
 HIGHBD_VARIANCES(8, 4)
 HIGHBD_VARIANCES(4, 8)
 HIGHBD_VARIANCES(4, 4)
-HIGHBD_VARIANCES(4, 2)
-HIGHBD_VARIANCES(2, 4)
-HIGHBD_VARIANCES(2, 2)
 
 // Realtime mode doesn't use 4x rectangular blocks.
 #if !CONFIG_REALTIME_ONLY
@@ -692,9 +662,6 @@ HIGHBD_VARIANCES(32, 8)
 HIGHBD_VARIANCES(16, 64)
 HIGHBD_VARIANCES(64, 16)
 #endif
-
-HIGHBD_GET_VAR(8)
-HIGHBD_GET_VAR(16)
 
 HIGHBD_MSE(16, 16)
 HIGHBD_MSE(16, 8)
@@ -1091,7 +1058,7 @@ static INLINE void highbd_12_obmc_variance(const uint8_t *pre8, int pre_stride,
 }
 
 #define HIGHBD_OBMC_VAR(W, H)                                              \
-  unsigned int aom_highbd_obmc_variance##W##x##H##_c(                      \
+  unsigned int aom_highbd_8_obmc_variance##W##x##H##_c(                    \
       const uint8_t *pre, int pre_stride, const int32_t *wsrc,             \
       const int32_t *mask, unsigned int *sse) {                            \
     int sum;                                                               \
@@ -1120,7 +1087,7 @@ static INLINE void highbd_12_obmc_variance(const uint8_t *pre8, int pre_stride,
   }
 
 #define HIGHBD_OBMC_SUBPIX_VAR(W, H)                                           \
-  unsigned int aom_highbd_obmc_sub_pixel_variance##W##x##H##_c(                \
+  unsigned int aom_highbd_8_obmc_sub_pixel_variance##W##x##H##_c(              \
       const uint8_t *pre, int pre_stride, int xoffset, int yoffset,            \
       const int32_t *wsrc, const int32_t *mask, unsigned int *sse) {           \
     uint16_t fdata3[(H + 1) * W];                                              \
@@ -1131,8 +1098,8 @@ static INLINE void highbd_12_obmc_variance(const uint8_t *pre8, int pre_stride,
     aom_highbd_var_filter_block2d_bil_second_pass(                             \
         fdata3, temp2, W, W, H, W, bilinear_filters_2t[yoffset]);              \
                                                                                \
-    return aom_highbd_obmc_variance##W##x##H##_c(CONVERT_TO_BYTEPTR(temp2), W, \
-                                                 wsrc, mask, sse);             \
+    return aom_highbd_8_obmc_variance##W##x##H##_c(CONVERT_TO_BYTEPTR(temp2),  \
+                                                   W, wsrc, mask, sse);        \
   }                                                                            \
                                                                                \
   unsigned int aom_highbd_10_obmc_sub_pixel_variance##W##x##H##_c(             \

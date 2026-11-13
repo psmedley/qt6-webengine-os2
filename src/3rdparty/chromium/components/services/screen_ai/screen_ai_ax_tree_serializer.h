@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_serializable_tree.h"
@@ -35,6 +36,8 @@ class ScreenAIAXTreeSerializer final {
   ~ScreenAIAXTreeSerializer();
 
   ui::AXTreeUpdate Serialize() const;
+
+  const ui::AXTree* tree_for_testing() const { return tree_.get(); }
 
  private:
   const std::unique_ptr<ui::AXSerializableTree> tree_;

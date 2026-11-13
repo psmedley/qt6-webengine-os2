@@ -12,7 +12,7 @@
 
 GrD3DTextureRenderTarget::GrD3DTextureRenderTarget(
         GrD3DGpu* gpu,
-        SkBudgeted budgeted,
+        skgpu::Budgeted budgeted,
         SkISize dimensions,
         const GrD3DTextureResourceInfo& info,
         sk_sp<GrD3DResourceState> state,
@@ -41,7 +41,7 @@ GrD3DTextureRenderTarget::GrD3DTextureRenderTarget(
 
 GrD3DTextureRenderTarget::GrD3DTextureRenderTarget(
         GrD3DGpu* gpu,
-        SkBudgeted budgeted,
+        skgpu::Budgeted budgeted,
         SkISize dimensions,
         const GrD3DTextureResourceInfo& info,
         sk_sp<GrD3DResourceState> state,
@@ -104,14 +104,13 @@ GrD3DTextureRenderTarget::GrD3DTextureRenderTarget(
 
 sk_sp<GrD3DTextureRenderTarget> GrD3DTextureRenderTarget::MakeNewTextureRenderTarget(
         GrD3DGpu* gpu,
-        SkBudgeted budgeted,
+        skgpu::Budgeted budgeted,
         SkISize dimensions,
         int sampleCnt,
         const D3D12_RESOURCE_DESC& resourceDesc,
         GrProtected isProtected,
         GrMipmapStatus mipmapStatus,
         std::string_view label) {
-
     GrD3DTextureResourceInfo info;
     D3D12_RESOURCE_STATES initialState = sampleCnt > 1 ? D3D12_RESOURCE_STATE_RESOLVE_DEST
                                                        : D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -143,6 +142,9 @@ sk_sp<GrD3DTextureRenderTarget> GrD3DTextureRenderTarget::MakeNewTextureRenderTa
         SkColor4f clearColor = { 0, 0, 0, 0 };
         std::tie(msInfo, msState) =
                 GrD3DTextureResource::CreateMSAA(gpu, dimensions, sampleCnt, info, clearColor);
+        if (!msInfo.fResource || !msState) {
+            return nullptr;
+        }
 
         const GrD3DDescriptorHeap::CPUHandle msaaRenderTargetView =
                 gpu->resourceProvider().createRenderTargetView(msInfo.fResource.get());
@@ -202,6 +204,9 @@ sk_sp<GrD3DTextureRenderTarget> GrD3DTextureRenderTarget::MakeWrappedTextureRend
         SkColor4f clearColor = { 1, 1, 1, 1 };
         std::tie(msInfo, msState) =
                 GrD3DTextureResource::CreateMSAA(gpu, dimensions, sampleCnt, info, clearColor);
+        if (!msInfo.fResource || !msState) {
+            return nullptr;
+        }
 
         const GrD3DDescriptorHeap::CPUHandle msaaRenderTargetView =
                 gpu->resourceProvider().createRenderTargetView(msInfo.fResource.get());

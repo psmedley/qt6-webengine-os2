@@ -1,5 +1,6 @@
 // Copyright (C) 2022 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef QWEBENGINESETTINGS_H
 #define QWEBENGINESETTINGS_H
@@ -60,6 +61,8 @@ public:
         DnsPrefetchEnabled,
         PdfViewerEnabled,
         NavigateOnDropEnabled,
+        ReadingFromCanvasEnabled,
+        ForceDarkMode,
     };
 
     enum FontSize {
@@ -74,6 +77,13 @@ public:
         DisallowUnknownUrlSchemes = 1,
         AllowUnknownUrlSchemesFromUserInteraction,
         AllowAllUnknownUrlSchemes
+    };
+
+    enum class ImageAnimationPolicy : uint8_t {
+        Inherited = 0,
+        Allow,
+        AnimateOnce,
+        Disallow,
     };
 
 public:
@@ -96,6 +106,10 @@ public:
     UnknownUrlSchemePolicy unknownUrlSchemePolicy() const;
     void setUnknownUrlSchemePolicy(UnknownUrlSchemePolicy policy);
     void resetUnknownUrlSchemePolicy();
+
+    void setImageAnimationPolicy(ImageAnimationPolicy policy);
+    ImageAnimationPolicy imageAnimationPolicy() const;
+    void resetImageAnimationPolicy();
 
 private:
     explicit QWebEngineSettings(QWebEngineSettings *parentSettings = nullptr);

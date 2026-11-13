@@ -57,7 +57,7 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
                           false) {
     ReadyToRunWorkerScript();
     GetBrowserInterfaceBroker().SetBinderForTesting(
-        ukm::mojom::UkmRecorderInterface::Name_,
+        ukm::mojom::UkmRecorderFactory::Name_,
         WTF::BindRepeating(
             [](ScopedFakeUkmRecorder* interface,
                mojo::ScopedMessagePipeHandle handle) {
@@ -122,7 +122,7 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
   // Returns a token uniquely identifying this fake worker.
   WorkerToken GetWorkerToken() const final { return token_; }
   bool CrossOriginIsolatedCapability() const final { return false; }
-  bool IsolatedApplicationCapability() const final { return false; }
+  bool IsIsolatedContext() const final { return false; }
   ExecutionContextToken GetExecutionContextToken() const final {
     return token_;
   }

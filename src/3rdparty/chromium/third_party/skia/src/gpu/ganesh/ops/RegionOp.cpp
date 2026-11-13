@@ -8,6 +8,7 @@
 #include "src/gpu/ganesh/ops/RegionOp.h"
 
 #include "include/core/SkRegion.h"
+#include "src/base/SkSafeMath.h"
 #include "src/core/SkMatrixPriv.h"
 #include "src/gpu/BufferWriter.h"
 #include "src/gpu/ganesh/GrCaps.h"
@@ -18,7 +19,9 @@
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
 
-namespace skgpu::v1::RegionOp {
+using namespace skia_private;
+
+namespace skgpu::ganesh::RegionOp {
 
 namespace {
 
@@ -112,13 +115,16 @@ private:
             }
         }
 
-        int numRegions = fRegions.count();
+        int numRegions = fRegions.size();
         int numRects = 0;
+
+        SkSafeMath safeMath;
         for (int i = 0; i < numRegions; i++) {
-            numRects += fRegions[i].fRegion.computeRegionComplexity();
+            numRects = safeMath.addInt(numRects, fRegions[i].fRegion.computeRegionComplexity());
         }
 
-        if (!numRects) {
+        if (!numRects || !safeMath) {
+            // This is a nonsensical draw, so we can just drop it.
             return;
         }
 
@@ -163,15 +169,15 @@ private:
             return CombineResult::kCannotCombine;
         }
 
-        fRegions.push_back_n(that->fRegions.count(), that->fRegions.begin());
+        fRegions.push_back_n(that->fRegions.size(), that->fRegions.begin());
         fWideColor |= that->fWideColor;
         return CombineResult::kMerged;
     }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     SkString onDumpInfo() const override {
-        SkString str = SkStringPrintf("# combined: %d\n", fRegions.count());
-        for (int i = 0; i < fRegions.count(); ++i) {
+        SkString str = SkStringPrintf("# combined: %d\n", fRegions.size());
+        for (int i = 0; i < fRegions.size(); ++i) {
             const RegionInfo& info = fRegions[i];
             str.appendf("%d: Color: 0x%08x, Region with %d rects\n", i, info.fColor.toBytes_RGBA(),
                         info.fRegion.computeRegionComplexity());
@@ -188,7 +194,7 @@ private:
 
     Helper fHelper;
     SkMatrix fViewMatrix;
-    SkSTArray<1, RegionInfo, true> fRegions;
+    STArray<1, RegionInfo, true> fRegions;
     bool fWideColor;
 
     GrSimpleMesh*  fMesh = nullptr;
@@ -212,9 +218,9 @@ GrOp::Owner Make(GrRecordingContext* context,
                               stencilSettings);
 }
 
-} // namespace skgpu::v1::RegionOp
+}  // namespace skgpu::ganesh::RegionOp
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 
 #include "src/gpu/ganesh/GrDrawOpTest.h"
 
@@ -243,8 +249,12 @@ GR_DRAW_OP_TEST_DEFINE(RegionOp) {
     if (numSamples > 1 && random->nextBool()) {
         aaType = GrAAType::kMSAA;
     }
-    return skgpu::v1::RegionOp::RegionOpImpl::Make(context, std::move(paint), viewMatrix, region,
-                                                   aaType, GrGetRandomStencil(random, context));
+    return skgpu::ganesh::RegionOp::RegionOpImpl::Make(context,
+                                                       std::move(paint),
+                                                       viewMatrix,
+                                                       region,
+                                                       aaType,
+                                                       GrGetRandomStencil(random, context));
 }
 
-#endif // GR_TEST_UTILS
+#endif // defined(GR_TEST_UTILS)

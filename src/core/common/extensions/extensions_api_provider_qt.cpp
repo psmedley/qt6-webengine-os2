@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "extensions_api_provider_qt.h"
 
@@ -57,7 +58,7 @@ bool ExtensionsAPIProviderQt::IsAPISchemaGenerated(const std::string &name)
             api::QtWebEngineGeneratedSchemas::IsGenerated(name);
 }
 
-base::StringPiece ExtensionsAPIProviderQt::GetAPISchema(const std::string &name)
+std::string_view ExtensionsAPIProviderQt::GetAPISchema(const std::string &name)
 {
     if (!api::GeneratedSchemas::Get(name).empty())
         return api::GeneratedSchemas::Get(name);

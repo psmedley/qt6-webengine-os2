@@ -4,6 +4,7 @@ DESC = FFmpeg utility library
 HEADERS = adler32.h                                                     \
           aes.h                                                         \
           aes_ctr.h                                                     \
+          ambient_viewing_environment.h                                 \
           attributes.h                                                  \
           audio_fifo.h                                                  \
           avassert.h                                                    \
@@ -30,6 +31,7 @@ HEADERS = adler32.h                                                     \
           encryption_info.h                                             \
           error.h                                                       \
           eval.h                                                        \
+          executor.h                                                    \
           fifo.h                                                        \
           file.h                                                        \
           frame.h                                                       \
@@ -90,6 +92,7 @@ HEADERS = adler32.h                                                     \
           tea.h                                                         \
           tx.h                                                          \
           film_grain_params.h                                           \
+          video_hint.h
 
 ARCH_HEADERS = bswap.h                                                  \
                intmath.h                                                \
@@ -102,6 +105,7 @@ BUILT_HEADERS = avconfig.h                                              \
 OBJS = adler32.o                                                        \
        aes.o                                                            \
        aes_ctr.o                                                        \
+       ambient_viewing_environment.o                                    \
        audio_fifo.o                                                     \
        avstring.o                                                       \
        avsscanf.o                                                       \
@@ -112,7 +116,6 @@ OBJS = adler32.o                                                        \
        cast5.o                                                          \
        camellia.o                                                       \
        channel_layout.o                                                 \
-       color_utils.o                                                    \
        cpu.o                                                            \
        crc.o                                                            \
        csp.o                                                            \
@@ -125,6 +128,7 @@ OBJS = adler32.o                                                        \
        encryption_info.o                                                \
        error.o                                                          \
        eval.o                                                           \
+       executor.o                                                       \
        fifo.o                                                           \
        file.o                                                           \
        file_open.o                                                      \
@@ -180,6 +184,7 @@ OBJS = adler32.o                                                        \
        uuid.o                                                           \
        version.o                                                        \
        video_enc_params.o                                               \
+       video_hint.o                                                     \
        film_grain_params.o                                              \
 
 
@@ -194,7 +199,7 @@ OBJS-$(CONFIG_QSV)                      += hwcontext_qsv.o
 OBJS-$(CONFIG_VAAPI)                    += hwcontext_vaapi.o
 OBJS-$(CONFIG_VIDEOTOOLBOX)             += hwcontext_videotoolbox.o
 OBJS-$(CONFIG_VDPAU)                    += hwcontext_vdpau.o
-OBJS-$(CONFIG_VULKAN)                   += hwcontext_vulkan.o
+OBJS-$(CONFIG_VULKAN)                   += hwcontext_vulkan.o vulkan.o
 
 OBJS-$(!CONFIG_VULKAN)                  += hwcontext_stub.o
 

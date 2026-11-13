@@ -402,7 +402,7 @@ TEST_F(BbrSenderTest, RemoveBytesLostInRecovery) {
   LostPacketVector lost_packets;
   lost_packets.emplace_back(least_inflight, least_inflight_packet_size);
   sender_->OnCongestionEvent(false, prior_inflight, clock_->Now(), {},
-                             lost_packets);
+                             lost_packets, 0, 0);
   EXPECT_EQ(sender_->ExportDebugState().recovery_window,
             prior_inflight - least_inflight_packet_size);
   EXPECT_LT(sender_->ExportDebugState().recovery_window, prior_recovery_window);
@@ -868,7 +868,7 @@ TEST_F(BbrSenderTest, SimpleTransfer2RTTStartup) {
   QuicBandwidth max_bw(QuicBandwidth::Zero());
   bool simulator_result = simulator_.RunUntilOrTimeout(
       [this, &max_bw, &max_bw_round]() {
-        if (max_bw < sender_->ExportDebugState().max_bandwidth) {
+        if (max_bw * 1.001 < sender_->ExportDebugState().max_bandwidth) {
           max_bw = sender_->ExportDebugState().max_bandwidth;
           max_bw_round = sender_->ExportDebugState().round_trip_count;
         }
@@ -895,7 +895,7 @@ TEST_F(BbrSenderTest, SimpleTransferExitStartupOnLoss) {
   QuicBandwidth max_bw(QuicBandwidth::Zero());
   bool simulator_result = simulator_.RunUntilOrTimeout(
       [this, &max_bw, &max_bw_round]() {
-        if (max_bw < sender_->ExportDebugState().max_bandwidth) {
+        if (max_bw * 1.001 < sender_->ExportDebugState().max_bandwidth) {
           max_bw = sender_->ExportDebugState().max_bandwidth;
           max_bw_round = sender_->ExportDebugState().round_trip_count;
         }
@@ -1300,7 +1300,7 @@ TEST_F(BbrSenderTest, LossOnlyCongestionEvent) {
 
   QuicTime now = simulator_.GetClock()->Now() + kTestRtt * 0.25;
   sender_->OnCongestionEvent(false, unacked_packets->bytes_in_flight(), now, {},
-                             lost_packets);
+                             lost_packets, 0, 0);
 
   // Bandwidth estimate should not change for the loss only event.
   EXPECT_EQ(prior_bandwidth_estimate, sender_->BandwidthEstimate());

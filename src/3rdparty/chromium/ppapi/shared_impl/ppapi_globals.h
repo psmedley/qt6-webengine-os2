@@ -5,10 +5,11 @@
 #ifndef PPAPI_SHARED_IMPL_PPAPI_GLOBALS_H_
 #define PPAPI_SHARED_IMPL_PPAPI_GLOBALS_H_
 
+#include <stack>
 #include <string>
 
-#include "base/memory/ref_counted.h"
-#include "base/threading/thread_local.h"  // For testing purposes only.
+#include "base/functional/callback.h"
+#include "base/memory/scoped_refptr.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/ppb_console.h"
@@ -104,6 +105,9 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   // in the constructor, so PpapiGlobals must be created on the main thread.
   base::SingleThreadTaskRunner* GetMainThreadMessageLoop();
 
+  // Manage the MessageLoop
+  void RunMsgLoop();
+  void QuitMsgLoop();
   // In tests, the PpapiGlobals object persists across tests but the MLP pointer
   // it hangs on will go stale and the next PPAPI test will crash because of
   // thread checks. This resets the pointer to be the current MLP object.
@@ -129,6 +133,7 @@ class PPAPI_SHARED_EXPORT PpapiGlobals {
   static PpapiGlobals* GetThreadLocalPointer();
 
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
+  std::stack<base::OnceClosure> message_loop_quit_closures_;
 };
 
 }  // namespace ppapi

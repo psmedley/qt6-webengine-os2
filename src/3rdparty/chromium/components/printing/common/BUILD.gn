@@ -6,12 +6,14 @@ import("//build/config/features.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//printing/buildflags/buildflags.gni")
 
-assert(enable_basic_printing)
+assert(enable_printing)
 
 source_set("common") {
   sources = [
     "cloud_print_cdd_conversion.cc",
     "cloud_print_cdd_conversion.h",
+    "print_params.cc",
+    "print_params.h",
   ]
 
   deps = [
@@ -41,6 +43,7 @@ mojom("mojo_interfaces") {
   public_deps = [
     "//mojo/public/mojom/base",
     "//printing/mojom",
+    "//ui/accessibility/mojom",
     "//ui/gfx/geometry/mojom",
   ]
 
@@ -48,11 +51,7 @@ mojom("mojo_interfaces") {
   if (enable_print_preview) {
     enabled_features += [ "enable_print_preview" ]
   }
-  if (enable_tagged_pdf) {
-    assert(enable_print_preview)
-    public_deps += [ "//ui/accessibility/mojom" ]
-    enabled_features += [ "enable_tagged_pdf" ]
-  }
+
   if (enable_print_content_analysis) {
     enabled_features += [ "enable_print_content_analysis" ]
   }
@@ -65,6 +64,8 @@ source_set("unit_tests") {
     ":common",
     "//base/test:test_support",
     "//printing/backend",
+    "//printing/backend:test_support",
     "//testing/gtest",
+    "//ui/gfx/geometry:geometry",
   ]
 }

@@ -10,7 +10,7 @@ Most of what you'll want to know exists between
 
 * [`//base/allocator/partition_allocator/BUILD.gn`][pa-build-gn],
 * Everything else ending in `.gn` or `.gni` in
-  `//base/allocator/partition_allocator/`,
+  `//base/allocator/partition_allocator/src/partition_alloc/`,
 * [`allocator.gni`][allocator-gni],
 * [`//base/allocator/BUILD.gn`][base-allocator-build-gn], and
 * [`//base/BUILD.gn`][base-build-gn].
@@ -48,47 +48,19 @@ PartitionAlloc-Everywhere and must be `true` as a prerequisite for
 enabling PA-E.
 ***
 
-### `use_allocator`
+### `use_partition_alloc_as_malloc`
 
-Does nothing special when value is `"none"`. Enables
-[PartitionAlloc-Everywhere (PA-E)][pae-public-doc] when value is
-`"partition"`.
+Does nothing special when value is `false`. Enables
+[PartitionAlloc-Everywhere (PA-E)][pae-public-doc] when value is `true`.
 
 *** note
 * While "everywhere" (in "PartitionAlloc-Everywhere") tautologically
   includes Blink where PartitionAlloc originated, setting
-  `use_allocator = "none"` does not disable PA usage in Blink.
-* `use_allocator = "partition"` internally sets
-  `use_partition_alloc_as_malloc = true`, which must not be confused
+  `use_partition_alloc_as_malloc = false` does not disable PA usage in Blink,
+  which invokes PA explicitly (not via malloc).
+* `use_partition_alloc_as_malloc = true` must not be confused
   with `use_partition_alloc` (see above).
 ***
-
-### `use_backup_ref_ptr`
-
-Specifies `BackupRefPtr` as the implementation for `base::raw_ptr<T>`
-when `true`. See the [MiraclePtr documentation][miracleptr-doc].
-
-*** aside
-BRP requires support from PartitionAlloc, so `use_backup_ref_ptr` also
-compiles the relevant code into PA. However, this arg does _not_ govern
-whether or not BRP is actually enabled at runtime - that functionality
-is controlled by a Finch flag.
-***
-
-## Note: Component Builds
-
-When working on PartitionAlloc, know that `is_debug` defaults to
-implying `is_component_build`, which interferes with the allocator
-shim. A typical set of GN args should include
-
-```none
-is_debug = true
-is_component_build = false
-```
-
-Conversely, build configurations that have `is_component_build = true`
-without explicitly specifying PA-specific args will not build with PA-E
-enabled.
 
 ## Notable Macros
 
@@ -125,7 +97,7 @@ that influence PartitionAlloc's behavior.
 [allocator-gni]: https://source.chromium.org/chromium/chromium/src/+/main:base/allocator/allocator.gni
 [base-allocator-build-gn]: https://source.chromium.org/chromium/chromium/src/+/main:base/allocator/BUILD.gn
 [base-build-gn]: https://source.chromium.org/chromium/chromium/src/+/main:base/BUILD.gn
-[partition-alloc-config]: https://source.chromium.org/chromium/chromium/src/+/main:base/allocator/partition_allocator/partition_alloc_config.h
+[partition-alloc-config]: https://source.chromium.org/chromium/chromium/src/+/main:base/allocator/partition_allocator/src/partition_alloc/partition_alloc_config.h
 [pae-public-doc]: https://docs.google.com/document/d/1R1H9z5IVUAnXJgDjnts3nTJVcRbufWWT9ByXLgecSUM/preview
 [miracleptr-doc]: https://docs.google.com/document/d/1pnnOAIz_DMWDI4oIOFoMAqLnf_MZ2GsrJNb_dbQ3ZBg/preview
 [pa-ee-crbug]: https://crbug.com/1151236

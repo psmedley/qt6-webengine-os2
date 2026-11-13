@@ -7,6 +7,9 @@
 
 #include "include/private/SkIDChangeListener.h"
 
+#include "include/private/base/SkAssert.h"
+
+#include <utility>
 /**
  * Used to be notified when a gen/unique ID is invalidated, typically to preemptively purge
  * associated items from a cache that are no longer reachable. The listener can
@@ -26,11 +29,10 @@ List::List() = default;
 List::~List() {
     // We don't need the mutex. No other thread should have this list while it's being
     // destroyed.
-    for (int i = 0; i < fListeners.size(); ++i) {
-        if (!fListeners[i]->shouldDeregister()) {
-            fListeners[i]->changed();
+    for (auto& listener : fListeners) {
+        if (!listener->shouldDeregister()) {
+            listener->changed();
         }
-        fListeners[i]->unref();
     }
 }
 
@@ -44,11 +46,10 @@ void List::add(sk_sp<SkIDChangeListener> listener) {
     // Clean out any stale listeners before we append the new one.
     for (int i = 0; i < fListeners.size(); ++i) {
         if (fListeners[i]->shouldDeregister()) {
-            fListeners[i]->unref();
             fListeners.removeShuffle(i--);  // No need to preserve the order after i.
         }
     }
-    *fListeners.append() = listener.release();
+    fListeners.push_back(std::move(listener));
 }
 
 int List::count() const {
@@ -58,17 +59,15 @@ int List::count() const {
 
 void List::changed() {
     SkAutoMutexExclusive lock(fMutex);
-    for (SkIDChangeListener* listener : fListeners) {
+    for (auto& listener : fListeners) {
         if (!listener->shouldDeregister()) {
             listener->changed();
         }
-        // Listeners get at most one shot, so whether these triggered or not, blow them away.
-        listener->unref();
     }
-    fListeners.reset();
+    fListeners.clear();
 }
 
 void List::reset() {
     SkAutoMutexExclusive lock(fMutex);
-    fListeners.unrefAll();
+    fListeners.clear();
 }

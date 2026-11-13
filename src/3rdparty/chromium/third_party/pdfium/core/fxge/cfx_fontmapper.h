@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 #ifdef PDF_ENABLE_XFA
-#include "core/fxcrt/fixed_uninit_data_vector.h"
+#include "core/fxcrt/fixed_size_data_vector.h"
 #endif
 
 class CFX_FontMgr;
@@ -88,10 +88,12 @@ class CFX_FontMapper {
 
 #ifdef PDF_ENABLE_XFA
   // `index` must be less than GetFaceSize().
-  FixedUninitDataVector<uint8_t> RawBytesForIndex(size_t index);
+  FixedSizeDataVector<uint8_t> RawBytesForIndex(size_t index);
 #endif  // PDF_ENABLE_XFA
 
  private:
+  friend class TestFontMapper;
+
   uint32_t GetChecksumFromTT(void* font_handle);
   ByteString GetPSNameFromTT(void* font_handle);
   ByteString MatchInstalledFonts(const ByteString& norm_name);

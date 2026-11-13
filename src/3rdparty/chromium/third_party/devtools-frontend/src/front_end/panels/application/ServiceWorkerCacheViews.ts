@@ -6,68 +6,71 @@ import * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import type * as Protocol from '../../generated/protocol.js';
+import * as LegacyWrapper from '../../ui/components/legacy_wrapper/legacy_wrapper.js';
 import * as DataGrid from '../../ui/legacy/components/data_grid/data_grid.js';
 import * as UI from '../../ui/legacy/legacy.js';
-
-import serviceWorkerCacheViewsStyles from './serviceWorkerCacheViews.css.js';
-
-import type * as Protocol from '../../generated/protocol.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
+import * as NetworkComponents from '../network/components/components.js';
 import * as Network from '../network/network.js';
+
+import * as ApplicationComponents from './components/components.js';
+import serviceWorkerCacheViewsStyles from './serviceWorkerCacheViews.css.js';
 
 const UIStrings = {
   /**
-  *@description Text in Application Panel Sidebar of the Application panel
-  */
+   *@description Text in Application Panel Sidebar of the Application panel
+   */
   cache: 'Cache',
   /**
-  *@description Text to refresh the page
-  */
+   *@description Text to refresh the page
+   */
   refresh: 'Refresh',
   /**
-  *@description Tooltip text that appears when hovering over the largeicon delete button in the Service Worker Cache Views of the Application panel
-  */
+   *@description Tooltip text that appears when hovering over the largeicon delete button in the Service Worker Cache Views of the Application panel
+   */
   deleteSelected: 'Delete Selected',
   /**
-  *@description Text in Service Worker Cache Views of the Application panel
-  */
+   *@description Text in Service Worker Cache Views of the Application panel
+   */
   filterByPath: 'Filter by Path',
   /**
-  *@description Text in Service Worker Cache Views of the Application panel
-  */
+   *@description Text in Service Worker Cache Views of the Application panel
+   */
   selectACacheEntryAboveToPreview: 'Select a cache entry above to preview',
   /**
-  *@description Text for the name of something
-  */
+   *@description Text for the name of something
+   */
   name: 'Name',
   /**
-  *@description Text in Service Worker Cache Views of the Application panel
-  */
+   *@description Text in Service Worker Cache Views of the Application panel
+   */
   timeCached: 'Time Cached',
   /**
-  * @description Tooltip text that appears when hovering over the vary header column in the Service Worker Cache Views of the Application panel
-  */
+   * @description Tooltip text that appears when hovering over the vary header column in the Service Worker Cache Views of the Application panel
+   */
   varyHeaderWarning: '⚠️ Set ignoreVary to true when matching this entry',
   /**
-  *@description Text used to show that data was retrieved from ServiceWorker Cache
-  */
+   *@description Text used to show that data was retrieved from ServiceWorker Cache
+   */
   serviceWorkerCache: '`Service Worker` Cache',
   /**
-  *@description Span text content in Service Worker Cache Views of the Application panel
-  *@example {2} PH1
-  */
+   *@description Span text content in Service Worker Cache Views of the Application panel
+   *@example {2} PH1
+   */
   matchingEntriesS: 'Matching entries: {PH1}',
   /**
-  *@description Span text content in Indexed DBViews of the Application panel
-  *@example {2} PH1
-  */
+   *@description Span text content in Indexed DBViews of the Application panel
+   *@example {2} PH1
+   */
   totalEntriesS: 'Total entries: {PH1}',
   /**
-  *@description Text for network request headers
-  */
+   *@description Text for network request headers
+   */
   headers: 'Headers',
   /**
-  *@description Text for previewing items
-  */
+   *@description Text for previewing items
+   */
   preview: 'Preview',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/ServiceWorkerCacheViews.ts', UIStrings);
@@ -90,6 +93,8 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
     entries: Array<Protocol.CacheStorage.DataEntry>,
     returnCount: number,
   }>|null;
+  private readonly metadataView = new ApplicationComponents.StorageMetadataView.StorageMetadataView();
+
   constructor(model: SDK.ServiceWorkerCacheModel.ServiceWorkerCacheModel, cache: SDK.ServiceWorkerCacheModel.Cache) {
     super(i18nString(UIStrings.cache));
 
@@ -98,8 +103,10 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
 
     this.element.classList.add('service-worker-cache-data-view');
     this.element.classList.add('storage-view');
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('cache-storage-data')}`);
 
     const editorToolbar = new UI.Toolbar.Toolbar('data-view-toolbar', this.element);
+    this.element.appendChild(this.metadataView);
     this.splitWidget = new UI.SplitWidget.SplitWidget(false, false);
     this.splitWidget.show(this.element);
 
@@ -111,13 +118,23 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
     this.preview = null;
 
     this.cache = cache;
+    const bucketInfo = this.model.target()
+                           .model(SDK.StorageBucketsModel.StorageBucketsModel)
+                           ?.getBucketByName(cache.storageBucket.storageKey, cache.storageBucket.name);
+    if (bucketInfo) {
+      this.metadataView.setStorageBucket(bucketInfo);
+    } else if (cache.storageKey) {
+      this.metadataView.setStorageKey(cache.storageKey);
+    }
     this.dataGrid = null;
     this.refreshThrottler = new Common.Throttler.Throttler(300);
-    this.refreshButton = new UI.Toolbar.ToolbarButton(i18nString(UIStrings.refresh), 'largeicon-refresh');
+    this.refreshButton =
+        new UI.Toolbar.ToolbarButton(i18nString(UIStrings.refresh), 'refresh', undefined, 'cache-storage.refresh');
     this.refreshButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, this.refreshButtonClicked, this);
     editorToolbar.appendToolbarItem(this.refreshButton);
 
-    this.deleteSelectedButton = new UI.Toolbar.ToolbarButton(i18nString(UIStrings.deleteSelected), 'largeicon-delete');
+    this.deleteSelectedButton = new UI.Toolbar.ToolbarButton(
+        i18nString(UIStrings.deleteSelected), 'cross', undefined, 'cache-storage.delete-selected');
     this.deleteSelectedButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, _event => {
       void this.deleteButtonClicked(null);
     });
@@ -150,14 +167,14 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
     dataGridWidget.setMinimumSize(0, 250);
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     this.model.addEventListener(
         SDK.ServiceWorkerCacheModel.Events.CacheStorageContentUpdated, this.cacheContentUpdated, this);
     this.registerCSSFiles([serviceWorkerCacheViewsStyles]);
     void this.updateData(true);
   }
 
-  willHide(): void {
+  override willHide(): void {
     this.model.removeEventListener(
         SDK.ServiceWorkerCacheModel.Events.CacheStorageContentUpdated, this.cacheContentUpdated, this);
   }
@@ -177,33 +194,34 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
   }
 
   private createDataGrid(): DataGrid.DataGrid.DataGridImpl<DataGridNode> {
+    const k = Platform.StringUtilities.kebab;
     const columns = ([
-      {id: 'number', title: '#', sortable: false, width: '3px'},
-      {id: 'name', title: i18nString(UIStrings.name), weight: 4, sortable: true},
+      {id: k('number'), title: '#', sortable: false, width: '3px'},
+      {id: k('name'), title: i18nString(UIStrings.name), weight: 4, sortable: true},
       {
-        id: 'responseType',
+        id: k('response-type'),
         title: i18n.i18n.lockedString('Response-Type'),
         weight: 1,
         align: DataGrid.DataGrid.Align.Right,
         sortable: true,
       },
-      {id: 'contentType', title: i18n.i18n.lockedString('Content-Type'), weight: 1, sortable: true},
+      {id: k('content-type'), title: i18n.i18n.lockedString('Content-Type'), weight: 1, sortable: true},
       {
-        id: 'contentLength',
+        id: k('content-length'),
         title: i18n.i18n.lockedString('Content-Length'),
         weight: 1,
         align: DataGrid.DataGrid.Align.Right,
         sortable: true,
       },
       {
-        id: 'responseTime',
+        id: k('response-time'),
         title: i18nString(UIStrings.timeCached),
         width: '12em',
         weight: 1,
         align: DataGrid.DataGrid.Align.Right,
         sortable: true,
       },
-      {id: 'varyHeader', title: i18n.i18n.lockedString('Vary Header'), weight: 1, sortable: true},
+      {id: k('vary-header'), title: i18n.i18n.lockedString('Vary Header'), weight: 1, sortable: true},
     ] as DataGrid.DataGrid.ColumnDescriptor[]);
     const dataGrid = new DataGrid.DataGrid.DataGridImpl({
       displayName: i18nString(UIStrings.serviceWorkerCache),
@@ -234,15 +252,15 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
     let comparator: (arg0: DataGridNode, arg1: DataGridNode) => number;
     if (columnId === 'name') {
       comparator = (a: DataGridNode, b: DataGridNode): number => a.name.localeCompare(b.name);
-    } else if (columnId === 'contentType') {
+    } else if (columnId === 'content-type') {
       comparator = (a: DataGridNode, b: DataGridNode): number => a.data.mimeType.localeCompare(b.data.mimeType);
-    } else if (columnId === 'contentLength') {
+    } else if (columnId === 'content-length') {
       comparator = (a: DataGridNode, b: DataGridNode): number => a.data.resourceSize - b.data.resourceSize;
-    } else if (columnId === 'responseTime') {
+    } else if (columnId === 'response-time') {
       comparator = (a: DataGridNode, b: DataGridNode): number => a.data.endTime - b.data.endTime;
-    } else if (columnId === 'responseType') {
+    } else if (columnId === 'response-type') {
       comparator = (a: DataGridNode, b: DataGridNode): number => a.responseType.localeCompare(b.responseType);
-    } else if (columnId === 'varyHeader') {
+    } else if (columnId === 'vary-header') {
       comparator = (a: DataGridNode, b: DataGridNode): number => a.varyHeader.localeCompare(b.varyHeader);
     }
 
@@ -359,8 +377,8 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
 
   private cacheContentUpdated(
       event: Common.EventTarget.EventTargetEvent<SDK.ServiceWorkerCacheModel.CacheStorageContentUpdatedEvent>): void {
-    const {cacheName, origin} = event.data;
-    if (this.cache.securityOrigin !== origin || this.cache.cacheName !== cacheName) {
+    const {cacheName, storageBucket} = event.data;
+    if ((!this.cache.inBucket(storageBucket) || this.cache.cacheName !== cacheName)) {
       return;
     }
     void this.refreshThrottler.schedule(() => Promise.resolve(this.updateData(true)), true);
@@ -393,13 +411,19 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
     request.endTime = entry.responseTime;
 
     let header = entry.responseHeaders.find(header => header.name.toLowerCase() === 'content-type');
-    const contentType = header ? header.value : SDK.NetworkRequest.MIME_TYPE.PLAIN;
-    request.mimeType = contentType as SDK.NetworkRequest.MIME_TYPE;
+    let mimeType: string = SDK.MimeType.MimeType.PLAIN;
+    if (header) {
+      const result = SDK.MimeType.parseContentType(header.value);
+      if (result.mimeType) {
+        mimeType = result.mimeType;
+      }
+    }
+    request.mimeType = mimeType;
 
     header = entry.responseHeaders.find(header => header.name.toLowerCase() === 'content-length');
     request.resourceSize = (header && Number(header.value)) || 0;
 
-    let resourceType = Common.ResourceType.ResourceType.fromMimeType(contentType);
+    let resourceType = Common.ResourceType.ResourceType.fromMimeType(mimeType);
     if (!resourceType) {
       resourceType =
           Common.ResourceType.ResourceType.fromURL(entry.requestURL) || Common.ResourceType.resourceTypes.Other;
@@ -409,14 +433,14 @@ export class ServiceWorkerCacheView extends UI.View.SimpleView {
     return request;
   }
 
-  private async requestContent(request: SDK.NetworkRequest.NetworkRequest): Promise<SDK.NetworkRequest.ContentData> {
-    const isText = request.resourceType().isTextType();
-    const contentData: SDK.NetworkRequest.ContentData = {error: null, content: null, encoded: !isText};
+  private async requestContent(request: SDK.NetworkRequest.NetworkRequest):
+      Promise<SDK.ContentData.ContentDataOrError> {
     const response = await this.cache.requestCachedResponse(request.url(), request.requestHeaders());
-    if (response) {
-      contentData.content = isText ? window.atob(response.body) : response.body;
+    if (!response) {
+      return {error: 'No cached response found'};
     }
-    return contentData;
+    return new SDK.ContentData.ContentData(
+        response.body, /* isBase64=*/ true, request.mimeType, request.charset() ?? undefined);
   }
 
   private updatedForTest(): void {
@@ -452,7 +476,7 @@ export class DataGridNode extends DataGrid.DataGrid.DataGridNode<DataGridNode> {
     this.varyHeader = request.responseHeaders.find(header => header.name.toLowerCase() === 'vary')?.value || '';
   }
 
-  createCell(columnId: string): HTMLElement {
+  override createCell(columnId: string): HTMLElement {
     const cell = this.createTD(columnId);
     let value;
     let tooltip = this.request.url() as string;
@@ -460,7 +484,7 @@ export class DataGridNode extends DataGrid.DataGrid.DataGridNode<DataGridNode> {
       value = String(this.number);
     } else if (columnId === 'name') {
       value = this.name;
-    } else if (columnId === 'responseType') {
+    } else if (columnId === 'response-type') {
       if (this.responseType === 'opaqueResponse') {
         value = 'opaque';
       } else if (this.responseType === 'opaqueRedirect') {
@@ -468,13 +492,13 @@ export class DataGridNode extends DataGrid.DataGrid.DataGridNode<DataGridNode> {
       } else {
         value = this.responseType;
       }
-    } else if (columnId === 'contentType') {
+    } else if (columnId === 'content-type') {
       value = this.request.mimeType;
-    } else if (columnId === 'contentLength') {
+    } else if (columnId === 'content-length') {
       value = (this.request.resourceSize | 0).toLocaleString('en-US');
-    } else if (columnId === 'responseTime') {
+    } else if (columnId === 'response-time') {
       value = new Date(this.request.endTime * 1000).toLocaleString();
-    } else if (columnId === 'varyHeader') {
+    } else if (columnId === 'vary-header') {
       value = this.varyHeader;
       if (this.varyHeader) {
         tooltip = i18nString(UIStrings.varyHeaderWarning);
@@ -499,17 +523,20 @@ export class RequestView extends UI.Widget.VBox {
     super();
 
     this.tabbedPane = new UI.TabbedPane.TabbedPane();
+    this.tabbedPane.element.setAttribute('jslog', `${VisualLogging.section().context('network-item-preview')}`);
     this.tabbedPane.addEventListener(UI.TabbedPane.Events.TabSelected, this.tabSelected, this);
     this.resourceViewTabSetting = Common.Settings.Settings.instance().createSetting('cacheStorageViewTab', 'preview');
 
     this.tabbedPane.appendTab(
-        'headers', i18nString(UIStrings.headers), new Network.RequestHeadersView.RequestHeadersView(request));
+        'headers', i18nString(UIStrings.headers),
+        LegacyWrapper.LegacyWrapper.legacyWrapper(
+            UI.Widget.VBox, new NetworkComponents.RequestHeadersView.RequestHeadersView(request)));
     this.tabbedPane.appendTab(
         'preview', i18nString(UIStrings.preview), new Network.RequestPreviewView.RequestPreviewView(request));
     this.tabbedPane.show(this.element);
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.selectTab();
   }

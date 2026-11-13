@@ -7,8 +7,10 @@
 #include "base/base64url.h"
 #include "base/check.h"
 #include "base/rand_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversion_utils.h"
+#include "content/public/common/content_features.h"
 
 namespace content {
 namespace {
@@ -51,10 +53,8 @@ std::string ToJSONString(base::StringPiece in) {
     } else if (codepoint == 0x5c) {
       ret.append("\\\\");
     } else {
-      static const char hextable[17] = "0123456789abcdef";
       ret.append("\\u00");
-      ret.push_back(hextable[codepoint >> 4]);
-      ret.push_back(hextable[codepoint & 15]);
+      base::AppendHexEncodedByte(static_cast<uint8_t>(codepoint), ret, false);
     }
   }
 
@@ -81,14 +81,7 @@ std::string BuildClientDataJson(ClientDataJsonParams params) {
   std::string ret;
   ret.reserve(128);
 
-  // U2F uses "typ", while WebAuthn uses "type" for the type key.
   switch (params.type) {
-    case ClientDataRequestType::kU2fRegister:
-      ret.append(R"({"typ":"navigator.id.finishEnrollment")");
-      break;
-    case ClientDataRequestType::kU2fSign:
-      ret.append(R"({"typ":"navigator.id.getAssertion")");
-      break;
     case ClientDataRequestType::kWebAuthnCreate:
       ret.append(R"({"type":"webauthn.create")");
       break;
@@ -116,10 +109,6 @@ std::string BuildClientDataJson(ClientDataJsonParams params) {
     ret.append(R"(,"payment":{)");
 
     ret.append(R"("rpId":)");
-    ret.append(ToJSONString(params.payment_rp));
-
-    // TODO(crbug.com/1356224): Remove legacy 'rp' parameter.
-    ret.append(R"(,"rp":)");
     ret.append(ToJSONString(params.payment_rp));
 
     ret.append(R"(,"topOrigin":)");

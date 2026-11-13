@@ -19,32 +19,32 @@ import {frameworkEventListeners, type FrameworkEventListenersObject} from './Eve
 
 const UIStrings = {
   /**
-  *@description Empty holder text content in Event Listeners View of the Event Listener Debugging pane in the Sources panel
-  */
+   *@description Empty holder text content in Event Listeners View of the Event Listener Debugging pane in the Sources panel
+   */
   noEventListeners: 'No event listeners',
   /**
-  *@description Label for an item to remove something
-  */
+   *@description Label for an item to remove something
+   */
   remove: 'Remove',
   /**
-  *@description Delete button title in Event Listeners View of the Event Listener Debugging pane in the Sources panel
-  */
+   *@description Delete button title in Event Listeners View of the Event Listener Debugging pane in the Sources panel
+   */
   deleteEventListener: 'Delete event listener',
   /**
-  *@description Passive button text content in Event Listeners View of the Event Listener Debugging pane in the Sources panel
-  */
+   *@description Passive button text content in Event Listeners View of the Event Listener Debugging pane in the Sources panel
+   */
   togglePassive: 'Toggle Passive',
   /**
-  *@description Passive button title in Event Listeners View of the Event Listener Debugging pane in the Sources panel
-  */
+   *@description Passive button title in Event Listeners View of the Event Listener Debugging pane in the Sources panel
+   */
   toggleWhetherEventListenerIs: 'Toggle whether event listener is passive or blocking',
   /**
-  *@description A context menu item to reveal a node in the DOM tree of the Elements Panel
-  */
+   *@description A context menu item to reveal a node in the DOM tree of the Elements Panel
+   */
   revealInElementsPanel: 'Reveal in Elements panel',
   /**
-  *@description Text in Event Listeners Widget of the Elements panel
-  */
+   *@description Text in Event Listeners Widget of the Elements panel
+   */
   passive: 'Passive',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/event_listeners/EventListenersView.ts', UIStrings);
@@ -61,8 +61,6 @@ export class EventListenersView extends UI.Widget.VBox {
     this.changeCallback = changeCallback;
     this.enableDefaultTreeFocus = enableDefaultTreeFocus;
     this.treeOutline = new UI.TreeOutline.TreeOutlineInShadow();
-    this.treeOutline.hideOverflow();
-
     this.treeOutline.setComparator(EventListenersTreeElement.comparator);
     this.treeOutline.element.classList.add('monospace');
     this.treeOutline.setShowSelectionOnKeyboardFocus(true);
@@ -76,7 +74,7 @@ export class EventListenersView extends UI.Widget.VBox {
     this.treeItemMap = new Map();
   }
 
-  focus(): void {
+  override focus(): void {
     if (!this.enableDefaultTreeFocus) {
       return;
     }
@@ -237,14 +235,14 @@ export class EventListenersView extends UI.Widget.VBox {
 
   private eventListenersArrivedForTest(): void {
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.treeOutline.registerCSSFiles([eventListenersViewStyles, objectValueStyles]);
   }
 }
 
 export class EventListenersTreeElement extends UI.TreeOutline.TreeElement {
-  toggleOnClick: boolean;
+  override toggleOnClick: boolean;
   private readonly linkifier: Components.Linkifier.Linkifier;
   private readonly changeCallback: () => void;
   constructor(type: string, linkifier: Components.Linkifier.Linkifier, changeCallback: () => void) {
@@ -252,7 +250,7 @@ export class EventListenersTreeElement extends UI.TreeOutline.TreeElement {
     this.toggleOnClick = true;
     this.linkifier = linkifier;
     this.changeCallback = changeCallback;
-    UI.ARIAUtils.setAccessibleName(this.listItemElement, `${type}, event listener`);
+    UI.ARIAUtils.setLabel(this.listItemElement, `${type}, event listener`);
   }
 
   static comparator(element1: UI.TreeOutline.TreeElement, element2: UI.TreeOutline.TreeElement): number {
@@ -284,7 +282,7 @@ export class ObjectEventListenerBar extends UI.TreeOutline.TreeElement {
     this.changeCallback = changeCallback;
   }
 
-  async onpopulate(): Promise<void> {
+  override async onpopulate(): Promise<void> {
     const properties = [];
     const eventListener = this.eventListenerInternal;
     const runtimeModel = eventListener.domDebuggerModel().runtimeModel();
@@ -344,7 +342,7 @@ export class ObjectEventListenerBar extends UI.TreeOutline.TreeElement {
       }
       menu.defaultSection().appendItem(
           i18nString(UIStrings.deleteEventListener), this.removeListener.bind(this),
-          !this.eventListenerInternal.canRemove());
+          {disabled: !this.eventListenerInternal.canRemove()});
       menu.defaultSection().appendCheckboxItem(
           i18nString(UIStrings.passive), this.togglePassiveListener.bind(this), this.eventListenerInternal.passive(),
           !this.eventListenerInternal.canTogglePassive());
@@ -383,7 +381,7 @@ export class ObjectEventListenerBar extends UI.TreeOutline.TreeElement {
     return this.eventListenerInternal;
   }
 
-  onenter(): boolean {
+  override onenter(): boolean {
     if (this.valueTitle) {
       (this.valueTitle as HTMLElement).click();
       return true;
@@ -392,7 +390,7 @@ export class ObjectEventListenerBar extends UI.TreeOutline.TreeElement {
     return false;
   }
 
-  ondelete(): boolean {
+  override ondelete(): boolean {
     if (this.eventListenerInternal.canRemove()) {
       this.removeListener();
       return true;

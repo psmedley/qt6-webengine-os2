@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <map>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,8 +36,25 @@ CharT* data(std::basic_string<CharT, Traits, Allocator>& str) {
   return std::addressof(str[0]);
 }
 
-std::string Join(const std::vector<std::string>& strings,
-                 const char* delimiter);
+// Stringify a vector of objects that have an operator<< overload.
+template <typename T>
+std::string Join(const std::vector<T>& vec, const char* delimiter = ", ") {
+  std::stringstream ss;
+
+  auto it = vec.begin();
+  ss << *it;
+  for (++it; it != vec.end(); ++it) {
+    ss << delimiter << *it;
+  }
+
+  return ss.str();
+}
+
+// Removes ALL whitespace in place from the string, based on the present C
+// locale. This includes spaces, tabs, and returns. This is useful for string
+// comparisons where whitespace doesn't matter, or, in the case of JSON
+// serialization, is dependent on build configuration and other settings.
+std::string& RemoveWhitespace(std::string& s);
 
 template <typename Key, typename Value>
 void RemoveValueFromMap(std::map<Key, Value*>* map, Value* value) {

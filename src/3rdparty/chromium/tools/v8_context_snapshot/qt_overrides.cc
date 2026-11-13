@@ -4,14 +4,16 @@
 
 #include "build/build_config.h"
 #include "gpu/vulkan/buildflags.h"
+#include "ui/base/ozone_buildflags.h"
 
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_display.h"
 #include "ui/gl/gl_surface.h"
+#endif
 
-#if BUILDFLAG(IS_LINUX)
-#include "ui/gl/gl_surface_egl.h"
+#if BUILDFLAG(IS_LINUX) && BUILDFLAG(IS_OZONE_X11)
 #include "ui/gl/gl_surface_glx.h"
 #endif
 
@@ -23,30 +25,12 @@
 #include "gpu/vulkan/init/vulkan_factory.h"
 #endif
 
-#if BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_LINUX) && BUILDFLAG(IS_OZONE_X11)
 void* GetQtXDisplay() {
   return nullptr;
 }
 
 namespace gl {
-DisplayType GLDisplayEGL::GetDisplayType() const {
-  return DisplayType::DEFAULT;
-}
-GLDisplayEGL* GLSurfaceEGL::GetGLDisplayEGL() {
-  return nullptr;
-}
-GLDisplayEGL* GLDisplayEGL::GetDisplayForCurrentContext() {
-  return nullptr;
-}
-bool GLDisplayEGL::IsAndroidNativeFenceSyncSupported() {
-  return false;
-}
-bool GLDisplayEGL::IsEGLContextPrioritySupported() {
-  return false;
-}
-bool GLDisplayEGL::InitializeExtensionSettings() {
-  return false;
-}
 bool GLSurfaceGLX::IsCreateContextRobustnessSupported() {
   return false;
 }
@@ -62,14 +46,8 @@ bool GLSurfaceGLX::IsCreateContextES2ProfileSupported() {
 bool GLSurfaceGLX::IsCreateContextSupported() {
   return false;
 }
-bool GLSurfaceGLX::InitializeExtensionSettingsOneOff() {
-  return false;
-}
-std::string DisplayExtensionsEGL::GetPlatformExtensions(EGLDisplay) {
-  return std::string();
-}
-}  // namespace gl
-#endif  // BUILDFLAG(IS_LINUX)
+} // namespace gl
+#endif  // if BUILDFLAG(IS_LINUX) && BUILDFLAG(IS_OZONE_X11)
 
 #if BUILDFLAG(IS_WIN)
 namespace gl {
@@ -82,25 +60,23 @@ scoped_refptr<GLContext> CreateGLContext(GLShareGroup* share_group,
                                          const GLContextAttribs& attribs) {
   return nullptr;
 }
-GLDisplay* InitializeGLOneOffPlatform(uint64_t system_device_id) {
+GLDisplay* InitializeGLOneOffPlatform(GpuPreference preference) {
   return nullptr;
 }
 bool usingSoftwareDynamicGL() {
   return false;
 }
-scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
-    GLDisplay* display,
-    const gfx::Size& size,
-    GLSurfaceFormat format) {
+scoped_refptr<GLSurface> CreateOffscreenGLSurface(GLDisplay* display,
+                                                  const gfx::Size& size) {
   return nullptr;
 }
 scoped_refptr<GLSurface> CreateViewGLSurface(GLDisplay* display,
                                              gfx::AcceleratedWidget window) {
   return nullptr;
 }
+
 }  // namespace init
 }  // namespace gl
-
 #endif  // BUILDFLAG(IS_WIN)
 
 namespace ui {

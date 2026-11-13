@@ -1,20 +1,37 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_METAL_UTILSMETAL_H_
 #define SRC_DAWN_NATIVE_METAL_UTILSMETAL_H_
 
+#include <string>
+
+#include "dawn/common/NSRef.h"
+#include "dawn/common/StackContainer.h"
 #include "dawn/native/dawn_platform.h"
 #include "dawn/native/metal/DeviceMTL.h"
 #include "dawn/native/metal/ShaderModuleMTL.h"
@@ -31,12 +48,42 @@ enum class SingleShaderStage;
 
 namespace dawn::native::metal {
 
+MTLPixelFormat MetalPixelFormat(const DeviceBase* device, wgpu::TextureFormat format);
+
+NSRef<NSString> MakeDebugName(DeviceBase* device, const char* prefix, std::string label = "");
+
+// Templating for setting the label on MTL objects because not all MTL objects are of the same base
+// class. For example MTLBuffer and MTLTexture inherit MTLResource, but MTLFunction does not. Note
+// that we allow a nullable Metal object because APISetLabel does not currently do any checks on
+// backend resources.
+template <typename T>
+void SetDebugName(DeviceBase* device, T* mtlObj, const char* prefix, std::string label = "") {
+    if (mtlObj == nullptr) {
+        return;
+    }
+    NSRef<NSString> debugName = MakeDebugName(device, prefix, label);
+    [mtlObj setLabel:debugName.Get()];
+}
+
+Aspect GetDepthStencilAspects(MTLPixelFormat format);
 MTLCompareFunction ToMetalCompareFunction(wgpu::CompareFunction compareFunction);
 
 struct TextureBufferCopySplit {
-    static constexpr uint32_t kMaxTextureBufferCopyRegions = 3;
+    // Avoid allocations except in the worse case. Most cases require at most 3 regions.
+    static constexpr uint32_t kNumCommonTextureBufferCopyRegions = 3;
 
     struct CopyInfo {
+        CopyInfo(NSUInteger bufferOffset,
+                 NSUInteger bytesPerRow,
+                 NSUInteger bytesPerImage,
+                 Origin3D textureOrigin,
+                 Extent3D copyExtent)
+            : bufferOffset(bufferOffset),
+              bytesPerRow(bytesPerRow),
+              bytesPerImage(bytesPerImage),
+              textureOrigin(textureOrigin),
+              copyExtent(copyExtent) {}
+
         NSUInteger bufferOffset;
         NSUInteger bytesPerRow;
         NSUInteger bytesPerImage;
@@ -44,12 +91,11 @@ struct TextureBufferCopySplit {
         Extent3D copyExtent;
     };
 
-    uint32_t count = 0;
-    std::array<CopyInfo, kMaxTextureBufferCopyRegions> copies;
+    StackVector<CopyInfo, kNumCommonTextureBufferCopyRegions> copies;
 
-    auto begin() const { return copies.begin(); }
-
-    auto end() const { return copies.begin() + count; }
+    auto begin() const { return copies->begin(); }
+    auto end() const { return copies->end(); }
+    void push_back(const CopyInfo& copyInfo) { copies->push_back(copyInfo); }
 };
 
 TextureBufferCopySplit ComputeTextureBufferCopySplit(const Texture* texture,
@@ -62,21 +108,10 @@ TextureBufferCopySplit ComputeTextureBufferCopySplit(const Texture* texture,
                                                      uint32_t rowsPerImage,
                                                      Aspect aspect);
 
-void EnsureDestinationTextureInitialized(CommandRecordingContext* commandContext,
-                                         Texture* texture,
-                                         const TextureCopy& dst,
-                                         const Extent3D& size);
-
-MTLBlitOption ComputeMTLBlitOption(const Format& format, Aspect aspect);
-
-// Allow use MTLStoreActionStoreAndMultismapleResolve because the logic in the backend is
-// first to compute what the "best" Metal render pass descriptor is, then fix it up if we
-// are not on macOS 10.12 (i.e. the EmulateStoreAndMSAAResolve toggle is on).
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunguarded-availability"
-constexpr MTLStoreAction kMTLStoreActionStoreAndMultisampleResolve =
-    MTLStoreActionStoreAndMultisampleResolve;
-#pragma clang diagnostic pop
+MaybeError EnsureDestinationTextureInitialized(CommandRecordingContext* commandContext,
+                                               Texture* texture,
+                                               const TextureCopy& dst,
+                                               const Extent3D& size);
 
 // Helper functions to encode Metal render passes that take care of multiple workarounds that
 // happen at the render pass start and end. Because workarounds wrap the encoding of the render
@@ -91,6 +126,15 @@ MaybeError EncodeMetalRenderPass(Device* device,
                                  uint32_t height,
                                  EncodeInsideRenderPass encodeInside,
                                  BeginRenderPassCmd* renderPassCmd = nullptr);
+
+MTLStorageMode IOSurfaceStorageMode();
+
+id<MTLTexture> CreateTextureMtlForPlane(MTLTextureUsage mtlUsage,
+                                        const Format& format,
+                                        size_t plane,
+                                        Device* device,
+                                        uint32_t sampleCount,
+                                        IOSurfaceRef ioSurface);
 
 MaybeError EncodeEmptyMetalRenderPass(Device* device,
                                       CommandRecordingContext* commandContext,

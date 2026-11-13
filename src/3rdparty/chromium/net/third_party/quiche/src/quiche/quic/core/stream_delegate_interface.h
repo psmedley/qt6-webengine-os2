@@ -6,10 +6,10 @@
 #define QUICHE_QUIC_CORE_STREAM_DELEGATE_INTERFACE_H_
 
 #include <cstddef>
+#include <optional>
 
-#include "absl/types/optional.h"
+#include "quiche/quic/core/quic_stream_priority.h"
 #include "quiche/quic/core/quic_types.h"
-#include "quiche/spdy/core/spdy_protocol.h"
 
 namespace quic {
 
@@ -17,7 +17,7 @@ class QuicStream;
 
 // Pure virtual class to get notified when particular QuicStream events
 // occurred.
-class QUIC_EXPORT_PRIVATE StreamDelegateInterface {
+class QUICHE_EXPORT StreamDelegateInterface {
  public:
   virtual ~StreamDelegateInterface() {}
 
@@ -41,14 +41,13 @@ class QUIC_EXPORT_PRIVATE StreamDelegateInterface {
                                 QuicStreamOffset offset,
                                 TransmissionType type) = 0;
   // Called on stream creation.
-  virtual void RegisterStreamPriority(
-      QuicStreamId id, bool is_static,
-      const spdy::SpdyStreamPrecedence& precedence) = 0;
+  virtual void RegisterStreamPriority(QuicStreamId id, bool is_static,
+                                      const QuicStreamPriority& priority) = 0;
   // Called on stream destruction to clear priority.
-  virtual void UnregisterStreamPriority(QuicStreamId id, bool is_static) = 0;
+  virtual void UnregisterStreamPriority(QuicStreamId id) = 0;
   // Called by the stream on SetPriority to update priority.
-  virtual void UpdateStreamPriority(
-      QuicStreamId id, const spdy::SpdyStreamPrecedence& new_precedence) = 0;
+  virtual void UpdateStreamPriority(QuicStreamId id,
+                                    const QuicStreamPriority& new_priority) = 0;
 };
 
 }  // namespace quic

@@ -4,6 +4,11 @@
 
 #include "quiche/spdy/core/spdy_alt_svc_wire_format.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+#include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_test.h"
 
 namespace spdy {
@@ -380,7 +385,7 @@ TEST(SpdyAltSvcWireFormatTest, ParseTruncatedHeaderFieldValue) {
   SpdyAltSvcWireFormat::AlternativeServiceVector altsvc_vector;
   const char* field_value_array[] = {"a=\":137\"", "a=\"foo:137\"",
                                      "a%25=\"foo\\\"bar\\\\baz:137\""};
-  for (const std::string& field_value : field_value_array) {
+  for (const absl::string_view field_value : field_value_array) {
     for (size_t len = 1; len < field_value.size(); ++len) {
       EXPECT_FALSE(SpdyAltSvcWireFormat::ParseHeaderFieldValue(
           field_value.substr(0, len), &altsvc_vector))

@@ -210,7 +210,7 @@ void ServiceWorkerContainer::Trace(Visitor* visitor) const {
   visitor->Trace(dom_content_loaded_observer_);
   visitor->Trace(service_worker_registration_objects_);
   visitor->Trace(service_worker_objects_);
-  EventTargetWithInlineData::Trace(visitor);
+  EventTarget::Trace(visitor);
   Supplement<LocalDOMWindow>::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }
@@ -615,7 +615,7 @@ ServiceWorker* ServiceWorkerContainer::GetOrCreateServiceWorker(
 
   auto it = service_worker_objects_.find(info.version_id);
   if (it != service_worker_objects_.end())
-    return it->value;
+    return it->value.Get();
 
   const int64_t version_id = info.version_id;
   ServiceWorker* worker = ServiceWorker::Create(
@@ -673,17 +673,17 @@ void ServiceWorkerContainer::DispatchMessageEvent(
     }
   }
   if (!event) {
-    if (!msg.locked_to_sender_agent_cluster ||
-        GetExecutionContext()->IsSameAgentCluster(
-            msg.sender_agent_cluster_id)) {
-      event = MessageEvent::Create(
-          ports, std::move(msg.message),
-          GetExecutionContext()->GetSecurityOrigin()->ToString(),
-          String() /* lastEventId */, service_worker);
+    auto* context = GetExecutionContext();
+    if ((!msg.locked_to_sender_agent_cluster ||
+         context->IsSameAgentCluster(msg.sender_agent_cluster_id)) &&
+        msg.message->CanDeserializeIn(context)) {
+      event = MessageEvent::Create(ports, std::move(msg.message),
+                                   context->GetSecurityOrigin()->ToString(),
+                                   MessageEvent::kMessageIsSameOrigin,
+                                   String() /* lastEventId */, service_worker);
     } else {
       event = MessageEvent::CreateError(
-          GetExecutionContext()->GetSecurityOrigin()->ToString(),
-          service_worker);
+          context->GetSecurityOrigin()->ToString(), service_worker);
     }
   }
   // Schedule the event to be dispatched on the correct task source:

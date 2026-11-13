@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -17,8 +17,7 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 class MessagePipeEnd : public MessagePort {
  public:
@@ -38,6 +37,13 @@ class MessagePipeEnd : public MessagePort {
   }
 
   void ResetClient() override { client_ = nullptr; }
+
+  void ReceiveMessage(const std::string& sender_id,
+                      const std::string& namespace_,
+                      const std::string& message) {
+    ASSERT_NE(client_, nullptr);
+    client_->OnMessage(sender_id, namespace_, message);
+  }
 
   void ReceiveMessage(const std::string& namespace_,
                       const std::string& message) {
@@ -82,7 +88,6 @@ class MessagePipe {
   MessagePipeEnd right_;
 };
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast
 
 #endif  // CAST_STREAMING_TESTING_MESSAGE_PIPE_H_

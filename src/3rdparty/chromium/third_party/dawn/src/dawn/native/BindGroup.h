@@ -1,16 +1,29 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_BINDGROUP_H_
 #define SRC_DAWN_NATIVE_BINDGROUP_H_
@@ -44,17 +57,22 @@ struct BufferBinding {
 
 class BindGroupBase : public ApiObjectBase {
   public:
-    static BindGroupBase* MakeError(DeviceBase* device);
+    static Ref<BindGroupBase> MakeError(DeviceBase* device, const char* label);
 
     ObjectType GetType() const override;
 
-    BindGroupLayoutBase* GetLayout();
-    const BindGroupLayoutBase* GetLayout() const;
+    BindGroupLayoutBase* GetFrontendLayout();
+    const BindGroupLayoutBase* GetFrontendLayout() const;
+    BindGroupLayoutInternalBase* GetLayout();
+    const BindGroupLayoutInternalBase* GetLayout() const;
+
     BufferBinding GetBindingAsBufferBinding(BindingIndex bindingIndex);
     SamplerBase* GetBindingAsSampler(BindingIndex bindingIndex) const;
     TextureViewBase* GetBindingAsTextureView(BindingIndex bindingIndex);
     const ityp::span<uint32_t, uint64_t>& GetUnverifiedBufferSizes() const;
     const std::vector<Ref<ExternalTextureBase>>& GetBoundExternalTextures() const;
+
+    void ForEachUnverifiedBufferBindingIndex(std::function<void(BindingIndex, uint32_t)> fn) const;
 
   protected:
     // To save memory, the size of a bind group is dynamically determined and the bind group is
@@ -69,25 +87,25 @@ class BindGroupBase : public ApiObjectBase {
     // be first in the allocation. The binding data is stored after the Derived class.
     template <typename Derived>
     BindGroupBase(Derived* derived, DeviceBase* device, const BindGroupDescriptor* descriptor)
-        : BindGroupBase(device,
-                        descriptor,
-                        AlignPtr(reinterpret_cast<char*>(derived) + sizeof(Derived),
-                                 descriptor->layout->GetBindingDataAlignment())) {
+        : BindGroupBase(
+              device,
+              descriptor,
+              AlignPtr(
+                  reinterpret_cast<char*>(derived) + sizeof(Derived),
+                  descriptor->layout->GetInternalBindGroupLayout()->GetBindingDataAlignment())) {
         static_assert(std::is_base_of<BindGroupBase, Derived>::value);
     }
 
-    // Constructor used only for mocking and testing.
-    explicit BindGroupBase(DeviceBase* device);
     void DestroyImpl() override;
 
     ~BindGroupBase() override;
 
   private:
-    BindGroupBase(DeviceBase* device, ObjectBase::ErrorTag tag);
+    BindGroupBase(DeviceBase* device, ObjectBase::ErrorTag tag, const char* label);
     void DeleteThis() override;
 
     Ref<BindGroupLayoutBase> mLayout;
-    BindGroupLayoutBase::BindingDataPointers mBindingData;
+    BindGroupLayoutInternalBase::BindingDataPointers mBindingData;
 
     // TODO(dawn:1293): Store external textures in
     // BindGroupLayoutBase::BindingDataPointers::bindings

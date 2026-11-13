@@ -27,13 +27,11 @@
 
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/string_writer.h"
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/trace_processor/trace_processor.h"
 #include "src/traceconv/utils.h"
-
-#define FILTER_RAW_EVENTS \
-  " where not (name like \"chrome_event.%\" or name like \"track_event.%\")"
 
 namespace perfetto {
 namespace trace_to_text {
@@ -167,8 +165,7 @@ int ExtractRawEvents(TraceWriter* trace_writer,
                      Keep truncate_keep) {
   using trace_processor::Iterator;
 
-  static const char kRawEventsCountSql[] =
-      "select count(1) from raw" FILTER_RAW_EVENTS;
+  static const char kRawEventsCountSql[] = "select count(1) from ftrace_event";
   uint32_t raw_events = 0;
   auto e_callback = [&raw_events](Iterator* it, base::StringWriter*) {
     raw_events = static_cast<uint32_t>(it->Get(0).long_value);
@@ -234,7 +231,7 @@ int ExtractRawEvents(TraceWriter* trace_writer,
   const uint32_t max_ftrace_events = (140 * 1024 * 1024) / 130;
 
   static const char kRawEventsQuery[] =
-      "select to_ftrace(id) from raw" FILTER_RAW_EVENTS;
+      "select to_ftrace(id) from ftrace_event";
 
   // 1. Write the appropriate header for the file type.
   if (wrapped_in_json) {
@@ -247,15 +244,15 @@ int ExtractRawEvents(TraceWriter* trace_writer,
 
   // 2. Write the actual events.
   if (truncate_keep == Keep::kEnd && raw_events > max_ftrace_events) {
-    char end_truncate[150];
-    sprintf(end_truncate, "%s limit %d offset %d", kRawEventsQuery,
-            max_ftrace_events, raw_events - max_ftrace_events);
-    if (!q_writer.RunQuery(end_truncate, raw_callback))
+    base::StackString<150> end_truncate("%s limit %d offset %d",
+                                        kRawEventsQuery, max_ftrace_events,
+                                        raw_events - max_ftrace_events);
+    if (!q_writer.RunQuery(end_truncate.ToStdString(), raw_callback))
       return 1;
   } else if (truncate_keep == Keep::kStart) {
-    char start_truncate[150];
-    sprintf(start_truncate, "%s limit %d", kRawEventsQuery, max_ftrace_events);
-    if (!q_writer.RunQuery(start_truncate, raw_callback))
+    base::StackString<150> start_truncate("%s limit %d", kRawEventsQuery,
+                                          max_ftrace_events);
+    if (!q_writer.RunQuery(start_truncate.ToStdString(), raw_callback))
       return 1;
   } else {
     if (!q_writer.RunQuery(kRawEventsQuery, raw_callback))

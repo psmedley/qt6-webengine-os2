@@ -6,6 +6,8 @@ import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("accessibility") {
   sources = [
+    "aria_notification.cc",
+    "aria_notification.h",
     "ax_enums.cc",
     "ax_enums.h",
     "ax_image_map_link.cc",
@@ -75,4 +77,15 @@ blink_modules_sources("accessibility") {
   # The modules/accessibility/ depends closely on core/ --
   # include the core pch for faster Windows compilation times.
   configs += [ "//third_party/blink/renderer/core:blink_core_pch" ]
+
+  if (is_debug || dcheck_always_on) {
+    sources += [
+      "ax_debug_utils.cc",
+      "ax_debug_utils.h",
+    ]
+  }
+
+  if (is_android) {
+    defines = [ " REDUCE_AX_INLINE_TEXTBOXES " ]
+  }
 }

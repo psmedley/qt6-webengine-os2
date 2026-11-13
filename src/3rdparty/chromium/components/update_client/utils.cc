@@ -10,18 +10,21 @@
 #include <cstring>
 #include <memory>
 #include <utility>
+#include <vector>
 
-#include "base/callback.h"
+#include "base/check.h"
 #include "base/containers/contains.h"
-#include "base/containers/cxx20_erase.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/memory_mapped_file.h"
+#include "base/functional/callback.h"
 #include "base/json/json_file_value_serializer.h"
+#include "base/path_service.h"
 #include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "base/system/sys_info.h"
 #include "base/values.h"
 #include "components/crx_file/id_util.h"
 #include "components/update_client/component.h"
@@ -33,7 +36,17 @@
 #include "crypto/sha2.h"
 #include "url/gurl.h"
 
+#if BUILDFLAG(IS_WIN)
+#include <shlobj.h>
+
+#include "base/win/windows_version.h"
+#endif  // BUILDFLAG(IS_WIN)
+
 namespace update_client {
+
+const char kArchAmd64[] = "x86_64";
+const char kArchIntel[] = "x86";
+const char kArchArm64[] = "arm64";
 
 bool HasDiffUpdate(const Component& component) {
   return !component.crx_diffurls().empty();
@@ -44,14 +57,19 @@ bool IsHttpServerError(int status_code) {
 }
 
 bool DeleteFileAndEmptyParentDirectory(const base::FilePath& filepath) {
-  if (!base::DeleteFile(filepath))
+  if (!base::DeleteFile(filepath)) {
     return false;
+  }
 
-  const base::FilePath dirname(filepath.DirName());
-  if (!base::IsDirectoryEmpty(dirname))
+  return DeleteEmptyDirectory(filepath.DirName());
+}
+
+bool DeleteEmptyDirectory(const base::FilePath& dir_path) {
+  if (!base::IsDirectoryEmpty(dir_path)) {
     return true;
+  }
 
-  return base::DeleteFile(dirname);
+  return base::DeleteFile(dir_path);
 }
 
 std::string GetCrxComponentID(const CrxComponent& component) {
@@ -59,10 +77,9 @@ std::string GetCrxComponentID(const CrxComponent& component) {
                                   : component.app_id;
 }
 
-std::string GetCrxIdFromPublicKeyHash(const std::vector<uint8_t>& pk_hash) {
-  const std::string result =
-      crx_file::id_util::GenerateIdFromHash(&pk_hash[0], pk_hash.size());
-  DCHECK(crx_file::id_util::IdIsValid(result));
+std::string GetCrxIdFromPublicKeyHash(base::span<const uint8_t> pk_hash) {
+  const std::string result = crx_file::id_util::GenerateIdFromHash(pk_hash);
+  CHECK(crx_file::id_util::IdIsValid(result));
   return result;
 }
 
@@ -78,12 +95,14 @@ bool VerifyFileHash256(const base::FilePath& filepath,
       crypto::SecureHash::Create(crypto::SecureHash::SHA256));
 
   int64_t file_size = 0;
-  if (!base::GetFileSize(filepath, &file_size))
+  if (!base::GetFileSize(filepath, &file_size)) {
     return false;
+  }
   if (file_size > 0) {
     base::MemoryMappedFile mmfile;
-    if (!mmfile.Initialize(filepath))
+    if (!mmfile.Initialize(filepath)) {
       return false;
+    }
     hasher->Update(mmfile.data(), mmfile.length());
   }
 
@@ -130,8 +149,8 @@ bool IsValidInstallerAttribute(const InstallerAttribute& attr) {
 }
 
 void RemoveUnsecureUrls(std::vector<GURL>* urls) {
-  DCHECK(urls);
-  base::EraseIf(*urls,
+  CHECK(urls);
+  std::erase_if(*urls,
                 [](const GURL& url) { return !url.SchemeIsCryptographic(); });
 }
 
@@ -142,20 +161,31 @@ CrxInstaller::Result InstallFunctionWrapper(
                                   : InstallError::GENERIC_ERROR);
 }
 
-// TODO(cpu): add a specific attribute check to a component json that the
-// extension unpacker will reject, so that a component cannot be installed
-// as an extension.
-base::Value ReadManifest(const base::FilePath& unpack_path) {
+absl::optional<base::Value::Dict> ReadManifest(
+    const base::FilePath& unpack_path) {
   base::FilePath manifest =
       unpack_path.Append(FILE_PATH_LITERAL("manifest.json"));
-  if (!base::PathExists(manifest))
-    return base::Value();
+  if (!base::PathExists(manifest)) {
+    return absl::nullopt;
+  }
   JSONFileValueDeserializer deserializer(manifest);
   std::string error;
   std::unique_ptr<base::Value> root = deserializer.Deserialize(nullptr, &error);
-  if (!root)
-    return base::Value();
-  return base::Value::FromUniquePtrValue(std::move(root));
+  if (!root || !root->is_dict()) {
+    return absl::nullopt;
+  }
+  return std::move(root->GetDict());
+}
+
+std::string GetArchitecture() {
+#if BUILDFLAG(IS_WIN)
+  const base::win::OSInfo* os_info = base::win::OSInfo::GetInstance();
+  return (os_info->IsWowX86OnARM64() || os_info->IsWowAMD64OnARM64())
+             ? kArchArm64
+             : base::SysInfo().OperatingSystemArchitecture();
+#else   // BUILDFLAG(IS_WIN)
+  return base::SysInfo().OperatingSystemArchitecture();
+#endif  // BUILDFLAG(IS_WIN)
 }
 
 }  // namespace update_client

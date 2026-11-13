@@ -1,4 +1,4 @@
-// Copyright 2020 PDFium Authors. All rights reserved.
+// Copyright 2020 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include <memory>
 
 #include "core/fxcodec/progressive_decoder_iface.h"
-#include "third_party/base/no_destructor.h"
 
 namespace fxcodec {
 
@@ -20,6 +19,9 @@ class CFX_DIBAttribute;
 
 class JpegProgressiveDecoder final : public ProgressiveDecoderIface {
  public:
+  static void InitializeGlobals();
+  static void DestroyGlobals();
+
   static JpegProgressiveDecoder* GetInstance();
 
   static std::unique_ptr<Context> Start();
@@ -41,8 +43,6 @@ class JpegProgressiveDecoder final : public ProgressiveDecoderIface {
              RetainPtr<CFX_CodecMemory> codec_memory) override;
 
  private:
-  friend pdfium::base::NoDestructor<JpegProgressiveDecoder>;
-
   JpegProgressiveDecoder();
   ~JpegProgressiveDecoder() override;
 };

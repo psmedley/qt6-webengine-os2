@@ -1,16 +1,29 @@
-// Copyright 2021 The Tint Authors.
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // This tool parses WGSL specification and outputs WGSL rules.
 //
@@ -246,8 +259,10 @@ func parseSection(in string) ([]int, error) {
 }
 
 // concatRules concatenate rules slice to make two string outputs;
-//   txt, a human-readable string
-//   tsv, a tab separated string
+//
+//	txt, a human-readable string
+//	tsv, a tab separated string
+//
 // If testNameFilter is a non-empty string, then only rules whose TestName
 // contains the string are included
 func concatRules(rules []rule, testNameFilter string) (string, string) {
@@ -679,9 +694,10 @@ var (
 // example in:
 // ` float abs:
 // T is f32 or vecN<f32>
-// 		abs(e: T ) -> 	T
-// 	  Returns the absolute value of e (e.g. e  with a positive sign bit). Component-wise when T is a vector.
-//   (GLSLstd450Fabs)`
+//
+//			abs(e: T ) -> 	T
+//		  Returns the absolute value of e (e.g. e  with a positive sign bit). Component-wise when T is a vector.
+//	  (GLSLstd450Fabs)`
 //
 // example out:
 // `float abs:
@@ -703,10 +719,11 @@ var (
 // cleanUpStartEnd creates a string by removing all extra spaces,
 // newlines and tabs form the start and end of the input string.
 // Example:
-//	input: "\s\t\nHello\s\n\t\Bye\s\s\s\t\n\n\n"
-//  output: "Hello\s\n\tBye"
-//  input2: "\nbye\n\n"
-//  output2: "\nbye"
+//
+//		input: "\s\t\nHello\s\n\t\Bye\s\s\s\t\n\n\n"
+//	 output: "Hello\s\n\tBye"
+//	 input2: "\nbye\n\n"
+//	 output2: "\nbye"
 func cleanUpStartEnd(in string) string {
 	out := reCleanUpStartEnd.ReplaceAllString(in, "")
 	return out
@@ -721,13 +738,17 @@ var (
 
 // testName creates a test name given a rule id (ie. section name), description and section
 // returns for a builtin rule:
-// 		testName:${section name} + "," + ${builtin name}
-// 		builtinName: ${builtin name}
-//		err: nil
+//
+//	testName:${section name} + "," + ${builtin name}
+//	builtinName: ${builtin name}
+//	err: nil
+//
 // returns for a other rules:
-//		testName: ${section name} + "_rule_ + " + ${string(counter)}
-//		builtinName: ""
-//		err: nil
+//
+//	testName: ${section name} + "_rule_ + " + ${string(counter)}
+//	builtinName: ""
+//	err: nil
+//
 // if it cannot create a unique name it returns "", "", err.
 func testName(id string, desc string, section string) (testName, builtinName string, err error) {
 	// regex for every thing other than letters and numbers
@@ -838,9 +859,10 @@ func getUnimplementedTestPlan(p Parser, path string) error {
 
 // getTestPlanFilePath returns a sort friendly path
 // example: if we have 10 sections, and generate filenames naively, this will be the sorted result:
-// 		section1.spec.ts -> section10.spec.ts -> section2.spec.ts -> ...
+//
+//		section1.spec.ts -> section10.spec.ts -> section2.spec.ts -> ...
 //	    if we make all the section numbers have the same number of digits, we will get:
-// 		section01.spec.ts -> section02.spec.ts -> ... -> section10.spec.ts
+//		section01.spec.ts -> section02.spec.ts -> ... -> section10.spec.ts
 func getTestPlanFilePath(path string, x, y, digits int) (string, error) {
 	fileName := ""
 	if y != -1 {

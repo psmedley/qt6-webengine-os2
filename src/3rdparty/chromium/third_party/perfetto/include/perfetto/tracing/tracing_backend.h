@@ -17,10 +17,12 @@
 #ifndef INCLUDE_PERFETTO_TRACING_TRACING_BACKEND_H_
 #define INCLUDE_PERFETTO_TRACING_TRACING_BACKEND_H_
 
+#include <functional>
 #include <memory>
 #include <string>
 
 #include "perfetto/base/export.h"
+#include "perfetto/base/platform_handle.h"
 
 // The embedder can (but doesn't have to) extend the TracingBackend class and
 // pass as an argument to Tracing::Initialize(kCustomBackend) to override the
@@ -43,9 +45,13 @@ class ConsumerEndpoint;
 class Producer;
 class ProducerEndpoint;
 
-class PERFETTO_EXPORT_COMPONENT TracingBackend {
+using CreateSocketCallback = std::function<void(base::SocketHandle)>;
+using CreateSocketAsync = void (*)(CreateSocketCallback);
+
+// Responsible for connecting to the producer.
+class PERFETTO_EXPORT_COMPONENT TracingProducerBackend {
  public:
-  virtual ~TracingBackend();
+  virtual ~TracingProducerBackend();
 
   // Connects a Producer instance and obtains a ProducerEndpoint, which is
   // essentially a 1:1 channel between one Producer and the Service.
@@ -73,10 +79,20 @@ class PERFETTO_EXPORT_COMPONENT TracingBackend {
     // it to the service when connecting.
     // It's used in startup tracing.
     bool use_producer_provided_smb = false;
+
+    // If set, the producer will call this function to create and connect to a
+    // socket. See the corresponding field in TracingInitArgs for more info.
+    CreateSocketAsync create_socket_async = nullptr;
   };
 
   virtual std::unique_ptr<ProducerEndpoint> ConnectProducer(
       const ConnectProducerArgs&) = 0;
+};
+
+// Responsible for connecting to the consumer.
+class PERFETTO_EXPORT_COMPONENT TracingConsumerBackend {
+ public:
+  virtual ~TracingConsumerBackend();
 
   // As above, for the Consumer-side.
   struct ConnectConsumerArgs {
@@ -89,6 +105,12 @@ class PERFETTO_EXPORT_COMPONENT TracingBackend {
   };
   virtual std::unique_ptr<ConsumerEndpoint> ConnectConsumer(
       const ConnectConsumerArgs&) = 0;
+};
+
+class PERFETTO_EXPORT_COMPONENT TracingBackend : public TracingProducerBackend,
+                                                 public TracingConsumerBackend {
+ public:
+  ~TracingBackend() override;
 };
 
 }  // namespace perfetto

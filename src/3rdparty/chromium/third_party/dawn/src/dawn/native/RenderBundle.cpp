@@ -1,21 +1,35 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/RenderBundle.h"
 
 #include <utility>
 
+#include "absl/strings/str_format.h"
 #include "dawn/common/BitSetIterator.h"
 #include "dawn/native/Commands.h"
 #include "dawn/native/Device.h"
@@ -38,7 +52,8 @@ RenderBundleBase::RenderBundleBase(RenderBundleEncoder* encoder,
       mDepthReadOnly(depthReadOnly),
       mStencilReadOnly(stencilReadOnly),
       mDrawCount(encoder->GetDrawCount()),
-      mResourceUsage(std::move(resourceUsage)) {
+      mResourceUsage(std::move(resourceUsage)),
+      mEncoderLabel(encoder->GetLabel()) {
     GetObjectTrackingList()->Track(this);
 }
 
@@ -51,15 +66,37 @@ void RenderBundleBase::DestroyImpl() {
 }
 
 // static
-RenderBundleBase* RenderBundleBase::MakeError(DeviceBase* device) {
-    return new RenderBundleBase(device, ObjectBase::kError);
+Ref<RenderBundleBase> RenderBundleBase::MakeError(DeviceBase* device, const char* label) {
+    return AcquireRef(new RenderBundleBase(device, ObjectBase::kError, label));
 }
 
-RenderBundleBase::RenderBundleBase(DeviceBase* device, ErrorTag errorTag)
-    : ApiObjectBase(device, errorTag), mIndirectDrawMetadata(device->GetLimits()) {}
+RenderBundleBase::RenderBundleBase(DeviceBase* device, ErrorTag errorTag, const char* label)
+    : ApiObjectBase(device, errorTag, label), mIndirectDrawMetadata(device->GetLimits()) {}
 
 ObjectType RenderBundleBase::GetType() const {
     return ObjectType::RenderBundle;
+}
+
+void RenderBundleBase::FormatLabel(absl::FormatSink* s) const {
+    s->Append(ObjectTypeAsString(GetType()));
+
+    const std::string& label = GetLabel();
+    if (!label.empty()) {
+        s->Append(absl::StrFormat(" \"%s\"", label));
+    }
+
+    if (!mEncoderLabel.empty()) {
+        s->Append(absl::StrFormat(
+            " from %s \"%s\"", ObjectTypeAsString(ObjectType::RenderBundleEncoder), mEncoderLabel));
+    }
+}
+
+const std::string& RenderBundleBase::GetEncoderLabel() const {
+    return mEncoderLabel;
+}
+
+void RenderBundleBase::SetEncoderLabel(std::string encoderLabel) {
+    mEncoderLabel = encoderLabel;
 }
 
 CommandIterator* RenderBundleBase::GetCommands() {
@@ -67,27 +104,27 @@ CommandIterator* RenderBundleBase::GetCommands() {
 }
 
 const AttachmentState* RenderBundleBase::GetAttachmentState() const {
-    ASSERT(!IsError());
+    DAWN_ASSERT(!IsError());
     return mAttachmentState.Get();
 }
 
 bool RenderBundleBase::IsDepthReadOnly() const {
-    ASSERT(!IsError());
+    DAWN_ASSERT(!IsError());
     return mDepthReadOnly;
 }
 
 bool RenderBundleBase::IsStencilReadOnly() const {
-    ASSERT(!IsError());
+    DAWN_ASSERT(!IsError());
     return mStencilReadOnly;
 }
 
 uint64_t RenderBundleBase::GetDrawCount() const {
-    ASSERT(!IsError());
+    DAWN_ASSERT(!IsError());
     return mDrawCount;
 }
 
 const RenderPassResourceUsage& RenderBundleBase::GetResourceUsage() const {
-    ASSERT(!IsError());
+    DAWN_ASSERT(!IsError());
     return mResourceUsage;
 }
 

@@ -1,5 +1,6 @@
 // Copyright (C) 2021 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:data-parser
 
 #ifndef QWEBENGINEVIEW_P_H
 #define QWEBENGINEVIEW_P_H
@@ -18,6 +19,8 @@
 #include <QtWebEngineCore/private/qwebenginepage_p.h> // PageView
 
 #include "render_view_context_menu_qt.h"
+
+#include <QtCore/qpointer.h>
 
 namespace QtWebEngineCore {
 class AutofillPopupController;
@@ -71,6 +74,7 @@ public:
     void didPrintPage(QPrinter *&printer, QSharedPointer<QByteArray> result) override;
     void didPrintPageToPdf(const QString &filePath, bool success) override;
     void printRequested() override;
+    void printRequestedByFrame(QWebEngineFrame frame) override;
     void showAutofillPopup(QtWebEngineCore::AutofillPopupController *controller,
                            const QRect &bounds, bool autoselectFirstSuggestion) override;
     void hideAutofillPopup() override;
@@ -85,7 +89,7 @@ public:
     static void bindPageAndView(QWebEnginePage *page, QWebEngineView *view);
     static void bindPageAndWidget(QWebEnginePagePrivate *pagePrivate,
                                   QtWebEngineCore::WebEngineQuickWidget *widget);
-    QIcon webActionIcon(QWebEnginePage::WebAction action);
+    QIcon webActionIcon(QWebEnginePage::WebAction action) const;
     void unhandledKeyEvent(QKeyEvent *event) override;
     void focusContainer() override;
     bool passOnFocus(bool reverse) override;

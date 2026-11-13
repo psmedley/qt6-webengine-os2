@@ -1,5 +1,6 @@
 // Copyright (C) 2022 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // This file is based on chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc:
 // Copyright 2019 The Chromium Authors. All rights reserved.
@@ -241,6 +242,8 @@ FileSystemAccessPermissionContextQt::GetReadPermissionGrant(const url::Origin &o
         break;
     case UserAction::kLoadFromStorage:
         break;
+    case UserAction::kNone:
+        Q_UNREACHABLE();
     }
 
     return existing_grant;
@@ -285,6 +288,8 @@ FileSystemAccessPermissionContextQt::GetWritePermissionGrant(const url::Origin &
     case UserAction::kDragAndDrop:
     case UserAction::kLoadFromStorage:
         break;
+    case UserAction::kNone:
+        Q_UNREACHABLE();
     }
 
     return existing_grant;
@@ -360,9 +365,6 @@ base::FilePath FileSystemAccessPermissionContextQt::GetWellKnownDirectoryPath(
 {
     QStandardPaths::StandardLocation location = QStandardPaths::DocumentsLocation;
     switch (directory) {
-    case blink::mojom::WellKnownDirectory::kDefault:
-        location = QStandardPaths::DocumentsLocation;
-        break;
     case blink::mojom::WellKnownDirectory::kDirDesktop:
         location = QStandardPaths::DesktopLocation;
         break;
@@ -469,6 +471,10 @@ void FileSystemAccessPermissionContextQt::PermissionGrantDestroyed(
     }
     if (grant_it->second == grant)
         grants.erase(grant_it);
+}
+
+void FileSystemAccessPermissionContextQt::NotifyEntryMoved(const url::Origin &, const base::FilePath &, const base::FilePath &)
+{
 }
 
 } // namespace QtWebEngineCore

@@ -6,7 +6,7 @@
 
 #include "build/build_config.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
 #include "chrome/grit/locale_settings.h"
 #endif
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -26,25 +26,30 @@ SpellcheckService* SpellcheckServiceFactory::GetForContext(
 
 // static
 SpellcheckServiceFactory* SpellcheckServiceFactory::GetInstance() {
-  return base::Singleton<SpellcheckServiceFactory>::get();
+  static base::NoDestructor<SpellcheckServiceFactory> instance;
+  return instance.get();
 }
 
 SpellcheckServiceFactory::SpellcheckServiceFactory()
     : ProfileKeyedServiceFactory(
           "SpellcheckService",
-          ProfileSelections::BuildRedirectedInIncognito()) {
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kRedirectedToOriginal)
+              // TODO(crbug.com/1418376): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kRedirectedToOriginal)
+              .Build()) {
   // TODO(erg): Uncomment these as they are initialized.
   // DependsOn(RequestContextFactory::GetInstance());
 }
 
-SpellcheckServiceFactory::~SpellcheckServiceFactory() {}
+SpellcheckServiceFactory::~SpellcheckServiceFactory() = default;
 
-KeyedService* SpellcheckServiceFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+SpellcheckServiceFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
   // Many variables are initialized from the |context| in the SpellcheckService.
-  SpellcheckService* spellcheck = new SpellcheckService(context);
-
-  return spellcheck;
+  return std::make_unique<SpellcheckService>(context);
 }
 
 void SpellcheckServiceFactory::RegisterProfilePrefs(
@@ -56,7 +61,7 @@ void SpellcheckServiceFactory::RegisterProfilePrefs(
       spellcheck::prefs::kSpellCheckBlocklistedDictionaries);
   // Continue registering kSpellCheckDictionary for preference migration.
   // TODO(estade): remove: crbug.com/751275
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
   user_prefs->RegisterStringPref(
       spellcheck::prefs::kSpellCheckDictionary,
       l10n_util::GetStringUTF8(IDS_SPELLCHECK_DICTIONARY));

@@ -13,11 +13,12 @@
 #include "include/core/SkRRect.h"
 #include "src/core/SkRectPriv.h"
 #include "src/gpu/ganesh/GrColorInfo.h"
+#include "src/gpu/ganesh/GrFPArgs.h"
 #include "src/gpu/ganesh/GrProcessorUnitTest.h"
 #include "src/gpu/ganesh/GrStyle.h"
 #include "src/utils/SkDashPathPriv.h"
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 
 static const SkMatrix& test_matrix(SkRandom* random,
                                    bool includeNonPerspective,
@@ -296,7 +297,8 @@ TestDashPathEffect::TestDashPathEffect(const SkScalar* intervals, int count, SkS
 bool TestDashPathEffect::onFilterPath(SkPath* dst, const SkPath& src, SkStrokeRec* rec,
                                       const SkRect* cullRect, const SkMatrix&) const {
     return SkDashPath::InternalFilter(dst, src, rec, cullRect, fIntervals.get(), fCount,
-                                      fInitialDashLength, fInitialDashIndex, fIntervalLength);
+                                      fInitialDashLength, fInitialDashIndex, fIntervalLength,
+                                      fPhase);
 }
 
 SkPathEffect::DashType TestDashPathEffect::onAsADash(DashInfo* info) const {
@@ -343,13 +345,9 @@ sk_sp<GrColorSpaceXform> TestColorXform(SkRandom* random) {
 }
 
 TestAsFPArgs::TestAsFPArgs(GrProcessorTestData* d)
-        : fMatrixProvider(TestMatrix(d->fRandom))
-        , fColorInfoStorage(std::make_unique<GrColorInfo>(
+        : fColorInfoStorage(std::make_unique<GrColorInfo>(
                   GrColorType::kRGBA_8888, kPremul_SkAlphaType, TestColorSpace(d->fRandom)))
-        , fArgs(d->context(),
-                fMatrixProvider,
-                fColorInfoStorage.get(),
-                fSurfaceProps) {}
+        , fArgs(d->context(), fColorInfoStorage.get(), fSurfaceProps, GrFPArgs::Scope::kDefault) {}
 
 TestAsFPArgs::~TestAsFPArgs() {}
 

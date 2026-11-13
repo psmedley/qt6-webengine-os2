@@ -15,9 +15,39 @@
 namespace skgpu::graphite {
 
 class Buffer;
-class CommandBuffer;
 class Texture;
 class TextureProxy;
+
+class CopyBufferToBufferTask final : public Task {
+public:
+    // The srcBuffer for this Task is always a transfer buffer which is owned by the
+    // UploadBufferManager. Thus we don't have to take a ref to it as the UploadBufferManager will
+    // handle its refs and passing them to the Recording.
+    static sk_sp<CopyBufferToBufferTask> Make(const Buffer* srcBuffer,
+                                              size_t srcOffset,
+                                              sk_sp<Buffer> dstBuffer,
+                                              size_t dstOffset,
+                                              size_t size);
+
+    ~CopyBufferToBufferTask() override;
+
+    bool prepareResources(ResourceProvider*, const RuntimeEffectDictionary*) override;
+
+    bool addCommands(Context*, CommandBuffer*, ReplayTargetData) override;
+
+private:
+    CopyBufferToBufferTask(const Buffer* srcBuffer,
+                           size_t srcOffset,
+                           sk_sp<Buffer> dstBuffer,
+                           size_t dstOffset,
+                           size_t size);
+
+    const Buffer* fSrcBuffer;
+    size_t        fSrcOffset;
+    sk_sp<Buffer> fDstBuffer;
+    size_t        fDstOffset;
+    size_t        fSize;
+};
 
 class CopyTextureToBufferTask final : public Task {
 public:
@@ -29,9 +59,9 @@ public:
 
     ~CopyTextureToBufferTask() override;
 
-    bool prepareResources(ResourceProvider*, const SkRuntimeEffectDictionary*) override;
+    bool prepareResources(ResourceProvider*, const RuntimeEffectDictionary*) override;
 
-    bool addCommands(ResourceProvider*, CommandBuffer*) override;
+    bool addCommands(Context*, CommandBuffer*, ReplayTargetData) override;
 
 private:
     CopyTextureToBufferTask(sk_sp<TextureProxy>,
@@ -52,24 +82,27 @@ public:
     static sk_sp<CopyTextureToTextureTask> Make(sk_sp<TextureProxy> srcProxy,
                                                 SkIRect srcRect,
                                                 sk_sp<TextureProxy> dstProxy,
-                                                SkIPoint dstPoint);
+                                                SkIPoint dstPoint,
+                                                int dstLevel = 0);
 
     ~CopyTextureToTextureTask() override;
 
-    bool prepareResources(ResourceProvider*, const SkRuntimeEffectDictionary*) override;
+    bool prepareResources(ResourceProvider*, const RuntimeEffectDictionary*) override;
 
-    bool addCommands(ResourceProvider*, CommandBuffer*) override;
+    bool addCommands(Context*, CommandBuffer*, ReplayTargetData) override;
 
 private:
     CopyTextureToTextureTask(sk_sp<TextureProxy> srcProxy,
                              SkIRect srcRect,
                              sk_sp<TextureProxy> dstProxy,
-                             SkIPoint dstPoint);
+                             SkIPoint dstPoint,
+                             int dstLevel);
 
     sk_sp<TextureProxy> fSrcProxy;
     SkIRect fSrcRect;
     sk_sp<TextureProxy> fDstProxy;
     SkIPoint fDstPoint;
+    int fDstLevel;
 };
 
 } // namespace skgpu::graphite

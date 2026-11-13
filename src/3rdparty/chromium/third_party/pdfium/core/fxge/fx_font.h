@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 #include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/fx_coordinates.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 /* Font pitch and family flags */
 #define FXFONT_FF_FIXEDPITCH (1 << 0)
@@ -43,7 +43,7 @@ constexpr uint16_t kNamePlatformAppleUnicode = 0;
 constexpr uint16_t kNamePlatformMac = 1;
 constexpr uint16_t kNamePlatformWindows = 3;
 
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
+#if defined(PDF_USE_SKIA)
 class SkTypeface;
 
 using CFX_TypeFace = SkTypeface;

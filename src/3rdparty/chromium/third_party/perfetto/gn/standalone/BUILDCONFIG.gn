@@ -63,24 +63,24 @@ declare_args() {
       target_cpu != host_cpu || target_os != host_os || target_triplet != ""
 }
 default_configs = [
-  "//gn/standalone:debug_symbols",
   "//gn/standalone:default",
-  "//gn/standalone:c++11",
   "//gn/standalone:extra_warnings",
   "//gn/standalone:no_exceptions",
   "//gn/standalone:no_rtti",
   "//gn/standalone:visibility_hidden",
   "//gn/standalone/libc++:config",
   "//gn/standalone/sanitizers:sanitizers_cflags",
+  "//gn/standalone:c++17",
 ]
+
+if (is_debug) {
+  default_configs += [ "//gn/standalone:debug_noopt" ]
+} else {
+  default_configs += [ "//gn/standalone:release" ]
+}
 
 if (is_win) {
   default_configs += [ "//gn/standalone:win32_lean_and_mean" ]
-}
-
-if (!is_debug) {
-  default_configs -= [ "//gn/standalone:debug_symbols" ]
-  default_configs += [ "//gn/standalone:release" ]
 }
 
 set_defaults("source_set") {

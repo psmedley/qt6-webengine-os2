@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 #include <algorithm>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <utility>
 
-#include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 #include "cast/streaming/constants.h"
@@ -22,9 +22,9 @@
 #include "util/json/json_serialization.h"
 #include "util/osp_logging.h"
 #include "util/stringprintf.h"
+#include "util/stringutil.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 namespace {
 
@@ -40,15 +40,15 @@ bool CodecParameterIsValid(VideoCodec codec,
   }
   switch (codec) {
     case VideoCodec::kVp8:
-      return absl::StartsWith(codec_parameter, "vp08");
+      return stringutil::starts_with(codec_parameter, "vp08");
     case VideoCodec::kVp9:
-      return absl::StartsWith(codec_parameter, "vp09");
+      return stringutil::starts_with(codec_parameter, "vp09");
     case VideoCodec::kAv1:
-      return absl::StartsWith(codec_parameter, "av01");
+      return stringutil::starts_with(codec_parameter, "av01");
     case VideoCodec::kHevc:
-      return absl::StartsWith(codec_parameter, "hev1");
+      return stringutil::starts_with(codec_parameter, "hev1");
     case VideoCodec::kH264:
-      return absl::StartsWith(codec_parameter, "avc1");
+      return stringutil::starts_with(codec_parameter, "avc1");
     case VideoCodec::kNotSpecified:
       return false;
   }
@@ -62,7 +62,7 @@ bool CodecParameterIsValid(AudioCodec codec,
   }
   switch (codec) {
     case AudioCodec::kAac:
-      return absl::StartsWith(codec_parameter, "mp4a.");
+      return stringutil::starts_with(codec_parameter, "mp4a.");
 
     // Opus doesn't use codec parameters.
     case AudioCodec::kOpus:  // fallthrough
@@ -137,7 +137,7 @@ bool TryParseAesHexBytes(const Json::Value& value,
   return false;
 }
 
-absl::string_view ToString(Stream::Type type) {
+std::string_view ToString(Stream::Type type) {
   switch (type) {
     case Stream::Type::kAudioSource:
       return kAudioSourceType;
@@ -436,5 +436,4 @@ bool Offer::IsValid() const {
          std::all_of(video_streams.begin(), video_streams.end(),
                      [](const VideoStream& v) { return v.IsValid(); });
 }
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

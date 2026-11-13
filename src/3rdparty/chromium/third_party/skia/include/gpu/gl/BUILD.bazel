@@ -1,10 +1,10 @@
-load("//bazel:macros.bzl", "exports_files_legacy")
+load("//bazel:skia_rules.bzl", "exports_files_legacy", "skia_filegroup")
 
 licenses(["notice"])
 
 exports_files_legacy()
 
-filegroup(
+skia_filegroup(
     name = "public_hdrs",
     srcs = [
         "GrGLAssembleHelpers.h",
@@ -20,4 +20,18 @@ filegroup(
         "//conditions:default": [],
     }),
     visibility = ["//include/gpu:__pkg__"],
+)
+
+skia_filegroup(
+    name = "ganesh_gl_hdrs",
+    srcs = [
+        "GrGLAssembleHelpers.h",
+        "GrGLAssembleInterface.h",
+        "GrGLConfig.h",
+        "GrGLExtensions.h",
+        "GrGLFunctions.h",
+        "GrGLInterface.h",
+        "GrGLTypes.h",
+    ],
+    visibility = ["//src/gpu/ganesh/gl:__pkg__"],
 )

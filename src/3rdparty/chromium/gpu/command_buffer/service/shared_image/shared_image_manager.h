@@ -5,6 +5,7 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_SHARED_IMAGE_MANAGER_H_
 #define GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_SHARED_IMAGE_MANAGER_H_
 
+#include <optional>
 #include "base/containers/flat_set.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/synchronization/lock.h"
@@ -14,7 +15,13 @@
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_backing.h"
 #include "gpu/gpu_gles2_export.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "gpu/vulkan/buildflags.h"
+
+#if BUILDFLAG(IS_WIN)
+namespace gfx {
+class D3DSharedFence;
+}
+#endif
 
 namespace gpu {
 class DXGISharedHandleManager;
@@ -50,16 +57,14 @@ class GPU_GLES2_EXPORT SharedImageManager
       std::unique_ptr<SharedImageBacking> backing,
       MemoryTypeTracker* ref);
 
-  // Marks the backing associated with a mailbox as context lost.
-  void OnContextLost(const Mailbox& mailbox);
+  std::unique_ptr<SharedImageRepresentationFactoryRef> AddSecondaryReference(
+      const Mailbox& mailbox,
+      MemoryTypeTracker* tracker);
 
   // Accessors which return a SharedImageRepresentation. Representations also
   // take a ref on the mailbox, releasing it when the representation is
   // destroyed.
   std::unique_ptr<GLTextureImageRepresentation> ProduceGLTexture(
-      const Mailbox& mailbox,
-      MemoryTypeTracker* ref);
-  std::unique_ptr<GLTextureImageRepresentation> ProduceRGBEmulationGLTexture(
       const Mailbox& mailbox,
       MemoryTypeTracker* ref);
   std::unique_ptr<GLTexturePassthroughImageRepresentation>
@@ -78,8 +83,10 @@ class GPU_GLES2_EXPORT SharedImageManager
   std::unique_ptr<DawnImageRepresentation> ProduceDawn(
       const Mailbox& mailbox,
       MemoryTypeTracker* ref,
-      WGPUDevice device,
-      WGPUBackendType backend_type);
+      const wgpu::Device& device,
+      wgpu::BackendType backend_type,
+      std::vector<wgpu::TextureFormat> view_formats,
+      scoped_refptr<SharedContextState> context_state);
   std::unique_ptr<OverlayImageRepresentation> ProduceOverlay(
       const Mailbox& mailbox,
       MemoryTypeTracker* ref);
@@ -93,6 +100,18 @@ class GPU_GLES2_EXPORT SharedImageManager
   std::unique_ptr<RasterImageRepresentation> ProduceRaster(
       const Mailbox& mailbox,
       MemoryTypeTracker* ref);
+  std::unique_ptr<VideoDecodeImageRepresentation> ProduceVideoDecode(
+      VideoDecodeDevice device,
+      const Mailbox& mailbox,
+      MemoryTypeTracker* ref);
+
+#if BUILDFLAG(ENABLE_VULKAN)
+  std::unique_ptr<VulkanImageRepresentation> ProduceVulkan(
+      const Mailbox& mailbox,
+      MemoryTypeTracker* ref,
+      gpu::VulkanDeviceQueue* vulkan_device_queue,
+      gpu::VulkanImplementation& vulkan_impl);
+#endif
 
 #if BUILDFLAG(IS_ANDROID)
   std::unique_ptr<LegacyOverlayImageRepresentation> ProduceLegacyOverlay(
@@ -100,15 +119,24 @@ class GPU_GLES2_EXPORT SharedImageManager
       MemoryTypeTracker* ref);
 #endif
 
+#if BUILDFLAG(IS_WIN)
+  void UpdateExternalFence(const Mailbox& mailbox,
+                           scoped_refptr<gfx::D3DSharedFence> external_fence);
+#endif
+
   // Called by SharedImageRepresentation in the destructor.
   void OnRepresentationDestroyed(const Mailbox& mailbox,
                                  SharedImageRepresentation* representation);
+
+  void SetPurgeable(const Mailbox& mailbox, bool purgeable);
 
   bool is_thread_safe() const { return !!lock_; }
 
   bool display_context_on_another_thread() const {
     return display_context_on_another_thread_;
   }
+
+  static bool SupportsScanoutImages();
 
   // Returns the NativePixmap backing |mailbox|. Returns null if the SharedImage
   // doesn't exist or is not backed by a NativePixmap. The caller is not
@@ -127,7 +155,7 @@ class GPU_GLES2_EXPORT SharedImageManager
  private:
   class AutoLock;
   // The lock for protecting |images_|.
-  absl::optional<base::Lock> lock_;
+  std::optional<base::Lock> lock_;
 
   base::flat_set<std::unique_ptr<SharedImageBacking>> images_ GUARDED_BY(lock_);
 

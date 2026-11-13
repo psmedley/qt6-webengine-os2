@@ -12,36 +12,92 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {getGridStepSize} from './gridline_helper';
+import {Time, TimeSpan} from '../base/time';
+
+import {getPattern, TickGenerator, TickType} from './gridline_helper';
 
 test('gridline helper to have sensible step sizes', () => {
-  expect(getGridStepSize(10, 14)).toEqual(1);
-  expect(getGridStepSize(30, 14)).toEqual(2);
-  expect(getGridStepSize(60, 14)).toEqual(5);
-  expect(getGridStepSize(100, 14)).toEqual(10);
+  expect(getPattern(1n)).toEqual([1n, '|']);
+  expect(getPattern(2n)).toEqual([2n, '|:']);
+  expect(getPattern(3n)).toEqual([5n, '|....']);
+  expect(getPattern(4n)).toEqual([5n, '|....']);
+  expect(getPattern(5n)).toEqual([5n, '|....']);
+  expect(getPattern(7n)).toEqual([10n, '|....:....']);
 
-  expect(getGridStepSize(10, 21)).toEqual(0.5);
-  expect(getGridStepSize(30, 21)).toEqual(2);
-  expect(getGridStepSize(60, 21)).toEqual(2);
-  expect(getGridStepSize(100, 21)).toEqual(5);
+  expect(getPattern(10n)).toEqual([10n, '|....:....']);
+  expect(getPattern(20n)).toEqual([20n, '|.:.']);
+  expect(getPattern(50n)).toEqual([50n, '|....']);
 
-  expect(getGridStepSize(10, 3)).toEqual(5);
-  expect(getGridStepSize(30, 3)).toEqual(10);
-  expect(getGridStepSize(60, 3)).toEqual(20);
-  expect(getGridStepSize(100, 3)).toEqual(50);
-
-  expect(getGridStepSize(800, 4)).toEqual(200);
+  expect(getPattern(100n)).toEqual([100n, '|....:....']);
 });
 
-test('gridline helper to scale to very small and very large values', () => {
-  expect(getGridStepSize(.01, 14)).toEqual(.001);
-  expect(getGridStepSize(10000, 14)).toEqual(1000);
-});
+describe('TickGenerator', () => {
+  it('can generate ticks with span starting at origin', () => {
+    const tickGen =
+        new TickGenerator(new TimeSpan(Time.fromRaw(0n), Time.fromRaw(10n)), 1);
+    const expected = [
+      {type: TickType.MAJOR, time: 0n},
+      {type: TickType.MINOR, time: 1n},
+      {type: TickType.MINOR, time: 2n},
+      {type: TickType.MINOR, time: 3n},
+      {type: TickType.MINOR, time: 4n},
+      {type: TickType.MEDIUM, time: 5n},
+      {type: TickType.MINOR, time: 6n},
+      {type: TickType.MINOR, time: 7n},
+      {type: TickType.MINOR, time: 8n},
+      {type: TickType.MINOR, time: 9n},
+    ];
+    const actual = Array.from(tickGen!);
+    expect(actual).toStrictEqual(expected);
+  });
 
-test('gridline helper to always return a reasonable number of steps', () => {
-  for (let i = 1; i <= 1000; i++) {
-    const stepSize = getGridStepSize(i, 14);
-    expect(Math.round(i / stepSize)).toBeGreaterThanOrEqual(7);
-    expect(Math.round(i / stepSize)).toBeLessThanOrEqual(21);
-  }
+  it('can generate ticks when span has an offset', () => {
+    const tickGen = new TickGenerator(
+        new TimeSpan(Time.fromRaw(10n), Time.fromRaw(20n)), 1);
+    const expected = [
+      {type: TickType.MAJOR, time: 10n},
+      {type: TickType.MINOR, time: 11n},
+      {type: TickType.MINOR, time: 12n},
+      {type: TickType.MINOR, time: 13n},
+      {type: TickType.MINOR, time: 14n},
+      {type: TickType.MEDIUM, time: 15n},
+      {type: TickType.MINOR, time: 16n},
+      {type: TickType.MINOR, time: 17n},
+      {type: TickType.MINOR, time: 18n},
+      {type: TickType.MINOR, time: 19n},
+    ];
+    const actual = Array.from(tickGen!);
+    expect(actual).toStrictEqual(expected);
+  });
+
+  it('can generate ticks when span is large', () => {
+    const tickGen = new TickGenerator(
+        new TimeSpan(Time.fromRaw(1000000000n), Time.fromRaw(2000000000n)), 1);
+    const expected = [
+      {type: TickType.MAJOR, time: 1000000000n},
+      {type: TickType.MINOR, time: 1100000000n},
+      {type: TickType.MINOR, time: 1200000000n},
+      {type: TickType.MINOR, time: 1300000000n},
+      {type: TickType.MINOR, time: 1400000000n},
+      {type: TickType.MEDIUM, time: 1500000000n},
+      {type: TickType.MINOR, time: 1600000000n},
+      {type: TickType.MINOR, time: 1700000000n},
+      {type: TickType.MINOR, time: 1800000000n},
+      {type: TickType.MINOR, time: 1900000000n},
+    ];
+    const actual = Array.from(tickGen!);
+    expect(actual).toStrictEqual(expected);
+  });
+
+  it('throws an error when timespan duration is 0', () => {
+    expect(() => {
+      new TickGenerator(TimeSpan.ZERO, 1);
+    }).toThrow(Error);
+  });
+
+  it('throws an error when max ticks is 0', () => {
+    expect(() => {
+      new TickGenerator(new TimeSpan(Time.fromRaw(0n), Time.fromRaw(1n)), 0);
+    }).toThrow(Error);
+  });
 });

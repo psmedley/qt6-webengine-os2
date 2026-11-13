@@ -13,9 +13,11 @@ constexpr char kDlpServiceName[] = "org.chromium.Dlp";
 // DLP Daemon methods:
 constexpr char kSetDlpFilesPolicyMethod[] = "SetDlpFilesPolicy";
 constexpr char kAddFileMethod[] = "AddFile";
+constexpr char kAddFilesMethod[] = "AddFiles";
 constexpr char kRequestFileAccessMethod[] = "RequestFileAccess";
 constexpr char kGetFilesSourcesMethod[] = "GetFilesSources";
 constexpr char kCheckFilesTransferMethod[] = "CheckFilesTransfer";
+constexpr char kGetDatabaseEntriesMethod[] = "GetDatabaseEntries";
 
 // Errors returned by DLP Daemon mathods:
 constexpr char kErrorFailedToCreatePipe[] = "FailedToCreatePipe";

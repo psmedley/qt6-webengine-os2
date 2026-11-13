@@ -30,6 +30,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
+
 import {type SearchableView} from './SearchableView.js';
 import {SplitWidget} from './SplitWidget.js';
 import {VBox} from './Widget.js';
@@ -40,6 +42,7 @@ export class Panel extends VBox {
   constructor(name: string) {
     super();
 
+    this.element.setAttribute('jslog', `${VisualLogging.panel().context(name)}`);
     this.element.classList.add('panel');
     this.element.setAttribute('aria-label', name);
     this.element.classList.add(name);
@@ -47,6 +50,10 @@ export class Panel extends VBox {
 
     // @ts-ignore: Legacy global. Requires rewriting tests to get rid of.
     // For testing.
+    self.UI = self.UI || {};
+    // @ts-ignore
+    self.UI.panels = self.UI.panels || {};
+    // @ts-ignore
     UI.panels[name] = this;
   }
 
@@ -58,7 +65,7 @@ export class Panel extends VBox {
     return null;
   }
 
-  elementsToRestoreScrollPositionsFor(): Element[] {
+  override elementsToRestoreScrollPositionsFor(): Element[] {
     return [];
   }
 }

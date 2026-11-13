@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include "core/fpdfapi/parser/cpdf_stream_acc.h"
 #include "core/fxcrt/cfx_bitstream.h"
 #include "third_party/base/check.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 namespace {
 
@@ -221,7 +221,7 @@ std::tuple<float, float, float> CPDF_MeshStream::ReadColor() {
   float result[kMaxComponents] = {};
   for (const auto& func : m_funcs) {
     if (func && func->CountOutputs() <= kMaxComponents)
-      func->Call(pdfium::make_span(color_value, 1), result);
+      func->Call(pdfium::make_span(color_value, 1u), result);
   }
 
   m_pCS->GetRGB(result, &r, &g, &b);
@@ -254,7 +254,7 @@ std::vector<CPDF_MeshVertex> CPDF_MeshStream::ReadVertexRow(
     if (m_BitStream->IsEOF() || !CanReadCoords())
       return std::vector<CPDF_MeshVertex>();
 
-    vertices.push_back(CPDF_MeshVertex());
+    vertices.emplace_back();
     CPDF_MeshVertex& vertex = vertices.back();
     vertex.position = pObject2Bitmap.Transform(ReadCoords());
     if (!CanReadColor())

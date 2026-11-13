@@ -1,11 +1,12 @@
 // Copyright (C) 2022 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QSignalSpy>
 #include <QTest>
 #include <QtCore/QLoggingCategory>
 #include <QtGui/QClipboard>
 #include <QtGui/QPointingDevice>
+#include <QtGui/QStyleHints>
 #include <QtQuick/QQuickView>
 #include <QtPdfQuick/private/qquickpdflinkmodel_p.h>
 #include <QtPdfQuick/private/qquickpdfsearchmodel_p.h>
@@ -28,6 +29,8 @@ private Q_SLOTS:
     void password();
     void selectionAndClipboard();
     void search();
+    void pinchDragPinch();
+    void jumpOnDocumentReady();
 
 public:
     enum NavigationAction {
@@ -59,7 +62,7 @@ void tst_MultiPageView::internalLink_data()
     QTest::addColumn<qreal>("expectedZoom");
     QTest::addColumn<QPoint>("expectedScroll");
 
-    QTest::newRow("first link") << 0 << 1 << qreal(1) << QPoint(134, 1276);
+    QTest::newRow("first link") << 0 << 1 << qreal(1) << QPoint(134, 1286);
     // TODO fails because it zooms out, and the view leaves gaps between pages currently
 //    QTest::newRow("second link") << 1 << 2 << qreal(0.5) << QPoint(0, 717);
 }
@@ -353,6 +356,90 @@ void tst_MultiPageView::search()
     }
     qCDebug(lcTests) << "total movements" << movements;
     QVERIFY(movements > 4);
+}
+
+void tst_MultiPageView::pinchDragPinch()
+{
+    qputenv("QML_NO_TOUCH_COMPRESSION", "1");
+    QQuickView window;
+    QVERIFY(showView(window, testFileUrl("multiPageView.qml")));
+    QQuickItem *pdfView = window.rootObject();
+    QVERIFY(pdfView);
+    pdfView->setProperty("source", testFileUrl("bookmarksAndLinks.pdf"));
+    QTRY_COMPARE(pdfView->property("currentPageRenderingStatus").toInt(), QQuickPdfPageImage::Ready);
+    QQuickItem *table = static_cast<QQuickItem *>(findFirstChild(pdfView, "QQuickTableView"));
+    QVERIFY(table);
+    QQuickItem *firstPage = tableViewItemAtCell(table, 0, 0);
+    QVERIFY(firstPage);
+    QQuickItem *paper = firstPage->childAt(10, 10);
+    QVERIFY(paper);
+    QQuickPdfPageImage *image = firstPage->findChild<QQuickPdfPageImage *>();
+    QVERIFY(image);
+
+    auto pinch = [&window, paper, this]() {
+        const int threshold = QGuiApplication::styleHints()->startDragDistance();
+        const int movement = 100;
+        QCOMPARE_GT(movement, threshold);
+        const qreal initialScale = paper->scale();
+        QPoint p0(100, 200);
+        QPoint p1(200, 200);
+        QTest::QTouchEventSequence seq = QTest::touchEvent(&window, touchscreen.get());
+        seq.press(0, p0, &window).commit();
+        seq.stationary(0).press(1, p1, &window).commit();
+        p1.setX(p1.x() + movement);
+        QSignalSpy frameSwappedSpy(&window, &QQuickWindow::frameSwapped);
+        seq.stationary(0).move(1, p1, &window).commit();
+        // after a frame is rendered, the PinchHandler ought to be active
+        // (but verifying it would require private API)
+        QTRY_VERIFY(frameSwappedSpy.size() > 0);
+        QTRY_COMPARE(paper->scale(), initialScale);
+
+        for (int i = 1; i <= 2; ++i) {
+            p1.setX(p1.x() + movement);
+            seq.stationary(0).move(1, p1, &window).commit();
+            QTRY_COMPARE(paper->scale(), initialScale + i * 0.5);
+        }
+        seq.release(0, p0, &window).release(1, p1, &window).commit();
+    };
+
+    auto drag = [&window, table, this]() {
+        const int movement = 100;
+        QPoint p0(200, 200);
+        QTest::QTouchEventSequence seq = QTest::touchEvent(&window, touchscreen.get());
+        seq.press(0, p0, &window).commit();
+        p0.setY(p0.y() + movement);
+        seq.move(0, p0, &window).commit();
+        p0.setY(p0.y() + movement);
+        seq.move(0, p0, &window).commit();
+        seq.release(0, p0, &window).commit();
+        QTRY_COMPARE(table->property("moving"), false);
+    };
+
+    pinch();
+    qCDebug(lcTests) << "new scale" << pdfView->property("renderScale").toReal();
+    QTRY_COMPARE(pdfView->property("renderScale").toReal(), 2);
+
+    drag();
+    QCOMPARE(pdfView->property("renderScale").toReal(), 2);
+
+    pinch();
+    qCDebug(lcTests) << "new scale" << pdfView->property("renderScale").toReal();
+    QTRY_COMPARE(pdfView->property("renderScale").toReal(), 4);
+
+    // wait for rendering to be done before we exit: if we delete the document
+    // prematurely, QPdfIOHandler might access a dangling pointer
+    QTRY_COMPARE(image->status(), QQuickPdfPageImage::Ready);
+}
+
+void tst_MultiPageView::jumpOnDocumentReady() // QTBUG-119416
+{
+    QQuickView window;
+    QVERIFY(showView(window, testFileUrl("jumpOnDocumentReady.qml")));
+    QQuickItem *pdfView = window.rootObject();
+    QVERIFY(pdfView);
+
+    // QML calls view.goToPage(2): verify that it eventually happens
+    QTRY_COMPARE(pdfView->property("currentPage").toInt(), 2);
 }
 
 QTEST_MAIN(tst_MultiPageView)

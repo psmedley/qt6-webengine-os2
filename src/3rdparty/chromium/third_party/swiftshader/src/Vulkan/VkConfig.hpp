@@ -20,6 +20,14 @@
 #include "Vulkan/VulkanPlatform.hpp"
 #include "spirv-tools/libspirv.h"
 
+#ifndef SWIFTSHADER_LEGACY_PRECISION
+#	define SWIFTSHADER_LEGACY_PRECISION false
+#endif
+
+#ifndef SWIFTSHADER_DEVICE_MEMORY_ALLOCATION_ALIGNMENT
+#	define SWIFTSHADER_DEVICE_MEMORY_ALLOCATION_ALIGNMENT 256
+#endif
+
 namespace vk {
 
 // Note: Constant array initialization requires a string literal.
@@ -35,7 +43,7 @@ constexpr uint32_t VENDOR_ID = 0x1AE0;  // Google, Inc.: https://pcisig.com/goog
 constexpr uint32_t DEVICE_ID = 0xC0DE;  // SwiftShader (placeholder)
 
 // "Allocations returned by vkAllocateMemory are guaranteed to meet any alignment requirement of the implementation."
-constexpr VkDeviceSize DEVICE_MEMORY_ALLOCATION_ALIGNMENT = 256;
+constexpr VkDeviceSize DEVICE_MEMORY_ALLOCATION_ALIGNMENT = SWIFTSHADER_DEVICE_MEMORY_ALLOCATION_ALIGNMENT;
 
 constexpr VkDeviceSize MIN_MEMORY_MAP_ALIGNMENT = 64;
 static_assert(DEVICE_MEMORY_ALLOCATION_ALIGNMENT >= MIN_MEMORY_MAP_ALIGNMENT);
@@ -90,7 +98,7 @@ constexpr float MAX_POINT_SIZE = 1023.0;
 
 constexpr int MAX_SAMPLER_ALLOCATION_COUNT = 4000;
 
-constexpr int SUBPIXEL_PRECISION_BITS = 4;
+constexpr int SUBPIXEL_PRECISION_BITS = SWIFTSHADER_LEGACY_PRECISION ? 4 : 8;
 constexpr float SUBPIXEL_PRECISION_FACTOR = static_cast<float>(1 << SUBPIXEL_PRECISION_BITS);
 constexpr int SUBPIXEL_PRECISION_MASK = 0xFFFFFFFF >> (32 - SUBPIXEL_PRECISION_BITS);
 

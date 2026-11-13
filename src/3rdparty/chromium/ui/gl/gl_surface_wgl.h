@@ -48,7 +48,7 @@ class GL_EXPORT NativeViewGLSurfaceWGL : public GLSurfaceWGL {
   bool Recreate() override;
   bool IsOffscreen() override;
   gfx::SwapResult SwapBuffers(PresentationCallback callback,
-                              FrameData data) override;
+                              gfx::FrameData data) override;
   gfx::Size GetSize() override;
   void* GetHandle() override;
   GLSurfaceFormat GetFormat() override;
@@ -75,7 +75,7 @@ class GL_EXPORT PbufferGLSurfaceWGL : public GLSurfaceWGL {
   void Destroy() override;
   bool IsOffscreen() override;
   gfx::SwapResult SwapBuffers(PresentationCallback callback,
-                              FrameData data) override;
+                              gfx::FrameData data) override;
   gfx::Size GetSize() override;
   void* GetHandle() override;
   GLSurfaceFormat GetFormat() override;

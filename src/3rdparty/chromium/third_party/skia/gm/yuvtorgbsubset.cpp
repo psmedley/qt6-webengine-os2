@@ -19,6 +19,8 @@
 #include "include/core/SkYUVAInfo.h"
 #include "include/core/SkYUVAPixmaps.h"
 #include "src/core/SkCanvasPriv.h"
+#include "src/gpu/ganesh/GrCanvas.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
 #include "src/gpu/ganesh/GrSamplerState.h"
 #include "src/gpu/ganesh/GrTextureProxy.h"
 #include "src/gpu/ganesh/GrYUVATextureProxies.h"
@@ -45,11 +47,9 @@ public:
     }
 
 protected:
-    SkString onShortName() override {
-        return SkString("yuv_to_rgb_subset_effect");
-    }
+    SkString getName() const override { return SkString("yuv_to_rgb_subset_effect"); }
 
-    SkISize onISize() override { return {1310, 540}; }
+    SkISize getISize() override { return {1310, 540}; }
 
     void makePixmaps() {
         SkYUVAInfo yuvaInfo = SkYUVAInfo({8, 8},
@@ -82,7 +82,8 @@ protected:
         bitmaps[2].writePixels(innerVPM, 1, 1);
     }
 
-    DrawResult onGpuSetup(GrDirectContext* context, SkString* errorMsg) override {
+    DrawResult onGpuSetup(SkCanvas* canvas, SkString* errorMsg, GraphiteTestContext*) override {
+        auto context = GrAsDirectContext(canvas->recordingContext());
         if (!context) {
             return DrawResult::kSkip;
         }
@@ -95,9 +96,8 @@ protected:
             SkBitmap bitmap;
             bitmap.installPixels(fPixmaps.plane(i));
             bitmap.setImmutable();
-            views[i] = std::get<0>(
-                    GrMakeCachedBitmapProxyView(context, bitmap, /*label=*/"DrawResult_GpuSetup",
-                    GrMipmapped::kNo));
+            views[i] = std::get<0>(GrMakeCachedBitmapProxyView(
+                    context, bitmap, /*label=*/"DrawResult_GpuSetup", skgpu::Mipmapped::kNo));
             if (!views[i]) {
                 *errorMsg = "Failed to create proxy";
                 return context->abandoned() ? DrawResult::kSkip : DrawResult::kFail;
@@ -117,7 +117,7 @@ protected:
     DrawResult onDraw(GrRecordingContext* rContext,
                       SkCanvas* canvas,
                       SkString* errorMsg) override {
-        auto sdc = SkCanvasPriv::TopDeviceSurfaceDrawContext(canvas);
+        auto sdc = skgpu::ganesh::TopDeviceSurfaceDrawContext(canvas);
         if (!sdc) {
             *errorMsg = kErrorMsg_DrawSkippedGpuOnly;
             return DrawResult::kSkip;

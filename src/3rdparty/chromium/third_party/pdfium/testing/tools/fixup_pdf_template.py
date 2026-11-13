@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2014 The PDFium Authors. All rights reserved.
+# Copyright 2014 The PDFium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Expands a hand-written PDF testcase (template) into a valid PDF file.
@@ -18,8 +18,6 @@ script replaces {{name}}-style variables in the input with calculated results
   {{object x y}} - expands to `x y obj` declaration, noting the offset.
   {{streamlen}} - expands to `/Length n`.
 """
-
-from __future__ import print_function
 
 import io
 import optparse
@@ -168,6 +166,10 @@ def insert_includes(input_path, output_file, visited_set):
     return
   visited_set.add(input_path)
   try:
+    _, file_extension = os.path.splitext(input_path)
+    override_line_endings = (file_extension in EXTENSION_OVERRIDE_LINE_ENDINGS)
+
+    end_of_file_line_ending = False
     with open(input_path, 'rb') as infile:
       for line in infile:
         match = re.match(b'\s*\{\{include\s+(.+)\}\}', line)
@@ -177,12 +179,18 @@ def insert_includes(input_path, output_file, visited_set):
                   os.path.dirname(input_path),
                   match.group(1).decode('utf-8')), output_file, visited_set)
         else:
-          # Replace CRLF with LF line endings for .in files.
-          _, file_extension = os.path.splitext(input_path)
-          if (file_extension in EXTENSION_OVERRIDE_LINE_ENDINGS and
-              line.endswith(WINDOWS_LINE_ENDING)):
-            line = line.removesuffix(WINDOWS_LINE_ENDING) + UNIX_LINE_ENDING
+          if override_line_endings:
+            # Replace CRLF with LF line endings for .in files.
+            if line.endswith(WINDOWS_LINE_ENDING):
+              line = line[:-len(WINDOWS_LINE_ENDING)] + UNIX_LINE_ENDING
+              end_of_file_line_ending = True
+            else:
+              end_of_file_line_ending = line.endswith(UNIX_LINE_ENDING)
           output_file.write(line)
+
+    # Ensure the include ends on its own line.
+    if not end_of_file_line_ending:
+      output_file.write(UNIX_LINE_ENDING)
   except IOError:
     print('failed to include %s' % input_path, file=sys.stderr)
     raise

@@ -9,11 +9,10 @@ Returns the arc tangent of e1 over e2. Component-wise when T is a vector.
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { TypeF32 } from '../../../../../util/conversion.js';
-import { atan2Interval } from '../../../../../util/f32_interval.js';
-import { fullF32Range } from '../../../../../util/math.js';
-import { allInputSources, Case, makeBinaryToF32IntervalCase, run } from '../../expression.js';
+import { TypeF16, TypeF32 } from '../../../../../util/conversion.js';
+import { allInputSources, run } from '../../expression.js';
 
+import { d } from './atan2.cache.js';
 import { builtin } from './builtin.js';
 
 export const g = makeTestGroup(GPUTest);
@@ -39,18 +38,7 @@ TODO(#792): Decide what the ground-truth is for these tests. [1]
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    const makeCase = (y: number, x: number): Case => {
-      return makeBinaryToF32IntervalCase(y, x, atan2Interval);
-    };
-
-    const numeric_range = fullF32Range();
-    const cases: Array<Case> = [];
-    numeric_range.forEach(y => {
-      numeric_range.forEach(x => {
-        cases.push(makeCase(y, x));
-      });
-    });
-
+    const cases = await d.get(`f32_${t.params.inputSource === 'const' ? 'const' : 'non_const'}`);
     await run(t, builtin('atan2'), [TypeF32, TypeF32], TypeF32, t.params, cases);
   });
 
@@ -60,4 +48,10 @@ g.test('f16')
   .params(u =>
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
-  .unimplemented();
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get(`f16_${t.params.inputSource === 'const' ? 'const' : 'non_const'}`);
+    await run(t, builtin('atan2'), [TypeF16, TypeF16], TypeF16, t.params, cases);
+  });

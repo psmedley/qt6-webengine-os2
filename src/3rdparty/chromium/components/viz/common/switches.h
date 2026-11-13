@@ -7,18 +7,17 @@
 
 #include <stdint.h>
 
-#include "build/build_config.h"
+#include "base/feature_list.h"
 #include "components/viz/common/viz_common_export.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace switches {
 
 // Keep list in alphabetical order.
-VIZ_COMMON_EXPORT extern const char kDeJellyScreenWidth[];
 VIZ_COMMON_EXPORT extern const char kDeadlineToSynchronizeSurfaces[];
+VIZ_COMMON_EXPORT extern const char kDisableAdpf[];
 VIZ_COMMON_EXPORT extern const char kDisableFrameRateLimit[];
 VIZ_COMMON_EXPORT extern const char kDoubleBufferCompositing[];
-VIZ_COMMON_EXPORT extern const char kEnableDeJelly[];
 VIZ_COMMON_EXPORT extern const char kEnableHardwareOverlays[];
 VIZ_COMMON_EXPORT extern const char kRunAllCompositorStagesBeforeDraw[];
 VIZ_COMMON_EXPORT extern const char kShowAggregatedDamage[];

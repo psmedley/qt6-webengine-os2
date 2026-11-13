@@ -1,9 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef PLATFORM_IMPL_LOGGING_H_
 #define PLATFORM_IMPL_LOGGING_H_
+
+#include <string>
 
 #include "util/osp_logging.h"
 
@@ -21,6 +23,9 @@ void SetLogLevel(LogLevel level);
 
 // Returns the current global logging level.
 LogLevel GetLogLevel();
+
+// Log a trace message. Used by the text trace logging platform.
+void LogTraceMessage(const std::string& message);
 
 }  // namespace openscreen
 

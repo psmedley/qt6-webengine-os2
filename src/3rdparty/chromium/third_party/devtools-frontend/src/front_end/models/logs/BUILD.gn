@@ -30,10 +30,12 @@ devtools_entrypoint("bundle") {
   visibility = [
     ":*",
     "../../../test/unittests/front_end/models/logs/*",
+    "../../../test/unittests/front_end/panels/console/*",
     "../../../test/unittests/front_end/ui/components/request_link_icon/*",
     "../../entrypoints/main/*",
     "../../panels/application/*",
     "../../panels/console/*",
+    "../../panels/explain/*",
     "../../panels/issues/*",
     "../../panels/network/*",
     "../../ui/components/request_link_icon/*",
@@ -46,7 +48,11 @@ devtools_entrypoint("bundle") {
 devtools_entrypoint("meta") {
   entrypoint = "logs-meta.ts"
 
-  deps = [ ":bundle" ]
+  deps = [
+    ":bundle",
+    "../../core/common:bundle",
+    "../../core/i18n:bundle",
+  ]
 
   visibility = [ "../../entrypoints/*" ]
 }

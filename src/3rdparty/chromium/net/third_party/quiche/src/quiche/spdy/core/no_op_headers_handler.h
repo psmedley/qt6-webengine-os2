@@ -1,6 +1,9 @@
 #ifndef QUICHE_SPDY_CORE_NO_OP_HEADERS_HANDLER_H_
 #define QUICHE_SPDY_CORE_NO_OP_HEADERS_HANDLER_H_
 
+#include <cstddef>
+
+#include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/spdy/core/header_byte_listener_interface.h"
 #include "quiche/spdy/core/spdy_headers_handler_interface.h"
@@ -9,8 +12,7 @@ namespace spdy {
 
 // Drops all header data, but passes information about header bytes parsed to
 // a listener.
-class QUICHE_EXPORT_PRIVATE NoOpHeadersHandler
-    : public SpdyHeadersHandlerInterface {
+class QUICHE_EXPORT NoOpHeadersHandler : public SpdyHeadersHandlerInterface {
  public:
   // Does not take ownership of listener.
   explicit NoOpHeadersHandler(HeaderByteListenerInterface* listener)

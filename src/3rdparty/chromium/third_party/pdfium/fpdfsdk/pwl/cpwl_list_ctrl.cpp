@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -356,26 +356,30 @@ void CPWL_ListCtrl::SetCaret(int32_t nItemIndex) {
 }
 
 void CPWL_ListCtrl::InvalidateItem(int32_t nItemIndex) {
-  if (m_pNotify) {
-    if (nItemIndex == -1) {
-      if (!m_bNotifyFlag) {
-        m_bNotifyFlag = true;
-        CFX_FloatRect rcRefresh = m_rcPlate;
-        m_pNotify->OnInvalidateRect(rcRefresh);
-        m_bNotifyFlag = false;
+  if (!m_pNotify) {
+    return;
+  }
+  if (nItemIndex == -1) {
+    if (!m_bNotifyFlag) {
+      m_bNotifyFlag = true;
+      CFX_FloatRect rcRefresh = m_rcPlate;
+      if (!m_pNotify->OnInvalidateRect(rcRefresh)) {
+        m_pNotify = nullptr;  // Gone, dangling even.
       }
-    } else {
-      if (!m_bNotifyFlag) {
-        m_bNotifyFlag = true;
-        CFX_FloatRect rcRefresh = GetItemRect(nItemIndex);
-        rcRefresh.left -= 1.0f;
-        rcRefresh.right += 1.0f;
-        rcRefresh.bottom -= 1.0f;
-        rcRefresh.top += 1.0f;
-
-        m_pNotify->OnInvalidateRect(rcRefresh);
-        m_bNotifyFlag = false;
+      m_bNotifyFlag = false;
+    }
+  } else {
+    if (!m_bNotifyFlag) {
+      m_bNotifyFlag = true;
+      CFX_FloatRect rcRefresh = GetItemRect(nItemIndex);
+      rcRefresh.left -= 1.0f;
+      rcRefresh.right += 1.0f;
+      rcRefresh.bottom -= 1.0f;
+      rcRefresh.top += 1.0f;
+      if (!m_pNotify->OnInvalidateRect(rcRefresh)) {
+        m_pNotify = nullptr;  // Gone, dangling even.
       }
+      m_bNotifyFlag = false;
     }
   }
 }
@@ -551,7 +555,7 @@ WideString CPWL_ListCtrl::GetText() const {
 
 void CPWL_ListCtrl::AddItem(const WideString& str) {
   auto pListItem = std::make_unique<Item>();
-  pListItem->SetFontMap(m_pFontMap.Get());
+  pListItem->SetFontMap(m_pFontMap);
   pListItem->SetFontSize(m_fFontSize);
   pListItem->SetText(str);
   m_ListItems.push_back(std::move(pListItem));

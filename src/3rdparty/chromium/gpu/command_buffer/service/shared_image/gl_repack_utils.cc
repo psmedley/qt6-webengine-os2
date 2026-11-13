@@ -8,6 +8,7 @@
 
 #include "base/bits.h"
 #include "base/check_op.h"
+#include "third_party/libyuv/include/libyuv/planar_functions.h"
 #include "third_party/skia/include/core/SkPixmap.h"
 
 namespace gpu {
@@ -56,10 +57,38 @@ std::vector<uint8_t> RepackPixelDataWithStride(const gfx::Size& size,
   DCHECK_LT(dst_stride, src_stride);
 
   std::vector<uint8_t> dst_data(dst_stride * size.height());
-  for (int y = 0; y < size.height(); ++y) {
-    memcpy(&dst_data[y * dst_stride], &src_data[y * src_stride], dst_stride);
-  }
+  libyuv::CopyPlane(src_data, src_stride, dst_data.data(), dst_stride,
+                    src_pixmap.info().minRowBytes(), size.height());
+
   return dst_data;
+}
+
+void UnpackPixelDataWithStride(const gfx::Size& size,
+                               const std::vector<uint8_t>& src_data,
+                               size_t src_stride,
+                               const SkPixmap& dst_pixmap) {
+  uint8_t* dst_data = static_cast<uint8_t*>(dst_pixmap.writable_addr());
+  size_t dst_stride = dst_pixmap.rowBytes();
+
+  DCHECK_GT(dst_stride, src_stride);
+
+  libyuv::CopyPlane(src_data.data(), src_stride, dst_data, dst_stride,
+                    dst_pixmap.info().minRowBytes(), size.height());
+}
+
+void SwizzleRedAndBlue(const SkPixmap& pixmap) {
+  DCHECK_EQ(pixmap.info().bytesPerPixel(), 4);
+
+  uint8_t* data = static_cast<uint8_t*>(pixmap.writable_addr());
+  size_t stride = pixmap.rowBytes();
+
+  for (int y = 0; y < pixmap.height(); ++y) {
+    size_t row_offset = y * stride;
+    for (int x = 0; x < pixmap.width(); ++x) {
+      size_t pixel_offset = row_offset + x * 4;
+      std::swap(data[pixel_offset], data[pixel_offset + 2]);
+    }
+  }
 }
 
 }  // namespace gpu

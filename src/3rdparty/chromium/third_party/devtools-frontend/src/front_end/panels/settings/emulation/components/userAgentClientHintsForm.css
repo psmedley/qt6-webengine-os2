@@ -4,12 +4,8 @@
  * found in the LICENSE file.
  */
 
-:host {
-  --client-hints-form-icon-color: var(--color-text-primary);
-}
-
 .root {
-  color: var(--color-text-primary);
+  color: var(--sys-color-on-surface);
   width: 100%;
 }
 
@@ -20,7 +16,7 @@
 }
 
 .rotate-icon {
-  transform: rotate(-90deg);
+  transform: rotate(90deg);
 }
 
 .form-container {
@@ -49,18 +45,17 @@
 }
 
 .input-field {
-  color: var(--color-text-primary);
+  color: var(--sys-color-on-surface);
   padding: 3px 6px;
-  border: none;
   border-radius: 2px;
-  box-shadow: var(--legacy-focus-ring-inactive-shadow);
-  background-color: var(--color-background);
+  border: 1px solid var(--sys-color-neutral-outline);
+  background-color: var(--sys-color-cdt-base-container);
   font-size: inherit;
   height: 18px;
 }
 
 .input-field:focus {
-  box-shadow: var(--legacy-focus-ring-active-shadow);
+  border: 1px solid var(--sys-color-state-focus-ring);
   outline-width: 0;
 }
 
@@ -86,9 +81,22 @@
   width: 100%;
 }
 
-.info-link {
-  height: 14px;
+.info-icon {
   margin-left: 5px;
+  margin-right: 1px;
+}
+
+.link,
+.devtools-link {
+  color: var(--sys-color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+  outline-offset: 2px;
+  font-weight: 400;
+}
+
+devtools-icon + .link {
+  margin-inline-start: 2px;
 }
 
 .hide-container {
@@ -102,10 +110,6 @@
 }
 
 @media (forced-colors: active) {
-  :host {
-    --client-hints-form-icon-color: fieldtext;
-  }
-
   .input-field {
     border: 1px solid;
   }

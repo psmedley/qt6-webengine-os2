@@ -34,7 +34,7 @@
     *   [shared_library: Declare a shared library target.](#func_shared_library)
     *   [source_set: Declare a source set target.](#func_source_set)
     *   [static_library: Declare a static library target.](#func_static_library)
-    *   [target: Declare an target with the given programmatic type.](#func_target)
+    *   [target: Declare a target with the given programmatic type.](#func_target)
 *   [Buildfile functions](#functions)
     *   [assert: Assert an expression is true at generation time.](#func_assert)
     *   [config: Defines a configuration object.](#func_config)
@@ -43,6 +43,8 @@
     *   [exec_script: Synchronously run a script and return the output.](#func_exec_script)
     *   [filter_exclude: Remove values that match a set of patterns.](#func_filter_exclude)
     *   [filter_include: Remove values that do not match a set of patterns.](#func_filter_include)
+    *   [filter_labels_exclude: Remove labels that match a set of patterns.](#func_filter_labels_exclude)
+    *   [filter_labels_include: Remove labels that do not match a set of patterns.](#func_filter_labels_include)
     *   [foreach: Iterate over a list.](#func_foreach)
     *   [forward_variables_from: Copies variables from a different scope.](#func_forward_variables_from)
     *   [get_label_info: Get an attribute from a target's label.](#func_get_label_info)
@@ -50,9 +52,11 @@
     *   [get_target_outputs: [file list] Get the list of outputs from a target.](#func_get_target_outputs)
     *   [getenv: Get an environment variable.](#func_getenv)
     *   [import: Import a file into the current scope.](#func_import)
+    *   [label_matches: Returns whether a label matches any of a list of patterns.](#func_label_matches)
     *   [not_needed: Mark variables from scope as not needed.](#func_not_needed)
     *   [pool: Defines a pool object.](#func_pool)
     *   [print: Prints to the console.](#func_print)
+    *   [print_stack_trace: Prints a stack trace.](#func_print_stack_trace)
     *   [process_file_template: Do template expansion over a list of files.](#func_process_file_template)
     *   [read_file: Read a file into a variable.](#func_read_file)
     *   [rebase_path: Rebase a file or directory to another location.](#func_rebase_path)
@@ -104,10 +108,10 @@
     *   [cflags_objc: [string list] Flags passed to the Objective C compiler.](#var_cflags_objc)
     *   [cflags_objcc: [string list] Flags passed to the Objective C++ compiler.](#var_cflags_objcc)
     *   [check_includes: [boolean] Controls whether a target's files are checked.](#var_check_includes)
-    *   [code_signing_args: [string list] Arguments passed to code signing script.](#var_code_signing_args)
-    *   [code_signing_outputs: [file list] Output files for code signing step.](#var_code_signing_outputs)
-    *   [code_signing_script: [file name] Script for code signing.](#var_code_signing_script)
-    *   [code_signing_sources: [file list] Sources for code signing step.](#var_code_signing_sources)
+    *   [code_signing_args: [string list] [deprecated] Args for the post-processing script.](#var_code_signing_args)
+    *   [code_signing_outputs: [file list] [deprecated] Outputs of the post-processing step.](#var_code_signing_outputs)
+    *   [code_signing_script: [file name] [deprecated] Script for the post-processing step.](#var_code_signing_script)
+    *   [code_signing_sources: [file list] [deprecated] Sources for the post-processing step.](#var_code_signing_sources)
     *   [complete_static_lib: [boolean] Links all deps into a static library.](#var_complete_static_lib)
     *   [configs: [label list] Configs applying to this target or config.](#var_configs)
     *   [contents: Contents to write to file.](#var_contents)
@@ -124,12 +128,14 @@
     *   [framework_dirs: [directory list] Additional framework search directories.](#var_framework_dirs)
     *   [frameworks: [name list] Name of frameworks that must be linked.](#var_frameworks)
     *   [friend: [label pattern list] Allow targets to include private headers.](#var_friend)
+    *   [gen_deps: [label list] Declares targets that should generate when this one does.](#var_gen_deps)
     *   [include_dirs: [directory list] Additional include directories.](#var_include_dirs)
     *   [inputs: [file list] Additional compile-time dependencies.](#var_inputs)
     *   [ldflags: [string list] Flags passed to the linker.](#var_ldflags)
     *   [lib_dirs: [directory list] Additional library directories.](#var_lib_dirs)
     *   [libs: [string list] Additional libraries to link.](#var_libs)
     *   [metadata: [scope] Metadata of this target.](#var_metadata)
+    *   [mnemonic: [string] Prefix displayed when ninja runs this action.](#var_mnemonic)
     *   [module_name: [string] The name for the compiled module.](#var_module_name)
     *   [output_conversion: Data format for generated_file targets.](#var_output_conversion)
     *   [output_dir: [directory] Directory to put output file in.](#var_output_dir)
@@ -138,20 +144,26 @@
     *   [output_prefix_override: [boolean] Don't use prefix for output name.](#var_output_prefix_override)
     *   [outputs: [file list] Output files for actions and copy targets.](#var_outputs)
     *   [partial_info_plist: [filename] Path plist from asset catalog compiler.](#var_partial_info_plist)
-    *   [pool: [string] Label of the pool used by the action.](#var_pool)
+    *   [pool: [string] Label of the pool used by binary targets and actions.](#var_pool)
+    *   [post_processing_args: [string list] Args for the post-processing script.](#var_post_processing_args)
+    *   [post_processing_outputs: [file list] Outputs of the post-processing step.](#var_post_processing_outputs)
+    *   [post_processing_script: [file name] Script for the post-processing step.](#var_post_processing_script)
+    *   [post_processing_sources: [file list] Sources for the post-processing step.](#var_post_processing_sources)
     *   [precompiled_header: [string] Header file to precompile.](#var_precompiled_header)
     *   [precompiled_header_type: [string] "gcc" or "msvc".](#var_precompiled_header_type)
     *   [precompiled_source: [file name] Source file to precompile.](#var_precompiled_source)
-    *   [product_type: [string] Product type for Xcode projects.](#var_product_type)
+    *   [product_type: [string] Product type for the bundle.](#var_product_type)
     *   [public: [file list] Declare public header files for a target.](#var_public)
     *   [public_configs: [label list] Configs applied to dependents.](#var_public_configs)
     *   [public_deps: [label list] Declare public dependencies.](#var_public_deps)
     *   [rebase: [boolean] Rebase collected metadata as files.](#var_rebase)
     *   [response_file_contents: [string list] Contents of .rsp file for actions.](#var_response_file_contents)
+    *   [rustflags: [string list] Flags passed to the Rust compiler.](#var_rustflags)
     *   [script: [file name] Script file for actions.](#var_script)
     *   [sources: [file list] Source files for a target.](#var_sources)
     *   [swiftflags: [string list] Flags passed to the swift compiler.](#var_swiftflags)
     *   [testonly: [boolean] Declares a target must only be used for testing.](#var_testonly)
+    *   [transparent: [bool] True if the bundle is transparent.](#var_transparent)
     *   [visibility: [label list] A list of labels that can depend on a target.](#var_visibility)
     *   [walk_keys: [string list] Key(s) for managing the metadata collection walk.](#var_walk_keys)
     *   [weak_frameworks: [name list] Name of frameworks that must be weak linked.](#var_weak_frameworks)
@@ -777,6 +789,7 @@
       "vs2015" - Visual Studio 2015 project/solution files.
       "vs2017" - Visual Studio 2017 project/solution files.
       "vs2019" - Visual Studio 2019 project/solution files.
+      "vs2022" - Visual Studio 2022 project/solution files.
       "xcode" - Xcode workspace/solution files.
       "qtcreator" - QtCreator project files.
       "json" - JSON file containing target information
@@ -824,6 +837,34 @@
       values are (default to "legacy"):
       "legacy" - Legacy Build system
       "new" - New Build System
+
+  --xcode-configs=<config_name_list>
+      Configure the list of build configuration supported by the generated
+      project. If specified, must be a list of semicolon-separated strings.
+      If omitted, a single configuration will be used in the generated
+      project derived from the build directory.
+
+  --xcode-config-build-dir=<string>
+      If present, must be a path relative to the source directory. It will
+      default to $root_out_dir if omitted. The path is assumed to point to
+      the directory where ninja needs to be invoked. This variable can be
+      used to build for multiple configuration / platform / environment from
+      the same generated Xcode project (assuming that the user has created a
+      gn build directory with the correct args.gn for each).
+
+      One useful value is to use Xcode variables such as '${CONFIGURATION}'
+      or '${EFFECTIVE_PLATFORM}'.
+
+  --xcode-additional-files-patterns=<pattern_list>
+      If present, must be a list of semicolon-separated file patterns. It
+      will be used to add all files matching the pattern located in the
+      source tree to the project. It can be used to add, e.g. documentation
+      files to the project to allow easily edit them.
+
+  --xcode-additional-files-roots=<path_list>
+      If present, must be a list of semicolon-separated paths. It will be used
+      as roots when looking for additional files to add. If omitted, defaults
+      to "//".
 
   --ninja-executable=<string>
       Can be used to specify the ninja executable to use when building.
@@ -876,7 +917,35 @@
       generated JSON file will be first argument when invoking script.
 
   --json-ide-script-args=<argument>
-      Optional second argument that will passed to executed script.
+      Optional second argument that will be passed to executed script.
+```
+
+#### **Ninja Outputs**
+
+```
+  The --ninja-outputs-file=<FILE> option dumps a JSON file that maps GN labels
+  to their Ninja output paths. This can be later processed to build an index
+  to convert between Ninja targets and GN ones before or after the build itself.
+  It looks like:
+
+    {
+      "label1": [
+        "path1",
+        "path2"
+      ],
+      "label2": [
+        "path3"
+      ]
+    }
+
+  --ninja-outputs-script=<path_to_python_script>
+    Executes python script after the outputs file is generated or updated
+    with new content. Path can be project absolute (//), system absolute (/) or
+    relative, in which case the output directory will be base. Path to
+    generated file will be first argument when invoking script.
+
+  --ninja-outputs-script-args=<argument>
+    Optional second argument that will be passed to executed script.
 ```
 
 #### **Compilation Database**
@@ -888,21 +957,37 @@
       replay of individual compilations independent of the build system.
       This is an unstable format and likely to change without warning.
 
+  --add-export-compile-commands=<label_pattern>
+      Adds an additional label pattern (see "gn help label_pattern") of a
+      target to add to the compilation database. This pattern is appended to any
+      list values specified in the export_compile_commands variable in the
+      .gn file (see "gn help dotfile"). This allows the user to add additional
+      targets to the compilation database that the project doesn't add by default.
+
+      To add more than one value, specify this switch more than once. Each
+      invocation adds an additional label pattern.
+
+      Example:
+        --add-export-compile-commands=//tools:my_tool
+        --add-export-compile-commands="//base/*"
+
   --export-compile-commands[=<target_name1,target_name2...>]
-      Produces a compile_commands.json file in the root of the build directory
-      containing an array of “command objects”, where each command object
-      specifies one way a translation unit is compiled in the project. If a list
-      of target_name is supplied, only targets that are reachable from any
-      target in any build file whose name is target_name will be used for
-      “command objects” generation, otherwise all available targets will be used.
-      This is used for various Clang-based tooling, allowing for the replay of
-      individual compilations independent of the build system.
-      e.g. "foo" will match:
-      - "//path/to/src:foo"
-      - "//other/path:foo"
-      - "//foo:foo"
+      DEPRECATED https://bugs.chromium.org/p/gn/issues/detail?id=302.
+      Please use --add-export-compile-commands for per-user configuration, and
+      the "export_compile_commands" value in the project-level .gn file (see
+      "gn help dotfile") for per-project configuration.
+
+      Overrides the value of the export_compile_commands in the .gn file (see
+      "gn help dotfile") as well as the --add-export-compile-commands switch.
+
+      Unlike the .gn setting, this switch takes a legacy format which is a list
+      of target names that are matched in any directory. For example, "foo" will
+      match:
+       - "//path/to/src:foo"
+       - "//other/path:foo"
+       - "//foo:foo"
       and not match:
-      - "//foo:bar"
+       - "//foo:bar"
 ```
 ### <a name="cmd_help"></a>**gn help &lt;anything&gt;**
 
@@ -1013,17 +1098,18 @@
     A list of target labels from which to initiate the walk.
 
   --data
-    A list of keys from which to extract data. In each target walked, its metadata
-    scope is checked for the presence of these keys. If present, the contents of
-    those variable in the scope are appended to the results list.
+    A comma-separated list of keys from which to extract data. In each target
+    walked, its metadata scope is checked for the presence of these keys. If
+    present, the contents of those variable in the scope are appended to the
+    results list.
 
   --walk (optional)
-    A list of keys from which to control the walk. In each target walked, its
-    metadata scope is checked for the presence of any of these keys. If present,
-    the contents of those variables is checked to ensure that it is a label of
-    a valid dependency of the target and then added to the set of targets to walk.
-    If the empty string ("") is present in any of these keys, all deps and data_deps
-    are added to the walk set.
+    A comma-separated list of keys from which to control the walk. In each
+    target walked, its metadata scope is checked for the presence of any of
+    these keys. If present, the contents of those variables is checked to ensure
+    that it is a label of a valid dependency of the target and then added to the
+    set of targets to walk. If the empty string ("") is present in any of these
+    keys, all deps and data_deps are added to the walk set.
 
   --rebase (optional)
     A destination directory onto which to rebase any paths found. If set, all
@@ -1038,7 +1124,7 @@
       Lists collected metaresults for the `files` key in the //base/foo:foo
       target and all of its dependency tree.
 
-  gn meta out/Debug "//base/foo" --data=files --data=other
+  gn meta out/Debug "//base/foo" --data=files,other
       Lists collected metaresults for the `files` and `other` keys in the
       //base/foo:foo target and all of its dependency tree.
 
@@ -1240,7 +1326,7 @@
   gn refs out/Debug //gn:gn
       Find all targets depending on the given exact target name.
 
-  gn refs out/Debug //base:i18n --as=buildfiles | xargs gvim
+  gn refs out/Debug //base:i18n --as=buildfile | xargs gvim
       Edit all .gn files containing references to //base:i18n
 
   gn refs out/Debug //base --all
@@ -1309,6 +1395,12 @@
   and stuff like other Python files required to run your script in the "inputs"
   variable.
 
+  Actions can take the configs and public_configs lists, as well as any of the
+  configs variables (defines, include_dirs, etc.) set directly on the target.
+  These behave exactly as they would on a binary target and can be accessed
+  using substitution patterns in the script args (see "gn help args") to
+  implement custom compiler-like tools.
+
   The "deps" and "public_deps" for an action will always be
   completed before any part of the action is run so it can depend on
   the output of previous steps. The "data_deps" will be built if the
@@ -1351,8 +1443,20 @@
 #### **Variables**
 
 ```
-  args, data, data_deps, depfile, deps, inputs, metadata, outputs*, pool,
-  response_file_contents, script*, sources
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Dependent configs: all_dependent_configs, public_configs
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
+  General: check_includes, configs, data, friend, inputs, metadata,
+           output_extension, output_name, public, sources, testonly,
+           visibility
+  Action variables: args, bridge_header, configs, data, depfile,
+                    framework_dirs, inputs, mnemonic, module_deps,
+                    module_name, outputs*, pool, response_file_contents,
+                    script*, sources
   * = required
 ```
 
@@ -1440,8 +1544,20 @@
 #### **Variables**
 
 ```
-  args, data, data_deps, depfile, deps, inputs, metadata, outputs*, pool,
-  response_file_contents, script*, sources*
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Dependent configs: all_dependent_configs, public_configs
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
+  General: check_includes, configs, data, friend, inputs, metadata,
+           output_extension, output_name, public, sources, testonly,
+           visibility
+  Action variables: args, bridge_header, configs, data, depfile,
+                    framework_dirs, inputs, mnemonic, module_deps,
+                    module_name, outputs*, pool, response_file_contents,
+                    script*, sources
   * = required
 ```
 
@@ -1453,6 +1569,10 @@
   action_foreach("my_idl") {
     script = "idl_processor.py"
     sources = [ "foo.idl", "bar.idl" ]
+
+    # Causes ninja to output "IDL <label>" rather than the default
+    # "ACTION <label>" when building this action.
+    mnemonic = "IDL"
 
     # Our script reads this file each time, so we need to list it as a
     # dependency so we can rebuild if it changes.
@@ -1487,13 +1607,24 @@
   generate iOS/macOS bundle. In cross-platform projects, it is advised to put it
   behind iOS/macOS conditionals.
 
+  If any source files in a bundle_data target match `*/*.xcassets/*` then they
+  will be considered part of an assets catalog, and instead of being copied to
+  the final bundle the assets catalog itself will be added to the inputs of the
+  assets catalog compilation step. See "compile_xcassets" tool.
+
   See "gn help create_bundle" for more information.
 ```
 
 #### **Variables**
 
 ```
-  sources*, outputs*, deps, data_deps, metadata, public_deps, visibility
+  Dependent configs: all_dependent_configs, public_configs
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
+  General: check_includes, configs, data, friend, inputs, metadata,
+           output_extension, output_name, public, sources, testonly,
+           visibility
+  Bundle-specific: sources*, outputs*
   * = required
 ```
 
@@ -1543,6 +1674,23 @@
   mapping from each source file to an output file name using source expansion
   (see "gn help source_expansion"). The placeholders will look like
   "{{source_name_part}}", for example.
+
+  If you want to copy the output of a previous build step, the target that
+  generates the file to copy must be reachable from the deps or public_deps of
+  the copy target.
+```
+
+#### **Variables**
+
+```
+  Dependent configs: all_dependent_configs, public_configs
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
+  General: check_includes, configs, data, friend, inputs, metadata,
+           output_extension, output_name, public, sources, testonly,
+           visibility
+  Copy variables: sources*, outputs*
+  * = required
 ```
 
 #### **Examples**
@@ -1561,6 +1709,24 @@
     # Use source expansion to generate output files with the corresponding file
     # names in the gen dir. This will just copy each file.
     outputs = [ "$target_gen_dir/{{source_file_part}}" ]
+  }
+
+  # Copy the output of a generated executable.
+  copy("package_melon") {
+    # This example uses get_label_info() to compute the output directory of the
+    # dependency. This allows the copy rule to work regardless of the toolchain.
+    #
+    # In some cases (particularly actions defined previously in the same file)
+    # you can use get_target_outputs() to get the input file which can eliminate
+    # the assumptions about the output file name of the dependency.
+
+    input_dir = get_label_info("//src/tools/melon", "root_out_dir");
+    sources = [ "$input_dir/melon" ]
+
+    outputs = [ "$target_gen_dir/{{source_file_part}}" ]
+
+    # Depend on the target to build the file before copying.
+    deps = [ "//src/tools/melon" ]
   }
 ```
 ### <a name="func_create_bundle"></a>**create_bundle**: [ios/macOS] Build an iOS or macOS bundle.
@@ -1586,32 +1752,47 @@
   data_deps, however.
 ```
 
-#### **Code signing**
+#### **Post-processing**
 
 ```
-  Some bundle needs to be code signed as part of the build (on iOS all
-  application needs to be code signed to run on a device). The code signature
-  can be configured via the code_signing_script variable.
+  Some bundle needs to be post-processed as part of the build (e.g. on iOS all
+  application needs to be code signed to run on a device). The post processing
+  step can be configured via the post_processing_script variable.
 
-  If set, code_signing_script is the path of a script that invoked after all
-  files have been moved into the bundle. The script must not change any file in
-  the bundle, but may add new files.
+  If set, `post_processing_script` is the path of a script that invoked after
+  all files have been moved into the bundle. The script must not change any file
+  in the bundle, but may add new files.
 
-  If code_signing_script is defined, then code_signing_outputs must also be
-  defined and non-empty to inform when the script needs to be re-run. The
-  code_signing_args will be passed as is to the script (so path have to be
-  rebased) and additional inputs may be listed with the variable
-  code_signing_sources.
+  If `post_processing_script` is defined, then `post_processing_outputs` must
+  be defined and non-empty to inform when the script needs to be re-run. The
+  `post_processing_args` will be passed as is to the script (so path have to be
+  rebased) and additional inputs may be listed via `post_processing_sources`.
+```
+
+#### **Migration**
+
+```
+  The post-processing step used to be limited to code-signing. The properties
+  used to be named `code_signing_$name` instead of `post_processing_$name`. The
+  old names are still accepted as alias to facilitate migration but a warning
+  will be emitted and the alias eventually be removed.
 ```
 
 #### **Variables**
 
 ```
-  bundle_root_dir, bundle_contents_dir, bundle_resources_dir,
-  bundle_executable_dir, bundle_deps_filter, deps, data_deps, public_deps,
-  visibility, product_type, code_signing_args, code_signing_script,
-  code_signing_sources, code_signing_outputs, xcode_extra_attributes,
-  xcode_test_application_name, partial_info_plist, metadata
+  Dependent configs: all_dependent_configs, public_configs
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
+  General: check_includes, configs, data, friend, inputs, metadata,
+           output_extension, output_name, public, sources, testonly,
+           visibility
+  Bundle vars: bundle_root_dir, bundle_contents_dir, bundle_resources_dir,
+               bundle_executable_dir, bundle_deps_filter, product_type,
+               post_processing_args, post_processing_script,
+               post_processing_sources, post_processing_outputs,
+               xcode_extra_attributes, xcode_test_application_name,
+               partial_info_plist
 ```
 
 #### **Example**
@@ -1685,19 +1866,19 @@
         deps = [ ":${app_name}_bundle_info_plist" ]
         if (is_ios && code_signing) {
           deps += [ ":${app_name}_generate_executable" ]
-          code_signing_script = "//build/config/ios/codesign.py"
-          code_signing_sources = [
+          post_processing_script = "//build/config/ios/codesign.py"
+          post_processing_sources = [
             invoker.entitlements_path,
             "$target_gen_dir/$app_name",
           ]
-          code_signing_outputs = [
+          post_processing_outputs = [
             "$bundle_root_dir/$app_name",
             "$bundle_root_dir/_CodeSignature/CodeResources",
             "$bundle_root_dir/embedded.mobileprovision",
             "$target_gen_dir/$app_name.xcent",
           ]
-          code_signing_args = [
-            "-i=" + ios_code_signing_identity,
+          post_processing_args = [
+            "-i=" + ios_post_processing_identity,
             "-b=" + rebase_path(
                 "$target_gen_dir/$app_name", root_build_dir),
             "-e=" + rebase_path(
@@ -1728,14 +1909,15 @@
 #### **Variables**
 
 ```
-  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
-         libs, precompiled_header, precompiled_source, rustflags,
-         rustenv, swiftflags
-  Deps: data_deps, deps, public_deps
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, friend, inputs, metadata,
-           output_name, output_extension, public, sources, testonly,
+           output_extension, output_name, public, sources, testonly,
            visibility
   Rust variables: aliased_deps, crate_root, crate_name
 ```
@@ -1761,6 +1943,18 @@
 
   Collected metadata, if specified, will be returned in postorder of
   dependencies. See the example for details.
+```
+
+#### **Variables**
+
+```
+  Dependent configs: all_dependent_configs, public_configs
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
+  General: check_includes, configs, data, friend, inputs, metadata,
+           output_extension, output_name, public, sources, testonly,
+           visibility
+  Generated file: contents, data_keys, rebase, walk_keys, output_conversion
 ```
 
 #### **Example (metadata collection)**
@@ -1860,18 +2054,6 @@
       "../base/foo.cpp",  // from //base:a
     ]
 ```
-
-#### **Variables**
-
-```
-  contents
-  data_keys
-  rebase
-  walk_keys
-  output_conversion
-  Deps: data_deps, deps, public_deps
-  Dependent configs: all_dependent_configs, public_configs
-```
 ### <a name="func_group"></a>**group**: Declare a named group of targets.
 
 ```
@@ -1883,8 +2065,12 @@
 #### **Variables**
 
 ```
-  Deps: data_deps, deps, public_deps
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
   Dependent configs: all_dependent_configs, public_configs
+  General: check_includes, configs, data, friend, inputs, metadata,
+           output_extension, output_name, public, sources, testonly,
+           visibility
 ```
 
 #### **Example**
@@ -1922,14 +2108,15 @@
 #### **Variables**
 
 ```
-  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
-         libs, precompiled_header, precompiled_source, rustflags,
-         rustenv, swiftflags
-  Deps: data_deps, deps, public_deps
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, friend, inputs, metadata,
-           output_name, output_extension, public, sources, testonly,
+           output_extension, output_name, public, sources, testonly,
            visibility
   Rust variables: aliased_deps, crate_root, crate_name, crate_type
 ```
@@ -1954,14 +2141,15 @@
 #### **Variables**
 
 ```
-  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
-         libs, precompiled_header, precompiled_source, rustflags,
-         rustenv, swiftflags
-  Deps: data_deps, deps, public_deps
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, friend, inputs, metadata,
-           output_name, output_extension, public, sources, testonly,
+           output_extension, output_name, public, sources, testonly,
            visibility
   Rust variables: aliased_deps, crate_root, crate_name
 ```
@@ -1989,14 +2177,15 @@
 #### **Variables**
 
 ```
-  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
-         libs, precompiled_header, precompiled_source, rustflags,
-         rustenv, swiftflags
-  Deps: data_deps, deps, public_deps
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, friend, inputs, metadata,
-           output_name, output_extension, public, sources, testonly,
+           output_extension, output_name, public, sources, testonly,
            visibility
   Rust variables: aliased_deps, crate_root, crate_name
 ```
@@ -2023,14 +2212,15 @@
 #### **Variables**
 
 ```
-  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
-         libs, precompiled_header, precompiled_source, rustflags,
-         rustenv, swiftflags
-  Deps: data_deps, deps, public_deps
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, friend, inputs, metadata,
-           output_name, output_extension, public, sources, testonly,
+           output_extension, output_name, public, sources, testonly,
            visibility
   Rust variables: aliased_deps, crate_root, crate_name, crate_type
 ```
@@ -2068,14 +2258,15 @@
 #### **Variables**
 
 ```
-  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
-         libs, precompiled_header, precompiled_source, rustflags,
-         rustenv, swiftflags
-  Deps: data_deps, deps, public_deps
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, friend, inputs, metadata,
-           output_name, output_extension, public, sources, testonly,
+           output_extension, output_name, public, sources, testonly,
            visibility
 ```
 ### <a name="func_static_library"></a>**static_library**: Declare a static library target.
@@ -2092,14 +2283,15 @@
 
 ```
   complete_static_lib
-  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
-         libs, precompiled_header, precompiled_source, rustflags,
-         rustenv, swiftflags
-  Deps: data_deps, deps, public_deps
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, friend, inputs, metadata,
-           output_name, output_extension, public, sources, testonly,
+           output_extension, output_name, public, sources, testonly,
            visibility
   Rust variables: aliased_deps, crate_root, crate_name
 
@@ -2109,7 +2301,7 @@
   target containing both C and C++ sources is acceptable, but a
   target containing C and Rust sources is not).
 ```
-### <a name="func_target"></a>**target**: Declare an target with the given programmatic type.
+### <a name="func_target"></a>**target**: Declare a target with the given programmatic type.
 
 ```
   target(target_type_string, target_name_string) { ... }
@@ -2126,6 +2318,20 @@
     target("source_set", "doom_melon") {
   Is equivalent to:
     source_set("doom_melon") {
+```
+
+#### **Common target variables**
+
+```
+  Deps: assert_no_deps, data_deps, deps, public_deps, runtime_deps,
+        write_runtime_deps
+  Dependent configs: all_dependent_configs, public_configs
+  General: check_includes, configs, data, friend, inputs, metadata,
+           output_extension, output_name, public, sources, testonly,
+           visibility
+
+  Targets will also have variables specific to that type, see "gn help <type>"
+  for more.
 ```
 
 #### **Example**
@@ -2201,10 +2407,10 @@
 #### **Variables valid in a config definition**
 
 ```
-  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
-         libs, precompiled_header, precompiled_source, rustflags,
-         rustenv, swiftflags
+  Flags: asmflags, cflags, cflags_c, cflags_cc, cflags_objc,
+         cflags_objcc, defines, include_dirs, inputs, ldflags,
+         lib_dirs, libs, precompiled_header, precompiled_source,
+         rustenv, rustflags, swiftflags, testonly
   Nested configs: configs
   General: visibility
 ```
@@ -2304,6 +2510,13 @@
   which will return true or false depending on whether bar is defined in the
   named scope foo. It will throw an error if foo is not defined or is not a
   scope.
+
+  You can also check a named scope using a subscript string expression:
+    defined(foo[bar + "_name"])
+  which will return true or false depending on whether the subscript
+  expression expands to the name of a member of the scope foo. It will
+  throw an error if foo is not defined or is not a scope, or if the
+  expression does not expand to a string, or if it is an empty string.
 ```
 
 #### **Example**
@@ -2417,6 +2630,42 @@
   values = [ "foo.cc", "foo.h", "foo.proto" ]
   result = filter_include(values, [ "*.proto" ])
   # result will be [ "foo.proto" ]
+```
+### <a name="func_filter_labels_exclude"></a>**filter_labels_exclude**: Remove labels that match a set of patterns.
+
+```
+  filter_labels_exclude(labels, exclude_patterns)
+
+  The argument labels must be a list of strings.
+
+  The argument exclude_patterns must be a list of label patterns (see
+  "gn help label_pattern"). Only elements from labels matching at least
+  one of the patterns will be excluded.
+```
+
+#### **Examples**
+```
+  labels = [ "//foo:baz", "//foo/bar:baz", "//bar:baz" ]
+  result = filter_labels_exclude(labels, [ "//foo:*" ])
+  # result will be [ "//foo/bar:baz", "//bar:baz" ]
+```
+### <a name="func_filter_labels_include"></a>**filter_labels_include**: Remove labels that do not match a set of patterns.
+
+```
+  filter_labels_include(labels, include_patterns)
+
+  The argument labels must be a list of strings.
+
+  The argument include_patterns must be a list of label patterns (see
+  "gn help label_pattern"). Only elements from labels matching at least
+  one of the patterns will be included.
+```
+
+#### **Examples**
+```
+  labels = [ "//foo:baz", "//foo/bar:baz", "//bar:baz" ]
+  result = filter_labels_include(labels, [ "//foo:*" ])
+  # result will be [ "//foo:baz" ]
 ```
 ### <a name="func_foreach"></a>**foreach**: Iterate over a list.
 
@@ -2780,6 +3029,21 @@
   # Looks in the current directory.
   import("my_vars.gni")
 ```
+### <a name="func_label_matches"></a>**label_matches**: Returns true if the label matches any of a set of patterns.
+
+```
+  label_matches(target_label, patterns)
+
+  The argument patterns must be a list of label patterns (see
+  "gn help label_pattern"). If the target_label matches any of the patterns,
+  the function returns the value true.
+```
+
+#### **Examples**
+```
+  result = label_matches("//baz:bar", [ "//foo/bar/*", "//baz:*" ])
+  # result will be true
+```
 ### <a name="func_not_needed"></a>**not_needed**: Mark variables from scope as not needed.
 
 ```
@@ -2864,6 +3128,35 @@
   print("Hello world")
 
   print(sources, deps)
+```
+### <a name="func_print_stack_trace"></a>**print_stack_trace**: Prints a stack trace.
+
+```
+  Prints the current file location, and all template invocations that led up to
+  this location, to the console.
+```
+
+#### **Examples**
+
+```
+  template("foo"){
+    print_stack_trace()
+  }
+  template("bar"){
+    foo(target_name + ".foo") {
+      baz = invoker.baz
+    }
+  }
+  bar("lala") {
+    baz = 42
+  }
+
+  will print out the following:
+
+  print_stack_trace() initiated at  //build.gn:2
+    bar("lala")  //BUILD.gn:9
+    foo("lala.foo")  //BUILD.gn:5
+    print_stack_trace()  //BUILD.gn:2
 ```
 ### <a name="func_process_file_template"></a>**process_file_template**: Do template expansion over a list of files.
 
@@ -3679,6 +3972,20 @@
         process, but may be used when generating metadata for rust-analyzer.
         (See --export-rust-project). It enables such metadata to include
         information about the Rust standard library.
+
+    dynamic_link_switch
+        Valid for: Rust tools which link
+
+        A switch to be optionally inserted into linker command lines
+        to indicate that subsequent items may be dynamically linked.
+        For ld-like linkers, -Clink-arg=-Bdynamic may be a good choice.
+        This switch is inserted by gn into rustc command lines before
+        listing any non-Rust dependencies. This may be necessary because
+        sometimes rustc puts the linker into a mode where it would otherwise
+        link against static libraries by default. This flag will be
+        inserted into the {{rustdeps}} variable at the appropriate place;
+        {{ldflags}} can't be used for the same purpose because the flags
+        may not be inserted at the desired place in the command line.
 ```
 
 #### **Expansions for tool variables**
@@ -3885,6 +4192,10 @@
     {{xcasset_compiler_flags}}
         Expands to the list of flags specified in corresponding
         create_bundle target.
+
+  The inputs for compile_xcassets tool will be found from the bundle_data
+  dependencies by looking for any file matching "*/*.xcassets/*" pattern.
+  The "$assets.xcassets" directory will be added as input to the tool.
 
   The Swift tool has multiple input and outputs. It must have exactly one
   output of .swiftmodule type, but can have one or more object file outputs,
@@ -4377,6 +4688,13 @@
   - "arm"
   - "arm64"
   - "mipsel"
+  - "mips64el"
+  - "s390x"
+  - "ppc64"
+  - "riscv32"
+  - "riscv64"
+  - "e2k"
+  - "loong64"
 ```
 ### <a name="var_target_gen_dir"></a>**target_gen_dir**: Directory for a target's generated files.
 
@@ -4686,6 +5004,14 @@
   to the script. Typically you would use source expansion (see "gn help
   source_expansion") to insert the source file names.
 
+  Args can also expand the substitution patterns corresponding to config
+  variables in the same way that compiler tools (see "gn help tool") do. These
+  allow actions that run compiler or compiler-like tools to access the results
+  of propagating configs through the build graph. For example:
+
+  args = [ "{{defines}}", "{{include_dirs}}", "{{rustenv}}", "--input-file",
+           "{{source}}" ]
+
   See also "gn help action" and "gn help action_foreach".
 ```
 ### <a name="var_asmflags"></a>**asmflags**: Flags passed to the assembler.
@@ -4872,8 +5198,8 @@
   versions of cflags* will be appended on the compiler command line after
   "cflags".
 
-  See also "asmflags" for flags for assembly-language files and "swiftflags"
-  for swift files.
+  See also "asmflags" for flags for assembly-language files, "swiftflags" for
+  swift files, and "rustflags" for Rust files.
 ```
 
 #### **Ordering of flags and values**
@@ -4906,8 +5232,8 @@
   versions of cflags* will be appended on the compiler command line after
   "cflags".
 
-  See also "asmflags" for flags for assembly-language files and "swiftflags"
-  for swift files.
+  See also "asmflags" for flags for assembly-language files, "swiftflags" for
+  swift files, and "rustflags" for Rust files.
 ```
 
 #### **Ordering of flags and values**
@@ -4940,8 +5266,8 @@
   versions of cflags* will be appended on the compiler command line after
   "cflags".
 
-  See also "asmflags" for flags for assembly-language files and "swiftflags"
-  for swift files.
+  See also "asmflags" for flags for assembly-language files, "swiftflags" for
+  swift files, and "rustflags" for Rust files.
 ```
 
 #### **Ordering of flags and values**
@@ -4974,8 +5300,8 @@
   versions of cflags* will be appended on the compiler command line after
   "cflags".
 
-  See also "asmflags" for flags for assembly-language files and "swiftflags"
-  for swift files.
+  See also "asmflags" for flags for assembly-language files, "swiftflags" for
+  swift files, and "rustflags" for Rust files.
 ```
 
 #### **Ordering of flags and values**
@@ -5008,8 +5334,8 @@
   versions of cflags* will be appended on the compiler command line after
   "cflags".
 
-  See also "asmflags" for flags for assembly-language files and "swiftflags"
-  for swift files.
+  See also "asmflags" for flags for assembly-language files, "swiftflags" for
+  swift files, and "rustflags" for Rust files.
 ```
 
 #### **Ordering of flags and values**
@@ -5057,39 +5383,55 @@
     ...
   }
 ```
-### <a name="var_code_signing_args"></a>**code_signing_args**: [string list] Arguments passed to code signing script.
+### <a name="var_code_signing_args"></a>**code_signing_args**: [string list] [deprecated] Args for the post-processing script.
 
 ```
-  For create_bundle targets, code_signing_args is the list of arguments to pass
-  to the code signing script. Typically you would use source expansion (see "gn
-  help source_expansion") to insert the source file names.
+  For create_bundle targets, post_processing_args is the list of arguments to
+  pass to the post-processing script. Typically you would use source expansion
+  (see "gn help source_expansion") to insert the source file names.
 
-  See also "gn help create_bundle".
+  Deprecated: this is an old name for the "post_processing_args" property of
+  the "create_bundle" target. It is still supported to avoid breaking existing
+  build rules, but a warning will be emitted when it is used.
+
+  See also "gn help create_bundle" and "gn help post_processing_args".
 ```
-### <a name="var_code_signing_outputs"></a>**code_signing_outputs**: [file list] Output files for code signing step.
+### <a name="var_code_signing_outputs"></a>**code_signing_outputs**: [file list] [deprecated] Outputs of the post-processing step.
 
 ```
-  Outputs from the code signing step of a create_bundle target. Must refer to
+  Outputs from the post-processing step of a create_bundle target. Must refer to
   files in the build directory.
 
-  See also "gn help create_bundle".
+  Deprecated: this is an old name for the "post_processing_outputs" property of
+  the "create_bundle" target. It is still supported to avoid breaking existing
+  build rules, but a warning will be emitted when it is used.
+
+  See also "gn help create_bundle" and "gn help post_processing_args".
 ```
-### <a name="var_code_signing_script"></a>**code_signing_script**: [file name] Script for code signing."
+### <a name="var_code_signing_script"></a>**code_signing_script**: [file name] [deprecated] Script for the post-processing step."
 
 ```
   An absolute or buildfile-relative file name of a Python script to run for a
-  create_bundle target to perform code signing step.
+  create_bundle target to perform the post-processing step.
 
-  See also "gn help create_bundle".
+  Deprecated: this is an old name for the "post_processing_script" property of
+  the "create_bundle" target. It is still supported to avoid breaking existing
+  build rules, but a warning will be emitted when it is used.
+
+  See also "gn help create_bundle" and "gn help post_processing_args".
 ```
-### <a name="var_code_signing_sources"></a>**code_signing_sources**: [file list] Sources for code signing step.
+### <a name="var_code_signing_sources"></a>**code_signing_sources**: [file list] [deprecated] Sources for the post-processing step.
 
 ```
-  A list of files used as input for code signing script step of a create_bundle
+  A list of files used as input for the post-processing step of a create_bundle
   target. Non-absolute paths will be resolved relative to the current build
   file.
 
-  See also "gn help create_bundle".
+  Deprecated: this is an old name for the "post_processing_sources" property of
+  the "create_bundle" target. It is still supported to avoid breaking existing
+  build rules, but a warning will be emitted when it is used.
+
+  See also "gn help create_bundle" and "gn help post_processing_args".
 ```
 ### <a name="var_complete_static_lib"></a>**complete_static_lib**: [boolean] Links all deps into a static library.
 
@@ -5395,10 +5737,10 @@
 
     # Locate the depfile in the output directory named like the
     # inputs but with a ".d" appended.
-    depfile = "$relative_target_output_dir/{{source_name}}.d"
+    depfile = "$target_gen_dir/{{source_name_part}}.d"
 
     # Say our script uses "-o <d file>" to indicate the depfile.
-    args = [ "{{source}}", "-o", depfile ]
+    args = [ "{{source}}", "-o", rebase_path(depfile, root_build_dir)]
   }
 ```
 ### <a name="var_deps"></a>**deps**: Private linked dependencies.
@@ -5428,6 +5770,10 @@
   of target type. all_dependent_configs are always propagated across all types
   of targets, and public_configs are always propagated across public deps of
   all types of targets.
+
+  For Rust targets, deps ensures that Rust code can refer to the dependency
+  target. If the dependency is a C/C++ target, the path to that target will
+  be made available to Rust for `#[link]` directives.
 
   Data dependencies are propagated differently. See "gn help data_deps" and
   "gn help runtime_deps".
@@ -5582,6 +5928,18 @@
       ":lib",  # Required for the include to be allowed.
     ]
   }
+```
+### <a name="var_gen_deps"></a>**gen_deps**: Declares targets that should generate when this one does.
+
+```
+  A list of target labels.
+
+  Not all GN targets that get evaluated are actually turned into ninja targets
+  (see "gn help execution"). If this target is generated, then any targets in
+  the "gen_deps" list will also be generated, regardless of the usual criteria.
+
+  Since "gen_deps" are not build time dependencies, there can be cycles between
+  "deps" and "gen_deps" or within "gen_deps" itself.
 ```
 ### <a name="var_include_dirs"></a>**include_dirs**: Additional include directories.
 
@@ -5852,6 +6210,17 @@
     }
   }
 ```
+### <a name="var_mnemonic"></a>**mnemonic**: [string] Prefix displayed when ninja runs this action.
+
+```
+  Tools in GN can set their ninja "description" which is displayed when
+  building a target. These are commonly set with the format "CXX $output"
+  or "LINK $label". By default, all GN actions will have the description
+  "ACTION $label". Setting a mnemonic will override the "ACTION" prefix
+  with another string, but the label will still be unconditionally displayed.
+
+  Whitespace is not allowed within a mnemonic.
+```
 ### <a name="var_module_name"></a>**module_name**: [string] The name for the compiled module.
 
 ```
@@ -6006,25 +6375,64 @@
 ```
   Valid for create_bundle target, corresponds to the path for the partial
   Info.plist created by the asset catalog compiler that needs to be merged
-  with the application Info.plist (usually done by the code signing script).
+  with the application Info.plist (usually done by the post-processing script).
 
   The file will be generated regardless of whether the asset compiler has
   been invoked or not. See "gn help create_bundle".
 ```
-### <a name="var_pool"></a>**pool**: Label of the pool used by the action.
+### <a name="var_pool"></a>**pool**: Label of the pool used by binary targets actions.
 
 ```
-  A fully-qualified label representing the pool that will be used for the
-  action. Pools are defined using the pool() {...} declaration.
+  A fully-qualified label representing the pool that will be used for binary
+  targets and actions. Pools are defined using the pool() {...} declaration.
 ```
 
 #### **Example**
 
 ```
+  executable("binary") {
+    pool = "//build:custom_pool"
+    ...
+  }
+
   action("action") {
     pool = "//build:custom_pool"
     ...
   }
+```
+### <a name="var_post_processing_args"></a>**post_processing_args**: [string list] Args for the post-processing script.
+
+```
+  For create_bundle targets, post_processing_args is the list of arguments to
+  pass to the post-processing script. Typically you would use source expansion
+  (see "gn help source_expansion") to insert the source file names.
+
+  See also "gn help create_bundle".
+```
+### <a name="var_post_processing_outputs"></a>**post_processing_outputs**: [file list] Outputs of the post-processing step.
+
+```
+  Outputs from the post-processing step of a create_bundle target. Must refer to
+  files in the build directory.
+
+  See also "gn help create_bundle".
+```
+### <a name="var_post_processing_script"></a>**post_processing_script**: [file name] Script for the post-processing step."
+
+```
+  An absolute or buildfile-relative file name of a Python script to run for a
+  create_bundle target to perform the post-processing step.
+
+  See also "gn help create_bundle".
+```
+### <a name="var_post_processing_sources"></a>**post_processing_sources**: [file list] Sources for the post-processing step.
+
+```
+  A list of files used as input for the post-processing step of a create_bundle
+  target. Non-absolute paths will be resolved relative to the current build
+  file.
+
+  See also "gn help create_bundle".
 ```
 ### <a name="var_precompiled_header"></a>**precompiled_header**: [string] Header file to precompile.
 
@@ -6106,14 +6514,17 @@
   "msvc"-style precompiled headers. It will be implicitly added to the sources
   of the target. See "gn help precompiled_header".
 ```
-### <a name="var_product_type"></a>**product_type**: Product type for Xcode projects.
+### <a name="var_product_type"></a>**product_type**: [string] Product type for the bundle.
 
 ```
-  Correspond to the type of the product of a create_bundle target. Only
-  meaningful to Xcode (used as part of the Xcode project generation).
+  Valid for "create_bundle" and "bundle_data" targets.
 
-  When generating Xcode project files, only create_bundle target with a
-  non-empty product_type will have a corresponding target in Xcode project.
+  Correspond to the type of the bundle. Used by transparent "create_bundle"
+  target to control whether a "bundle_data" needs to be propagated or not.
+
+  When generating Xcode project, the product_type is propagated and only
+  "create_bundle" with a non-empty product_type will have a corresponding
+  target in the project.
 ```
 ### <a name="var_public"></a>**public**: Declare public header files for a target.
 
@@ -6364,6 +6775,13 @@
     ]
   }
 ```
+### <a name="var_rustflags"></a>**rustflags**: Flags passed to the Rust compiler.
+
+```
+  A list of strings.
+
+  "rustflags" are passed to all invocations of the Rust compiler.
+```
 ### <a name="var_script"></a>**script**: Script file for actions.
 
 ```
@@ -6459,6 +6877,16 @@
     testonly = true
     ...
   }
+```
+### <a name="var_transparent"></a>**transparent**: [bool] True if the bundle is transparent.
+
+```
+  A boolean.
+
+  Valid for "create_bundle" target. If true, the "create_bundle" target will
+  not package the "bundle_data" deps but will forward them to all targets that
+  depends on it (unless the "bundle_data" target sets "product_type" to the
+  same value as the "create_bundle" target).
 ```
 ### <a name="var_visibility"></a>**visibility**: A list of labels that can depend on a target.
 
@@ -6763,6 +7191,28 @@
           "//build/my_config.gni",
         ]
 
+  export_compile_commands [optional]
+      A list of label patterns for which to generate a Clang compilation
+      database (see "gn help label_pattern" for the string format).
+
+      When specified, GN will generate a compile_commands.json file in the root
+      of the build directory containing information on how to compile each
+      source file reachable from any label matching any pattern in the list.
+      This is used for Clang-based tooling and some editor integration. See
+      https://clang.llvm.org/docs/JSONCompilationDatabase.html
+
+      The switch --add-export-compile-commands to "gn gen" (see "gn help gen")
+      appends to this value which provides a per-user way to customize it.
+
+      The deprecated switch --export-compile-commands to "gn gen" (see "gn help
+      gen") adds to the export target list using a different format.
+
+      Example:
+        export_compile_commands = [
+          "//base/*",
+          "//tools:doom_melon",
+        ]
+
   root [optional]
       Label of the root build target. The GN build will start by loading the
       build file containing this target name. This defaults to "//:" which will
@@ -6772,13 +7222,27 @@
       The command-line switch --root-target will override this value (see "gn
       help --root-target").
 
-  script_executable [optional]
-      Path to specific Python executable or other interpreter to use in
-      action targets and exec_script calls. By default GN searches the
-      PATH for Python to execute these scripts.
+  root_patterns [optional]
+      A list of label pattern strings. When not defined or empty, the GN build
+      graph will contain all targets from any BUILD.gn evaluated in the default
+      toolchain context, and their transitive dependencies.
 
-      If set to the empty string, the path specified in action targets
-      and exec_script calls will be executed directly.
+      When set to a non empty list, only the targets in the default toolchain
+      matching these patterns, and their transitive dependencies, will be defined
+      instead.
+
+      The command-line switch --root-pattern will override this value (see
+      "gn help --root-pattern")
+
+  script_executable [optional]
+      By default, GN runs the scripts used in action targets and exec_script
+      calls using the Python interpreter found in PATH. This value specifies the
+      Python executable or other interpreter to use instead.
+
+      If set to the empty string, the scripts will be executed directly.
+
+      The command-line switch --script-executable will override this value (see
+      "gn help --script-executable")
 
   secondary_source [optional]
       Label of an alternate directory tree to find input files. When searching
@@ -6902,6 +7366,13 @@
   Targets in non-default toolchains will only be generated when they are
   required (directly or transitively) to build a target in the default
   toolchain.
+
+  Some targets might be associated but without a formal build dependency (for
+  example, related tools or optional variants). A target that is marked as
+  "generated" can propagate its generated state to an associated target using
+  "gen_deps". This will make the referenced dependency have Ninja rules
+  generated in the same cases the source target has but without a build-time
+  dependency and even in non-default toolchains.
 
   See also "gn help ninja_rules".
 ```
@@ -7109,19 +7580,20 @@
 ```
   All execution happens in the context of a scope which holds the current state
   (like variables). With the exception of loops and conditions, '{' introduces
-  a new scope that has a parent reference to the old scope.
+  a new scope.
 
-  Variable reads recursively search all nested scopes until the variable is
-  found or there are no more scopes. Variable writes always go into the current
-  scope. This means that after the closing '}' (again excepting loops and
-  conditions), all local variables will be restored to the previous values.
-  This also means that "foo = foo" can do useful work by copying a variable
-  into the current scope that was defined in a containing scope.
+  Most scopes have a parent reference to the old scope. Variable reads
+  recursively search all parent scopes until the variable is found or there are
+  no more scopes. Variable writes always go into the current scope. This means
+  that after the closing '}' (again excepting loops and conditions), all local
+  variables will be restored to the previous values.  This also means that "foo
+  = foo" can do useful work by copying a variable into the current scope that
+  was defined in a containing scope.
 
-  Scopes can also be assigned to variables. Such scopes can be created by
-  functions like exec_script, when invoking a template (the template code
-  refers to the variables set by the invoking code by the implicitly-created
-  "invoker" scope), or explicitly like:
+  Scopes can be assigned to variables. Examples of such scopes are the
+  implicitly-created "invoker" when invoking a template (which refers to the
+  variables set by the invoking code), scopes created by functions like
+  exec_script, and scopes explicitly created like
 
     empty_scope = {}
     myvalues = {
@@ -7129,10 +7601,14 @@
       bar = "something"
     }
 
-  Inside such a scope definition can be any GN code including conditionals and
-  function calls. After the close of the scope, it will contain all variables
-  explicitly set by the code contained inside it. After this, the values can be
-  read, modified, or added to:
+  In the case of explicitly created scopes and scopes created by functions like
+  exec_script, there is no reference to the parent scope. Such scopes are fully
+  self-contained and do not "inherit" values from their defining scope.
+
+  Inside an explicit scope definition can be any GN code including conditionals
+  and function calls. After the close of the scope, it will contain all
+  variables explicitly set by the code contained inside it. After this, the
+  values can be read, modified, or added to:
 
     myvalues.foo += 2
     empty_scope.new_thing = [ 1, 2, 3 ]
@@ -7551,6 +8027,10 @@
     4. The short names of executables if there is only one executable with that
        short name. Use "ninja doom_melon" to compile the
        "//tools/fruit:doom_melon" executable.
+
+       Note that for Apple platforms, create_bundle targets with a product_type
+       of "com.apple.product-type.application" are considered as executable
+       for this rule (as they define application bundles).
 
     5. The short names of all targets if there is only one target with that
        short name.

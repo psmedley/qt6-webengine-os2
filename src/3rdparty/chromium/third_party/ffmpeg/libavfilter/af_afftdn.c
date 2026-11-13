@@ -26,7 +26,6 @@
 #include "libavutil/tx.h"
 #include "avfilter.h"
 #include "audio.h"
-#include "formats.h"
 #include "filters.h"
 
 #define C       (M_LN10 * 0.1)
@@ -107,6 +106,7 @@ typedef struct AudioFFTDeNoiseContext {
 
     int     format;
     size_t  sample_size;
+    size_t  complex_sample_size;
 
     float   noise_reduction;
     float   noise_floor;
@@ -627,7 +627,6 @@ static int config_input(AVFilterLink *inlink)
 {
     AVFilterContext *ctx = inlink->dst;
     AudioFFTDeNoiseContext *s = ctx->priv;
-    size_t complex_sample_size;
     double wscale, sar, sum, sdiv;
     int i, j, k, m, n, ret, tx_type;
     double dscale = 1.;
@@ -639,13 +638,13 @@ static int config_input(AVFilterLink *inlink)
     switch (s->format) {
     case AV_SAMPLE_FMT_FLTP:
         s->sample_size = sizeof(float);
-        complex_sample_size = sizeof(AVComplexFloat);
+        s->complex_sample_size = sizeof(AVComplexFloat);
         tx_type = AV_TX_FLOAT_RDFT;
         scale = &fscale;
         break;
     case AV_SAMPLE_FMT_DBLP:
         s->sample_size = sizeof(double);
-        complex_sample_size = sizeof(AVComplexDouble);
+        s->complex_sample_size = sizeof(AVComplexDouble);
         tx_type = AV_TX_DOUBLE_RDFT;
         scale = &dscale;
         break;
@@ -753,7 +752,7 @@ static int config_input(AVFilterLink *inlink)
         dnch->rel_var = av_calloc(s->bin_count, sizeof(*dnch->rel_var));
         dnch->min_abs_var = av_calloc(s->bin_count, sizeof(*dnch->min_abs_var));
         dnch->fft_in = av_calloc(s->fft_length2, s->sample_size);
-        dnch->fft_out = av_calloc(s->fft_length2 + 1, complex_sample_size);
+        dnch->fft_out = av_calloc(s->fft_length2 + 1, s->complex_sample_size);
         ret = av_tx_init(&dnch->fft, &dnch->tx_fn, tx_type, 0, s->fft_length2, scale, 0);
         if (ret < 0)
             return ret;
@@ -931,7 +930,7 @@ static void sample_noise_block(AudioFFTDeNoiseContext *s,
         break;
     }
 
-    dnch->tx_fn(dnch->fft, dnch->fft_out, dnch->fft_in, sizeof(s->sample_size));
+    dnch->tx_fn(dnch->fft, dnch->fft_out, dnch->fft_in, s->sample_size);
 
     edge = s->noise_band_edge[0];
     j = edge;
@@ -1074,14 +1073,14 @@ static int filter_channel(AVFilterContext *ctx, void *arg, int jobnr, int nb_job
             break;
         }
 
-        dnch->tx_fn(dnch->fft, dnch->fft_out, dnch->fft_in, sizeof(s->sample_size));
+        dnch->tx_fn(dnch->fft, dnch->fft_out, dnch->fft_in, s->sample_size);
 
         process_frame(ctx, s, dnch,
                       dnch->prior,
                       dnch->prior_band_excit,
                       s->track_noise);
 
-        dnch->itx_fn(dnch->ifft, dnch->fft_in, dnch->fft_out, sizeof(s->sample_size));
+        dnch->itx_fn(dnch->ifft, dnch->fft_in, dnch->fft_out, s->complex_sample_size);
 
         switch (s->format) {
         case AV_SAMPLE_FMT_FLTP:
@@ -1196,7 +1195,7 @@ static int output_frame(AVFilterLink *inlink, AVFrame *in)
             return AVERROR(ENOMEM);
         }
 
-        out->pts = in->pts;
+        av_frame_copy_props(out, in);
     }
 
     for (int ch = 0; ch < inlink->ch_layout.nb_channels; ch++) {
@@ -1357,13 +1356,6 @@ static const AVFilterPad inputs[] = {
     },
 };
 
-static const AVFilterPad outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_AUDIO,
-    },
-};
-
 const AVFilter ff_af_afftdn = {
     .name            = "afftdn",
     .description     = NULL_IF_CONFIG_SMALL("Denoise audio samples using FFT."),
@@ -1372,7 +1364,7 @@ const AVFilter ff_af_afftdn = {
     .activate        = activate,
     .uninit          = uninit,
     FILTER_INPUTS(inputs),
-    FILTER_OUTPUTS(outputs),
+    FILTER_OUTPUTS(ff_audio_default_filterpad),
     FILTER_SAMPLEFMTS(AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_DBLP),
     .process_command = process_command,
     .flags           = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL |

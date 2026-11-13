@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,14 @@
 #include <stdint.h>
 
 #include "core/fxcrt/data_vector.h"
+#include "core/fxcrt/fixed_size_data_vector.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/dib/fx_dib.h"
 #include "third_party/base/check_op.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CFX_DIBBase;
 class PauseIndicatorIface;
@@ -131,9 +132,7 @@ class CStretchEngine {
     k1BppTo8Bpp,
     k1BppToManyBpp,
     k8BppTo8Bpp,
-    k8BppTo8BppWithAlpha,
     k8BppToManyBpp,
-    k8BppToManyBppWithAlpha,
     kManyBpptoManyBpp,
     kManyBpptoManyBppWithAlpha
   };
@@ -151,16 +150,14 @@ class CStretchEngine {
   const int m_DestHeight;
   const FX_RECT m_DestClip;
   DataVector<uint8_t> m_DestScanline;
-  DataVector<uint8_t> m_DestMaskScanline;
-  DataVector<uint8_t> m_InterBuf;
-  DataVector<uint8_t> m_ExtraAlphaBuf;
+  FixedSizeDataVector<uint8_t> m_InterBuf;
   FX_RECT m_SrcClip;
   int m_InterPitch;
   int m_ExtraMaskPitch;
   FXDIB_ResampleOptions m_ResampleOptions;
   TransformMethod m_TransMethod;
   State m_State = State::kInitial;
-  int m_CurRow;
+  int m_CurRow = 0;
   WeightTable m_WeightTable;
 };
 

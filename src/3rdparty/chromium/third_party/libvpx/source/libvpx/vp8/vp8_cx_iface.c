@@ -12,13 +12,16 @@
 #include "./vp8_rtcd.h"
 #include "./vpx_dsp_rtcd.h"
 #include "./vpx_scale_rtcd.h"
-#include "vpx/vpx_codec.h"
+#include "vpx/vpx_encoder.h"
 #include "vpx/internal/vpx_codec_internal.h"
 #include "vpx_version.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vpx_ports/static_assert.h"
 #include "vpx_ports/system_state.h"
 #include "vpx_util/vpx_timestamp.h"
+#if CONFIG_MULTITHREAD
+#include "vp8/encoder/ethreading.h"
+#endif
 #include "vp8/encoder/onyx_int.h"
 #include "vpx/vp8cx.h"
 #include "vp8/encoder/firstpass.h"
@@ -92,13 +95,16 @@ struct vpx_codec_alg_priv {
   vpx_enc_frame_flags_t control_frame_flags;
 };
 
+// Called by vp8e_set_config() and vp8e_encode() only. Must not be called
+// by vp8e_init() because the `error` paramerer (cpi->common.error) will be
+// destroyed by vpx_codec_enc_init_ver() after vp8e_init() returns an error.
+// See the "IMPORTANT" comment in vpx_codec_enc_init_ver().
 static vpx_codec_err_t update_error_state(
     vpx_codec_alg_priv_t *ctx, const struct vpx_internal_error_info *error) {
-  vpx_codec_err_t res;
+  const vpx_codec_err_t res = error->error_code;
 
-  if ((res = error->error_code)) {
+  if (res != VPX_CODEC_OK)
     ctx->base.err_detail = error->has_detail ? error->detail : NULL;
-  }
 
   return res;
 }
@@ -488,6 +494,9 @@ static vpx_codec_err_t vp8e_set_config(vpx_codec_alg_priv_t *ctx,
   ctx->cfg = *cfg;
   set_vp8e_config(&ctx->oxcf, ctx->cfg, ctx->vp8_cfg, NULL);
   vp8_change_config(ctx->cpi, &ctx->oxcf);
+#if CONFIG_MULTITHREAD
+  if (vp8cx_create_encoder_threads(ctx->cpi)) return VPX_CODEC_ERROR;
+#endif
   ctx->cpi->common.error.setjmp = 0;
   return VPX_CODEC_OK;
 }
@@ -618,10 +627,11 @@ static vpx_codec_err_t set_screen_content_mode(vpx_codec_alg_priv_t *ctx,
 static vpx_codec_err_t ctrl_set_rtc_external_ratectrl(vpx_codec_alg_priv_t *ctx,
                                                       va_list args) {
   VP8_COMP *cpi = ctx->cpi;
-  const unsigned int data = CAST(VP8E_SET_GF_CBR_BOOST_PCT, args);
+  const unsigned int data = CAST(VP8E_SET_RTC_EXTERNAL_RATECTRL, args);
   if (data) {
     cpi->cyclic_refresh_mode_enabled = 0;
     cpi->rt_always_update_correction_factor = 1;
+    cpi->rt_drop_recode_on_overshoot = 0;
   }
   return VPX_CODEC_OK;
 }
@@ -715,7 +725,17 @@ static vpx_codec_err_t vp8e_init(vpx_codec_ctx_t *ctx,
 
       set_vp8e_config(&priv->oxcf, priv->cfg, priv->vp8_cfg, mr_cfg);
       priv->cpi = vp8_create_compressor(&priv->oxcf);
-      if (!priv->cpi) res = VPX_CODEC_MEM_ERROR;
+      if (!priv->cpi) {
+#if CONFIG_MULTI_RES_ENCODING
+        // Release ownership of mr_cfg->mr_low_res_mode_info on failure. This
+        // prevents ownership confusion with the caller and avoids a double
+        // free when vpx_codec_destroy() is called on this instance.
+        priv->oxcf.mr_total_resolutions = 0;
+        priv->oxcf.mr_encoder_id = 0;
+        priv->oxcf.mr_low_res_mode_info = NULL;
+#endif
+        res = VPX_CODEC_MEM_ERROR;
+      }
     }
   }
 
@@ -769,7 +789,7 @@ static vpx_codec_err_t image2yuvconfig(const vpx_image_t *img,
 
 static void pick_quickcompress_mode(vpx_codec_alg_priv_t *ctx,
                                     unsigned long duration,
-                                    unsigned long deadline) {
+                                    vpx_enc_deadline_t deadline) {
   int new_qc;
 
 #if !(CONFIG_REALTIME_ONLY)
@@ -859,7 +879,7 @@ static vpx_codec_err_t vp8e_encode(vpx_codec_alg_priv_t *ctx,
                                    const vpx_image_t *img, vpx_codec_pts_t pts,
                                    unsigned long duration,
                                    vpx_enc_frame_flags_t enc_flags,
-                                   unsigned long deadline) {
+                                   vpx_enc_deadline_t deadline) {
   volatile vpx_codec_err_t res = VPX_CODEC_OK;
   // Make a copy as volatile to avoid -Wclobbered with longjmp.
   volatile vpx_enc_frame_flags_t flags = enc_flags;
@@ -911,12 +931,6 @@ static vpx_codec_err_t vp8e_encode(vpx_codec_alg_priv_t *ctx,
     }
   }
 
-  if (setjmp(ctx->cpi->common.error.jmp)) {
-    ctx->cpi->common.error.setjmp = 0;
-    vpx_clear_system_state();
-    return VPX_CODEC_CORRUPT_FRAME;
-  }
-
   /* Initialize the encoder instance on the first frame*/
   if (!res && ctx->cpi) {
     unsigned int lib_flags;
@@ -926,6 +940,14 @@ static vpx_codec_err_t vp8e_encode(vpx_codec_alg_priv_t *ctx,
     unsigned char *cx_data;
     unsigned char *cx_data_end;
     int comp_data_state = 0;
+
+    if (setjmp(ctx->cpi->common.error.jmp)) {
+      ctx->cpi->common.error.setjmp = 0;
+      res = update_error_state(ctx, &ctx->cpi->common.error);
+      vpx_clear_system_state();
+      return res;
+    }
+    ctx->cpi->common.error.setjmp = 1;
 
     /* Set up internal flags */
     if (ctx->base.init_flags & VPX_CODEC_USE_PSNR) {
@@ -961,8 +983,6 @@ static vpx_codec_err_t vp8e_encode(vpx_codec_alg_priv_t *ctx,
     cx_data_sz = ctx->cx_data_sz;
     cx_data_end = ctx->cx_data + cx_data_sz;
     lib_flags = 0;
-
-    ctx->cpi->common.error.setjmp = 1;
 
     while (cx_data_sz >= ctx->cx_data_sz / 2) {
       comp_data_state = vp8_get_compressed_data(
@@ -1059,6 +1079,7 @@ static vpx_codec_err_t vp8e_encode(vpx_codec_alg_priv_t *ctx,
         }
       }
     }
+    ctx->cpi->common.error.setjmp = 0;
   }
 
   return res;
@@ -1224,8 +1245,8 @@ static vpx_codec_err_t vp8e_set_scalemode(vpx_codec_alg_priv_t *ctx,
   if (data) {
     int res;
     vpx_scaling_mode_t scalemode = *(vpx_scaling_mode_t *)data;
-    res = vp8_set_internal_size(ctx->cpi, (VPX_SCALING)scalemode.h_scaling_mode,
-                                (VPX_SCALING)scalemode.v_scaling_mode);
+    res = vp8_set_internal_size(ctx->cpi, scalemode.h_scaling_mode,
+                                scalemode.v_scaling_mode);
 
     if (!res) {
       /*force next frame a key frame to effect scaling mode */
@@ -1292,8 +1313,8 @@ static vpx_codec_enc_cfg_map_t vp8e_usage_cfg_map[] = {
         0,  /* rc_resize_allowed */
         1,  /* rc_scaled_width */
         1,  /* rc_scaled_height */
-        60, /* rc_resize_down_thresold */
-        30, /* rc_resize_up_thresold */
+        60, /* rc_resize_down_thresh */
+        30, /* rc_resize_up_thresh */
 
         VPX_VBR,     /* rc_end_usage */
         { NULL, 0 }, /* rc_twopass_stats_in */

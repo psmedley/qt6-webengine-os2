@@ -8,6 +8,7 @@
 #include "quiche/quic/core/quic_bandwidth.h"
 #include "quiche/quic/core/quic_time.h"
 #include "quiche/quic/core/quic_types.h"
+#include "quiche/quic/platform/api/quic_bug_tracker.h"
 #include "quiche/quic/platform/api/quic_flag_utils.h"
 #include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/quic/platform/api/quic_logging.h"
@@ -42,6 +43,9 @@ MinRttFilter::MinRttFilter(QuicTime::Delta initial_min_rtt,
       min_rtt_timestamp_(initial_min_rtt_timestamp) {}
 
 void MinRttFilter::Update(QuicTime::Delta sample_rtt, QuicTime now) {
+  if (sample_rtt <= QuicTime::Delta::Zero()) {
+    return;
+  }
   if (sample_rtt < min_rtt_ || min_rtt_timestamp_ == QuicTime::Zero()) {
     min_rtt_ = sample_rtt;
     min_rtt_timestamp_ = now;
@@ -49,6 +53,9 @@ void MinRttFilter::Update(QuicTime::Delta sample_rtt, QuicTime now) {
 }
 
 void MinRttFilter::ForceUpdate(QuicTime::Delta sample_rtt, QuicTime now) {
+  if (sample_rtt <= QuicTime::Delta::Zero()) {
+    return;
+  }
   min_rtt_ = sample_rtt;
   min_rtt_timestamp_ = now;
 }
@@ -80,6 +87,9 @@ void Bbr2NetworkModel::OnPacketSent(QuicTime sent_time,
   // quiescence.
   if (bytes_in_flight < min_bytes_in_flight_in_round_) {
     min_bytes_in_flight_in_round_ = bytes_in_flight;
+  }
+  if (bytes_in_flight + bytes >= inflight_hi_) {
+    inflight_hi_limited_in_round_ = true;
   }
   round_trip_counter_.OnPacketSent(packet_number);
 
@@ -143,11 +153,19 @@ void Bbr2NetworkModel::OnCongestionEventStart(
         congestion_event->prior_bytes_in_flight -
         congestion_event->bytes_acked - congestion_event->bytes_lost;
   } else {
-    QUIC_LOG_FIRST_N(ERROR, 1)
-        << "prior_bytes_in_flight:" << congestion_event->prior_bytes_in_flight
-        << " is smaller than the sum of bytes_acked:"
-        << congestion_event->bytes_acked
-        << " and bytes_lost:" << congestion_event->bytes_lost;
+    if (GetQuicReloadableFlag(quic_bbr2_fix_spurious_loss_bytes_counting)) {
+      QUIC_BUG(quic_bbr2_prior_in_flight_too_small)
+          << "prior_bytes_in_flight:" << congestion_event->prior_bytes_in_flight
+          << " is smaller than the sum of bytes_acked:"
+          << congestion_event->bytes_acked
+          << " and bytes_lost:" << congestion_event->bytes_lost;
+    } else {
+      QUIC_LOG_FIRST_N(ERROR, 1)
+          << "prior_bytes_in_flight:" << congestion_event->prior_bytes_in_flight
+          << " is smaller than the sum of bytes_acked:"
+          << congestion_event->bytes_acked
+          << " and bytes_lost:" << congestion_event->bytes_lost;
+    }
     congestion_event->bytes_in_flight = 0;
   }
 
@@ -280,15 +298,15 @@ void Bbr2NetworkModel::AdaptLowerBounds(
     // fast, conservation style response to loss, use the last sample.
     last_bandwidth = congestion_event.sample_max_bandwidth;
   }
-  if (pacing_gain_ > Params().startup_full_bw_threshold) {
+  if (pacing_gain_ > Params().full_bw_threshold) {
     // In STARTUP, pacing_gain_ is applied to bandwidth_lo_ in
     // UpdatePacingRate, so this backs that multiplication out to allow the
     // pacing rate to decrease, but not below
-    // last_bandwidth * startup_full_bw_threshold.
+    // last_bandwidth * full_bw_threshold.
     // TODO(ianswett): Consider altering pacing_gain_ when in STARTUP instead.
-    bandwidth_lo_ = std::max(
-        bandwidth_lo_,
-        last_bandwidth * (Params().startup_full_bw_threshold / pacing_gain_));
+    bandwidth_lo_ =
+        std::max(bandwidth_lo_,
+                 last_bandwidth * (Params().full_bw_threshold / pacing_gain_));
   } else {
     // Ensure bandwidth_lo isn't lower than last_bandwidth.
     bandwidth_lo_ = std::max(bandwidth_lo_, last_bandwidth);
@@ -376,6 +394,7 @@ bool Bbr2NetworkModel::IsInflightTooHigh(
 void Bbr2NetworkModel::RestartRoundEarly() {
   OnNewRound();
   round_trip_counter_.RestartRound();
+  rounds_with_queueing_ = 0;
 }
 
 void Bbr2NetworkModel::OnNewRound() {
@@ -383,6 +402,7 @@ void Bbr2NetworkModel::OnNewRound() {
   loss_events_in_round_ = 0;
   max_bytes_delivered_in_round_ = 0;
   min_bytes_in_flight_in_round_ = std::numeric_limits<uint64_t>::max();
+  inflight_hi_limited_in_round_ = false;
 }
 
 void Bbr2NetworkModel::cap_inflight_lo(QuicByteCount cap) {
@@ -406,7 +426,7 @@ bool Bbr2NetworkModel::HasBandwidthGrowth(
   QUICHE_DCHECK(congestion_event.end_of_round_trip);
 
   QuicBandwidth threshold =
-      full_bandwidth_baseline_ * Params().startup_full_bw_threshold;
+      full_bandwidth_baseline_ * Params().full_bw_threshold;
 
   if (MaxBandwidth() >= threshold) {
     QUIC_DVLOG(3) << " CheckBandwidthGrowth at end of round. max_bandwidth:"
@@ -433,26 +453,23 @@ bool Bbr2NetworkModel::HasBandwidthGrowth(
   return false;
 }
 
-bool Bbr2NetworkModel::CheckPersistentQueue(
-    const Bbr2CongestionEvent& congestion_event, float bdp_gain) {
+void Bbr2NetworkModel::CheckPersistentQueue(
+    const Bbr2CongestionEvent& congestion_event, float target_gain) {
   QUICHE_DCHECK(congestion_event.end_of_round_trip);
   QUICHE_DCHECK_NE(min_bytes_in_flight_in_round_,
                    std::numeric_limits<uint64_t>::max());
-  QuicByteCount target = bdp_gain * BDP();
-  if (bdp_gain >= 2) {
-    // Use a more conservative threshold for STARTUP because CWND gain is 2.
-    if (target <= QueueingThresholdExtraBytes()) {
-      return false;
-    }
-    target -= QueueingThresholdExtraBytes();
-  } else {
-    target += QueueingThresholdExtraBytes();
+  QUICHE_DCHECK_GE(target_gain, Params().full_bw_threshold);
+  QuicByteCount target =
+      std::max(static_cast<QuicByteCount>(target_gain * BDP()),
+               BDP() + QueueingThresholdExtraBytes());
+  if (min_bytes_in_flight_in_round_ < target) {
+    rounds_with_queueing_ = 0;
+    return;
   }
-  if (min_bytes_in_flight_in_round_ > target) {
+  rounds_with_queueing_++;
+  if (rounds_with_queueing_ >= Params().max_startup_queue_rounds) {
     full_bandwidth_reached_ = true;
-    return true;
   }
-  return false;
 }
 
 }  // namespace quic

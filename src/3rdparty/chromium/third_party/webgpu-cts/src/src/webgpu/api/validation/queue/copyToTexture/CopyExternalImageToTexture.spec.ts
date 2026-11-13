@@ -5,23 +5,24 @@ the destination texture should have RENDER_ATTACHMENT usage, which is only allow
 textures.
 `;
 
-import { getResourcePath } from '../../../../../common/framework/resources.js';
+import {
+  getResourcePath,
+  getCrossOriginResourcePath,
+} from '../../../../../common/framework/resources.js';
 import { makeTestGroup } from '../../../../../common/framework/test_group.js';
 import { raceWithRejectOnTimeout, unreachable, assert } from '../../../../../common/util/util.js';
+import { kTextureUsages } from '../../../../capability_info.js';
 import {
   kTextureFormatInfo,
   kTextureFormats,
-  kTextureUsages,
   kValidTextureFormatsForCopyE2T,
-} from '../../../../capability_info.js';
+} from '../../../../format_info.js';
 import { kResourceStates } from '../../../../gpu_test.js';
 import {
   CanvasType,
-  canCopyFromCanvasContext,
   createCanvas,
   createOnscreenCanvas,
   createOffscreenCanvas,
-  kValidCanvasContextIds,
 } from '../../../../util/create_elements.js';
 import { ValidationTest } from '../../validation_test.js';
 
@@ -136,6 +137,8 @@ function generateCopySizeForDstOOB({ mipLevel, dstOrigin }: WithDstOriginMipLeve
 }
 
 class CopyExternalImageToTextureTest extends ValidationTest {
+  onlineCrossOriginUrl = 'https://raw.githubusercontent.com/gpuweb/gpuweb/main/logo/webgpu.png';
+
   getImageData(width: number, height: number): ImageData {
     if (typeof ImageData === 'undefined') {
       this.skip('ImageData is not supported.');
@@ -154,7 +157,14 @@ class CopyExternalImageToTextureTest extends ValidationTest {
   ): HTMLCanvasElement | OffscreenCanvas {
     const canvas = createCanvas(this, canvasType, 1, 1);
     const ctx = canvas.getContext('2d');
-    assert(ctx !== null);
+    switch (canvasType) {
+      case 'onscreen':
+        assert(ctx instanceof CanvasRenderingContext2D);
+        break;
+      case 'offscreen':
+        assert(ctx instanceof OffscreenCanvasRenderingContext2D);
+        break;
+    }
     ctx.drawImage(content, 0, 0);
 
     return canvas;
@@ -198,100 +208,6 @@ class CopyExternalImageToTextureTest extends ValidationTest {
 
 export const g = makeTestGroup(CopyExternalImageToTextureTest);
 
-g.test('source_canvas,contexts')
-  .desc(
-    `
-  Test HTMLCanvasElement as source image with different contexts.
-
-  Call HTMLCanvasElement.getContext() with different context type.
-  Only '2d', 'experimental-webgl', 'webgl', 'webgl2' is valid context
-  type.
-
-  Check whether 'OperationError' is generated when context type is invalid.
-  `
-  )
-  .params(u =>
-    u //
-      .combine('contextType', kValidCanvasContextIds)
-      .beginSubcases()
-      .combine('copySize', [
-        { width: 0, height: 0, depthOrArrayLayers: 0 },
-        { width: 1, height: 1, depthOrArrayLayers: 1 },
-      ])
-  )
-  .fn(async t => {
-    const { contextType, copySize } = t.params;
-    const canvas = createOnscreenCanvas(t, 1, 1);
-    const dstTexture = t.device.createTexture({
-      size: { width: 1, height: 1, depthOrArrayLayers: 1 },
-      format: 'bgra8unorm',
-      usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-
-    const ctx = canvas.getContext(contextType);
-    if (ctx === null) {
-      t.skip('Failed to get context for canvas element');
-      return;
-    }
-    t.tryTrackForCleanup(ctx);
-
-    t.runTest(
-      { source: canvas },
-      { texture: dstTexture },
-      copySize,
-      true, // No validation errors.
-      canCopyFromCanvasContext(contextType) ? '' : 'OperationError'
-    );
-  });
-
-g.test('source_offscreenCanvas,contexts')
-  .desc(
-    `
-  Test OffscreenCanvas as source image with different contexts.
-
-  Call OffscreenCanvas.getContext() with different context type.
-  Only '2d', 'webgl', 'webgl2', 'webgpu' is valid context type.
-
-  Check whether 'OperationError' is generated when context type is invalid.
-  `
-  )
-  .params(u =>
-    u //
-      .combine('contextType', kValidCanvasContextIds)
-      .beginSubcases()
-      .combine('copySize', [
-        { width: 0, height: 0, depthOrArrayLayers: 0 },
-        { width: 1, height: 1, depthOrArrayLayers: 1 },
-      ])
-  )
-  .fn(async t => {
-    const { contextType, copySize } = t.params;
-    const canvas = createOffscreenCanvas(t, 1, 1);
-    const dstTexture = t.device.createTexture({
-      size: { width: 1, height: 1, depthOrArrayLayers: 1 },
-      format: 'bgra8unorm',
-      usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-
-    // MAINTENANCE_TODO: Workaround for @types/offscreencanvas missing an overload of
-    // `OffscreenCanvas.getContext` that takes `string` or a union of context types.
-    const ctx = ((canvas as unknown) as HTMLCanvasElement).getContext(contextType);
-
-    if (ctx === null) {
-      t.skip('Failed to get context for canvas element');
-      return;
-    }
-    t.tryTrackForCleanup(ctx);
-
-    t.runTest(
-      { source: canvas },
-      { texture: dstTexture },
-      copySize,
-      true, // No validation errors.
-      canCopyFromCanvasContext(contextType) ? '' : 'OperationError'
-    );
-  });
-
 g.test('source_image,crossOrigin')
   .desc(
     `
@@ -301,9 +217,6 @@ g.test('source_image,crossOrigin')
   images.
 
   Check whether 'SecurityError' is generated when source image is not origin clean.
-
-  TODO: make this test case work offline, ref link to achieve this :
-  https://web-platform-tests.org/writing-tests/server-features.html#tests-involving-multiple-origins
   `
   )
   .params(u =>
@@ -323,9 +236,8 @@ g.test('source_image,crossOrigin')
       t.skip('DOM is not available to create an image element.');
     }
 
-    const crossOriginUrl = 'https://get.webgl.org/conformance-resources/opengl_logo.jpg';
-    const originCleanUrl = getResourcePath('Di-3d.png');
-
+    const crossOriginUrl = getCrossOriginResourcePath('webgpu.png', t.onlineCrossOriginUrl);
+    const originCleanUrl = getResourcePath('webgpu.png');
     const img = document.createElement('img');
     img.src = isOriginClean ? originCleanUrl : crossOriginUrl;
 
@@ -337,8 +249,7 @@ g.test('source_image,crossOrigin')
       if (isOriginClean) {
         throw e;
       } else {
-        t.warn('Something wrong happens in get.webgl.org');
-        t.skip('Cannot load image in time');
+        t.skip('Cannot load cross origin image in time');
         return;
       }
     }
@@ -471,11 +382,11 @@ g.test('source_canvas,state')
         { width: 1, height: 1, depthOrArrayLayers: 1 },
       ])
   )
-  .fn(async t => {
+  .fn(t => {
     const { state, copySize } = t.params;
     const canvas = createOnscreenCanvas(t, 1, 1);
     if (typeof canvas.transferControlToOffscreen === 'undefined') {
-      t.skip("Browser doesn't support HTMLCanvasElement transfer control right");
+      t.skip("Browser doesn't support HTMLCanvasElement.transferControlToOffscreen");
       return;
     }
 
@@ -767,6 +678,7 @@ g.test('destination_texture,format')
   )
   .beforeAllSubcases(t => {
     const { format } = t.params;
+    t.skipIfTextureFormatNotSupported(format);
     t.selectDeviceOrSkipTestCase(kTextureFormatInfo[format].feature);
   })
   .fn(async t => {

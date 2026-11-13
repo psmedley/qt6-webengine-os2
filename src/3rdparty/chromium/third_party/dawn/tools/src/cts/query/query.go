@@ -1,16 +1,29 @@
-// Copyright 2022 The Dawn Authors
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // Package query provides helpers for parsing and mutating WebGPU CTS queries.
 //
@@ -37,15 +50,16 @@ import (
 
 // Query represents a WebGPU test query
 // Example queries:
-//    'suite'
-//    'suite:*'
-//    'suite:file'
-//    'suite:file,*'
-//    'suite:file,file'
-//    'suite:file,file,*'
-//    'suite:file,file,file:test'
-//    'suite:file,file,file:test:*'
-//    'suite:file,file,file:test,test:case;*'
+//
+//	'suite'
+//	'suite:*'
+//	'suite:file'
+//	'suite:file,*'
+//	'suite:file,file'
+//	'suite:file,file,*'
+//	'suite:file,file,file:test'
+//	'suite:file,file,file:test:*'
+//	'suite:file,file,file:test,test:case;*'
 type Query struct {
 	Suite string
 	Files string
@@ -269,9 +283,10 @@ func (q Query) String() string {
 }
 
 // Compare compares the relative order of q and o, returning:
-//  -1 if q should come before o
-//   1 if q should come after o
-//   0 if q and o are identical
+//
+//	-1 if q should come before o
+//	 1 if q should come after o
+//	 0 if q and o are identical
 func (q Query) Compare(o Query) int {
 	for _, cmp := range []struct{ a, b string }{
 		{q.Suite, o.Suite},
@@ -335,9 +350,10 @@ func (q Query) Contains(o Query) bool {
 }
 
 // Callback function for Query.Walk()
-//   q is the query for the current segment.
-//   t is the target of the query q.
-//   n is the name of the new segment.
+//
+//	q is the query for the current segment.
+//	t is the target of the query q.
+//	n is the name of the new segment.
 type WalkCallback func(q Query, t Target, n string) error
 
 // Walk calls 'f' for each suite, file, test segment, and calls f once for all

@@ -4,10 +4,11 @@
 
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {AnnotationTool} from '../annotation_tool.js';
-import {InkApi} from '../ink/ink_api.js';
+import type {AnnotationTool} from '../annotation_tool.js';
+import type {InkApi} from '../ink/ink_api.js';
 import {record, UserAction} from '../metrics.js';
-import {PAGE_SHADOW, Viewport} from '../viewport.js';
+import type {Viewport} from '../viewport.js';
+import {PAGE_SHADOW} from '../viewport.js';
 
 import {getTemplate} from './viewer-ink-host.html.js';
 
@@ -211,7 +212,7 @@ export class ViewerInkHostElement extends PolymerElement {
     this.ink_!.addUndoStateListener(
         e => this.dispatchEvent(
             new CustomEvent('undo-state-changed', {detail: e})));
-    await this.ink_!.setPDF(data);
+    await this.ink_!.setPdf(data);
     this.state_ = State.ACTIVE;
     this.viewportChanged();
     // Wait for the next task to avoid a race where Ink drops the background
@@ -273,7 +274,7 @@ export class ViewerInkHostElement extends PolymerElement {
    */
   async saveDocument(): Promise<{fileName: string, dataToSave: ArrayBuffer}> {
     if (this.state_ === State.ACTIVE) {
-      const pdf = await this.ink_!.getPDFDestructive();
+      const pdf = await this.ink_!.getPdfDestructive();
       this.buffer_ = await pdf.buffer;
       this.state_ = State.IDLE;
     }

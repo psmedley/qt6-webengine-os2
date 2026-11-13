@@ -4,6 +4,8 @@
 
 #include "services/device/hid/hid_service_win.h"
 
+#include <string_view>
+
 #define INITGUID
 
 #include <dbt.h>
@@ -19,9 +21,9 @@
 #include <set>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/files/file.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/free_deleter.h"
 #include "base/strings/string_split.h"
@@ -30,7 +32,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/win/scoped_devinfo.h"
 #include "base/win/win_util.h"
 #include "components/device_event_log/device_event_log.h"
@@ -224,8 +225,7 @@ absl::optional<std::wstring> GetParentInstanceId(
     HDEVINFO device_info_set,
     SP_DEVICE_INTERFACE_DATA& device_interface_data) {
   // Get device info for |device_interface_data|.
-  SP_DEVINFO_DATA device_info_data{};
-    device_info_data.cbSize = sizeof(device_info_data);
+  SP_DEVINFO_DATA device_info_data = {.cbSize = sizeof(device_info_data)};
   std::wstring device_path;
   if (!GetDeviceInfoAndPathFromInterface(device_info_set, device_interface_data,
                                          &device_info_data, &device_path)) {
@@ -243,7 +243,7 @@ absl::optional<std::wstring> GetParentInstanceId(
   instance_id = base::ToLowerASCII(*instance_id);
   // Remove trailing NUL bytes.
   return std::wstring(base::TrimString(
-      *instance_id, base::WStringPiece(L"\0", 1), base::TRIM_TRAILING));
+      *instance_id, std::wstring_view(L"\0", 1), base::TRIM_TRAILING));
 }
 
 mojom::HidReportItemPtr CreateHidReportItem(
@@ -382,7 +382,7 @@ std::string GetHidProductString(HANDLE device_handle) {
   // HidD_GetProductString is guaranteed to write a NUL-terminated string into
   // |buffer|. The characters following the string were value-initialized by
   // base::WriteInto and are also NUL. Trim the trailing NUL characters.
-  buffer = std::wstring(base::TrimString(buffer, base::WStringPiece(L"\0", 1),
+  buffer = std::wstring(base::TrimString(buffer, std::wstring_view(L"\0", 1),
                                          base::TRIM_TRAILING));
   return base::SysWideToUTF8(buffer);
 }
@@ -400,7 +400,7 @@ std::string GetHidSerialNumberString(HANDLE device_handle) {
   // HidD_GetSerialNumberString is guaranteed to write a NUL-terminated string
   // into |buffer|. The characters following the string were value-initialized
   // by base::WriteInto and are also NUL. Trim the trailing NUL characters.
-  buffer = std::wstring(base::TrimString(buffer, base::WStringPiece(L"\0", 1),
+  buffer = std::wstring(base::TrimString(buffer, std::wstring_view(L"\0", 1),
                                          base::TRIM_TRAILING));
   return base::SysWideToUTF8(buffer);
 }
@@ -466,7 +466,7 @@ uint16_t HidServiceWin::PreparsedData::GetReportByteLength(
 }
 
 HidServiceWin::HidServiceWin()
-    : task_runner_(base::SequencedTaskRunnerHandle::Get()),
+    : task_runner_(base::SequencedTaskRunner::GetCurrentDefault()),
       blocking_task_runner_(
           base::ThreadPool::CreateSequencedTaskRunner(kBlockingTaskTraits)) {
   DeviceMonitorWin* device_monitor =
@@ -536,14 +536,13 @@ void HidServiceWin::EnumerateBlocking(
       /*hwndParent=*/nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE));
 
   if (device_info_set.is_valid()) {
-    SP_DEVICE_INTERFACE_DATA device_interface_data{};
-        device_interface_data.cbSize = sizeof(device_interface_data);
+    SP_DEVICE_INTERFACE_DATA device_interface_data = {
+        .cbSize = sizeof(device_interface_data)};
     for (int device_index = 0; SetupDiEnumDeviceInterfaces(
              device_info_set.get(), /*DeviceInfoData=*/nullptr,
              &GUID_DEVINTERFACE_HID, device_index, &device_interface_data);
          ++device_index) {
-      SP_DEVINFO_DATA device_info_data{};
-        device_info_data.cbSize = sizeof(device_info_data);
+      SP_DEVINFO_DATA device_info_data = {.cbSize = sizeof(device_info_data)};
       std::wstring device_path;
       if (!GetDeviceInfoAndPathFromInterface(device_info_set.get(),
                                              device_interface_data,
@@ -587,8 +586,7 @@ void HidServiceWin::AddDeviceBlocking(
   if (!preparsed_data)
     return;
 
-  HIDD_ATTRIBUTES attrib{};
-    attrib.Size = sizeof(attrib);
+  HIDD_ATTRIBUTES attrib = {.Size = sizeof(attrib)};
   if (!HidD_GetAttributes(device_handle.Get(), &attrib)) {
     HID_LOG(DEBUG) << "Failed to get device attributes.";
     return;
@@ -625,8 +623,7 @@ void HidServiceWin::AddDeviceBlocking(
 
 void HidServiceWin::OnDeviceAdded(const GUID& class_guid,
                                   const std::wstring& device_path) {
-  SP_DEVINFO_DATA device_info_data{};
-      device_info_data.cbSize = sizeof(device_info_data);
+  SP_DEVINFO_DATA device_info_data = {.cbSize = sizeof(device_info_data)};
   auto device_info_set =
       GetDeviceInfoSetFromDevicePath(device_path, &device_info_data);
   if (!device_info_set.is_valid())
@@ -674,13 +671,23 @@ void HidServiceWin::OnDeviceRemoved(const GUID& class_guid,
 // static
 base::win::ScopedHandle HidServiceWin::OpenDevice(
     const std::wstring& device_path) {
-  base::win::ScopedHandle file(
-      CreateFile(device_path.c_str(), GENERIC_WRITE | GENERIC_READ,
-                 FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
-                 FILE_FLAG_OVERLAPPED, nullptr));
-  if (!file.IsValid() && GetLastError() == ERROR_ACCESS_DENIED) {
-    file.Set(CreateFile(device_path.c_str(), GENERIC_READ, FILE_SHARE_READ,
-                        nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
+  constexpr DWORD kDesiredAccessModes[] = {
+      // Request read and write access.
+      GENERIC_WRITE | GENERIC_READ,
+      // Request read-only access.
+      GENERIC_READ,
+      // Don't request read or write access.
+      0,
+  };
+  base::win::ScopedHandle file;
+  for (const auto& desired_access : kDesiredAccessModes) {
+    file.Set(CreateFile(device_path.c_str(), desired_access,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        /*lpSecurityAttributes=*/nullptr, OPEN_EXISTING,
+                        FILE_FLAG_OVERLAPPED, /*hTemplateFile=*/nullptr));
+    if (file.IsValid() || GetLastError() != ERROR_ACCESS_DENIED) {
+      break;
+    }
   }
   return file;
 }

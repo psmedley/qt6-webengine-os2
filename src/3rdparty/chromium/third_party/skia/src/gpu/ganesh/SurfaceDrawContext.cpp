@@ -9,22 +9,23 @@
 
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkDrawable.h"
+#include "include/core/SkTypes.h"
 #include "include/core/SkVertices.h"
 #include "include/gpu/GrBackendSemaphore.h"
 #include "include/gpu/GrDirectContext.h"
 #include "include/gpu/GrRecordingContext.h"
-#include "include/private/SkShadowFlags.h"
-#include "include/private/SkVx.h"
 #include "include/private/gpu/ganesh/GrImageContext.h"
 #include "include/utils/SkShadowUtils.h"
+#include "src/base/SkVx.h"
 #include "src/core/SkAutoPixmapStorage.h"
+#include "src/core/SkBlendModePriv.h"
 #include "src/core/SkConvertPixels.h"
 #include "src/core/SkDrawProcs.h"
 #include "src/core/SkDrawShadowInfo.h"
 #include "src/core/SkLatticeIter.h"
 #include "src/core/SkMatrixPriv.h"
-#include "src/core/SkMatrixProvider.h"
 #include "src/core/SkMeshPriv.h"
+#include "src/core/SkPointPriv.h"
 #include "src/core/SkRRectPriv.h"
 #include "src/core/SkStrikeCache.h"
 #include "src/gpu/ganesh/GrAppliedClip.h"
@@ -47,9 +48,9 @@
 #include "src/gpu/ganesh/GrStencilSettings.h"
 #include "src/gpu/ganesh/GrStyle.h"
 #include "src/gpu/ganesh/GrTracing.h"
+#include "src/gpu/ganesh/GrXferProcessor.h"
 #include "src/gpu/ganesh/PathRenderer.h"
 #include "src/gpu/ganesh/SkGr.h"
-#include "src/gpu/ganesh/effects/GrBicubicEffect.h"
 #include "src/gpu/ganesh/effects/GrBlendFragmentProcessor.h"
 #include "src/gpu/ganesh/effects/GrDisableColorXP.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
@@ -77,6 +78,8 @@
 #define ASSERT_SINGLE_OWNER        SKGPU_ASSERT_SINGLE_OWNER(this->singleOwner())
 #define RETURN_IF_ABANDONED        if (fContext->abandoned()) { return; }
 #define RETURN_FALSE_IF_ABANDONED  if (fContext->abandoned()) { return false; }
+
+using namespace skia_private;
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -110,7 +113,7 @@ void op_bounds(SkRect* bounds, const GrOp* op) {
 
 } // anonymous namespace
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 using DoSimplify = GrStyledShape::DoSimplify;
 
@@ -150,21 +153,20 @@ std::unique_ptr<SurfaceDrawContext> SurfaceDrawContext::Make(GrRecordingContext*
                                                 surfaceProps);
 }
 
-std::unique_ptr<SurfaceDrawContext> SurfaceDrawContext::Make(
-        GrRecordingContext* rContext,
-        sk_sp<SkColorSpace> colorSpace,
-        SkBackingFit fit,
-        SkISize dimensions,
-        const GrBackendFormat& format,
-        int sampleCnt,
-        GrMipmapped mipmapped,
-        GrProtected isProtected,
-        skgpu::Swizzle readSwizzle,
-        skgpu::Swizzle writeSwizzle,
-        GrSurfaceOrigin origin,
-        SkBudgeted budgeted,
-        const SkSurfaceProps& surfaceProps,
-        std::string_view label) {
+std::unique_ptr<SurfaceDrawContext> SurfaceDrawContext::Make(GrRecordingContext* rContext,
+                                                             sk_sp<SkColorSpace> colorSpace,
+                                                             SkBackingFit fit,
+                                                             SkISize dimensions,
+                                                             const GrBackendFormat& format,
+                                                             int sampleCnt,
+                                                             skgpu::Mipmapped mipmapped,
+                                                             GrProtected isProtected,
+                                                             skgpu::Swizzle readSwizzle,
+                                                             skgpu::Swizzle writeSwizzle,
+                                                             GrSurfaceOrigin origin,
+                                                             skgpu::Budgeted budgeted,
+                                                             const SkSurfaceProps& surfaceProps,
+                                                             std::string_view label) {
     // It is probably not necessary to check if the context is abandoned here since uses of the
     // SurfaceDrawContext which need the context will mostly likely fail later on without an
     // issue. However having this hear adds some reassurance in case there is a path doesn't handle
@@ -200,19 +202,18 @@ std::unique_ptr<SurfaceDrawContext> SurfaceDrawContext::Make(
     return sdc;
 }
 
-std::unique_ptr<SurfaceDrawContext> SurfaceDrawContext::Make(
-        GrRecordingContext* rContext,
-        GrColorType colorType,
-        sk_sp<SkColorSpace> colorSpace,
-        SkBackingFit fit,
-        SkISize dimensions,
-        const SkSurfaceProps& surfaceProps,
-        std::string_view label,
-        int sampleCnt,
-        GrMipmapped mipmapped,
-        GrProtected isProtected,
-        GrSurfaceOrigin origin,
-        SkBudgeted budgeted) {
+std::unique_ptr<SurfaceDrawContext> SurfaceDrawContext::Make(GrRecordingContext* rContext,
+                                                             GrColorType colorType,
+                                                             sk_sp<SkColorSpace> colorSpace,
+                                                             SkBackingFit fit,
+                                                             SkISize dimensions,
+                                                             const SkSurfaceProps& surfaceProps,
+                                                             std::string_view label,
+                                                             int sampleCnt,
+                                                             skgpu::Mipmapped mipmapped,
+                                                             GrProtected isProtected,
+                                                             GrSurfaceOrigin origin,
+                                                             skgpu::Budgeted budgeted) {
     if (!rContext) {
         return nullptr;
     }
@@ -251,10 +252,10 @@ std::unique_ptr<SurfaceDrawContext> SurfaceDrawContext::MakeWithFallback(
         SkISize dimensions,
         const SkSurfaceProps& surfaceProps,
         int sampleCnt,
-        GrMipmapped mipmapped,
+        skgpu::Mipmapped mipmapped,
         GrProtected isProtected,
         GrSurfaceOrigin origin,
-        SkBudgeted budgeted) {
+        skgpu::Budgeted budgeted) {
     const GrCaps* caps = rContext->priv().caps();
     auto [ct, _] = caps->getFallbackColorTypeAndFormat(colorType, sampleCnt);
     if (ct == GrColorType::kUnknown) {
@@ -320,7 +321,7 @@ void SurfaceDrawContext::willReplaceOpsTask(OpsTask* prevTask, OpsTask* nextTask
         // values?
         nextTask->setInitialStencilContent(OpsTask::StencilContent::kPreserved);
     }
-#if GR_GPU_STATS && GR_TEST_UTILS
+#if GR_GPU_STATS && defined(GR_TEST_UTILS)
     if (fCanUseDynamicMSAA) {
         fContext->priv().dmsaaStats().fNumRenderPasses++;
     }
@@ -329,7 +330,7 @@ void SurfaceDrawContext::willReplaceOpsTask(OpsTask* prevTask, OpsTask* nextTask
 
 void SurfaceDrawContext::drawGlyphRunList(SkCanvas* canvas,
                                           const GrClip* clip,
-                                          const SkMatrixProvider& viewMatrix,
+                                          const SkMatrix& viewMatrix,
                                           const sktext::GlyphRunList& glyphRunList,
                                           SkStrikeDeviceInfo strikeDeviceInfo,
                                           const SkPaint& paint) {
@@ -346,8 +347,21 @@ void SurfaceDrawContext::drawGlyphRunList(SkCanvas* canvas,
     }
 
     sktext::gpu::TextBlobRedrawCoordinator* textBlobCache = fContext->priv().getTextBlobCache();
+
+    auto atlasDelegate = [&](const sktext::gpu::AtlasSubRun* subRun,
+                             SkPoint drawOrigin,
+                             const SkPaint& paint,
+                             sk_sp<SkRefCnt> subRunStorage,
+                             sktext::gpu::RendererData) {
+        auto [drawingClip, op] = subRun->makeAtlasTextOp(
+                clip, viewMatrix, drawOrigin, paint, std::move(subRunStorage), this);
+        if (op != nullptr) {
+            this->addDrawOp(drawingClip, std::move(op));
+        }
+    };
+
     textBlobCache->drawGlyphRunList(
-            canvas, clip, viewMatrix, glyphRunList, paint, strikeDeviceInfo, this);
+            canvas, viewMatrix, glyphRunList, paint, strikeDeviceInfo, atlasDelegate);
 }
 
 void SurfaceDrawContext::drawPaint(const GrClip* clip,
@@ -596,7 +610,7 @@ void SurfaceDrawContext::drawTexture(const GrClip* clip,
         fp = GrBlendFragmentProcessor::Make<SkBlendMode::kModulate>(std::move(fp), nullptr);
         paint.setColorFragmentProcessor(std::move(fp));
         if (blendMode != SkBlendMode::kSrcOver) {
-            paint.setXPFactory(SkBlendMode_AsXPFactory(blendMode));
+            paint.setXPFactory(GrXPFactory::FromBlendMode(blendMode));
         }
         this->fillRectToRect(clip, std::move(paint), GrAA::kYes, viewMatrix, dstRect, srcRect);
         return;
@@ -775,7 +789,7 @@ int SurfaceDrawContext::maxWindowRectangles() const {
 }
 
 OpsTask::CanDiscardPreviousOps SurfaceDrawContext::canDiscardPreviousOpsOnFullClear() const {
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     if (fPreserveOpsOnFullClear_TestingOnly) {
         return OpsTask::CanDiscardPreviousOps::kNo;
     }
@@ -899,7 +913,7 @@ void SurfaceDrawContext::drawTextureSet(const GrClip* clip,
 
 void SurfaceDrawContext::drawVertices(const GrClip* clip,
                                       GrPaint&& paint,
-                                      const SkMatrixProvider& matrixProvider,
+                                      const SkMatrix& viewMatrix,
                                       sk_sp<SkVertices> vertices,
                                       GrPrimitiveType* overridePrimType,
                                       bool skipColorXform) {
@@ -917,7 +931,7 @@ void SurfaceDrawContext::drawVertices(const GrClip* clip,
                                       std::move(paint),
                                       std::move(vertices),
                                       overridePrimType,
-                                      matrixProvider,
+                                      viewMatrix,
                                       aaType,
                                       std::move(xform));
     this->addDrawOp(clip, std::move(op));
@@ -925,8 +939,9 @@ void SurfaceDrawContext::drawVertices(const GrClip* clip,
 
 void SurfaceDrawContext::drawMesh(const GrClip* clip,
                                   GrPaint&& paint,
-                                  const SkMatrixProvider& matrixProvider,
-                                  const SkMesh& mesh) {
+                                  const SkMatrix& viewMatrix,
+                                  const SkMesh& mesh,
+                                  TArray<std::unique_ptr<GrFragmentProcessor>> children) {
     ASSERT_SINGLE_OWNER
     RETURN_IF_ABANDONED
     SkDEBUGCODE(this->validate();)
@@ -944,7 +959,8 @@ void SurfaceDrawContext::drawMesh(const GrClip* clip,
     GrOp::Owner op = DrawMeshOp::Make(fContext,
                                       std::move(paint),
                                       mesh,
-                                      matrixProvider,
+                                      std::move(children),
+                                      viewMatrix,
                                       aaType,
                                       std::move(xform));
     this->addDrawOp(clip, std::move(op));
@@ -1489,7 +1505,7 @@ bool SurfaceDrawContext::waitOnSemaphores(int numSemaphores,
 
     AutoCheckFlush acf(this->drawingManager());
 
-    if (numSemaphores && !this->caps()->semaphoreSupport()) {
+    if (numSemaphores && !this->caps()->backendSemaphoreSupport()) {
         return false;
     }
 
@@ -1628,11 +1644,11 @@ bool SurfaceDrawContext::drawAndStencilPath(const GrHardClip* clip,
     return true;
 }
 
-SkBudgeted SurfaceDrawContext::isBudgeted() const {
+skgpu::Budgeted SurfaceDrawContext::isBudgeted() const {
     ASSERT_SINGLE_OWNER
 
     if (fContext->abandoned()) {
-        return SkBudgeted::kNo;
+        return skgpu::Budgeted::kNo;
     }
 
     SkDEBUGCODE(this->validate();)
@@ -1805,7 +1821,6 @@ void SurfaceDrawContext::drawShapeUsingPathRenderer(const GrClip* clip,
     canDrawArgs.fAAType = aaType;
 
     constexpr static bool kDisallowSWPathRenderer = false;
-    constexpr static bool kAllowSWPathRenderer = true;
     using DrawType = PathRendererChain::DrawType;
 
     PathRenderer* pr = nullptr;
@@ -1854,28 +1869,29 @@ void SurfaceDrawContext::drawShapeUsingPathRenderer(const GrClip* clip,
         pr = this->drawingManager()->getPathRenderer(canDrawArgs, kDisallowSWPathRenderer,
                                                      DrawType::kColor);
     }
-    if (!pr) {
-        if (shape.style().applies()) {
-            shape = shape.applyStyle(GrStyle::Apply::kPathEffectAndStrokeRec, styleScale);
-            if (shape.isEmpty()) {
-                return;
-            }
-            // This time, allow SW renderer
-            pr = this->drawingManager()->getPathRenderer(canDrawArgs, kAllowSWPathRenderer,
-                                                         DrawType::kColor);
-        } else {
-            pr = this->drawingManager()->getSoftwarePathRenderer();
-#if GR_PATH_RENDERER_SPEW
-            SkDebugf("falling back to: %s\n", pr->name());
-#endif
+    if (!pr && shape.style().applies()) {
+        shape = shape.applyStyle(GrStyle::Apply::kPathEffectAndStrokeRec, styleScale);
+        if (shape.isEmpty()) {
+            return;
         }
+        pr = this->drawingManager()->getPathRenderer(canDrawArgs, kDisallowSWPathRenderer,
+                                                     DrawType::kColor);
     }
 
     if (!pr) {
-#ifdef SK_DEBUG
-        SkDebugf("Unable to find path renderer compatible with path.\n");
+        // Fall back on SW renderer as a last resort.
+        if (GrAATypeIsHW(aaType)) {
+            // No point in trying SW renderer with MSAA.
+            aaType = GrAAType::kCoverage;
+            canDrawArgs.fAAType = aaType;
+        }
+        // This can only fail if a) AA type is MSAA or the style is not applied (already checked),
+        // or b) the SW renderer's proxy provider is null, which should never happen.
+        pr = this->drawingManager()->getSoftwarePathRenderer();
+        SkASSERT(pr->canDrawPath(canDrawArgs) != PathRenderer::CanDrawPath::kNo);
+#if GR_PATH_RENDERER_SPEW
+        SkDebugf("falling back to: %s\n", pr->name());
 #endif
-        return;
     }
 
     PathRenderer::DrawPathArgs args{this->drawingManager()->getContext(),
@@ -1990,7 +2006,7 @@ void SurfaceDrawContext::addDrawOp(const GrClip* clip,
         this->setNeedsStencil();
     }
 
-#if GR_GPU_STATS && GR_TEST_UTILS
+#if GR_GPU_STATS && defined(GR_TEST_UTILS)
     if (fCanUseDynamicMSAA && drawNeedsMSAA) {
         if (!opsTask->usesMSAASurface()) {
             fContext->priv().dmsaaStats().fNumMultisampleRenderPasses++;
@@ -2100,10 +2116,10 @@ bool SurfaceDrawContext::setupDstProxyView(const SkRect& opBounds,
     auto copy = GrSurfaceProxy::Copy(fContext,
                                      this->asSurfaceProxyRef(),
                                      this->origin(),
-                                     GrMipmapped::kNo,
+                                     skgpu::Mipmapped::kNo,
                                      copyRect,
                                      fit,
-                                     SkBudgeted::kYes,
+                                     skgpu::Budgeted::kYes,
                                      /*label=*/{},
                                      restrictions.fRectsMustMatch);
     SkASSERT(copy);
@@ -2121,4 +2137,4 @@ OpsTask* SurfaceDrawContext::replaceOpsTaskIfModifiesColor() {
     return this->getOpsTask();
 }
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh

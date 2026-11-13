@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,7 +98,7 @@ class CXFA_TextLayout final : public cppgc::GarbageCollected<CXFA_TextLayout> {
     float fHeight;
   };
 
-  struct LoaderContext {
+  struct LoaderContext : public cppgc::GarbageCollected<LoaderContext> {
     LoaderContext();
     ~LoaderContext();
 
@@ -139,7 +139,7 @@ class CXFA_TextLayout final : public cppgc::GarbageCollected<CXFA_TextLayout> {
   bool LoadRichText(const CFX_XMLNode* pXMLNode,
                     float textWidth,
                     float* pLinePos,
-                    const RetainPtr<CFX_CSSComputedStyle>& pParentStyle,
+                    RetainPtr<CFX_CSSComputedStyle> pParentStyle,
                     bool bSavePieces,
                     RetainPtr<CFGAS_LinkUserData> pLinkData,
                     bool bEndBreak,
@@ -183,8 +183,8 @@ class CXFA_TextLayout final : public cppgc::GarbageCollected<CXFA_TextLayout> {
   cppgc::Member<CXFA_TextProvider> const m_pTextProvider;
   cppgc::Member<CXFA_Node> m_pTextDataNode;
   cppgc::Member<CXFA_TextParser> m_pTextParser;
+  cppgc::Member<LoaderContext> m_pLoader;
   std::unique_ptr<CFGAS_RTFBreak> m_pBreak;
-  std::unique_ptr<LoaderContext> m_pLoader;
   std::vector<std::unique_ptr<PieceLine>> m_pieceLines;
   std::unique_ptr<CXFA_TextTabstopsContext> m_pTabstopContext;
 };

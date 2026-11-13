@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-#include "perfetto/ext/tracing/ipc/default_socket.h"
+#include "perfetto/tracing/default_socket.h"
 
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/ipc/basic_types.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
@@ -66,8 +67,6 @@ bool UseRunPerfettoBaseDir() {
 
 }  // anonymous namespace
 
-static_assert(kInvalidUid == ipc::kInvalidUid, "kInvalidUid mismatching");
-
 const char* GetProducerSocket() {
   const char* name = getenv("PERFETTO_PRODUCER_SOCK_NAME");
   if (name == nullptr) {
@@ -85,6 +84,16 @@ const char* GetProducerSocket() {
   }
   base::ignore_result(UseRunPerfettoBaseDir);  // Silence unused func warnings.
   return name;
+}
+
+const char* GetRelaySocket() {
+  // The relay socket is optional and is connected only when the env var is set.
+  return getenv("PERFETTO_RELAY_SOCK_NAME");
+}
+
+std::vector<std::string> TokenizeProducerSockets(
+    const char* producer_socket_names) {
+  return base::SplitString(producer_socket_names, ",");
 }
 
 const char* GetConsumerSocket() {

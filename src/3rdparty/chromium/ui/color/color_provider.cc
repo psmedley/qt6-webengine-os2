@@ -8,7 +8,7 @@
 #include <set>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "ui/color/color_mixer.h"
 #include "ui/color/color_provider_utils.h"
@@ -96,6 +96,11 @@ void ColorProvider::GenerateColorMap() {
   // Clear away all associated mixers as these are no longer needed.
   mixers_.clear();
   first_postprocessing_mixer_ = mixers_.before_begin();
+}
+
+bool ColorProvider::IsColorMapEmpty() const {
+  DCHECK(color_map_);
+  return color_map_->empty();
 }
 
 void ColorProvider::SetColorForTesting(ColorId id, SkColor color) {

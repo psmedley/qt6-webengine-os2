@@ -28,12 +28,6 @@ namespace sh
 struct ShaderVariable;
 }
 
-constexpr bool ShPixelLocalStorageTypeUsesImages(ShPixelLocalStorageType type)
-{
-    return type == ShPixelLocalStorageType::ImageStoreR32PackedFormats ||
-           type == ShPixelLocalStorageType::ImageStoreNativeFormats;
-}
-
 namespace gl
 {
 
@@ -314,15 +308,18 @@ bool IsDrawEntryPoint(EntryPoint entryPoint);
 bool IsDispatchEntryPoint(EntryPoint entryPoint);
 bool IsClearEntryPoint(EntryPoint entryPoint);
 bool IsQueryEntryPoint(EntryPoint entryPoint);
+
+template <typename T>
+void FillWithNullptr(T *array)
+{
+    // std::array::fill(nullptr) yields unoptimized, unrolled loop over array items
+    memset(array->data(), 0, array->size() * sizeof(*array->data()));
+    // sanity check for non-0 nullptr
+    ASSERT(array->data()[0] == nullptr);
+}
 }  // namespace angle
 
-#if !defined(ANGLE_ENABLE_WINDOWS_UWP)
 void writeFile(const char *path, const void *data, size_t size);
-#endif
-
-#if defined(ANGLE_PLATFORM_WINDOWS)
-void ScheduleYield();
-#endif
 
 // Get the underlying type. Useful for indexing into arrays with enum values by avoiding the clutter
 // of the extraneous static_cast<>() calls.

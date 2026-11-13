@@ -18,9 +18,11 @@
 #include <string>
 
 #include "gtest/gtest.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/offline_service_controller.h"
+#include "internal/interop/device.h"
 #include "internal/platform/atomic_boolean.h"
 #include "internal/platform/condition_variable.h"
 #include "internal/platform/count_down_latch.h"
@@ -31,7 +33,7 @@
 //
 // This is a "standalone" version of PcpManager. It can run independently,
 // provided MediumEnvironment has adequate support for all medium types in use.
-namespace location {
+
 namespace nearby {
 namespace connections {
 
@@ -78,6 +80,10 @@ class OfflineSimulationUser {
   // Calls PcpManager::StopAdvertising().
   void StopAdvertising();
 
+  // Calls PcpManager::UpdateAdvertisingOptions().
+  Status UpdateAdvertisingOptions(absl::string_view service_id,
+                                  const AdvertisingOptions& options);
+
   // Calls PcpManager::StartDiscovery().
   // If found_latch is provided, will call found_latch->CountDown() in the
   // endpoint_found_cb callback.
@@ -90,6 +96,10 @@ class OfflineSimulationUser {
   // Calls PcpManager::StopDiscovery().
   void StopDiscovery();
 
+  // Calls PcpManager::UpdateDiscoveryOptions().
+  Status UpdateDiscoveryOptions(absl::string_view service_id,
+                                const DiscoveryOptions& options);
+
   // Calls PcpManager::InjectEndpoint();
   void InjectEndpoint(const std::string& service_id,
                       const OutOfBandConnectionMetadata& metadata);
@@ -98,6 +108,12 @@ class OfflineSimulationUser {
   // If latch is provided, latch->CountDown() will be called in the initiated_cb
   // callback.
   Status RequestConnection(CountDownLatch* latch);
+
+  // Calls PcpManager::RequestConnectionV3.
+  // If latch is provided, latch->CountDown() will be called in the initiated_cb
+  // callback.
+  Status RequestConnectionV3(CountDownLatch* latch,
+                             const NearbyDevice& remote_device);
 
   // Calls PcpManager::AcceptConnection.
   // If latch is provided, latch->CountDown() will be called in the accepted_cb
@@ -123,8 +139,9 @@ class OfflineSimulationUser {
   const DiscoveredInfo& GetDiscovered() const { return discovered_; }
   ByteArray GetInfo() const { return info_; }
 
-  bool WaitForProgress(std::function<bool(const PayloadProgressInfo&)> pred,
-                       absl::Duration timeout);
+  bool WaitForProgress(
+      absl::AnyInvocable<bool(const PayloadProgressInfo&)> pred,
+      absl::Duration timeout);
 
   Payload& GetPayload() { return payload_; }
   void SendPayload(Payload payload) {
@@ -172,8 +189,8 @@ class OfflineSimulationUser {
   void OnEndpointLost(const std::string& endpoint_id);
 
   // PayloadListener callbacks
-  void OnPayload(const std::string& endpoint_id, Payload payload);
-  void OnPayloadProgress(const std::string& endpoint_id,
+  void OnPayload(absl::string_view endpoint_id, Payload payload);
+  void OnPayloadProgress(absl::string_view endpoint_id,
                          const PayloadProgressInfo& info);
 
   std::string service_id_;
@@ -195,13 +212,12 @@ class OfflineSimulationUser {
   CountDownLatch* payload_latch_ = nullptr;
   CountDownLatch* disconnect_latch_ = nullptr;
   Future<bool>* future_ = nullptr;
-  std::function<bool(const PayloadProgressInfo&)> predicate_;
+  absl::AnyInvocable<bool(const PayloadProgressInfo&)> predicate_;
   ClientProxy client_;
   OfflineServiceController ctrl_;
 };
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_OFFLINE_SIMULATION_USER_H_

@@ -15,14 +15,17 @@
 #ifndef CORE_PAYLOAD_TYPE_H_
 #define CORE_PAYLOAD_TYPE_H_
 
-namespace location {
 namespace nearby {
 namespace connections {
 
 enum class PayloadType { kUnknown = 0, kBytes = 1, kStream = 2, kFile = 3 };
+enum PayloadDirection {
+  UNKNOWN_DIRECTION_PAYLOAD = 0,
+  INCOMING_PAYLOAD = 1,
+  OUTGOING_PAYLOAD = 2,
+};
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_PAYLOAD_TYPE_H_

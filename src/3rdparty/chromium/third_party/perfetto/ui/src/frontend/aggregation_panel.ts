@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {Actions} from '../common/actions';
 import {
@@ -20,18 +20,19 @@ import {
   Column,
   ThreadStateExtra,
 } from '../common/aggregation_data';
-import {colorForState, textColorForState} from '../common/colorizer';
+import {colorForState} from '../common/colorizer';
 import {translateState} from '../common/thread_state';
 
 import {globals} from './globals';
-import {Panel} from './panel';
+import {DurationWidget} from './widgets/duration';
 
 export interface AggregationPanelAttrs {
   data: AggregateData;
   kind: string;
 }
 
-export class AggregationPanel extends Panel<AggregationPanelAttrs> {
+export class AggregationPanel implements
+    m.ClassComponent<AggregationPanelAttrs> {
   view({attrs}: m.CVnode<AggregationPanelAttrs>) {
     return m(
         '.details-panel',
@@ -58,6 +59,7 @@ export class AggregationPanel extends Panel<AggregationPanelAttrs> {
   formatColumnHeading(col: Column, id: string) {
     const pref = globals.state.aggregatePreferences[id];
     let sortIcon = '';
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     if (pref && pref.sorting && pref.sorting.column === col.columnId) {
       sortIcon = pref.sorting.direction === 'DESC' ? 'arrow_drop_down' :
                                                      'arrow_drop_up';
@@ -111,8 +113,9 @@ export class AggregationPanel extends Panel<AggregationPanelAttrs> {
     const selection = globals.state.currentSelection;
     if (selection === null || selection.kind !== 'AREA') return undefined;
     const selectedArea = globals.state.areas[selection.areaId];
-    const rangeDurationMs = (selectedArea.endSec - selectedArea.startSec) * 1e3;
-    return m('.time-range', `Selected range: ${rangeDurationMs.toFixed(6)} ms`);
+    const duration = selectedArea.end - selectedArea.start;
+    return m(
+        '.time-range', 'Selected range: ', m(DurationWidget, {dur: duration}));
   }
 
   // Thread state aggregation panel only
@@ -120,15 +123,14 @@ export class AggregationPanel extends Panel<AggregationPanelAttrs> {
     if (data === undefined) return undefined;
     const states = [];
     for (let i = 0; i < data.states.length; i++) {
-      const color = colorForState(data.states[i]);
-      const textColor = textColorForState(data.states[i]);
+      const colorScheme = colorForState(data.states[i]);
       const width = data.values[i] / data.totalMs * 100;
       states.push(
           m('.state',
             {
               style: {
-                background: `hsl(${color.h},${color.s}%,${color.l}%)`,
-                color: `${textColor}`,
+                background: colorScheme.base.cssString,
+                color: colorScheme.textBase.cssString,
                 width: `${width}%`,
               },
             },
@@ -136,6 +138,4 @@ export class AggregationPanel extends Panel<AggregationPanelAttrs> {
     }
     return m('.states', states);
   }
-
-  renderCanvas() {}
 }

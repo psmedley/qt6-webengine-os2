@@ -6,6 +6,8 @@
 
 #include <objbase.h>
 
+#include <string_view>
+
 #include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/scoped_native_library.h"
@@ -74,12 +76,18 @@ TEST(BaseWinUtilTest, TestUint32ToInvalidHandle) {
   EXPECT_EQ(INVALID_HANDLE_VALUE, Uint32ToHandle(invalid_handle));
 }
 
+TEST(BaseWinUtilTest, PseudoHandles) {
+  EXPECT_TRUE(IsPseudoHandle(::GetCurrentProcess()));
+  EXPECT_TRUE(IsPseudoHandle(::GetCurrentThread()));
+  EXPECT_FALSE(IsPseudoHandle(nullptr));
+}
+
 TEST(BaseWinUtilTest, WStringFromGUID) {
   const GUID kGuid = {0x7698f759,
                       0xf5b0,
                       0x4328,
                       {0x92, 0x38, 0xbd, 0x70, 0x8a, 0x6d, 0xc9, 0x63}};
-  const base::WStringPiece kGuidStr = L"{7698F759-F5B0-4328-9238-BD708A6DC963}";
+  const std::wstring_view kGuidStr = L"{7698F759-F5B0-4328-9238-BD708A6DC963}";
   auto guid_wstring = WStringFromGUID(kGuid);
   EXPECT_EQ(guid_wstring, kGuidStr);
   wchar_t guid_wchar[39];

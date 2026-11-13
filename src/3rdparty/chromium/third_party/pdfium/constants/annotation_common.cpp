@@ -1,11 +1,10 @@
-// Copyright 2021 PDFium Authors. All rights reserved.
+// Copyright 2021 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "constants/annotation_common.h"
 
-namespace pdfium {
-namespace annotation {
+namespace pdfium::annotation {
 
 // PDF 1.7 spec, table 8.15.
 // Entries common to all annotation dictionaries.
@@ -33,5 +32,4 @@ const char kInkList[] = "InkList";
 // Entries for line annotations
 const char kL[] = "L";
 
-}  // namespace annotation
-}  // namespace pdfium
+}  // namespace pdfium::annotation

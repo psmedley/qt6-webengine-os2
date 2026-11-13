@@ -15,10 +15,11 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/bind_post_task.h"
 #include "base/win/windows_version.h"
 #include "media/audio/audio_device_description.h"
 #include "media/audio/audio_io.h"
@@ -29,14 +30,9 @@
 #include "media/audio/win/device_enumeration_win.h"
 #include "media/audio/win/waveout_output_win.h"
 #include "media/base/audio_parameters.h"
-#include "media/base/bind_to_current_loop.h"
 #include "media/base/channel_layout.h"
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
-
-#if BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
-#include "media/audio/win/audio_edid_scan_win.h"
-#endif  // BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
 
 // The following are defined in various DDK headers, and we (re)define them here
 // to avoid adding the DDK as a chrome dependency.
@@ -70,23 +66,6 @@ constexpr int kWinMaxChannels = 8;
 constexpr int kFallbackBufferSize = 2048;
 
 namespace {
-
-#if BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
-// Passthrough flags as defined in audio_edid_scan_win.h
-uint32_t bitstream_passthrough_bitmask_;
-
-// Convert result from ScanEdidBitstreams to AudioParameters::Format values
-uint32_t ConvertEdidScanToAudioBitstreamFlags(uint32_t edid_scan) {
-  uint32_t bitstream_codecs = 0;
-  if (edid_scan & kAudioBitstreamPcmLinear)
-    bitstream_codecs |= AudioParameters::AUDIO_PCM_LINEAR;
-  if (edid_scan & kAudioBitstreamDts)
-    bitstream_codecs |= AudioParameters::AUDIO_BITSTREAM_DTS;
-  if (edid_scan & kAudioBitstreamDtsHd)
-    bitstream_codecs |= AudioParameters::AUDIO_BITSTREAM_DTS_HD;
-  return bitstream_codecs;
-}
-#endif  // BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
 
 int NumberOfWaveOutBuffers() {
   // Use the user provided buffer count if provided.
@@ -179,9 +158,9 @@ void AudioManagerWin::InitializeOnAudioThread() {
   // posted to the audio thread instead of being run synchronously, since we use
   // BindPostTaskToCurrentDefault().
   output_device_listener_ = std::make_unique<AudioDeviceListenerWin>(
-      BindToCurrentLoop(base::BindRepeating(
+      base::BindPostTaskToCurrentDefault(base::BindRepeating(
           &AudioManagerWin::NotifyAllOutputDeviceChangeListeners,
-          weak_this_on_audio_thread_), FROM_HERE));
+          weak_this_on_audio_thread_)));
 }
 
 void AudioManagerWin::GetAudioDeviceNamesImpl(bool input,
@@ -443,15 +422,14 @@ AudioParameters AudioManagerWin::GetPreferredOutputStreamParameters(
 
   AudioParameters::HardwareCapabilities hardware_capabilities(min_buffer_size,
                                                               max_buffer_size);
-#if BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
+#if BUILDFLAG(ENABLE_PASSTHROUGH_AUDIO_CODECS)
   hardware_capabilities.bitstream_formats = 0;
   hardware_capabilities.require_encapsulation = false;
   if (WASAPIAudioOutputStream::GetShareMode() == AUDCLNT_SHAREMODE_EXCLUSIVE) {
-    hardware_capabilities.bitstream_formats =
-        ConvertEdidScanToAudioBitstreamFlags(bitstream_passthrough_bitmask_);
+    hardware_capabilities.bitstream_formats = GetPassthroughAudioFormats();
     hardware_capabilities.require_encapsulation = true;
   }
-#endif  // BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
+#endif  // BUILDFLAG(ENABLE_PASSTHROUGH_AUDIO_CODECS)
   AudioParameters params(AudioParameters::AUDIO_PCM_LOW_LATENCY,
                          channel_layout_config, sample_rate, buffer_size,
                          hardware_capabilities);
@@ -467,11 +445,5 @@ std::unique_ptr<AudioManager> CreateAudioManager(
   return std::make_unique<AudioManagerWin>(std::move(audio_thread),
                                            audio_log_factory);
 }
-
-#if BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
-void AudioManagerWin::SetBitstreamPassthroughBitmask(uint32_t bitmask) {
-  bitstream_passthrough_bitmask_ = bitmask;
-}
-#endif  // BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
 
 }  // namespace media

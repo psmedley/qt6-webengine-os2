@@ -8,16 +8,17 @@
 #include <vector>
 
 #include "base/containers/contains.h"
+#include "base/files/file_util.h"
 #include "base/rand_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
+#include "base/test/test_future.h"
 #include "net/cert/mock_cert_verifier.h"
-#include "net/cert/pem.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/log/test_net_log.h"
-#include "net/quic/crypto/proof_source_chromium.h"
 #include "net/quic/quic_context.h"
 #include "net/test/test_data_directory.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/proof_source_x509.h"
@@ -31,6 +32,7 @@
 #include "services/network/test/fake_test_cert_verifier_params_factory.h"
 #include "services/network/url_request_context_builder_mojo.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/boringssl/src/pki/pem.h"
 
 namespace network {
 namespace {
@@ -42,7 +44,7 @@ class HostResolverFactory final : public net::HostResolver::Factory {
 
   std::unique_ptr<net::HostResolver> CreateResolver(
       net::HostResolverManager* manager,
-      base::StringPiece host_mapping_rules,
+      std::string_view host_mapping_rules,
       bool enable_caching) override {
     DCHECK(resolver_);
     return std::move(resolver_);
@@ -52,7 +54,7 @@ class HostResolverFactory final : public net::HostResolver::Factory {
   std::unique_ptr<net::HostResolver> CreateStandaloneResolver(
       net::NetLog* net_log,
       const net::HostResolver::ManagerOptions& options,
-      base::StringPiece host_mapping_rules,
+      std::string_view host_mapping_rules,
       bool enable_caching) override {
     NOTREACHED();
     return nullptr;
@@ -116,8 +118,8 @@ std::string Read(mojo::ScopedDataPipeConsumerHandle readable) {
         readable->ReadData(buffer, &size, MOJO_READ_DATA_FLAG_NONE);
     if (result == MOJO_RESULT_SHOULD_WAIT) {
       base::RunLoop run_loop;
-      base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                       run_loop.QuitClosure());
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE, run_loop.QuitClosure());
       run_loop.Run();
       continue;
     }
@@ -144,8 +146,8 @@ class TestHandshakeClient final : public mojom::WebTransportHandshakeClient {
   void OnConnectionEstablished(
       mojo::PendingRemote<mojom::WebTransport> transport,
       mojo::PendingReceiver<mojom::WebTransportClient> client_receiver,
-      const scoped_refptr<net::HttpResponseHeaders>& response_headers)
-      override {
+      const scoped_refptr<net::HttpResponseHeaders>& response_headers,
+      mojom::WebTransportStatsPtr initial_stats) override {
     transport_ = std::move(transport);
     client_receiver_ = std::move(client_receiver);
     has_seen_connection_establishment_ = true;
@@ -222,9 +224,10 @@ class TestClient final : public mojom::WebTransportClient {
       std::move(quit_closure_for_outgoing_stream_closure_).Run();
     }
   }
-  void OnReceivedResetStream(uint32_t stream_id, uint8_t) override {}
-  void OnReceivedStopSending(uint32_t stream_id, uint8_t) override {}
-  void OnClosed(mojom::WebTransportCloseInfoPtr close_info) override {}
+  void OnReceivedResetStream(uint32_t stream_id, uint32_t) override {}
+  void OnReceivedStopSending(uint32_t stream_id, uint32_t) override {}
+  void OnClosed(mojom::WebTransportCloseInfoPtr close_info,
+                mojom::WebTransportStatsPtr final_stats) override {}
 
   void WaitUntilMojoConnectionError() {
     base::RunLoop run_loop;
@@ -296,7 +299,7 @@ quic::ParsedQuicVersion GetTestVersion() {
   return version;
 }
 
-class WebTransportTest : public testing::TestWithParam<base::StringPiece> {
+class WebTransportTest : public testing::TestWithParam<std::string_view> {
  public:
   WebTransportTest()
       : WebTransportTest(
@@ -331,8 +334,7 @@ class WebTransportTest : public testing::TestWithParam<base::StringPiece> {
     auto* quic_context =
         network_context_->url_request_context()->quic_context();
     quic_context->params()->supported_versions.push_back(version_);
-    quic_context->params()->origins_to_force_quic_on.insert(
-        net::HostPortPair("test.example.com", 0));
+    quic_context->params()->webtransport_developer_mode = true;
   }
   ~WebTransportTest() override = default;
 
@@ -365,7 +367,7 @@ class WebTransportTest : public testing::TestWithParam<base::StringPiece> {
                        std::move(fingerprints), std::move(handshake_client));
   }
 
-  GURL GetURL(base::StringPiece suffix) {
+  GURL GetURL(std::string_view suffix) {
     int port = http_server_->server_address().port();
     return GURL(base::StrCat(
         {"https://test.example.com:", base::NumberToString(port), suffix}));
@@ -378,8 +380,8 @@ class WebTransportTest : public testing::TestWithParam<base::StringPiece> {
 
   void RunPendingTasks() {
     base::RunLoop run_loop;
-    base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                     run_loop.QuitClosure());
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, run_loop.QuitClosure());
     run_loop.Run();
   }
 
@@ -717,6 +719,30 @@ TEST_F(WebTransportTest, DISABLED_EchoOnBidirectionalStream) {
   EXPECT_TRUE(client.stream_is_closed_as_incoming_stream(stream_id));
 }
 
+TEST_F(WebTransportTest, Stats) {
+  base::RunLoop run_loop_for_handshake;
+  mojo::PendingRemote<mojom::WebTransportHandshakeClient> handshake_client;
+  TestHandshakeClient test_handshake_client(
+      handshake_client.InitWithNewPipeAndPassReceiver(),
+      run_loop_for_handshake.QuitClosure());
+
+  CreateWebTransport(GetURL("/echo"), origin(), std::move(handshake_client));
+
+  run_loop_for_handshake.Run();
+  ASSERT_TRUE(test_handshake_client.has_seen_connection_establishment());
+
+  TestClient client(test_handshake_client.PassClientReceiver());
+  mojo::Remote<mojom::WebTransport> transport_remote(
+      test_handshake_client.PassTransport());
+
+  base::test::TestFuture<mojom::WebTransportStatsPtr> future;
+  transport_remote->GetStats(future.GetCallback());
+  mojom::WebTransportStatsPtr stats = future.Take();
+  ASSERT_FALSE(stats.is_null());
+  EXPECT_GT(stats->min_rtt, base::Microseconds(0));
+  EXPECT_LT(stats->min_rtt, base::Seconds(5));
+}
+
 class WebTransportWithCustomCertificateTest : public WebTransportTest {
  public:
   WebTransportWithCustomCertificateTest()
@@ -734,7 +760,6 @@ class WebTransportWithCustomCertificateTest : public WebTransportTest {
   ~WebTransportWithCustomCertificateTest() override = default;
 
   static std::unique_ptr<quic::ProofSource> CreateProofSource() {
-    auto proof_source = std::make_unique<net::ProofSourceChromium>();
     base::FilePath certs_dir = net::GetTestCertsDirectory();
     base::FilePath cert_path = certs_dir.AppendASCII("quic-short-lived.pem");
     base::FilePath key_path = certs_dir.AppendASCII("quic-ecdsa-leaf.key");
@@ -749,7 +774,7 @@ class WebTransportWithCustomCertificateTest : public WebTransportTest {
       return nullptr;
     }
 
-    net::PEMTokenizer pem_tokenizer(cert_pem, {"CERTIFICATE"});
+    bssl::PEMTokenizer pem_tokenizer(cert_pem, {"CERTIFICATE"});
     if (!pem_tokenizer.GetNext()) {
       ADD_FAILURE() << "No certificates found in " << cert_path;
       return nullptr;

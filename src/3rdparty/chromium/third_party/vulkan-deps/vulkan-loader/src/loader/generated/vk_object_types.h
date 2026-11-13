@@ -1,3 +1,4 @@
+// clang-format off
 // *** THIS FILE IS GENERATED - DO NOT EDIT ***
 // See helper_file_generator.py for modifications
 
@@ -80,11 +81,14 @@ typedef enum VulkanObjectType {
     kVulkanObjectTypeAccelerationStructureNV = 41,
     kVulkanObjectTypePerformanceConfigurationINTEL = 42,
     kVulkanObjectTypeIndirectCommandsLayoutNV = 43,
-    kVulkanObjectTypeBufferCollectionFUCHSIA = 44,
-    kVulkanObjectTypeMicromapEXT = 45,
-    kVulkanObjectTypeOpticalFlowSessionNV = 46,
-    kVulkanObjectTypeAccelerationStructureKHR = 47,
-    kVulkanObjectTypeMax = 48,
+    kVulkanObjectTypeCudaModuleNV = 44,
+    kVulkanObjectTypeCudaFunctionNV = 45,
+    kVulkanObjectTypeAccelerationStructureKHR = 46,
+    kVulkanObjectTypeBufferCollectionFUCHSIA = 47,
+    kVulkanObjectTypeMicromapEXT = 48,
+    kVulkanObjectTypeOpticalFlowSessionNV = 49,
+    kVulkanObjectTypeShaderEXT = 50,
+    kVulkanObjectTypeMax = 51,
     // Aliases for backwards compatibilty of "promoted" types
     kVulkanObjectTypeDescriptorUpdateTemplateKHR = kVulkanObjectTypeDescriptorUpdateTemplate,
     kVulkanObjectTypeSamplerYcbcrConversionKHR = kVulkanObjectTypeSamplerYcbcrConversion,
@@ -137,10 +141,13 @@ static const char * const object_string[kVulkanObjectTypeMax] = {
     "AccelerationStructureNV",
     "PerformanceConfigurationINTEL",
     "IndirectCommandsLayoutNV",
+    "CudaModuleNV",
+    "CudaFunctionNV",
+    "AccelerationStructureKHR",
     "BufferCollectionFUCHSIA",
     "MicromapEXT",
     "OpticalFlowSessionNV",
-    "AccelerationStructureKHR",
+    "ShaderEXT",
 };
 
 // Helper array to get Vulkan VK_EXT_debug_report object type enum from the internal layers version
@@ -189,10 +196,13 @@ const VkDebugReportObjectTypeEXT get_debug_report_enum[] = {
     VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT,   // kVulkanObjectTypeAccelerationStructureNV
     VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypePerformanceConfigurationINTEL
     VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypeIndirectCommandsLayoutNV
+    VK_DEBUG_REPORT_OBJECT_TYPE_CUDA_MODULE_NV_EXT,   // kVulkanObjectTypeCudaModuleNV
+    VK_DEBUG_REPORT_OBJECT_TYPE_CUDA_FUNCTION_NV_EXT,   // kVulkanObjectTypeCudaFunctionNV
+    VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR_EXT,   // kVulkanObjectTypeAccelerationStructureKHR
     VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA_EXT,   // kVulkanObjectTypeBufferCollectionFUCHSIA
     VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypeMicromapEXT
     VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypeOpticalFlowSessionNV
-    VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR_EXT,   // kVulkanObjectTypeAccelerationStructureKHR
+    VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypeShaderEXT
 };
 
 // Helper array to get Official Vulkan VkObjectType enum from the internal layers version
@@ -241,10 +251,13 @@ const VkObjectType get_object_type_enum[] = {
     VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV,   // kVulkanObjectTypeAccelerationStructureNV
     VK_OBJECT_TYPE_PERFORMANCE_CONFIGURATION_INTEL,   // kVulkanObjectTypePerformanceConfigurationINTEL
     VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_NV,   // kVulkanObjectTypeIndirectCommandsLayoutNV
+    VK_OBJECT_TYPE_CUDA_MODULE_NV,   // kVulkanObjectTypeCudaModuleNV
+    VK_OBJECT_TYPE_CUDA_FUNCTION_NV,   // kVulkanObjectTypeCudaFunctionNV
+    VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,   // kVulkanObjectTypeAccelerationStructureKHR
     VK_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA,   // kVulkanObjectTypeBufferCollectionFUCHSIA
     VK_OBJECT_TYPE_MICROMAP_EXT,   // kVulkanObjectTypeMicromapEXT
     VK_OBJECT_TYPE_OPTICAL_FLOW_SESSION_NV,   // kVulkanObjectTypeOpticalFlowSessionNV
-    VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,   // kVulkanObjectTypeAccelerationStructureKHR
+    VK_OBJECT_TYPE_SHADER_EXT,   // kVulkanObjectTypeShaderEXT
 };
 
 // Helper function to convert from VkDebugReportObjectTypeEXT to VkObjectType
@@ -331,6 +344,10 @@ static inline VkObjectType convertDebugReportObjectToCoreObject(VkDebugReportObj
         return VK_OBJECT_TYPE_VALIDATION_CACHE_EXT;
     } else if (debug_report_obj == VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT) {
         return VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV;
+    } else if (debug_report_obj == VK_DEBUG_REPORT_OBJECT_TYPE_CUDA_MODULE_NV_EXT) {
+        return VK_OBJECT_TYPE_CUDA_MODULE_NV;
+    } else if (debug_report_obj == VK_DEBUG_REPORT_OBJECT_TYPE_CUDA_FUNCTION_NV_EXT) {
+        return VK_OBJECT_TYPE_CUDA_FUNCTION_NV;
     } else if (debug_report_obj == VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA_EXT) {
         return VK_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA;
     }
@@ -421,8 +438,13 @@ static inline VkDebugReportObjectTypeEXT convertCoreObjectToDebugReportObject(Vk
         return VK_DEBUG_REPORT_OBJECT_TYPE_VALIDATION_CACHE_EXT_EXT;
     } else if (core_report_obj == VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV) {
         return VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT;
+    } else if (core_report_obj == VK_OBJECT_TYPE_CUDA_MODULE_NV) {
+        return VK_DEBUG_REPORT_OBJECT_TYPE_CUDA_MODULE_NV_EXT;
+    } else if (core_report_obj == VK_OBJECT_TYPE_CUDA_FUNCTION_NV) {
+        return VK_DEBUG_REPORT_OBJECT_TYPE_CUDA_FUNCTION_NV_EXT;
     } else if (core_report_obj == VK_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA) {
         return VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA_EXT;
     }
     return VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
 }
+// clang-format on

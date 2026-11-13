@@ -30,15 +30,15 @@
 
 import * as Common from '../../core/common/common.js';
 import * as Platform from '../../core/platform/platform.js';
+import * as VisualLogging from '../visual_logging/visual_logging.js';
 
 import * as ARIAUtils from './ARIAUtils.js';
 import {Constraints} from './Geometry.js';
-
-import {Events as ResizerWidgetEvents, SimpleResizerWidget, type ResizeUpdatePositionEvent} from './ResizerWidget.js';
+import {Events as ResizerWidgetEvents, type ResizeUpdatePositionEvent, SimpleResizerWidget} from './ResizerWidget.js';
+import splitWidgetStyles from './splitWidget.css.legacy.js';
 import {ToolbarButton} from './Toolbar.js';
 import {Widget} from './Widget.js';
 import {Events as ZoomManagerEvents, ZoomManager} from './ZoomManager.js';
-import splitWidgetStyles from './splitWidget.css.legacy.js';
 
 export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typeof Widget>(Widget) {
   private sidebarElementInternal: HTMLElement;
@@ -230,7 +230,7 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
     return this.sidebarElementInternal;
   }
 
-  childWasDetached(widget: Widget): void {
+  override childWasDetached(widget: Widget): void {
     if (this.detaching) {
       return;
     }
@@ -657,24 +657,24 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
     return Math.max(0, totalSize - minMainSize);
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     this.forceUpdateLayout();
     ZoomManager.instance().addEventListener(ZoomManagerEvents.ZoomChanged, this.onZoomChanged, this);
   }
 
-  willHide(): void {
+  override willHide(): void {
     ZoomManager.instance().removeEventListener(ZoomManagerEvents.ZoomChanged, this.onZoomChanged, this);
   }
 
-  onResize(): void {
+  override onResize(): void {
     this.updateLayout();
   }
 
-  onLayout(): void {
+  override onLayout(): void {
     this.updateLayout();
   }
 
-  calculateConstraints(): Constraints {
+  override calculateConstraints(): Constraints {
     if (this.showModeInternal === ShowMode.OnlyMain) {
       return this.mainWidgetInternal ? this.mainWidgetInternal.constraints() : new Constraints();
     }
@@ -825,13 +825,18 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
 
   createShowHideSidebarButton(
       showTitle: Common.UIString.LocalizedString, hideTitle: Common.UIString.LocalizedString,
-      shownString: Common.UIString.LocalizedString, hiddenString: Common.UIString.LocalizedString): ToolbarButton {
+      shownString: Common.UIString.LocalizedString, hiddenString: Common.UIString.LocalizedString,
+      jslogContext?: string): ToolbarButton {
     this.showSidebarButtonTitle = showTitle;
     this.hideSidebarButtonTitle = hideTitle;
     this.shownSidebarString = shownString;
     this.hiddenSidebarString = hiddenString;
     this.showHideSidebarButton = new ToolbarButton('', '');
     this.showHideSidebarButton.addEventListener(ToolbarButton.Events.Click, buttonClicked, this);
+    if (jslogContext) {
+      this.showHideSidebarButton.element.setAttribute(
+          'jslog', `${VisualLogging.toggleSubpane().track({click: true}).context(jslogContext)}`);
+    }
     this.updateShowHideSidebarButton();
 
     function buttonClicked(this: SplitWidget): void {
@@ -858,30 +863,24 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
     const sidebarHidden = this.showModeInternal === ShowMode.OnlyMain;
     let glyph = '';
     if (sidebarHidden) {
-      glyph = this.isVertical() ?
-          (this.isSidebarSecond() ? 'largeicon-show-right-sidebar' : 'largeicon-show-left-sidebar') :
-          (this.isSidebarSecond() ? 'largeicon-show-bottom-sidebar' : 'largeicon-show-top-sidebar');
+      glyph = this.isVertical() ? (this.isSidebarSecond() ? 'right-panel-open' : 'left-panel-open') :
+                                  (this.isSidebarSecond() ? 'bottom-panel-open' : 'top-panel-open');
     } else {
-      glyph = this.isVertical() ?
-          (this.isSidebarSecond() ? 'largeicon-hide-right-sidebar' : 'largeicon-hide-left-sidebar') :
-          (this.isSidebarSecond() ? 'largeicon-hide-bottom-sidebar' : 'largeicon-hide-top-sidebar');
+      glyph = this.isVertical() ? (this.isSidebarSecond() ? 'right-panel-close' : 'left-panel-close') :
+                                  (this.isSidebarSecond() ? 'bottom-panel-close' : 'top-panel-close');
     }
     this.showHideSidebarButton.setGlyph(glyph);
     this.showHideSidebarButton.setTitle(sidebarHidden ? this.showSidebarButtonTitle : this.hideSidebarButtonTitle);
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum ShowMode {
+export const enum ShowMode {
   Both = 'Both',
   OnlyMain = 'OnlyMain',
   OnlySidebar = 'OnlySidebar',
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   SidebarSizeChanged = 'SidebarSizeChanged',
   ShowModeChanged = 'ShowModeChanged',
 }

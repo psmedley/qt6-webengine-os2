@@ -41,7 +41,7 @@ config("runtime_library") {
   }
 
   if ((!is_chromeos || default_toolchain != "//build/toolchain/cros:target") &&
-      (!use_custom_libcxx || current_cpu == "mipsel") && !is_qtwebengine) {
+      (!use_custom_libcxx || current_cpu == "mipsel")) {
     libs = [ "atomic" ]
   }
 }
@@ -63,8 +63,8 @@ if (use_glib) {
       "gthread-2.0",
     ]
     defines = [
-      "GLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_40",
-      "GLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_40",
+      "GLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_56",
+      "GLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_56",
     ]
   }
 }

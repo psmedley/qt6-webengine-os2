@@ -8,16 +8,16 @@
 #include <vector>
 
 #include "base/check_op.h"
-#include "base/containers/stack_container.h"
 #include "base/functional/overloaded.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/no_destructor.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/process/process.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "mojo/core/core.h"
 #include "mojo/core/ipcz_driver/data_pipe.h"
 #include "mojo/core/ipcz_driver/invitation.h"
-#include "mojo/core/ipcz_driver/message_wrapper.h"
 #include "mojo/core/ipcz_driver/object.h"
 #include "mojo/core/ipcz_driver/shared_buffer.h"
 #include "mojo/core/ipcz_driver/transmissible_platform_handle.h"
@@ -25,8 +25,13 @@
 #include "mojo/public/cpp/platform/platform_channel.h"
 #include "mojo/public/cpp/platform/platform_channel_endpoint.h"
 #include "mojo/public/cpp/platform/platform_handle.h"
-#include "third_party/abseil-cpp/absl/types/variant.h"
+#include "third_party/abseil-cpp/absl/container/inlined_vector.h"
 #include "third_party/ipcz/include/ipcz/ipcz.h"
+
+#if BUILDFLAG(IS_WIN)
+#include "base/win/win_util.h"
+#include "mojo/public/cpp/platform/platform_handle_security_util_win.h"
+#endif
 
 namespace mojo::core::ipcz_driver {
 
@@ -63,6 +68,17 @@ enum HandleOwner : uint8_t {
   // already belong to the recipient.
   kRecipient,
 };
+
+// HANDLE value size varies by architecture. We always encode them with 64 bits.
+using HandleData = uint64_t;
+
+HandleData HandleToData(HANDLE handle) {
+  return static_cast<HandleData>(reinterpret_cast<uintptr_t>(handle));
+}
+
+HANDLE DataToHandle(HandleData data) {
+  return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(data));
+}
 #endif
 
 // Header serialized at the beginning of all mojo-ipcz driver objects.
@@ -96,23 +112,37 @@ struct IPCZ_ALIGN(8) TransportHeader {
   // Indicates whether the remote process on the other end of this transport
   // is the same process sending this object.
   bool is_same_remote_process;
+
+  // See notes on equivalent fields defined on Transport. Note that serialized
+  // transports endpoints with `is_peer_trusted` set to true can only be
+  // accepted from transports which are themselves trusted.
+  bool is_peer_trusted;
+  bool is_trusted_by_peer;
 };
 
 #if BUILDFLAG(IS_WIN)
 // Encodes a Windows HANDLE value for transmission within a serialized driver
 // object payload. See documentation on HandleOwner above for general notes
-// about how handles are communicated over IPC on Windows.
-void EncodeHandle(PlatformHandle& handle,
+// about how handles are communicated over IPC on Windows. Returns true on
+// success, with the encoded handle value in `out_handle_data`. Returns false if
+// handle duplication failed.
+bool EncodeHandle(PlatformHandle& handle,
                   const base::Process& remote_process,
                   HandleOwner handle_owner,
-                  HANDLE& out_handle) {
-  DCHECK(handle.is_valid());
+                  HandleData& out_handle_data,
+                  Transport::ProcessTrust remote_process_trust) {
+  CHECK(handle.is_valid());
+  // Duplicating INVALID_HANDLE_VALUE passes a process handle. If you intend to
+  // do this, you must open a valid process handle, not pass the result of
+  // GetCurrentProcess() or GetCurrentThread(). e.g. https://crbug.com/243339.
+  CHECK(!handle.is_pseudo_handle());
+
   if (handle_owner == HandleOwner::kSender) {
     // Nothing to do when sending handles that belong to us. The recipient must
     // be sufficiently privileged and equipped to duplicate such handles to
     // itself.
-    out_handle = handle.ReleaseHandle();
-    return;
+    out_handle_data = HandleToData(handle.ReleaseHandle());
+    return true;
   }
 
   // To encode a handle that already belongs to the recipient, we must first
@@ -121,23 +151,41 @@ void EncodeHandle(PlatformHandle& handle,
   // handle to the remote process.
   DCHECK_EQ(handle_owner, HandleOwner::kRecipient);
   DCHECK(remote_process.IsValid());
-  BOOL result = ::DuplicateHandle(
-      ::GetCurrentProcess(), handle.ReleaseHandle(), remote_process.Handle(),
-      &out_handle, 0, FALSE, DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE);
-  DCHECK(result);
+#if BUILDFLAG(IS_WIN)
+  if (remote_process_trust == Transport::ProcessTrust::kUntrusted) {
+    DcheckIfFileHandleIsUnsafe(handle.GetHandle().get());
+  }
+#endif
+
+  HANDLE new_handle;
+  if (!::DuplicateHandle(::GetCurrentProcess(), handle.ReleaseHandle(),
+                         remote_process.Handle(), &new_handle, 0, FALSE,
+                         DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE)) {
+    return false;
+  }
+
+  out_handle_data = HandleToData(new_handle);
+  return true;
 }
 
 // Decodes a Windows HANDLE value from a transmission containing a serialized
 // driver object. See documentation on HandleOwner above for general notes about
 // how handles are communicated over IPC on Windows.
-PlatformHandle DecodeHandle(HANDLE handle,
+PlatformHandle DecodeHandle(HandleData data,
                             const base::Process& remote_process,
-                            Transport::EndpointType sender_type,
-                            HandleOwner handle_owner) {
+                            HandleOwner handle_owner,
+                            Transport& from_transport) {
+  const HANDLE handle = DataToHandle(data);
+  // Do not decode sentinel values used by Windows (INVALID_HANDLE_VALUE &
+  // GetCurrentThread()).
+  CHECK(!base::win::IsPseudoHandle(handle));
+
   if (handle_owner == HandleOwner::kRecipient) {
-    if (sender_type != Transport::kBroker) {
+    if (from_transport.destination_type() != Transport::kBroker &&
+        !from_transport.is_peer_trusted() && !remote_process.is_current()) {
       // Do not trust non-broker endpoints to send handles which already belong
-      // to us.
+      // to us, unless the transport is explicitly marked as trustworthy (e.g.
+      // is connected to a known elevated process.)
       return PlatformHandle();
     }
     return PlatformHandle(base::win::ScopedHandle(handle));
@@ -163,27 +211,31 @@ scoped_refptr<base::SingleThreadTaskRunner>& GetIOTaskRunnerStorage() {
 }  // namespace
 
 Transport::Transport(EndpointTypes endpoint_types,
-                     Channel::Endpoint endpoint,
-                     base::Process remote_process)
+                     PlatformChannelEndpoint endpoint,
+                     base::Process remote_process,
+                     ProcessTrust remote_process_trust)
     : endpoint_types_(endpoint_types),
       remote_process_(std::move(remote_process)),
+      remote_process_trust_(remote_process_trust),
       inactive_endpoint_(std::move(endpoint)) {}
 
 // static
 scoped_refptr<Transport> Transport::Create(EndpointTypes endpoint_types,
-                                           Channel::Endpoint endpoint,
-                                           base::Process remote_process) {
+                                           PlatformChannelEndpoint endpoint,
+                                           base::Process remote_process,
+                                           ProcessTrust remote_process_trust) {
   return base::MakeRefCounted<Transport>(endpoint_types, std::move(endpoint),
-                                         std::move(remote_process));
+                                         std::move(remote_process),
+                                         remote_process_trust);
 }
 
 // static
 std::pair<scoped_refptr<Transport>, scoped_refptr<Transport>>
 Transport::CreatePair(EndpointType first_type, EndpointType second_type) {
   PlatformChannel channel;
-  auto one = Create({/*.source =*/ first_type, /*.destination =*/ second_type},
+  auto one = Create({.source = first_type, .destination = second_type},
                     channel.TakeLocalEndpoint());
-  auto two = Create({/*.source =*/ second_type, /*.destination =*/ first_type},
+  auto two = Create({.source = second_type, .destination = first_type},
                     channel.TakeRemoteEndpoint());
   return {one, two};
 }
@@ -191,10 +243,10 @@ Transport::CreatePair(EndpointType first_type, EndpointType second_type) {
 Transport::~Transport() {
   if (error_handler_) {
     const MojoProcessErrorDetails details{
-        /*.struct_size =*/ sizeof(details),
-        /*.error_message_length =*/ 0,
-        /*.error_message =*/ nullptr,
-        /*.flags =*/ MOJO_PROCESS_ERROR_FLAG_DISCONNECTED,
+        .struct_size = sizeof(details),
+        .error_message_length = 0,
+        .error_message = nullptr,
+        .flags = MOJO_PROCESS_ERROR_FLAG_DISCONNECTED,
     };
     error_handler_(error_handler_context_, &details);
   }
@@ -212,6 +264,11 @@ Transport::GetIOTaskRunner() {
   return GetIOTaskRunnerStorage();
 }
 
+void Transport::OverrideIOTaskRunner(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  io_task_runner_ = std::move(task_runner);
+}
+
 void Transport::ReportBadActivity(const std::string& error_message) {
   if (!error_handler_) {
     Invitation::InvokeDefaultProcessErrorHandler(error_message);
@@ -219,11 +276,11 @@ void Transport::ReportBadActivity(const std::string& error_message) {
   }
 
   const MojoProcessErrorDetails details{
-      /*.struct_size =*/ sizeof(details),
-//      .error_message_length =
+      .struct_size = sizeof(details),
+      .error_message_length =
           base::checked_cast<uint32_t>(error_message.size()),
-      /*.error_message =*/ error_message.c_str(),
-      /*.flags =*/ MOJO_PROCESS_ERROR_FLAG_NONE,
+      .error_message = error_message.c_str(),
+      .flags = MOJO_PROCESS_ERROR_FLAG_NONE,
   };
   error_handler_(error_handler_context_, &details);
 }
@@ -234,7 +291,7 @@ bool Transport::Activate(IpczHandle transport,
   std::vector<PendingTransmission> pending_transmissions;
   {
     base::AutoLock lock(lock_);
-    if (channel_ || !IsEndpointValid()) {
+    if (channel_ || !inactive_endpoint_.is_valid()) {
       return false;
     }
 
@@ -242,10 +299,10 @@ bool Transport::Activate(IpczHandle transport,
     activity_handler_ = activity_handler;
     self_reference_for_channel_ = base::WrapRefCounted(this);
     channel_ = Channel::CreateForIpczDriver(this, std::move(inactive_endpoint_),
-                                            GetIOTaskRunner());
+                                            io_task_runner_);
     channel_->Start();
     if (leak_channel_on_shutdown_) {
-      GetIOTaskRunner()->PostTask(
+      io_task_runner_->PostTask(
           FROM_HERE,
           base::BindOnce(
               [](scoped_refptr<Channel> channel) { channel->LeakHandle(); },
@@ -306,7 +363,7 @@ bool Transport::Transmit(base::span<const uint8_t> data,
   scoped_refptr<Channel> channel;
   {
     base::AutoLock lock(lock_);
-    if (IsEndpointValid()) {
+    if (inactive_endpoint_.is_valid()) {
       PendingTransmission transmission;
       transmission.bytes = std::vector<uint8_t>(data.begin(), data.end());
       transmission.handles = std::move(platform_handles);
@@ -345,7 +402,7 @@ IpczResult Transport::SerializeObject(ObjectBase& object,
 
 #if BUILDFLAG(IS_WIN)
   const size_t required_num_bytes = sizeof(ObjectHeader) + object_num_bytes +
-                                    sizeof(HANDLE) * object_num_handles;
+                                    sizeof(HandleData) * object_num_handles;
   const size_t required_num_handles = 0;
 #else
   const size_t required_num_bytes = sizeof(ObjectHeader) + object_num_bytes;
@@ -374,16 +431,18 @@ IpczResult Transport::SerializeObject(ObjectBase& object,
   header.reserved[2] = 0;
 
   const HandleOwner handle_owner =
-      remote_process_.IsValid() && source_type() == kBroker
+      remote_process_.IsValid() &&
+              (source_type() == kBroker || is_trusted_by_peer())
           ? HandleOwner::kRecipient
           : HandleOwner::kSender;
   header.handle_owner = handle_owner;
 
-  auto handle_data = base::make_span(reinterpret_cast<HANDLE*>(&header + 1),
+  auto handle_data = base::make_span(reinterpret_cast<HandleData*>(&header + 1),
                                      object_num_handles);
-  auto object_data = base::make_span(reinterpret_cast<uint8_t*>(&header + 1) +
-                                         object_num_handles * sizeof(HANDLE),
-                                     object_num_bytes);
+  auto object_data =
+      base::make_span(reinterpret_cast<uint8_t*>(&header + 1) +
+                          object_num_handles * sizeof(HandleData),
+                      object_num_bytes);
 #else
   auto object_data = base::make_span(reinterpret_cast<uint8_t*>(&header + 1),
                                      object_num_bytes);
@@ -391,24 +450,25 @@ IpczResult Transport::SerializeObject(ObjectBase& object,
 
   // A small amount of stack storage is reserved to avoid heap allocation in the
   // most common cases.
-  base::StackVector<PlatformHandle, 2> platform_handles;
-  platform_handles->resize(object_num_handles);
+  absl::InlinedVector<PlatformHandle, 2> platform_handles;
+  platform_handles.resize(object_num_handles);
   if (!object.Serialize(*this, object_data,
-                        base::make_span(platform_handles.container()))) {
+                        base::make_span(platform_handles))) {
     return IPCZ_RESULT_INVALID_ARGUMENT;
   }
 
+  bool ok = true;
   for (size_t i = 0; i < object_num_handles; ++i) {
 #if BUILDFLAG(IS_WIN)
-    EncodeHandle(platform_handles[i], remote_process_, handle_owner,
-                 handle_data[i]);
+    ok &= EncodeHandle(platform_handles[i], remote_process_, handle_owner,
+                       handle_data[i], remote_process_trust());
 #else
     handles[i] = TransmissiblePlatformHandle::ReleaseAsHandle(
         base::MakeRefCounted<TransmissiblePlatformHandle>(
             std::move(platform_handles[i])));
 #endif
   }
-  return IPCZ_RESULT_OK;
+  return ok ? IPCZ_RESULT_OK : IPCZ_RESULT_INVALID_ARGUMENT;
 }
 
 IpczResult Transport::DeserializeObject(
@@ -431,14 +491,15 @@ IpczResult Transport::DeserializeObject(
   const HandleOwner handle_owner = header.handle_owner;
 
   size_t available_bytes = bytes.size() - header_size;
-  const size_t max_handles = available_bytes / sizeof(HANDLE);
+  const size_t max_handles = available_bytes / sizeof(HandleData);
   if (num_handles > max_handles) {
     return IPCZ_RESULT_INVALID_ARGUMENT;
   }
 
-  const size_t handle_data_size = num_handles * sizeof(HANDLE);
+  const size_t handle_data_size = num_handles * sizeof(HandleData);
   auto handle_data = base::make_span(
-      reinterpret_cast<const HANDLE*>(bytes.data() + header_size), num_handles);
+      reinterpret_cast<const HandleData*>(bytes.data() + header_size),
+      num_handles);
   auto object_data = bytes.subspan(header_size + handle_data_size);
 #else
   auto object_data = bytes.subspan(header_size);
@@ -447,12 +508,12 @@ IpczResult Transport::DeserializeObject(
 
   // A small amount of stack storage is reserved to avoid heap allocation in the
   // most common cases.
-  base::StackVector<PlatformHandle, 2> platform_handles;
-  platform_handles->resize(num_handles);
+  absl::InlinedVector<PlatformHandle, 2> platform_handles;
+  platform_handles.resize(num_handles);
   for (size_t i = 0; i < num_handles; ++i) {
 #if BUILDFLAG(IS_WIN)
-    platform_handles[i] = DecodeHandle(handle_data[i], remote_process_,
-                                       destination_type(), handle_owner);
+    platform_handles[i] =
+        DecodeHandle(handle_data[i], remote_process_, handle_owner, *this);
 #else
     platform_handles[i] =
         TransmissiblePlatformHandle::TakeFromHandle(handles[i])->TakeHandle();
@@ -462,11 +523,12 @@ IpczResult Transport::DeserializeObject(
     }
   }
 
-  auto object_handles = base::make_span(platform_handles.container());
+  auto object_handles = base::make_span(platform_handles);
   switch (header.type) {
-    case ObjectBase::kTransport:
+    case ObjectBase::kTransport: {
       object = Deserialize(*this, object_data, object_handles);
       break;
+    }
 
     case ObjectBase::kSharedBuffer:
       object = SharedBuffer::Deserialize(object_data, object_handles);
@@ -483,12 +545,6 @@ IpczResult Transport::DeserializeObject(
 
     case ObjectBase::kDataPipe:
       object = DataPipe::Deserialize(object_data, object_handles);
-      break;
-
-    case ObjectBase::kMessageWrapper:
-      // Deserialize as a dummy object. This will be ignored. See comments
-      // within MessageWrapper and MojoRead/WriteMessageIpcz.
-      object = base::MakeRefCounted<MessageWrapper>();
       break;
 
     default:
@@ -529,6 +585,8 @@ bool Transport::Serialize(Transport& transmitter,
   auto& header = *reinterpret_cast<TransportHeader*>(data.data());
   header.destination_type = destination_type();
   header.is_same_remote_process = remote_process_.is_current();
+  header.is_peer_trusted = is_peer_trusted();
+  header.is_trusted_by_peer = is_trusted_by_peer();
 
 #if BUILDFLAG(IS_WIN)
   if (ShouldSerializeProcessHandle(transmitter)) {
@@ -544,10 +602,8 @@ bool Transport::Serialize(Transport& transmitter,
   DCHECK_EQ(handles.size(), 1u);
 #endif
 
-  DCHECK(IsEndpointValid());
-  DCHECK(absl::holds_alternative<PlatformChannelEndpoint>(inactive_endpoint_));
-  handles[0] = absl::get<PlatformChannelEndpoint>(inactive_endpoint_)
-                   .TakePlatformHandle();
+  CHECK(inactive_endpoint_.is_valid());
+  handles[0] = inactive_endpoint_.TakePlatformHandle();
   return true;
 }
 
@@ -563,18 +619,50 @@ scoped_refptr<Transport> Transport::Deserialize(
   base::Process process;
   const auto& header = *reinterpret_cast<const TransportHeader*>(data.data());
 #if BUILDFLAG(IS_WIN)
-  if (handles.size() >= 2 && from_transport.remote_process().IsValid()) {
+  if (handles.size() >= 2) {
     process = base::Process(handles[1].ReleaseHandle());
   }
 #endif
+  // Reject transports with out of range enum value in destination_type.
+  if (!(header.destination_type == kBroker ||
+        header.destination_type == kNonBroker)) {
+    return nullptr;
+  }
+
+  const bool is_source_trusted = from_transport.is_peer_trusted() ||
+                                 from_transport.destination_type() == kBroker;
+
+  const bool is_new_peer_trusted = header.is_peer_trusted;
+  const bool is_trusted_by_peer = header.is_trusted_by_peer;
+
+  if (is_new_peer_trusted && !is_source_trusted) {
+    // Untrusted transports cannot send us trusted transports.
+    return nullptr;
+  }
+
+  if (header.destination_type == kBroker && !is_source_trusted) {
+    // Do not accept broker connections from untrusted transports.
+    return nullptr;
+  }
+
   if (header.is_same_remote_process &&
       from_transport.remote_process().IsValid()) {
     process = from_transport.remote_process().Duplicate();
   }
-  return Create({/*.source =*/ from_transport.source_type(),
-                 /*.destination =*/ header.destination_type},
-                PlatformChannelEndpoint(std::move(handles[0])),
-                std::move(process));
+  auto transport =
+      Create({.source = from_transport.source_type(),
+              .destination = header.destination_type},
+             PlatformChannelEndpoint(std::move(handles[0])), std::move(process),
+             from_transport.remote_process_trust());
+  transport->set_is_peer_trusted(is_new_peer_trusted);
+  transport->set_is_trusted_by_peer(is_trusted_by_peer);
+
+  // Inherit the IO task used by the receiving Transport. Deserialized
+  // transports are always adopted by the receiving node, and we want any given
+  // node to receive all of its transports' I/O on the same thread.
+  transport->OverrideIOTaskRunner(from_transport.io_task_runner_);
+
+  return transport;
 }
 
 bool Transport::IsIpczTransport() const {
@@ -615,24 +703,14 @@ void Transport::OnChannelDestroyed() {
   self = std::move(self_reference_for_channel_);
 }
 
-bool Transport::IsEndpointValid() const {
-  return absl::visit(base::Overloaded{
-                         [](const PlatformChannelEndpoint& endpoint) {
-                           return endpoint.is_valid();
-                         },
-                         [](const PlatformChannelServerEndpoint& endpoint) {
-                           return endpoint.is_valid();
-                         },
-                     },
-                     inactive_endpoint_);
-}
-
 bool Transport::CanTransmitHandles() const {
 #if BUILDFLAG(IS_WIN)
   // On Windows, we can transmit handles only if at least one endpoint is a
-  // broker, or if we have a handle to the remote process.
-  return remote_process_.IsValid() || destination_type() == kBroker ||
-         source_type() == kBroker;
+  // broker, or if we have a handle to the remote process, or if the both ends
+  // of the transport are held by the same process.
+  return destination_type() == kBroker || source_type() == kBroker ||
+         (remote_process_.IsValid() && is_trusted_by_peer()) ||
+         remote_process_.is_current();
 #else
   return true;
 #endif
@@ -641,7 +719,8 @@ bool Transport::CanTransmitHandles() const {
 bool Transport::ShouldSerializeProcessHandle(Transport& transmitter) const {
 #if BUILDFLAG(IS_WIN)
   return remote_process_.IsValid() && !remote_process_.is_current() &&
-         transmitter.destination_type() == kBroker;
+         (transmitter.destination_type() == kBroker ||
+          transmitter.is_peer_trusted());
 #else
   // We have no need for the process handle on other platforms.
   return false;

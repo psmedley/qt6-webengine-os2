@@ -268,18 +268,18 @@ typedef struct aom_codec_priv aom_codec_priv_t;
  * support frame types that are codec specific (MPEG-1 D-frames for example)
  */
 typedef uint32_t aom_codec_frame_flags_t;
-#define AOM_FRAME_IS_KEY 0x1 /**< frame is the start of a GOP */
+#define AOM_FRAME_IS_KEY 0x1u /**< frame is the start of a GOP */
 /*!\brief frame can be dropped without affecting the stream (no future frame
  * depends on this one) */
-#define AOM_FRAME_IS_DROPPABLE 0x2
+#define AOM_FRAME_IS_DROPPABLE 0x2u
 /*!\brief this is an INTRA_ONLY frame */
-#define AOM_FRAME_IS_INTRAONLY 0x10
+#define AOM_FRAME_IS_INTRAONLY 0x10u
 /*!\brief this is an S-frame */
-#define AOM_FRAME_IS_SWITCH 0x20
+#define AOM_FRAME_IS_SWITCH 0x20u
 /*!\brief this is an error-resilient frame */
-#define AOM_FRAME_IS_ERROR_RESILIENT 0x40
+#define AOM_FRAME_IS_ERROR_RESILIENT 0x40u
 /*!\brief this is a key-frame dependent recovery-point frame */
-#define AOM_FRAME_IS_DELAYED_RANDOM_ACCESS_POINT 0x80
+#define AOM_FRAME_IS_DELAYED_RANDOM_ACCESS_POINT 0x80u
 
 /*!\brief Iterator
  *
@@ -417,19 +417,21 @@ const char *aom_codec_err_to_string(aom_codec_err_t err);
  * \param[in]    ctx     Pointer to this instance's context.
  *
  */
-const char *aom_codec_error(aom_codec_ctx_t *ctx);
+const char *aom_codec_error(const aom_codec_ctx_t *ctx);
 
 /*!\brief Retrieve detailed error information for codec context
  *
  * Returns a human readable string providing detailed information about
- * the last error.
+ * the last error. The returned string is only valid until the next
+ * aom_codec_* function call (except aom_codec_error and
+ * aom_codec_error_detail) on the codec context.
  *
  * \param[in]    ctx     Pointer to this instance's context.
  *
  * \retval NULL
  *     No detailed information is available.
  */
-const char *aom_codec_error_detail(aom_codec_ctx_t *ctx);
+const char *aom_codec_error_detail(const aom_codec_ctx_t *ctx);
 
 /* REQUIRED FUNCTIONS
  *
@@ -444,9 +446,11 @@ const char *aom_codec_error_detail(aom_codec_ctx_t *ctx);
  * \param[in] ctx   Pointer to this instance's context
  *
  * \retval #AOM_CODEC_OK
- *     The codec algorithm initialized.
- * \retval #AOM_CODEC_MEM_ERROR
- *     Memory allocation failed.
+ *     The codec instance has been destroyed.
+ * \retval #AOM_CODEC_INVALID_PARAM
+ *     ctx is a null pointer.
+ * \retval #AOM_CODEC_ERROR
+ *     Codec context not initialized.
  */
 aom_codec_err_t aom_codec_destroy(aom_codec_ctx_t *ctx);
 

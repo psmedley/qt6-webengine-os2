@@ -65,12 +65,6 @@ bool GLSurfaceWGL::InitializeOneOff() {
    if (!wgl_display->Init(init::usingSoftwareDynamicGL()))
      return false;
 
- // DCHECK(g_wgl_display == NULL);
-  // std::unique_ptr<DisplayWGL> wgl_display(new DisplayWGL);
-  // if (!wgl_display->Init(init::usingSoftwareDynamicGL()))
-  //   return false;
-  //
-  // g_wgl_display = wgl_display.release();
   initialized_ = true;
   return true;
 }
@@ -84,9 +78,7 @@ bool GLSurfaceWGL::InitializeExtensionSettingsOneOff() {
 }
 
 void GLSurfaceWGL::InitializeOneOffForTesting() {
-  // if (g_wgl_display == NULL) {
-  //   g_wgl_display = new DisplayWGL;
-  // }
+  NOTREACHED();
 }
 
 HDC GLSurfaceWGL::GetDisplayDC() {
@@ -188,7 +180,7 @@ bool NativeViewGLSurfaceWGL::IsOffscreen() {
 }
 
 gfx::SwapResult NativeViewGLSurfaceWGL::SwapBuffers(
-    PresentationCallback callback, FrameData data) {
+    PresentationCallback callback, gfx::FrameData data) {
   // TODO(penghuang): Provide presentation feedback. https://crbug.com/776877
   TRACE_EVENT2("gpu", "NativeViewGLSurfaceWGL:RealSwapBuffers",
       "width", GetSize().width(),
@@ -310,7 +302,7 @@ bool PbufferGLSurfaceWGL::IsOffscreen() {
 }
 
 gfx::SwapResult PbufferGLSurfaceWGL::SwapBuffers(
-    PresentationCallback callback, FrameData data) {
+    PresentationCallback callback, gfx::FrameData data) {
   NOTREACHED() << "Attempted to call SwapBuffers on a pbuffer.";
   return gfx::SwapResult::SWAP_FAILED;
 }

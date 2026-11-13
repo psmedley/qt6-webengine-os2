@@ -9,6 +9,7 @@
 #include "base/files/file_util.h"
 #include "base/strings/stringize_macros.h"
 #include "gn/build_settings.h"
+#include "gn/builtin_tool.h"
 #include "gn/c_tool.h"
 #include "gn/filesystem_utils.h"
 #include "gn/general_tool.h"
@@ -43,8 +44,10 @@ void NinjaToolchainWriter::Run(
   std::string rule_prefix = GetNinjaRulePrefixForToolchain(settings_);
 
   for (const auto& tool : toolchain_->tools()) {
-    if (tool.second->name() == GeneralTool::kGeneralToolAction)
+    if (tool.second->name() == GeneralTool::kGeneralToolAction ||
+        tool.second->AsBuiltin()) {
       continue;
+    }
     WriteToolRule(tool.second.get(), rule_prefix);
   }
   out_ << std::endl;
@@ -60,7 +63,8 @@ bool NinjaToolchainWriter::RunAndWriteFile(
     const std::vector<NinjaWriter::TargetRulePair>& rules) {
   base::FilePath ninja_file(settings->build_settings()->GetFullPath(
       GetNinjaFileForToolchain(settings)));
-  ScopedTrace trace(TraceItem::TRACE_FILE_WRITE, FilePathToUTF8(ninja_file));
+  ScopedTrace trace(TraceItem::TRACE_FILE_WRITE_NINJA,
+                    FilePathToUTF8(ninja_file));
 
   base::CreateDirectory(ninja_file.DirName());
 
@@ -133,7 +137,7 @@ void NinjaToolchainWriter::WriteCommandRulePattern(
     const SubstitutionPattern& command,
     const EscapeOptions& options) {
   CHECK(!command.empty()) << "Command should not be empty";
-  out_ << kIndent << name << " = " ;
+  out_ << kIndent << name << " = ";
   if (!launcher.empty())
     out_ << launcher << " ";
   SubstitutionWriter::WriteWithNinjaVariables(command, options, out_);

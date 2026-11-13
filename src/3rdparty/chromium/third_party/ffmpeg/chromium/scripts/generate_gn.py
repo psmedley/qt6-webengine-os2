@@ -36,6 +36,10 @@ import re
 import shutil
 import subprocess
 import sys
+from robo_lib import config
+
+# The test wrapper doesn't appreciate the status messages.
+ROBO_CONFIGURATION = config.RoboConfiguration(quiet=True)
 
 COPYRIGHT = """# Copyright %d The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -132,6 +136,8 @@ def CleanObjectFiles(object_files):
       'libavutil/ripemd.o',
       'libavutil/sha512.o',
       'libavutil/tree.o',
+      'libavutil/tx_double.o',
+      'libavutil/tx_int32.o',
       'libavutil/xtea.o',
       'libavutil/xga_font_data.o',
   ]
@@ -334,6 +340,8 @@ class SourceSet(object):
         platform_condition = None
       elif condition.PLATFORM == 'linux':
         platform_condition = 'use_linux_config'
+      elif condition.PLATFORM == 'mac':
+        platform_condition = 'is_apple'
       else:
         platform_condition = 'is_%s' % condition.PLATFORM
 
@@ -572,7 +580,7 @@ def ParseOptions():
       '-s',
       '--source_dir',
       dest='source_dir',
-      default='.',
+      default=ROBO_CONFIGURATION.ffmpeg_home(),
       metavar='DIR',
       help='FFmpeg source directory.')
 
@@ -580,7 +588,7 @@ def ParseOptions():
       '-b',
       '--build_dir',
       dest='build_dir',
-      default='.',
+      default=ROBO_CONFIGURATION.ffmpeg_home(),
       metavar='DIR',
       help='Build root containing build.x64.linux, etc...')
 
@@ -696,11 +704,11 @@ LICENSE_EXCEPTIONS = [
 
 # Regex to find lines matching #include "some_dir\some_file.h".
 # Also works for assembly files that use %include.
-INCLUDE_REGEX = re.compile('[#%]\s*include\s+"([^"]+)"')
+INCLUDE_REGEX = re.compile('^\s*[#%]\s*include\s+"([^"]+)"')
 
 # Regex to find whacky includes that we might be overlooking (e.g. using macros
 # or defines).
-EXOTIC_INCLUDE_REGEX = re.compile('[#%]\s*include\s+[^"<\s].+')
+EXOTIC_INCLUDE_REGEX = re.compile('^\s*[#%]\s*include\s+[^"<\s].+')
 
 # Prefix added to renamed files as part of
 RENAME_PREFIX = 'autorename'
@@ -778,7 +786,7 @@ def GetIncludedSources(file_path, source_dir, include_set, scan_only=False):
     elif include_file_path in MUST_BE_MISSING_INCLUDE_FILES:
       continue
     else:
-      exit('Failed to find file ' + include_file_path)
+      exit('Failed to find file ' + include_file_path + " in " + file_path)
 
     # At this point we've found the file. Check if its in our ignore list which
     # means that the list should be updated to no longer mention this file.

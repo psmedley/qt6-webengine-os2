@@ -1,14 +1,19 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The PDFium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//build/config/clang/clang.gni")
+import("//build/config/gclient_args.gni")
+import("//build/config/rust.gni")
 import("//testing/test.gni")
 import("pdfium.gni")
 
 group("default") {
   testonly = true
-  deps = [ ":pdfium_all" ]
+  deps = [ ":pdfium" ]
+  if (pdf_is_standalone) {
+    deps += [ ":pdfium_all" ]
+  }
 }
 
 group("freetype_common") {
@@ -25,10 +30,7 @@ config("pdfium_common_config") {
   cflags_cc = []
   ldflags = []
   include_dirs = [ "." ]
-  defines = [
-    "PNG_PREFIX",
-    "PNG_USE_READ_MACROS",
-  ]
+  defines = []
 
   if (!use_system_libopenjpeg2) {
     defines += [ "OPJ_STATIC" ]
@@ -39,11 +41,15 @@ config("pdfium_common_config") {
   }
 
   if (pdf_use_skia) {
-    defines += [ "_SKIA_SUPPORT_" ]
+    defines += [ "PDF_USE_SKIA" ]
+
+    if (pdf_enable_fontations) {
+      defines += [ "PDF_ENABLE_FONTATIONS" ]
+    }
   }
 
-  if (pdf_use_skia_paths) {
-    defines += [ "_SKIA_SUPPORT_PATHS_" ]
+  if (pdf_use_partition_alloc) {
+    defines += [ "PDF_USE_PARTITION_ALLOC" ]
   }
 
   if (is_win && !is_mingw) {
@@ -166,8 +172,7 @@ config("pdfium_common_config") {
                     # signed/unsigned mismatch
 
         "/wd4267",  # 'var' : conversion from 'size_t' to 'type', possible loss
-                    # of
-                    # data
+                    # of data
 
         "/wd4305",  # 'identifier' : truncation from 'type1' to 'type2'
         "/wd4389",  # 'operator' : signed/unsigned mismatch
@@ -199,14 +204,6 @@ config("pdfium_common_config") {
       ]
 
       if (current_cpu == "x86") {
-        cflags += [
-          # VC++ 2015 changes 32-bit size_t truncation warnings from 4244 to
-          # 4267. Example: short TruncTest(size_t x) { return x; }
-          # Since we disable 4244 we need to disable 4267 during migration.
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          "/wd4267",
-        ]
-
         if (msvc_use_sse2) {
           cflags += [ "/arch:SSE2" ]
         }
@@ -227,16 +224,6 @@ config("pdfium_common_config") {
 
     # May flag some issues when converting int to size_t.
     cflags += [ "-Wtautological-unsigned-zero-compare" ]
-
-    # Catch misuse of cppgc in XFA.
-    if (pdf_enable_xfa && clang_use_chrome_plugins) {
-      cflags += [
-        "-Xclang",
-        "-add-plugin",
-        "-Xclang",
-        "blink-gc-plugin",
-      ]
-    }
   }
 
   if (!is_win && !is_clang) {
@@ -294,11 +281,67 @@ config("pdfium_core_config") {
       "/wd4577",
     ]
   }
+  if (is_clang) {
+    cflags += [ "-Wcovered-switch-default" ]
+  }
+}
+
+config("pdfium_plugin_config") {
+  cflags = []
+  defines = []
+  if (clang_use_chrome_plugins) {
+    # Catch misuse of C-style pointers.
+    # TODO(tsepez): enable for windows, too.
+    if (!is_win) {
+      cflags += [
+        "-Xclang",
+        "-plugin-arg-find-bad-constructs",
+        "-Xclang",
+        "check-raw-ptr-fields",
+
+        "-Xclang",
+        "-plugin-arg-find-bad-constructs",
+        "-Xclang",
+        "raw-ptr-exclude-path=public",
+
+        "-Xclang",
+        "-plugin-arg-find-bad-constructs",
+        "-Xclang",
+        "raw-ptr-exclude-path=test",
+
+        # TODO(tsepez): enforce raw_ref<> as well.
+        # "-Xclang",
+        # "-plugin-arg-find-bad-constructs",
+        # "-Xclang",
+        # "check-raw-ref-fields",
+      ]
+      defines += [ "PDF_ENABLE_UNOWNED_PTR_EXCLUSION" ]
+    }
+
+    # Catch misuse of cppgc in XFA.
+    if (pdf_enable_xfa) {
+      cflags += [
+        "-Xclang",
+        "-add-plugin",
+        "-Xclang",
+        "blink-gc-plugin",
+      ]
+
+      # Disable GC plugin forbidding off-heap collections of GCed:
+      cflags += [
+        "-Xclang",
+        "-plugin-arg-blink-gc-plugin",
+        "-Xclang",
+        "disable-off-heap-collections-of-gced-check",
+      ]
+    }
+  }
 }
 
 config("pdfium_strict_config") {
   configs = [
     ":pdfium_core_config",
+    ":pdfium_plugin_config",
     "//build/config/compiler:wexit_time_destructors",
     "//build/config/compiler:wglobal_constructors",
   ]
@@ -348,6 +391,7 @@ group("pdfium_public_headers") {
 }
 
 component("pdfium") {
+  output_name = "pdfium"
   libs = []
   configs += [ ":pdfium_strict_config" ]
   public_configs = [ ":pdfium_public_config" ]
@@ -364,7 +408,6 @@ component("pdfium") {
     "fpdfsdk/formfiller",
     "fxjs",
     "third_party:pdfium_base",
-    "third_party:skia_shared",
   ]
 
   public_deps = [
@@ -409,12 +452,8 @@ component("pdfium") {
   }
 }
 
-# Targets below this are only visible within this file (and to the
-# top-level gn_visibility target used to help gn_all build everything).
-visibility = [
-  ":*",
-  "//:gn_visibility",
-]
+# Targets below this are only visible within this file.
+visibility = [ ":*" ]
 
 group("pdfium_unittest_deps") {
   testonly = true
@@ -455,18 +494,15 @@ test("pdfium_unittests") {
     "//testing/gtest",
   ]
   configs += [ ":pdfium_core_config" ]
-
   if (is_android) {
     use_raw_android_executable = true
   }
-
   if (pdf_enable_v8) {
     configs += [ "//v8:external_startup_data" ]
     deps += [
       "fxjs:unittests",
       "//v8",
     ]
-
     if (pdf_enable_xfa) {
       deps += [
         "core/fxcrt/css:unittests",
@@ -513,6 +549,7 @@ test("pdfium_embeddertests") {
     "core/fxcrt",
     "core/fxge:embeddertests",
     "fpdfsdk:embeddertests",
+    "fpdfsdk/formfiller:embeddertests",
     "fpdfsdk/pwl:embeddertests",
     "testing/image_diff",
     "//testing/gmock",
@@ -545,6 +582,7 @@ test("pdfium_embeddertests") {
 }
 
 executable("pdfium_diff") {
+  visibility += [ "testing/tools:test_runner_py" ]
   testonly = true
   sources = [ "testing/image_diff/image_diff.cpp" ]
   deps = [
@@ -556,29 +594,42 @@ executable("pdfium_diff") {
   configs += [ ":pdfium_strict_config" ]
 }
 
-if (pdf_is_standalone) {
-  source_set("samples") {
-    testonly = true
-    deps = [ "//samples" ]
-  }
-
-  group("fuzzers") {
-    testonly = true
-    deps = [ "//testing/fuzzers" ]
-  }
-}
-
 group("pdfium_all") {
   testonly = true
   deps = [
     ":pdfium_diff",
     ":pdfium_embeddertests",
     ":pdfium_unittests",
+    "samples",
+    "testing/fuzzers",
   ]
+
   if (pdf_is_standalone) {
-    deps += [
-      ":fuzzers",
-      ":samples",
-    ]
+    deps += [ "testing/tools:test_runner_py" ]
+  }
+  if (enable_rust) {
+    # Until there's actual Rust code to use, include the rust_build_tests in the
+    # all group to verify the language keeps working here.
+    deps += [ ":rust_build_tests" ]
+  }
+}
+
+# Makes additional targets reachable only for "gn check". These are not always
+# built by the "all" Ninja target, which uses the "default" group, which in turn
+# depends on the "pdfium_all" group.
+group("gn_check") {
+  deps = []
+
+  # TODO(crbug.com/pdfium/1832): Remove !is_android when //third_party/expat is
+  # available.
+  if (defined(checkout_skia) && checkout_skia && !is_android) {
+    deps += [ "//skia" ]
+  }
+}
+
+if (enable_rust) {
+  group("rust_build_tests") {
+    testonly = true
+    deps = [ "//build/rust/tests" ]
   }
 }

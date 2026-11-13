@@ -5,6 +5,7 @@
 #ifndef QUICHE_QUIC_CORE_QUIC_PATH_VALIDATOR_H_
 #define QUICHE_QUIC_CORE_QUIC_PATH_VALIDATOR_H_
 
+#include <memory>
 #include <ostream>
 
 #include "absl/container/inlined_vector.h"
@@ -29,8 +30,18 @@ class QuicPathValidatorPeer;
 
 class QuicConnection;
 
+enum class PathValidationReason {
+  kReasonUnknown,
+  kMultiPort,
+  kReversePathValidation,
+  kServerPreferredAddressMigration,
+  kPortMigration,
+  kConnectionMigration,
+  kMaxValue,
+};
+
 // Interface to provide the information of the path to be validated.
-class QUIC_EXPORT_PRIVATE QuicPathValidationContext {
+class QUICHE_EXPORT QuicPathValidationContext {
  public:
   QuicPathValidationContext(const QuicSocketAddress& self_address,
                             const QuicSocketAddress& peer_address)
@@ -56,7 +67,7 @@ class QUIC_EXPORT_PRIVATE QuicPathValidationContext {
   }
 
  private:
-  QUIC_EXPORT_PRIVATE friend std::ostream& operator<<(
+  QUICHE_EXPORT friend std::ostream& operator<<(
       std::ostream& os, const QuicPathValidationContext& context);
 
   QuicSocketAddress self_address_;
@@ -69,13 +80,13 @@ class QUIC_EXPORT_PRIVATE QuicPathValidationContext {
 
 // Used to validate a path by sending up to 3 PATH_CHALLENGE frames before
 // declaring a path validation failure.
-class QUIC_EXPORT_PRIVATE QuicPathValidator {
+class QUICHE_EXPORT QuicPathValidator {
  public:
   static const uint16_t kMaxRetryTimes = 2;
 
   // Used to write PATH_CHALLENGE on the path to be validated and to get retry
   // timeout.
-  class QUIC_EXPORT_PRIVATE SendDelegate {
+  class QUICHE_EXPORT SendDelegate {
    public:
     virtual ~SendDelegate() = default;
 
@@ -97,7 +108,7 @@ class QUIC_EXPORT_PRIVATE QuicPathValidator {
   // Handles the validation result.
   // TODO(danzh) consider to simplify this interface and its life time to
   // outlive a validation.
-  class QUIC_EXPORT_PRIVATE ResultDelegate {
+  class QUICHE_EXPORT ResultDelegate {
    public:
     virtual ~ResultDelegate() = default;
 
@@ -117,7 +128,8 @@ class QUIC_EXPORT_PRIVATE QuicPathValidator {
 
   // Send PATH_CHALLENGE and start the retry timer.
   void StartPathValidation(std::unique_ptr<QuicPathValidationContext> context,
-                           std::unique_ptr<ResultDelegate> result_delegate);
+                           std::unique_ptr<ResultDelegate> result_delegate,
+                           PathValidationReason reason);
 
   // Called when a PATH_RESPONSE frame has been received. Matches the received
   // PATH_RESPONSE payload with the payloads previously sent in PATH_CHALLANGE
@@ -132,11 +144,22 @@ class QUIC_EXPORT_PRIVATE QuicPathValidator {
 
   QuicPathValidationContext* GetContext() const;
 
+  // Pass the ownership of path_validation context to the caller and reset the
+  // validator.
+  std::unique_ptr<QuicPathValidationContext> ReleaseContext();
+
+  PathValidationReason GetPathValidationReason() const { return reason_; }
+
   // Send another PATH_CHALLENGE on the same path. After retrying
   // |kMaxRetryTimes| times, fail the current path validation.
   void OnRetryTimeout();
 
   bool IsValidatingPeerAddress(const QuicSocketAddress& effective_peer_address);
+
+  // Called to send packet to |peer_address| if the path validation to this
+  // address is pending.
+  void MaybeWritePacketToAddress(const char* buffer, size_t buf_len,
+                                 const QuicSocketAddress& peer_address);
 
  private:
   friend class test::QuicPathValidatorPeer;
@@ -148,7 +171,7 @@ class QUIC_EXPORT_PRIVATE QuicPathValidator {
 
   void ResetPathValidation();
 
-  struct QUIC_NO_EXPORT ProbingData {
+  struct QUICHE_EXPORT ProbingData {
     explicit ProbingData(QuicTime send_time) : send_time(send_time) {}
     QuicPathFrameBuffer frame_buffer;
     QuicTime send_time;
@@ -163,6 +186,7 @@ class QUIC_EXPORT_PRIVATE QuicPathValidator {
   std::unique_ptr<ResultDelegate> result_delegate_;
   QuicArenaScopedPtr<QuicAlarm> retry_timer_;
   size_t retry_count_;
+  PathValidationReason reason_ = PathValidationReason::kReasonUnknown;
 };
 
 }  // namespace quic

@@ -37,8 +37,7 @@ ol.tree-outline {
   padding: 0 10px;
   white-space: nowrap;
   margin-top: 1px;
-  color: var(--color-text-secondary);
-  text-shadow: var(--color-background-opacity-80) 0 1px 0;
+  color: var(--sys-color-token-subtle);
   line-height: 18px;
 }
 
@@ -51,20 +50,9 @@ ol.tree-outline {
 }
 /* Generic items styling */
 
-.title-container > .save-link {
-  text-decoration: underline;
-  margin-left: auto;
-  display: none;
-}
-
-li.selected .title-container > .save-link {
-  display: block;
-  cursor: pointer;
-}
-
 li .icon {
-  width: 32px;
-  height: 32px;
+  width: 20px;
+  height: 20px;
   margin-top: 1px;
   margin-right: 3px;
   flex: none;
@@ -75,7 +63,9 @@ li .icon {
 }
 
 li.wait .spinner::before {
-  margin: 4px;
+  --dimension: 20px;
+
+  margin: 0;
 }
 
 li.wait.small .spinner::before {
@@ -87,7 +77,7 @@ li.wait.small .spinner::before {
 }
 
 li.wait.selected .spinner::before {
-  --override-spinner-color: #fff;
+  --override-spinner-color: var(--ref-palette-neutral100);
 }
 
 @keyframes spinner-animation {
@@ -106,7 +96,7 @@ li .titles {
   line-height: 12px;
   padding-bottom: 1px;
   text-overflow: ellipsis;
-  overflow: hidden;
+  overflow: visible;
   white-space: nowrap;
   flex: auto;
 }
@@ -132,6 +122,17 @@ li .subtitle {
 li.small .subtitle {
   display: none;
 }
+
+li button {
+  border: none;
+  background: none;
+  visibility: hidden;
+}
+
+li.selected:hover button {
+  visibility: visible;
+}
+
 /* Launcher */
 
 .profile-launcher-view-tree-item {
@@ -143,17 +144,15 @@ li.small .subtitle {
   visibility: hidden;
 }
 /* Heap profiles and CPU profiles */
-
-.heap-snapshot-sidebar-tree-item .icon {
-  content: var(--image-file-profileIcon);
-}
-
+.heap-snapshot-sidebar-tree-item .icon,
 .profile-sidebar-tree-item .icon {
-  content: var(--image-file-profileIcon);
+  mask-image: var(--image-file-heap-snapshot);
+  background: var(--icon-default);
 }
 
 .profile-group-sidebar-tree-item .icon {
-  content: var(--image-file-profileGroupIcon);
+  mask-image: var(--image-file-heap-snapshots);
+  background: var(--icon-default);
 }
 
 li.small .icon {
@@ -165,12 +164,19 @@ li.wait .icon {
   content: none;
 }
 
+.heap-snapshot-sidebar-tree-item.wait .icon {
+  mask-image: unset;
+  background-color: inherit;
+}
+
 .heap-snapshot-sidebar-tree-item.small .icon {
-  content: var(--image-file-profileSmallIcon);
+  mask-image: var(--image-file-heap-snapshots);
+  background: var(--icon-default);
 }
 
 .profile-sidebar-tree-item.small .icon {
-  content: var(--image-file-profileSmallIcon);
+  mask-image: var(--image-file-heap-snapshots);
+  background: var(--icon-default);
 }
 
 @media (forced-colors: active) {

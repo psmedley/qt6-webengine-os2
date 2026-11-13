@@ -22,7 +22,6 @@
 #include "internal/platform/byte_array.h"
 #include "proto/connections_enums.pb.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -37,8 +36,6 @@ struct DiscoveryOptions : OptionsBase {
 
   bool auto_upgrade_bandwidth = true;
   bool enforce_topology_constraints;
-  int keep_alive_interval_millis = 0;
-  int keep_alive_timeout_millis = 0;
 
   // Whether this is intended to be used in conjunction with InjectEndpoint().
   bool is_out_of_band_connection = false;
@@ -52,6 +49,5 @@ struct DiscoveryOptions : OptionsBase {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_DISCOVERY_OPTIONS_H_

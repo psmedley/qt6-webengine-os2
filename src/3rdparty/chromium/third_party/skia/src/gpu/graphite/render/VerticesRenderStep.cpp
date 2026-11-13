@@ -7,13 +7,13 @@
 
 #include "src/gpu/graphite/render/VerticesRenderStep.h"
 
-#include "src/core/SkPipelineData.h"
 #include "src/core/SkSLTypeShared.h"
 #include "src/core/SkVertState.h"
 #include "src/core/SkVerticesPriv.h"
 #include "src/gpu/graphite/DrawParams.h"
 #include "src/gpu/graphite/DrawTypes.h"
 #include "src/gpu/graphite/DrawWriter.h"
+#include "src/gpu/graphite/PipelineData.h"
 #include "src/gpu/graphite/render/CommonDepthStencilSettings.h"
 
 namespace skgpu::graphite {
@@ -27,7 +27,7 @@ static constexpr Attribute kTexCoordAttr =
 static constexpr Attribute kColorAttr =
         {"vertColor", VertexAttribType::kUByte4_norm, SkSLType::kHalf4};
 static constexpr Attribute kSsboIndexAttr =
-        {"ssboIndex", VertexAttribType::kInt, SkSLType::kInt};
+        {"ssboIndices", VertexAttribType::kUShort2, SkSLType::kUShort2};
 
 static constexpr Attribute kAttributePositionOnly[] =
         {kPositionAttr, kSsboIndexAttr};
@@ -84,7 +84,7 @@ VerticesRenderStep::VerticesRenderStep(PrimitiveType type, bool hasColor, bool h
 
 VerticesRenderStep::~VerticesRenderStep() {}
 
-const char* VerticesRenderStep::vertexSkSL() const {
+std::string VerticesRenderStep::vertexSkSL() const {
     if (fHasColor && fHasTexCoords) {
         return R"(
             color = half4(vertColor.bgr * vertColor.a, vertColor.a);
@@ -124,7 +124,7 @@ const char* VerticesRenderStep::fragmentColorSkSL() const {
 
 void VerticesRenderStep::writeVertices(DrawWriter* writer,
                                        const DrawParams& params,
-                                       int ssboIndex) const {
+                                       skvx::ushort2 ssboIndices) const {
     SkVerticesPriv info(params.geometry().vertices()->priv());
     const int vertexCount = info.vertexCount();
     const int indexCount = info.indexCount();
@@ -156,28 +156,28 @@ void VerticesRenderStep::writeVertices(DrawWriter* writer,
                                                               : SK_ColorTRANSPARENT)
                         << VertexWriter::If(fHasTexCoords, texCoords ? texCoords[state.f0]
                                                                      : SkPoint{0.f, 0.f})
-                        << ssboIndex
+                        << ssboIndices
                         << positions[state.f1]
                         << VertexWriter::If(fHasColor, colors ? colors[state.f1]
                                                               : SK_ColorTRANSPARENT)
                         << VertexWriter::If(fHasTexCoords, texCoords ? texCoords[state.f1]
                                                                      : SkPoint{0.f, 0.f})
-                        << ssboIndex
+                        << ssboIndices
                         << positions[state.f2]
                         << VertexWriter::If(fHasColor, colors ? colors[state.f2]
                                                               : SK_ColorTRANSPARENT)
                         << VertexWriter::If(fHasTexCoords, texCoords ? texCoords[state.f2]
                                                                      : SkPoint{0.f, 0.f})
-                        << ssboIndex;
+                        << ssboIndices;
     }
 }
 
 void VerticesRenderStep::writeUniformsAndTextures(const DrawParams& params,
-                                                  SkPipelineDataGatherer* gatherer) const {
+                                                  PipelineDataGatherer* gatherer) const {
     // Vertices are transformed on the GPU. Store PaintDepth as a uniform to avoid copying the
     // same depth for each vertex.
     SkDEBUGCODE(UniformExpectationsValidator uev(gatherer, this->uniforms());)
-    gatherer->write(params.transform());
+    gatherer->write(params.transform().matrix());
     gatherer->write(params.order().depthAsFloat());
 }
 

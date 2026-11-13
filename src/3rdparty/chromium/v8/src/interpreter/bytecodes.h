@@ -105,8 +105,8 @@ namespace interpreter {
     OperandType::kIdx)                                                         \
   V(LdaGlobalInsideTypeof, ImplicitRegisterUse::kWriteAccumulator,             \
     OperandType::kIdx, OperandType::kIdx)                                      \
-  V(StaGlobal, ImplicitRegisterUse::kReadWriteAccumulator, OperandType::kIdx,  \
-    OperandType::kIdx)                                                         \
+  V(StaGlobal, ImplicitRegisterUse::kReadAndClobberAccumulator,                \
+    OperandType::kIdx, OperandType::kIdx)                                      \
                                                                                \
   /* Context operations */                                                     \
   V(StaContextSlot, ImplicitRegisterUse::kReadAccumulator, OperandType::kReg,  \
@@ -144,15 +144,16 @@ namespace interpreter {
     OperandType::kImm, OperandType::kUImm)                                     \
                                                                                \
   /* Propery stores (StoreIC) operations */                                    \
-  V(SetNamedProperty, ImplicitRegisterUse::kReadWriteAccumulator,              \
+  V(SetNamedProperty, ImplicitRegisterUse::kReadAndClobberAccumulator,         \
     OperandType::kReg, OperandType::kIdx, OperandType::kIdx)                   \
-  V(DefineNamedOwnProperty, ImplicitRegisterUse::kReadWriteAccumulator,        \
+  V(DefineNamedOwnProperty, ImplicitRegisterUse::kReadAndClobberAccumulator,   \
     OperandType::kReg, OperandType::kIdx, OperandType::kIdx)                   \
-  V(SetKeyedProperty, ImplicitRegisterUse::kReadWriteAccumulator,              \
+  V(SetKeyedProperty, ImplicitRegisterUse::kReadAndClobberAccumulator,         \
     OperandType::kReg, OperandType::kReg, OperandType::kIdx)                   \
-  V(DefineKeyedOwnProperty, ImplicitRegisterUse::kReadWriteAccumulator,        \
-    OperandType::kReg, OperandType::kReg, OperandType::kIdx)                   \
-  V(StaInArrayLiteral, ImplicitRegisterUse::kReadWriteAccumulator,             \
+  V(DefineKeyedOwnProperty, ImplicitRegisterUse::kReadAndClobberAccumulator,   \
+    OperandType::kReg, OperandType::kReg, OperandType::kFlag8,                 \
+    OperandType::kIdx)                                                         \
+  V(StaInArrayLiteral, ImplicitRegisterUse::kReadAndClobberAccumulator,        \
     OperandType::kReg, OperandType::kReg, OperandType::kIdx)                   \
   V(DefineKeyedOwnPropertyInLiteral, ImplicitRegisterUse::kReadAccumulator,    \
     OperandType::kReg, OperandType::kReg, OperandType::kFlag8,                 \
@@ -256,8 +257,9 @@ namespace interpreter {
     OperandType::kRegList, OperandType::kRegCount, OperandType::kIdx)          \
   V(CallRuntime, ImplicitRegisterUse::kWriteAccumulator,                       \
     OperandType::kRuntimeId, OperandType::kRegList, OperandType::kRegCount)    \
-  V(CallRuntimeForPair, ImplicitRegisterUse::kNone, OperandType::kRuntimeId,   \
-    OperandType::kRegList, OperandType::kRegCount, OperandType::kRegOutPair)   \
+  V(CallRuntimeForPair, ImplicitRegisterUse::kClobberAccumulator,              \
+    OperandType::kRuntimeId, OperandType::kRegList, OperandType::kRegCount,    \
+    OperandType::kRegOutPair)                                                  \
   V(CallJSRuntime, ImplicitRegisterUse::kWriteAccumulator,                     \
     OperandType::kNativeContextIndex, OperandType::kRegList,                   \
     OperandType::kRegCount)                                                    \
@@ -272,6 +274,8 @@ namespace interpreter {
   V(ConstructWithSpread, ImplicitRegisterUse::kReadWriteAccumulator,           \
     OperandType::kReg, OperandType::kRegList, OperandType::kRegCount,          \
     OperandType::kIdx)                                                         \
+  V(ConstructForwardAllArgs, ImplicitRegisterUse::kReadWriteAccumulator,       \
+    OperandType::kReg, OperandType::kIdx)                                      \
                                                                                \
   /* Effectful Test Operators */                                               \
   V(TestEqual, ImplicitRegisterUse::kReadWriteAccumulator, OperandType::kReg,  \
@@ -292,11 +296,12 @@ namespace interpreter {
     OperandType::kIdx)                                                         \
                                                                                \
   /* Cast operators */                                                         \
-  V(ToName, ImplicitRegisterUse::kReadAccumulator, OperandType::kRegOut)       \
+  V(ToName, ImplicitRegisterUse::kReadWriteAccumulator)                        \
   V(ToNumber, ImplicitRegisterUse::kReadWriteAccumulator, OperandType::kIdx)   \
   V(ToNumeric, ImplicitRegisterUse::kReadWriteAccumulator, OperandType::kIdx)  \
   V(ToObject, ImplicitRegisterUse::kReadAccumulator, OperandType::kRegOut)     \
   V(ToString, ImplicitRegisterUse::kReadWriteAccumulator)                      \
+  V(ToBoolean, ImplicitRegisterUse::kReadWriteAccumulator)                     \
                                                                                \
   /* Literals */                                                               \
   V(CreateRegExpLiteral, ImplicitRegisterUse::kWriteAccumulator,               \
@@ -339,7 +344,7 @@ namespace interpreter {
                                                                                \
   /* Control Flow -- carefully ordered for efficient checks */                 \
   /* - [Unconditional jumps] */                                                \
-  V(JumpLoop, ImplicitRegisterUse::kNone, OperandType::kUImm,                  \
+  V(JumpLoop, ImplicitRegisterUse::kClobberAccumulator, OperandType::kUImm,    \
     OperandType::kImm, OperandType::kIdx)                                      \
   /* - [Forward jumps] */                                                      \
   V(Jump, ImplicitRegisterUse::kNone, OperandType::kUImm)                      \
@@ -394,7 +399,7 @@ namespace interpreter {
                                                                                \
   /* Complex flow control For..in */                                           \
   V(ForInEnumerate, ImplicitRegisterUse::kWriteAccumulator, OperandType::kReg) \
-  V(ForInPrepare, ImplicitRegisterUse::kReadWriteAccumulator,                  \
+  V(ForInPrepare, ImplicitRegisterUse::kReadAndClobberAccumulator,             \
     OperandType::kRegOutTriple, OperandType::kIdx)                             \
   V(ForInContinue, ImplicitRegisterUse::kWriteAccumulator, OperandType::kReg,  \
     OperandType::kReg)                                                         \
@@ -429,7 +434,7 @@ namespace interpreter {
     OperandType::kIdx, OperandType::kIdx)                                      \
                                                                                \
   /* Debugger */                                                               \
-  V(Debugger, ImplicitRegisterUse::kNone)                                      \
+  V(Debugger, ImplicitRegisterUse::kClobberAccumulator)                        \
                                                                                \
   /* Block Coverage */                                                         \
   V(IncBlockCounter, ImplicitRegisterUse::kNone, OperandType::kIdx)            \
@@ -655,6 +660,18 @@ class V8_EXPORT_PRIVATE Bytecodes final : public AllStatic {
         GetImplicitRegisterUse(bytecode));
   }
 
+  // Returns true if |bytecode| writes the accumulator.
+  static bool ClobbersAccumulator(Bytecode bytecode) {
+    return BytecodeOperands::ClobbersAccumulator(
+        GetImplicitRegisterUse(bytecode));
+  }
+
+  // Returns true if |bytecode| writes the accumulator.
+  static bool WritesOrClobbersAccumulator(Bytecode bytecode) {
+    return BytecodeOperands::WritesOrClobbersAccumulator(
+        GetImplicitRegisterUse(bytecode));
+  }
+
   // Returns true if |bytecode| writes to a register not specified by an
   // operand.
   static bool WritesImplicitRegister(Bytecode bytecode) {
@@ -798,6 +815,7 @@ class V8_EXPORT_PRIVATE Bytecodes final : public AllStatic {
            bytecode == Bytecode::kConstruct ||
            bytecode == Bytecode::kCallWithSpread ||
            bytecode == Bytecode::kConstructWithSpread ||
+           bytecode == Bytecode::kConstructForwardAllArgs ||
            bytecode == Bytecode::kCallJSRuntime;
   }
 

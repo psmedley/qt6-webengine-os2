@@ -10,7 +10,7 @@
 
 #include "include/core/SkTypes.h"
 #include "include/effects/SkRuntimeEffect.h"
-#include "include/private/SkNoncopyable.h"
+#include "include/private/base/SkNoncopyable.h"
 #include "src/gpu/ganesh/GrResourceHandle.h"
 
 class SkMatrix;
@@ -22,7 +22,7 @@ class SkM44;
  */
 class GrGLSLProgramDataManager {
 public:
-    GR_DEFINE_RESOURCE_HANDLE_CLASS(UniformHandle);
+    GR_DEFINE_RESOURCE_HANDLE_CLASS(UniformHandle)
 
     virtual ~GrGLSLProgramDataManager() {}
 

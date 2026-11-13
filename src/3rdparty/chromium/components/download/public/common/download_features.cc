@@ -9,27 +9,15 @@
 namespace download {
 namespace features {
 
-BASE_FEATURE(kUseDownloadOfflineContentProvider,
-             "UseDownloadOfflineContentProvider",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
-CONSTINIT const base::Feature kDownloadAutoResumptionNative(
-             "DownloadsAutoResumptionNative",
 #if BUILDFLAG(IS_ANDROID)
-             base::FEATURE_ENABLED_BY_DEFAULT
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-);
-
-CONSTINIT const base::Feature kParallelDownloading(
+BASE_FEATURE(kParallelDownloading,
              "ParallelDownloading",
-#if BUILDFLAG(IS_ANDROID)
-             base::FEATURE_ENABLED_BY_DEFAULT
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #else
-             base::FEATURE_DISABLED_BY_DEFAULT
+BASE_FEATURE(kParallelDownloading,
+             "ParallelDownloading",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
-);
 
 #if BUILDFLAG(IS_ANDROID)
 BASE_FEATURE(kSmartSuggestionForLargeDownloads,
@@ -41,18 +29,33 @@ BASE_FEATURE(kRefreshExpirationDate,
              base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
+BASE_FEATURE(kDownloadsMigrateToJobsAPI,
+             "DownloadsMigrateToJobsAPI",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+#if BUILDFLAG(IS_ANDROID)
+BASE_FEATURE(kDownloadNotificationServiceUnifiedAPI,
+             "DownloadNotificationServiceUnifiedAPI",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#else
+BASE_FEATURE(kDownloadNotificationServiceUnifiedAPI,
+             "DownloadNotificationServiceUnifiedAPI",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
+
 BASE_FEATURE(kUseInProgressDownloadManagerForDownloadService,
              "UseInProgressDownloadManagerForDownloadService",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-CONSTINIT const base::Feature kAllowDownloadResumptionWithoutStrongValidators(
-             "AllowDownloadResumptionWithoutStrongValidators",
 #if BUILDFLAG(IS_ANDROID)
-             base::FEATURE_ENABLED_BY_DEFAULT
+BASE_FEATURE(kAllowDownloadResumptionWithoutStrongValidators,
+             "AllowDownloadResumptionWithoutStrongValidators",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #else
-             base::FEATURE_DISABLED_BY_DEFAULT
+BASE_FEATURE(kAllowDownloadResumptionWithoutStrongValidators,
+             "AllowDownloadResumptionWithoutStrongValidators",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
-);
 
 BASE_FEATURE(kUseParallelRequestsForHTTP2,
              "UseParallelRequestsForHTTP2",
@@ -73,8 +76,6 @@ BASE_FEATURE(kDeleteOverwrittenDownloads,
 BASE_FEATURE(kAllowFileBufferSizeControl,
              "AllowFileBufferSizeControl",
              base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kDownloadRange, "DownloadRange", base::FEATURE_ENABLED_BY_DEFAULT);
 
 }  // namespace features
 

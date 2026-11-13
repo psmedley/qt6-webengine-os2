@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,7 +58,9 @@ CXFA_XMLLocale::CXFA_XMLLocale(std::unique_ptr<CFX_XMLDocument> doc,
 
 CXFA_XMLLocale::~CXFA_XMLLocale() = default;
 
-void CXFA_XMLLocale::Trace(cppgc::Visitor* visitor) const {}
+void CXFA_XMLLocale::Trace(cppgc::Visitor* visitor) const {
+  GCedLocaleIface::Trace(visitor);
+}
 
 WideString CXFA_XMLLocale::GetName() const {
   return locale_->GetAttribute(L"name");

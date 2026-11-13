@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,11 +117,7 @@ ByteString GetNameFromTT(pdfium::span<const uint8_t> name_table,
           return ByteString();
         }
 
-        pdfium::span<const uint8_t> raw_span = utf16_be.raw_span();
-        return WideString::FromUTF16BE(
-                   reinterpret_cast<const uint16_t*>(raw_span.data()),
-                   raw_span.size() / 2)
-            .ToUTF8();
+        return WideString::FromUTF16BE(utf16_be.raw_span()).ToUTF8();
       }
     }
   }

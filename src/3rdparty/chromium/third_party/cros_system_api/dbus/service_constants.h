@@ -10,9 +10,8 @@
 // We use relative includes here to make this compatible with both the
 // Chromium OS and Chromium environment.
 #include "anomaly_detector/dbus-constants.h"
-#include "arc-data-snapshotd/dbus-constants.h"
+#include "arcvm_data_migrator/dbus-constants.h"
 #include "audio/dbus-constants.h"
-#include "authpolicy/dbus-constants.h"
 #include "biod/dbus-constants.h"
 #include "bluetooth/dbus-constants.h"
 #include "bootlockbox/dbus-constants.h"
@@ -22,6 +21,7 @@
 #include "cros-disks/dbus-constants.h"
 #include "cros_healthd/dbus-constants.h"
 #include "cryptohome/dbus-constants.h"
+#include "dcad/dbus-constants.h"
 #include "debugd/dbus-constants.h"
 #include "discod/dbus-constants.h"
 #include "dlp/dbus-constants.h"
@@ -44,6 +44,7 @@
 #include "patchpanel/dbus-constants.h"
 #include "permission_broker/dbus-constants.h"
 #include "power_manager/dbus-constants.h"
+#include "printscanmgr/dbus-constants.h"
 #include "privacy_screen/dbus-constants.h"
 #include "resource_manager/dbus-constants.h"
 #include "rgbkbd/dbus-constants.h"
@@ -54,12 +55,12 @@
 #include "smbfs/dbus-constants.h"
 #include "smbprovider/dbus-constants.h"
 #include "spaced/dbus-constants.h"
+#include "swap_management/dbus-constants.h"
 #include "update_engine/dbus-constants.h"
 #include "usbguard/dbus-constants.h"
 #include "vm_applications/dbus-constants.h"
 #include "vm_cicerone/dbus-constants.h"
 #include "vm_concierge/dbus-constants.h"
-#include "vm_disk_management/dbus-constants.h"
 #include "vm_plugin_dispatcher/dbus-constants.h"
 #include "vm_sk_forwarding/dbus-constants.h"
 #include "wilco_dtc_supportd/dbus-constants.h"
@@ -264,6 +265,8 @@ const char kChromeFeaturesServiceIsPeripheralDataAccessEnabledMethod[] =
     "IsPeripheralDataAccessEnabled";
 const char kChromeFeaturesServiceIsDNSProxyEnabledMethod[] =
     "IsDNSProxyEnabled";
+const char kChromeFeaturesServiceIsSuspendToDiskEnabledMethod[] =
+    "IsSuspendToDiskEnabled";
 
 const char kUrlHandlerServiceName[] = "org.chromium.UrlHandlerService";
 const char kUrlHandlerServicePath[] = "/org/chromium/UrlHandlerService";
@@ -352,6 +355,8 @@ const char kSMSReceivedSignal[] = "SmsReceived";
 // ModemManager1 interfaces and signals
 // The canonical source for these constants is:
 //   /usr/include/ModemManager/ModemManager-names.h
+const char kModemManager13gppInterface[] =
+    "org.freedesktop.ModemManager1.Modem.Modem3gpp";
 const char kModemManager1ServiceName[] = "org.freedesktop.ModemManager1";
 const char kModemManager1ServicePath[] = "/org/freedesktop/ModemManager1";
 const char kModemManager1ModemInterface[] =
@@ -362,6 +367,7 @@ const char kModemManager1SmsInterface[] = "org.freedesktop.ModemManager1.Sms";
 const char kModemManager1SarInterface[] =
     "org.freedesktop.ModemManager1.Modem.Sar";
 
+const char kModem3gppSetCarrierLock[] = "SetCarrierLock";
 const char kSMSAddedSignal[] = "Added";
 const char kSarEnable[] = "Enable";
 const char kSarSetPowerLevel[] = "SetPowerLevel";
@@ -465,6 +471,7 @@ const char kBootstrapCdmFactoryDaemonMojoConnection[] =
 const char kGetFactoryTransportKeyMaterial[] = "GetFactoryTransportKeyMaterial";
 const char kWrapFactoryKeybox[] = "WrapFactoryKeybox";
 const char kGetClientInformation[] = "GetClientInformation";
+const char kGetBootCertificateChain[] = "GetBootCertificateChain";
 }  // namespace cdm_oemcrypto
 
 namespace midis {
@@ -518,10 +525,6 @@ constexpr char kMojoConnectionServiceInterface[] =
     "org.chromium.MojoConnectionService";
 
 // Methods
-constexpr char kBootstrapMojoConnectionForIioServiceMethod[] =
-    "BootstrapMojoConnectionForIioService";
-constexpr char kBootstrapMojoConnectionForSensorClientsMethod[] =
-    "BootstrapMojoConnectionForSensorClients";
 constexpr char kBootstrapMojoConnectionForRollbackNetworkConfigMethod[] =
     "BootstrapMojoConnectionForRollbackNetworkConfigService";
 constexpr char kBootstrapForCrosHealthdInternalServiceFactoryMethod[] =
@@ -566,6 +569,14 @@ constexpr char kArcKeymasterInterfaceName[] = "org.chromium.ArcKeymaster";
 constexpr char kBootstrapMojoConnectionMethod[] = "BootstrapMojoConnection";
 }  // namespace keymaster
 
+namespace keymint {
+constexpr char kArcKeyMintServiceName[] = "org.chromium.ArcKeyMint";
+constexpr char kArcKeyMintServicePath[] = "/org/chromium/ArcKeyMint";
+constexpr char kArcKeyMintInterfaceName[] = "org.chromium.ArcKeyMint";
+// Methods
+constexpr char kBootstrapMojoConnectionMethod[] = "BootstrapMojoConnection";
+}  // namespace keymint
+
 namespace obb_mounter {
 // D-Bus service constants.
 constexpr char kArcObbMounterInterface[] =
@@ -592,17 +603,6 @@ constexpr char kMountMethod[] = "Mount";
 constexpr char kUnmountMethod[] = "Unmount";
 constexpr char kOpenFileMethod[] = "OpenFile";
 }  // namespace appfuse
-
-namespace sensor {
-// D-Bus service constants.
-constexpr char kArcSensorServiceInterface[] = "org.chromium.ArcSensorService";
-constexpr char kArcSensorServiceServicePath[] =
-    "/org/chromium/ArcSensorService";
-constexpr char kArcSensorServiceServiceName[] = "org.chromium.ArcSensorService";
-
-// Method names.
-constexpr char kBootstrapMojoConnectionMethod[] = "BootstrapMojoConnection";
-}  // namespace sensor
 
 }  // namespace arc
 

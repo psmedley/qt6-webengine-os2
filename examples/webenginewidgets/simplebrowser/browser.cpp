@@ -6,6 +6,8 @@
 
 #include <QWebEngineSettings>
 
+using namespace Qt::StringLiterals;
+
 Browser::Browser()
 {
     // Quit application if the download manager window is the only remaining window
@@ -19,17 +21,19 @@ Browser::Browser()
 BrowserWindow *Browser::createHiddenWindow(bool offTheRecord)
 {
     if (!offTheRecord && !m_profile) {
-        m_profile.reset(new QWebEngineProfile(
-                QString::fromLatin1("simplebrowser.%1").arg(qWebEngineChromiumVersion())));
+        const QString name = u"simplebrowser."_s + QLatin1StringView(qWebEngineChromiumVersion());
+        m_profile.reset(new QWebEngineProfile(name));
         m_profile->settings()->setAttribute(QWebEngineSettings::PluginsEnabled, true);
         m_profile->settings()->setAttribute(QWebEngineSettings::DnsPrefetchEnabled, true);
         m_profile->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
         m_profile->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);
+        m_profile->settings()->setAttribute(QWebEngineSettings::ScreenCaptureEnabled, true);
         QObject::connect(m_profile.get(), &QWebEngineProfile::downloadRequested,
                          &m_downloadManagerWidget, &DownloadManagerWidget::downloadRequested);
     }
     auto profile = !offTheRecord ? m_profile.get() : QWebEngineProfile::defaultProfile();
     auto mainWindow = new BrowserWindow(this, profile, false);
+    profile->setPersistentPermissionsPolicy(QWebEngineProfile::PersistentPermissionsPolicy::AskEveryTime);
     m_windows.append(mainWindow);
     QObject::connect(mainWindow, &QObject::destroyed, [this, mainWindow]() {
         m_windows.removeOne(mainWindow);

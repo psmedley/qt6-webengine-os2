@@ -11,10 +11,12 @@
 #define LIBANGLE_FRAME_CAPTURE_H_
 
 #include "common/PackedEnums.h"
+#include "common/frame_capture_utils.h"
 #include "common/system_utils.h"
 #include "libANGLE/Context.h"
+#include "libANGLE/ShareGroup.h"
+#include "libANGLE/Thread.h"
 #include "libANGLE/angletypes.h"
-#include "libANGLE/capture/frame_capture_utils_autogen.h"
 #include "libANGLE/entry_points_utils.h"
 
 namespace gl
@@ -25,157 +27,6 @@ enum class GLESEnum;
 
 namespace angle
 {
-
-using ParamData = std::vector<std::vector<uint8_t>>;
-struct ParamCapture : angle::NonCopyable
-{
-    ParamCapture();
-    ParamCapture(const char *nameIn, ParamType typeIn);
-    ~ParamCapture();
-
-    ParamCapture(ParamCapture &&other);
-    ParamCapture &operator=(ParamCapture &&other);
-
-    std::string name;
-    ParamType type;
-    ParamValue value;
-    gl::GLESEnum enumGroup;   // only used for param type GLenum, GLboolean and GLbitfield
-    gl::BigGLEnum bigGLEnum;  // only used for param type GLenum, GLboolean and GLbitfield
-    ParamData data;
-    int dataNElements           = 0;
-    int arrayClientPointerIndex = -1;
-    size_t readBufferSizeBytes  = 0;
-};
-
-class ParamBuffer final : angle::NonCopyable
-{
-  public:
-    ParamBuffer();
-    ~ParamBuffer();
-
-    ParamBuffer(ParamBuffer &&other);
-    ParamBuffer &operator=(ParamBuffer &&other);
-
-    template <typename T>
-    void addValueParam(const char *paramName, ParamType paramType, T paramValue);
-    template <typename T>
-    void setValueParamAtIndex(const char *paramName, ParamType paramType, T paramValue, int index);
-    template <typename T>
-    void addEnumParam(const char *paramName,
-                      gl::GLESEnum enumGroup,
-                      ParamType paramType,
-                      T paramValue);
-    template <typename T>
-    void addEnumParam(const char *paramName,
-                      gl::BigGLEnum enumGroup,
-                      ParamType paramType,
-                      T paramValue);
-
-    ParamCapture &getParam(const char *paramName, ParamType paramType, int index);
-    const ParamCapture &getParam(const char *paramName, ParamType paramType, int index) const;
-    ParamCapture &getParamFlexName(const char *paramName1,
-                                   const char *paramName2,
-                                   ParamType paramType,
-                                   int index);
-    const ParamCapture &getParamFlexName(const char *paramName1,
-                                         const char *paramName2,
-                                         ParamType paramType,
-                                         int index) const;
-    const ParamCapture &getReturnValue() const { return mReturnValueCapture; }
-
-    void addParam(ParamCapture &&param);
-    void addReturnValue(ParamCapture &&returnValue);
-    bool hasClientArrayData() const { return mClientArrayDataParam != -1; }
-    ParamCapture &getClientArrayPointerParameter();
-    size_t getReadBufferSize() const { return mReadBufferSize; }
-
-    const std::vector<ParamCapture> &getParamCaptures() const { return mParamCaptures; }
-
-    // These helpers allow us to track the ID of the buffer that was active when
-    // MapBufferRange was called.  We'll use it during replay to track the
-    // buffer's contents, as they can be modified by the host.
-    void setMappedBufferID(gl::BufferID bufferID) { mMappedBufferID = bufferID; }
-    gl::BufferID getMappedBufferID() const { return mMappedBufferID; }
-
-  private:
-    std::vector<ParamCapture> mParamCaptures;
-    ParamCapture mReturnValueCapture;
-    int mClientArrayDataParam = -1;
-    size_t mReadBufferSize    = 0;
-    gl::BufferID mMappedBufferID;
-};
-
-struct CallCapture
-{
-    CallCapture(EntryPoint entryPointIn, ParamBuffer &&paramsIn);
-    CallCapture(const std::string &customFunctionNameIn, ParamBuffer &&paramsIn);
-    ~CallCapture();
-
-    CallCapture(CallCapture &&other);
-    CallCapture &operator=(CallCapture &&other);
-
-    const char *name() const;
-
-    EntryPoint entryPoint;
-    std::string customFunctionName;
-    ParamBuffer params;
-    bool isActive = true;
-};
-
-class ReplayContext
-{
-  public:
-    ReplayContext(size_t readBufferSizebytes, const gl::AttribArray<size_t> &clientArraysSizebytes);
-    ~ReplayContext();
-
-    template <typename T>
-    T getReadBufferPointer(const ParamCapture &param)
-    {
-        ASSERT(param.readBufferSizeBytes > 0);
-        ASSERT(mReadBuffer.size() >= param.readBufferSizeBytes);
-        return reinterpret_cast<T>(mReadBuffer.data());
-    }
-    template <typename T>
-    T getAsConstPointer(const ParamCapture &param)
-    {
-        if (param.arrayClientPointerIndex != -1)
-        {
-            return reinterpret_cast<T>(mClientArraysBuffer[param.arrayClientPointerIndex].data());
-        }
-
-        if (!param.data.empty())
-        {
-            ASSERT(param.data.size() == 1);
-            return reinterpret_cast<T>(param.data[0].data());
-        }
-
-        return nullptr;
-    }
-
-    template <typename T>
-    T getAsPointerConstPointer(const ParamCapture &param)
-    {
-        static_assert(sizeof(typename std::remove_pointer<T>::type) == sizeof(uint8_t *),
-                      "pointer size not match!");
-
-        ASSERT(!param.data.empty());
-        mPointersBuffer.clear();
-        mPointersBuffer.reserve(param.data.size());
-        for (const std::vector<uint8_t> &data : param.data)
-        {
-            mPointersBuffer.emplace_back(data.data());
-        }
-        return reinterpret_cast<T>(mPointersBuffer.data());
-    }
-
-    gl::AttribArray<std::vector<uint8_t>> &getClientArraysBuffer() { return mClientArraysBuffer; }
-
-  private:
-    std::vector<uint8_t> mReadBuffer;
-    std::vector<const uint8_t *> mPointersBuffer;
-    gl::AttribArray<std::vector<uint8_t>> mClientArraysBuffer;
-};
-
 // Helper to use unique IDs for each local data variable.
 class DataCounters final : angle::NonCopyable
 {
@@ -225,6 +76,7 @@ class ReplayWriter final : angle::NonCopyable
     ReplayWriter();
     ~ReplayWriter();
 
+    void setSourceFileExtension(const char *ext);
     void setSourceFileSizeThreshold(size_t sourceFileSizeThreshold);
     void setFilenamePattern(const std::string &pattern);
     void setCaptureLabel(const std::string &label);
@@ -259,6 +111,7 @@ class ReplayWriter final : angle::NonCopyable
     void addWrittenFile(const std::string &filename);
     size_t getStoredReplaySourceSize() const;
 
+    std::string mSourceFileExtension;
     size_t mSourceFileSizeThreshold;
     size_t mFrameIndex;
 
@@ -285,8 +138,8 @@ using BufferCalls = std::map<GLuint, std::vector<CallCapture>>;
 // true means mapped, false means unmapped
 using BufferMapStatusMap = std::map<GLuint, bool>;
 
-using FenceSyncSet   = std::set<GLsync>;
-using FenceSyncCalls = std::map<GLsync, std::vector<CallCapture>>;
+using FenceSyncSet   = std::set<gl::SyncID>;
+using FenceSyncCalls = std::map<gl::SyncID, std::vector<CallCapture>>;
 
 // For default uniforms, we need to track which ones are dirty, and the series of calls to reset.
 // Each program has unique default uniforms, and each uniform has one or more locations in the
@@ -318,6 +171,8 @@ class TrackedResource final : angle::NonCopyable
     ResourceSet &getStartingResources() { return mStartingResources; }
     const ResourceSet &getNewResources() const { return mNewResources; }
     ResourceSet &getNewResources() { return mNewResources; }
+    const ResourceSet &getResourcesToDelete() const { return mResourcesToDelete; }
+    ResourceSet &getResourcesToDelete() { return mResourcesToDelete; }
     const ResourceSet &getResourcesToRegen() const { return mResourcesToRegen; }
     ResourceSet &getResourcesToRegen() { return mResourcesToRegen; }
     const ResourceSet &getResourcesToRestore() const { return mResourcesToRestore; }
@@ -342,6 +197,8 @@ class TrackedResource final : angle::NonCopyable
 
     // Resources created during the run that need to be deleted
     ResourceSet mNewResources;
+    // Resources recreated during the run that need to be deleted
+    ResourceSet mResourcesToDelete;
     // Resources deleted during the run that need to be recreated
     ResourceSet mResourcesToRegen;
     // Resources modified during the run that need to be restored
@@ -350,6 +207,12 @@ class TrackedResource final : angle::NonCopyable
 
 using TrackedResourceArray =
     std::array<TrackedResource, static_cast<uint32_t>(ResourceIDType::EnumCount)>;
+
+enum class ShaderProgramType
+{
+    ShaderType,
+    ProgramType
+};
 
 // Helper to track resource changes during the capture
 class ResourceTracker final : angle::NonCopyable
@@ -384,7 +247,7 @@ class ResourceTracker final : angle::NonCopyable
     FenceSyncSet &getStartingFenceSyncs() { return mStartingFenceSyncs; }
     FenceSyncCalls &getFenceSyncRegenCalls() { return mFenceSyncRegenCalls; }
     FenceSyncSet &getFenceSyncsToRegen() { return mFenceSyncsToRegen; }
-    void setDeletedFenceSync(GLsync sync);
+    void setDeletedFenceSync(gl::SyncID sync);
 
     DefaultUniformLocationsPerProgramMap &getDefaultUniformsToReset()
     {
@@ -410,9 +273,19 @@ class ResourceTracker final : angle::NonCopyable
 
     void getContextIDs(std::set<gl::ContextID> &idsOut);
 
-    std::map<void *, egl::AttributeMap> &getImageToAttribTable() { return mMatchImageToAttribs; }
+    std::map<EGLImage, egl::AttributeMap> &getImageToAttribTable() { return mMatchImageToAttribs; }
 
-    std::map<GLuint, void *> &getTextureIDToImageTable() { return mMatchTextureIDToImage; }
+    std::map<GLuint, egl::ImageID> &getTextureIDToImageTable() { return mMatchTextureIDToImage; }
+
+    void setShaderProgramType(gl::ShaderProgramID id, angle::ShaderProgramType type)
+    {
+        mShaderProgramType[id] = type;
+    }
+    ShaderProgramType getShaderProgramType(gl::ShaderProgramID id)
+    {
+        ASSERT(mShaderProgramType.find(id) != mShaderProgramType.end());
+        return mShaderProgramType[id];
+    }
 
   private:
     // Buffer map calls will map a buffer with correct offset, length, and access flags
@@ -451,8 +324,10 @@ class ResourceTracker final : angle::NonCopyable
     TrackedResourceArray mTrackedResourcesShared;
     std::map<gl::ContextID, TrackedResourceArray> mTrackedResourcesPerContext;
 
-    std::map<void *, egl::AttributeMap> mMatchImageToAttribs;
-    std::map<GLuint, void *> mMatchTextureIDToImage;
+    std::map<EGLImage, egl::AttributeMap> mMatchImageToAttribs;
+    std::map<GLuint, egl::ImageID> mMatchTextureIDToImage;
+
+    std::map<gl::ShaderProgramID, ShaderProgramType> mShaderProgramType;
 };
 
 // Used by the CPP replay to filter out unnecessary code.
@@ -490,6 +365,9 @@ using CallVector = std::vector<std::vector<CallCapture> *>;
 // A map from API entry point to calls
 using CallResetMap = std::map<angle::EntryPoint, std::vector<CallCapture>>;
 
+using TextureBinding  = std::pair<size_t, gl::TextureType>;
+using TextureResetMap = std::map<TextureBinding, gl::TextureID>;
+
 // StateResetHelper provides a simple way to track whether an entry point has been called during the
 // trace, along with the reset calls to get it back to starting state.  This is useful for things
 // that are one dimensional, like context bindings or context state.
@@ -507,12 +385,33 @@ class StateResetHelper final : angle::NonCopyable
 
     void setDefaultResetCalls(const gl::Context *context, angle::EntryPoint);
 
+    const std::set<TextureBinding> &getDirtyTextureBindings() const
+    {
+        return mDirtyTextureBindings;
+    }
+    void setTextureBindingDirty(size_t unit, gl::TextureType target)
+    {
+        mDirtyTextureBindings.emplace(unit, target);
+    }
+
+    TextureResetMap &getResetTextureBindings() { return mResetTextureBindings; }
+
+    void setResetActiveTexture(size_t textureID) { mResetActiveTexture = textureID; }
+    size_t getResetActiveTexture() { return mResetActiveTexture; }
+
   private:
     // Dirty state per entry point
     std::set<angle::EntryPoint> mDirtyEntryPoints;
 
     // Reset calls per API entry point
     CallResetMap mResetCalls;
+
+    // Dirty state per texture binding
+    std::set<TextureBinding> mDirtyTextureBindings;
+
+    // Texture bindings and active texture to restore
+    TextureResetMap mResetTextureBindings;
+    size_t mResetActiveTexture = 0;
 };
 
 class FrameCapture final : angle::NonCopyable
@@ -572,14 +471,21 @@ enum class PageSharingType
 class CoherentBuffer
 {
   public:
-    CoherentBuffer(uintptr_t start, size_t size, size_t pageSize);
+    CoherentBuffer(uintptr_t start, size_t size, size_t pageSize, bool useShadowMemory);
     ~CoherentBuffer();
 
     // Sets the a range in the buffer clean and protects a selected range
     void protectPageRange(const PageRange &pageRange);
 
+    // Sets all pages to clean and enables protection
+    void protectAll();
+
     // Sets a page dirty state and sets it's protection
     void setDirty(size_t relativePage, bool dirty);
+
+    // Shadow memory synchronization
+    void updateBufferMemory();
+    void updateShadowMemory();
 
     // Removes protection
     void removeProtection(PageSharingType sharingType);
@@ -593,6 +499,9 @@ class CoherentBuffer
     // Calculates address range from page range
     AddressRange getDirtyAddressRange(const PageRange &dirtyPageRange);
     AddressRange getRange();
+
+    void markShadowDirty() { mShadowDirty = true; }
+    bool isShadowDirty() { return mShadowDirty; }
 
   private:
     // Actual buffer start and size
@@ -610,6 +519,12 @@ class CoherentBuffer
 
     // Clean pages are protected
     std::vector<bool> mDirtyPages;
+
+    // shadow memory releated fields
+    bool mShadowMemoryEnabled;
+    uintptr_t mBufferStart;
+    void *mShadowMemory;
+    bool mShadowDirty;
 };
 
 class CoherentBufferTracker final : angle::NonCopyable
@@ -619,11 +534,18 @@ class CoherentBufferTracker final : angle::NonCopyable
     ~CoherentBufferTracker();
 
     bool isDirty(gl::BufferID id);
-    void addBuffer(gl::BufferID id, uintptr_t start, size_t size);
+    uintptr_t addBuffer(gl::BufferID id, uintptr_t start, size_t size);
     void removeBuffer(gl::BufferID id);
     void disable();
     void enable();
     void onEndFrame();
+    bool haveBuffer(gl::BufferID id);
+    bool isShadowMemoryEnabled() { return mShadowMemoryEnabled; }
+    void enableShadowMemory() { mShadowMemoryEnabled = true; }
+    void maybeUpdateShadowMemory();
+    void markAllShadowDirty();
+    // Determine whether memory protection can be used directly on graphics memory
+    bool canProtectDirectly(gl::Context *context);
 
   private:
     // Detect overlapping pages when removing protection
@@ -633,16 +555,17 @@ class CoherentBufferTracker final : angle::NonCopyable
     // For addresses that are in a page shared by 2 buffers, 2 results are returned.
     HashMap<std::shared_ptr<CoherentBuffer>, size_t> getBufferPagesForAddress(uintptr_t address);
     PageFaultHandlerRangeType handleWrite(uintptr_t address);
-    bool haveBuffer(gl::BufferID id);
 
   public:
     std::mutex mMutex;
     HashMap<GLuint, std::shared_ptr<CoherentBuffer>> mBuffers;
 
   private:
-    bool mEnabled = false;
+    bool mEnabled;
     std::unique_ptr<PageFaultHandler> mPageFaultHandler;
     size_t mPageSize;
+
+    bool mShadowMemoryEnabled;
 };
 
 // Shared class for any items that need to be tracked by FrameCapture across shared contexts
@@ -652,15 +575,14 @@ class FrameCaptureShared final : angle::NonCopyable
     FrameCaptureShared();
     ~FrameCaptureShared();
 
-    void captureCall(const gl::Context *context, CallCapture &&call, bool isCallValid);
+    void captureCall(gl::Context *context, CallCapture &&call, bool isCallValid);
     void checkForCaptureTrigger();
-    void onEndFrame(const gl::Context *context);
+    void onEndFrame(gl::Context *context);
     void onDestroyContext(const gl::Context *context);
     void onMakeCurrent(const gl::Context *context, const egl::Surface *drawSurface);
     bool enabled() const { return mEnabled; }
 
     bool isCapturing() const;
-    void replay(gl::Context *context);
     uint32_t getFrameCount() const;
 
     // Returns a frame index starting from "1" as the first frame.
@@ -783,6 +705,11 @@ class FrameCaptureShared final : angle::NonCopyable
         }
     }
 
+    void *maybeGetShadowMemoryPointer(gl::Buffer *buffer, GLsizeiptr length, GLbitfield access);
+    void determineMemoryProtectionSupport(gl::Context *context);
+
+    std::mutex &getFrameCaptureMutex() { return mFrameCaptureMutex; }
+
   private:
     void writeJSON(const gl::Context *context);
     void writeCppReplayIndexFiles(const gl::Context *context, bool writeResetContextCall);
@@ -816,6 +743,10 @@ class FrameCaptureShared final : angle::NonCopyable
                                             CallCapture &call,
                                             size_t instanceCount);
     void maybeCaptureCoherentBuffers(const gl::Context *context);
+    void captureCustomMapBufferFromContext(const gl::Context *context,
+                                           const char *entryPointName,
+                                           CallCapture &call,
+                                           std::vector<CallCapture> &callsOut);
     void updateCopyImageSubData(CallCapture &call);
     void overrideProgramBinary(const gl::Context *context,
                                CallCapture &call,
@@ -823,16 +754,11 @@ class FrameCaptureShared final : angle::NonCopyable
     void updateResourceCountsFromParamCapture(const ParamCapture &param, ResourceIDType idType);
     void updateResourceCountsFromCallCapture(const CallCapture &call);
 
-    void runMidExecutionCapture(const gl::Context *context);
+    void runMidExecutionCapture(gl::Context *context);
 
-    void scanSetupCalls(const gl::Context *context, std::vector<CallCapture> &setupCalls);
-
-    static void ReplayCall(gl::Context *context,
-                           ReplayContext *replayContext,
-                           const CallCapture &call);
+    void scanSetupCalls(std::vector<CallCapture> &setupCalls);
 
     std::vector<CallCapture> mFrameCalls;
-    gl::ContextID mLastContextId;
 
     // We save one large buffer of binary data for the whole CPP replay.
     // This simplifies a lot of file management.
@@ -852,14 +778,15 @@ class FrameCaptureShared final : angle::NonCopyable
     SurfaceParamsMap mDrawSurfaceParams;
     gl::AttribArray<size_t> mClientArraySizes;
     size_t mReadBufferSize;
+    size_t mResourceIDBufferSize;
     HasResourceTypeMap mHasResourceType;
     ResourceIDToSetupCallsMap mResourceIDToSetupCalls;
     BufferDataMap mBufferDataMap;
     bool mValidateSerializedState = false;
     std::string mValidationExpression;
-    bool mTrimEnabled = true;
     PackedEnumMap<ResourceIDType, uint32_t> mMaxAccessedResourceIDs;
     CoherentBufferTracker mCoherentBufferTracker;
+    std::mutex mFrameCaptureMutex;
 
     ResourceTracker mResourceTracker;
     ReplayWriter mReplayWriter;
@@ -879,68 +806,59 @@ class FrameCaptureShared final : angle::NonCopyable
     gl::ContextID mWindowSurfaceContextID;
 
     std::vector<CallCapture> mShareGroupSetupCalls;
+    // Track which Contexts were created and made current at least once before MEC,
+    // requiring setup for replay
+    std::unordered_set<GLuint> mActiveContexts;
+
+    // Invalid call counts per entry point while capture is active and inactive.
+    std::unordered_map<EntryPoint, size_t> mInvalidCallCountsActive;
+    std::unordered_map<EntryPoint, size_t> mInvalidCallCountsInactive;
 };
 
 template <typename CaptureFuncT, typename... ArgsT>
-void CaptureCallToFrameCapture(CaptureFuncT captureFunc,
-                               bool isCallValid,
-                               gl::Context *context,
-                               ArgsT... captureParams)
+void CaptureGLCallToFrameCapture(CaptureFuncT captureFunc,
+                                 bool isCallValid,
+                                 gl::Context *context,
+                                 ArgsT... captureParams)
 {
     FrameCaptureShared *frameCaptureShared = context->getShareGroup()->getFrameCaptureShared();
+
+    // EGL calls are protected by the global context mutex but only a subset of GL calls
+    // are so protected. Ensure FrameCaptureShared access thread safety by using a
+    // frame-capture only mutex.
+    std::lock_guard<std::mutex> lock(frameCaptureShared->getFrameCaptureMutex());
+
     if (!frameCaptureShared->isCapturing())
     {
         return;
     }
 
     CallCapture call = captureFunc(context->getState(), isCallValid, captureParams...);
-
     frameCaptureShared->captureCall(context, std::move(call), isCallValid);
 }
 
-template <typename T>
-void ParamBuffer::addValueParam(const char *paramName, ParamType paramType, T paramValue)
+template <typename CaptureFuncT, typename... ArgsT>
+void CaptureEGLCallToFrameCapture(CaptureFuncT captureFunc,
+                                  bool isCallValid,
+                                  egl::Thread *thread,
+                                  ArgsT... captureParams)
 {
-    ParamCapture capture(paramName, paramType);
-    InitParamValue(paramType, paramValue, &capture.value);
-    mParamCaptures.emplace_back(std::move(capture));
-}
+    gl::Context *context = thread->getContext();
+    if (!context)
+    {
+        return;
+    }
+    std::lock_guard<egl::ContextMutex> lock(context->getContextMutex());
 
-template <typename T>
-void ParamBuffer::setValueParamAtIndex(const char *paramName,
-                                       ParamType paramType,
-                                       T paramValue,
-                                       int index)
-{
-    ASSERT(mParamCaptures.size() > static_cast<size_t>(index));
+    angle::FrameCaptureShared *frameCaptureShared =
+        context->getShareGroup()->getFrameCaptureShared();
+    if (!frameCaptureShared->isCapturing())
+    {
+        return;
+    }
 
-    ParamCapture capture(paramName, paramType);
-    InitParamValue(paramType, paramValue, &capture.value);
-    mParamCaptures[index] = std::move(capture);
-}
-
-template <typename T>
-void ParamBuffer::addEnumParam(const char *paramName,
-                               gl::GLESEnum enumGroup,
-                               ParamType paramType,
-                               T paramValue)
-{
-    ParamCapture capture(paramName, paramType);
-    InitParamValue(paramType, paramValue, &capture.value);
-    capture.enumGroup = enumGroup;
-    mParamCaptures.emplace_back(std::move(capture));
-}
-
-template <typename T>
-void ParamBuffer::addEnumParam(const char *paramName,
-                               gl::BigGLEnum enumGroup,
-                               ParamType paramType,
-                               T paramValue)
-{
-    ParamCapture capture(paramName, paramType);
-    InitParamValue(paramType, paramValue, &capture.value);
-    capture.bigGLEnum = enumGroup;
-    mParamCaptures.emplace_back(std::move(capture));
+    angle::CallCapture call = captureFunc(thread, isCallValid, captureParams...);
+    frameCaptureShared->captureCall(context, std::move(call), true);
 }
 
 // Pointer capture helpers.
@@ -995,199 +913,6 @@ void CaptureShaderStrings(GLsizei count,
                           const GLint *length,
                           ParamCapture *paramCapture);
 
-template <ParamType ParamT, typename T>
-void WriteParamValueReplay(std::ostream &os, const CallCapture &call, T value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLboolean>(std::ostream &os,
-                                                  const CallCapture &call,
-                                                  GLboolean value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLbooleanPointer>(std::ostream &os,
-                                                         const CallCapture &call,
-                                                         GLboolean *value);
-
-template <>
-void WriteParamValueReplay<ParamType::TvoidConstPointer>(std::ostream &os,
-                                                         const CallCapture &call,
-                                                         const void *value);
-
-template <>
-void WriteParamValueReplay<ParamType::TvoidPointer>(std::ostream &os,
-                                                    const CallCapture &call,
-                                                    void *value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLfloatConstPointer>(std::ostream &os,
-                                                            const CallCapture &call,
-                                                            const GLfloat *value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLintConstPointer>(std::ostream &os,
-                                                          const CallCapture &call,
-                                                          const GLint *value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLsizeiPointer>(std::ostream &os,
-                                                       const CallCapture &call,
-                                                       GLsizei *value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLuintConstPointer>(std::ostream &os,
-                                                           const CallCapture &call,
-                                                           const GLuint *value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLDEBUGPROCKHR>(std::ostream &os,
-                                                       const CallCapture &call,
-                                                       GLDEBUGPROCKHR value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLDEBUGPROC>(std::ostream &os,
-                                                    const CallCapture &call,
-                                                    GLDEBUGPROC value);
-
-template <>
-void WriteParamValueReplay<ParamType::TBufferID>(std::ostream &os,
-                                                 const CallCapture &call,
-                                                 gl::BufferID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TFenceNVID>(std::ostream &os,
-                                                  const CallCapture &call,
-                                                  gl::FenceNVID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TFramebufferID>(std::ostream &os,
-                                                      const CallCapture &call,
-                                                      gl::FramebufferID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TMemoryObjectID>(std::ostream &os,
-                                                       const CallCapture &call,
-                                                       gl::MemoryObjectID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TProgramPipelineID>(std::ostream &os,
-                                                          const CallCapture &call,
-                                                          gl::ProgramPipelineID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TQueryID>(std::ostream &os,
-                                                const CallCapture &call,
-                                                gl::QueryID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TRenderbufferID>(std::ostream &os,
-                                                       const CallCapture &call,
-                                                       gl::RenderbufferID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TSamplerID>(std::ostream &os,
-                                                  const CallCapture &call,
-                                                  gl::SamplerID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TSemaphoreID>(std::ostream &os,
-                                                    const CallCapture &call,
-                                                    gl::SemaphoreID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TShaderProgramID>(std::ostream &os,
-                                                        const CallCapture &call,
-                                                        gl::ShaderProgramID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TTextureID>(std::ostream &os,
-                                                  const CallCapture &call,
-                                                  gl::TextureID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TTransformFeedbackID>(std::ostream &os,
-                                                            const CallCapture &call,
-                                                            gl::TransformFeedbackID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TVertexArrayID>(std::ostream &os,
-                                                      const CallCapture &call,
-                                                      gl::VertexArrayID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TUniformLocation>(std::ostream &os,
-                                                        const CallCapture &call,
-                                                        gl::UniformLocation value);
-
-template <>
-void WriteParamValueReplay<ParamType::TUniformBlockIndex>(std::ostream &os,
-                                                          const CallCapture &call,
-                                                          gl::UniformBlockIndex value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLsync>(std::ostream &os,
-                                               const CallCapture &call,
-                                               GLsync value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLeglImageOES>(std::ostream &os,
-                                                      const CallCapture &call,
-                                                      GLeglImageOES value);
-
-template <>
-void WriteParamValueReplay<ParamType::TGLubyte>(std::ostream &os,
-                                                const CallCapture &call,
-                                                GLubyte value);
-
-template <>
-void WriteParamValueReplay<ParamType::TEGLContext>(std::ostream &os,
-                                                   const CallCapture &call,
-                                                   EGLContext value);
-
-template <>
-void WriteParamValueReplay<ParamType::TEGLDisplay>(std::ostream &os,
-                                                   const CallCapture &call,
-                                                   EGLContext value);
-
-template <>
-void WriteParamValueReplay<ParamType::TEGLSurface>(std::ostream &os,
-                                                   const CallCapture &call,
-                                                   EGLContext value);
-
-template <>
-void WriteParamValueReplay<ParamType::TEGLDEBUGPROCKHR>(std::ostream &os,
-                                                        const CallCapture &call,
-                                                        EGLDEBUGPROCKHR value);
-
-template <>
-void WriteParamValueReplay<ParamType::TEGLGetBlobFuncANDROID>(std::ostream &os,
-                                                              const CallCapture &call,
-                                                              EGLGetBlobFuncANDROID value);
-
-template <>
-void WriteParamValueReplay<ParamType::TEGLSetBlobFuncANDROID>(std::ostream &os,
-                                                              const CallCapture &call,
-                                                              EGLSetBlobFuncANDROID value);
-template <>
-void WriteParamValueReplay<ParamType::TEGLClientBuffer>(std::ostream &os,
-                                                        const CallCapture &call,
-                                                        EGLClientBuffer value);
-
-template <>
-void WriteParamValueReplay<ParamType::TEGLConfig>(std::ostream &os,
-                                                  const CallCapture &call,
-                                                  EGLConfig value);
-
-template <>
-void WriteParamValueReplay<ParamType::TEGLSurface>(std::ostream &os,
-                                                   const CallCapture &call,
-                                                   EGLSurface value);
-
-// General fallback for any unspecific type.
-template <ParamType ParamT, typename T>
-void WriteParamValueReplay(std::ostream &os, const CallCapture &call, T value)
-{
-    os << value;
-}
 }  // namespace angle
 
 template <typename T>
@@ -1204,5 +929,10 @@ void CaptureTextureAndSamplerParameter_params(GLenum pname,
         CaptureMemory(param, sizeof(T), paramCapture);
     }
 }
+
+namespace egl
+{
+angle::ParamCapture CaptureAttributeMap(const egl::AttributeMap &attribMap);
+}  // namespace egl
 
 #endif  // LIBANGLE_FRAME_CAPTURE_H_

@@ -42,7 +42,7 @@ class SubresourceFilterContentSettingsManagerTest : public testing::Test {
     HostContentSettingsMap::RegisterProfilePrefs(prefs_.registry());
     settings_map_ = new HostContentSettingsMap(
         &prefs_, false /* is_off_the_record */, false /* store_last_modified */,
-        false /* restore_session */);
+        false /* restore_session */, true /* should_record_metrics */);
 
     settings_manager_ =
         std::make_unique<SubresourceFilterContentSettingsManager>(
@@ -62,11 +62,9 @@ class SubresourceFilterContentSettingsManagerTest : public testing::Test {
   }
 
   ContentSetting GetContentSettingMatchingUrlWithEmptyPath(const GURL& url) {
-    ContentSettingsForOneType host_settings;
-    GetSettingsMap()->GetSettingsForOneType(ContentSettingsType::ADS,
-                                            &host_settings);
     GURL url_with_empty_path = url.GetWithEmptyPath();
-    for (const auto& it : host_settings) {
+    for (const auto& it :
+         GetSettingsMap()->GetSettingsForOneType(ContentSettingsType::ADS)) {
       // Need GURL conversion to get rid of unnecessary default ports.
       if (GURL(it.primary_pattern.ToString()) == url_with_empty_path)
         return it.GetContentSetting();
@@ -95,7 +93,7 @@ class SubresourceFilterContentSettingsManagerTest : public testing::Test {
 
 TEST_F(SubresourceFilterContentSettingsManagerTest, LogDefaultSetting) {
   const char kDefaultContentSetting[] =
-      "ContentSettings.DefaultSubresourceFilterSetting";
+      "ContentSettings.RegularProfile.DefaultSubresourceFilterSetting";
   // The histogram should be logged at profile creation.
   histogram_tester().ExpectTotalCount(kDefaultContentSetting, 1);
 }

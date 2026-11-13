@@ -20,6 +20,7 @@
 #include "av1/common/cdef.h"
 #include "av1/common/cdef_block.h"
 #include "av1/common/reconinter.h"
+#include "av1/common/thread_common.h"
 
 static int is_8x8_block_skip(MB_MODE_INFO **grid, int mi_row, int mi_col,
                              int mi_stride) {
@@ -68,35 +69,51 @@ int av1_cdef_compute_sb_list(const CommonModeInfoParams *const mi_params,
 }
 
 void cdef_copy_rect8_8bit_to_16bit_c(uint16_t *dst, int dstride,
-                                     const uint8_t *src, int sstride, int v,
-                                     int h) {
-  for (int i = 0; i < v; i++) {
-    for (int j = 0; j < h; j++) {
+                                     const uint8_t *src, int sstride, int width,
+                                     int height) {
+  for (int i = 0; i < height; i++) {
+    for (int j = 0; j < width; j++) {
       dst[i * dstride + j] = src[i * sstride + j];
     }
   }
 }
 
 void cdef_copy_rect8_16bit_to_16bit_c(uint16_t *dst, int dstride,
-                                      const uint16_t *src, int sstride, int v,
-                                      int h) {
-  for (int i = 0; i < v; i++) {
-    for (int j = 0; j < h; j++) {
+                                      const uint16_t *src, int sstride,
+                                      int width, int height) {
+  for (int i = 0; i < height; i++) {
+    for (int j = 0; j < width; j++) {
       dst[i * dstride + j] = src[i * sstride + j];
     }
   }
+}
+
+void av1_cdef_copy_sb8_16_lowbd(uint16_t *const dst, int dstride,
+                                const uint8_t *src, int src_voffset,
+                                int src_hoffset, int sstride, int vsize,
+                                int hsize) {
+  const uint8_t *base = &src[src_voffset * sstride + src_hoffset];
+  cdef_copy_rect8_8bit_to_16bit(dst, dstride, base, sstride, hsize, vsize);
+}
+
+void av1_cdef_copy_sb8_16_highbd(uint16_t *const dst, int dstride,
+                                 const uint8_t *src, int src_voffset,
+                                 int src_hoffset, int sstride, int vsize,
+                                 int hsize) {
+  const uint16_t *base =
+      &CONVERT_TO_SHORTPTR(src)[src_voffset * sstride + src_hoffset];
+  cdef_copy_rect8_16bit_to_16bit(dst, dstride, base, sstride, hsize, vsize);
 }
 
 void av1_cdef_copy_sb8_16(const AV1_COMMON *const cm, uint16_t *const dst,
                           int dstride, const uint8_t *src, int src_voffset,
                           int src_hoffset, int sstride, int vsize, int hsize) {
   if (cm->seq_params->use_highbitdepth) {
-    const uint16_t *base =
-        &CONVERT_TO_SHORTPTR(src)[src_voffset * sstride + src_hoffset];
-    cdef_copy_rect8_16bit_to_16bit(dst, dstride, base, sstride, vsize, hsize);
+    av1_cdef_copy_sb8_16_highbd(dst, dstride, src, src_voffset, src_hoffset,
+                                sstride, vsize, hsize);
   } else {
-    const uint8_t *base = &src[src_voffset * sstride + src_hoffset];
-    cdef_copy_rect8_8bit_to_16bit(dst, dstride, base, sstride, vsize, hsize);
+    av1_cdef_copy_sb8_16_lowbd(dst, dstride, src, src_voffset, src_hoffset,
+                               sstride, vsize, hsize);
   }
 }
 
@@ -397,12 +414,25 @@ void av1_cdef_fb_row(const AV1_COMMON *const cm, MACROBLOCKD *xd,
                      uint16_t **const linebuf, uint16_t **const colbuf,
                      uint16_t *const src, int fbr,
                      cdef_init_fb_row_t cdef_init_fb_row_fn,
-                     struct AV1CdefSyncData *const cdef_sync) {
+                     struct AV1CdefSyncData *const cdef_sync,
+                     struct aom_internal_error_info *error_info) {
+  // TODO(aomedia:3276): Pass error_info to the low-level functions as required
+  // in future to handle error propagation.
+  (void)error_info;
   CdefBlockInfo fb_info;
   int cdef_left[MAX_MB_PLANE] = { 1, 1, 1 };
   const int nhfb = (cm->mi_params.mi_cols + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
 
   cdef_init_fb_row_fn(cm, xd, &fb_info, linebuf, src, cdef_sync, fbr);
+#if CONFIG_MULTITHREAD
+  if (cdef_sync && cm->cdef_info.allocated_num_workers > 1) {
+    pthread_mutex_lock(cdef_sync->mutex_);
+    const bool cdef_mt_exit = cdef_sync->cdef_mt_exit;
+    pthread_mutex_unlock(cdef_sync->mutex_);
+    // Exit in case any worker has encountered an error.
+    if (cdef_mt_exit) return;
+  }
+#endif
   for (int fbc = 0; fbc < nhfb; fbc++) {
     fb_info.frame_boundary[LEFT] = (MI_SIZE_64X64 * fbc == 0) ? 1 : 0;
     if (fbc != nhfb - 1)
@@ -431,5 +461,6 @@ void av1_cdef_frame(YV12_BUFFER_CONFIG *frame, AV1_COMMON *const cm,
 
   for (int fbr = 0; fbr < nvfb; fbr++)
     av1_cdef_fb_row(cm, xd, cm->cdef_info.linebuf, cm->cdef_info.colbuf,
-                    cm->cdef_info.srcbuf, fbr, cdef_init_fb_row_fn, NULL);
+                    cm->cdef_info.srcbuf, fbr, cdef_init_fb_row_fn, NULL,
+                    xd->error_info);
 }

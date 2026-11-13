@@ -14,6 +14,7 @@
 
 #include "base/base_export.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/strings/string_piece.h"
 #include "base/trace_event/trace_arguments.h"
 
@@ -42,7 +43,7 @@ class BASE_EXPORT TracedValue : public ConvertableToTraceFormat {
   void SetBoolean(const char* name, bool value);
   void SetString(const char* name, base::StringPiece value);
   void SetValue(const char* name, TracedValue* value);
-  void SetPointer(const char* name, void* value);
+  void SetPointer(const char* name, const void* value);
   void BeginDictionary(const char* name);
   void BeginArray(const char* name);
 
@@ -52,7 +53,7 @@ class BASE_EXPORT TracedValue : public ConvertableToTraceFormat {
   void SetBooleanWithCopiedName(base::StringPiece name, bool value);
   void SetStringWithCopiedName(base::StringPiece name, base::StringPiece value);
   void SetValueWithCopiedName(base::StringPiece name, TracedValue* value);
-  void SetPointerWithCopiedName(base::StringPiece name, void* value);
+  void SetPointerWithCopiedName(base::StringPiece name, const void* value);
   void BeginDictionaryWithCopiedName(base::StringPiece name);
   void BeginArrayWithCopiedName(base::StringPiece name);
 
@@ -60,13 +61,13 @@ class BASE_EXPORT TracedValue : public ConvertableToTraceFormat {
   void AppendDouble(double);
   void AppendBoolean(bool);
   void AppendString(base::StringPiece);
-  void AppendPointer(void*);
+  void AppendPointer(const void*);
   void BeginArray();
   void BeginDictionary();
 
   // ConvertableToTraceFormat implementation.
   void AppendAsTraceFormat(std::string* out) const override;
-  bool AppendToProto(ProtoAppender* appender) override;
+  bool AppendToProto(ProtoAppender* appender) const override;
 
   void EstimateTraceMemoryOverhead(TraceEventMemoryOverhead* overhead) override;
 
@@ -273,7 +274,9 @@ class BASE_EXPORT TracedValue : public ConvertableToTraceFormat {
       bool bool_value;
       base::StringPiece string_piece_value;
       std::string std_string_value;
-      void* void_ptr_value;
+      // This field is not a raw_ptr<> because it was filtered by the rewriter
+      // for: #union
+      RAW_PTR_EXCLUSION void* void_ptr_value;
       Array array_value;
       Dictionary dictionary_value;
 
@@ -390,7 +393,7 @@ class BASE_EXPORT TracedValue : public ConvertableToTraceFormat {
   std::unique_ptr<base::Value> ToBaseValue() const;
 
  private:
-  std::unique_ptr<Writer> writer_;
+  mutable std::unique_ptr<Writer> writer_;
 
 #ifndef NDEBUG
   // In debug builds checks the pairings of {Start,End}{Dictionary,Array}

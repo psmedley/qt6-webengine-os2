@@ -7,15 +7,27 @@
 
 #include "src/gpu/ganesh/text/GrAtlasManager.h"
 
-#include "include/core/SkColorSpace.h"
-#include "src/codec/SkMasks.h"
-#include "src/core/SkAutoMalloc.h"
+#include "include/core/SkSize.h"
+#include "include/core/SkSpan.h"
+#include "include/private/base/SkMalloc.h"
+#include "include/private/base/SkTLogic.h"
+#include "src/base/SkAutoMalloc.h"
 #include "src/core/SkDistanceFieldGen.h"
-#include "src/gpu/ganesh/GrImageInfo.h"
+#include "src/core/SkGlyph.h"
+#include "src/core/SkMask.h"
+#include "src/core/SkMasks.h"
+#include "src/core/SkStrikeSpec.h"
+#include "src/gpu/ganesh/GrColor.h"
+#include "src/gpu/ganesh/GrDeferredUpload.h"
 #include "src/gpu/ganesh/GrMeshDrawTarget.h"
 #include "src/text/gpu/Glyph.h"
 #include "src/text/gpu/GlyphVector.h"
 #include "src/text/gpu/StrikeCache.h"
+
+#include <cstring>
+#include <tuple>
+
+enum SkColorType : int;
 
 using Glyph = sktext::gpu::Glyph;
 using MaskFormat = skgpu::MaskFormat;
@@ -129,7 +141,7 @@ static void get_packed_glyph_image(
                                                      masks.getBlue(color565),
                                                      0xFF);
                 memcpy(dst, &colorRGBA, argbBpp);
-                src = (char*)src + a565Bpp;
+                src = (const char*)src + a565Bpp;
                 dst = (char*)dst + argbBpp;
             }
             dstRow += dstRB;
@@ -145,7 +157,11 @@ GrDrawOpAtlas::ErrorCode GrAtlasManager::addGlyphToAtlas(const SkGlyph& skGlyph,
                                                          int srcPadding,
                                                          GrResourceProvider* resourceProvider,
                                                          GrDeferredUploadTarget* uploadTarget) {
+#if !defined(SK_DISABLE_SDF_TEXT)
     SkASSERT(0 <= srcPadding && srcPadding <= SK_DistanceFieldInset);
+#else
+    SkASSERT(0 <= srcPadding);
+#endif
 
     if (skGlyph.image() == nullptr) {
         return GrDrawOpAtlas::ErrorCode::kError;
@@ -171,6 +187,7 @@ GrDrawOpAtlas::ErrorCode GrAtlasManager::addGlyphToAtlas(const SkGlyph& skGlyph,
             // The transformed mask/image case.
             padding = 1;
             break;
+#if !defined(SK_DISABLE_SDF_TEXT)
         case SK_DistanceFieldInset:
             // The SDFT case.
             // If the srcPadding == SK_DistanceFieldInset (SDFT case) then the padding is built
@@ -178,6 +195,7 @@ GrDrawOpAtlas::ErrorCode GrAtlasManager::addGlyphToAtlas(const SkGlyph& skGlyph,
             // TODO: can the SDFT glyph image in the cache be reduced by the padding?
             padding = 0;
             break;
+#endif
         default:
             // The padding is not one of the know forms.
             return GrDrawOpAtlas::ErrorCode::kError;
@@ -226,105 +244,11 @@ GrDrawOpAtlas::ErrorCode GrAtlasManager::addToAtlas(GrResourceProvider* resource
 
 void GrAtlasManager::addGlyphToBulkAndSetUseToken(skgpu::BulkUsePlotUpdater* updater,
                                                   MaskFormat format, Glyph* glyph,
-                                                  skgpu::DrawToken token) {
+                                                  skgpu::AtlasToken token) {
     SkASSERT(glyph);
     if (updater->add(glyph->fAtlasLocator)) {
         this->getAtlas(format)->setLastUseToken(glyph->fAtlasLocator, token);
     }
-}
-
-#ifdef SK_DEBUG
-#include "include/gpu/GrDirectContext.h"
-#include "src/gpu/ganesh/GrDirectContextPriv.h"
-#include "src/gpu/ganesh/GrSurfaceProxy.h"
-#include "src/gpu/ganesh/GrTextureProxy.h"
-#include "src/gpu/ganesh/SurfaceContext.h"
-
-#include "include/core/SkBitmap.h"
-#include "include/core/SkImageEncoder.h"
-#include "include/core/SkStream.h"
-#include <stdio.h>
-
-/**
-  * Write the contents of the surface proxy to a PNG. Returns true if successful.
-  * @param filename      Full path to desired file
-  */
-static bool save_pixels(GrDirectContext* dContext, GrSurfaceProxyView view, GrColorType colorType,
-                        const char* filename) {
-    if (!view.proxy()) {
-        return false;
-    }
-
-    auto ii = SkImageInfo::Make(view.proxy()->dimensions(), kRGBA_8888_SkColorType,
-                                kPremul_SkAlphaType);
-    SkBitmap bm;
-    if (!bm.tryAllocPixels(ii)) {
-        return false;
-    }
-
-    auto sContext = dContext->priv().makeSC(std::move(view),
-                                            {colorType, kUnknown_SkAlphaType, nullptr});
-    if (!sContext || !sContext->asTextureProxy()) {
-        return false;
-    }
-
-    bool result = sContext->readPixels(dContext, bm.pixmap(), {0, 0});
-    if (!result) {
-        SkDebugf("------ failed to read pixels for %s\n", filename);
-        return false;
-    }
-
-    // remove any previous version of this file
-    remove(filename);
-
-    SkFILEWStream file(filename);
-    if (!file.isValid()) {
-        SkDebugf("------ failed to create file: %s\n", filename);
-        remove(filename);   // remove any partial file
-        return false;
-    }
-
-    if (!SkEncodeImage(&file, bm, SkEncodedImageFormat::kPNG, 100)) {
-        SkDebugf("------ failed to encode %s\n", filename);
-        remove(filename);   // remove any partial file
-        return false;
-    }
-
-    return true;
-}
-
-void GrAtlasManager::dump(GrDirectContext* context) const {
-    static int gDumpCount = 0;
-    for (int i = 0; i < skgpu::kMaskFormatCount; ++i) {
-        if (fAtlases[i]) {
-            const GrSurfaceProxyView* views = fAtlases[i]->getViews();
-            for (uint32_t pageIdx = 0; pageIdx < fAtlases[i]->numActivePages(); ++pageIdx) {
-                SkASSERT(views[pageIdx].proxy());
-                SkString filename;
-#ifdef SK_BUILD_FOR_ANDROID
-                filename.printf("/sdcard/fontcache_%d%d%d.png", gDumpCount, i, pageIdx);
-#else
-                filename.printf("fontcache_%d%d%d.png", gDumpCount, i, pageIdx);
-#endif
-                SkColorType ct = MaskFormatToColorType(AtlasIndexToMaskFormat(i));
-                save_pixels(context, views[pageIdx], SkColorTypeToGrColorType(ct),
-                            filename.c_str());
-            }
-        }
-    }
-    ++gDumpCount;
-}
-#endif
-
-void GrAtlasManager::setAtlasDimensionsToMinimum_ForTesting() {
-    // Delete any old atlases.
-    // This should be safe to do as long as we are not in the middle of a flush.
-    for (int i = 0; i < skgpu::kMaskFormatCount; i++) {
-        fAtlases[i] = nullptr;
-    }
-
-    // Set all the atlas sizes to 1x1 plot each.
-    new (&fAtlasConfig) GrDrawOpAtlasConfig{};
 }
 
 bool GrAtlasManager::initAtlas(MaskFormat format) {
@@ -358,10 +282,8 @@ bool GrAtlasManager::initAtlas(MaskFormat format) {
 
 namespace sktext::gpu {
 
-std::tuple<bool, int> GlyphVector::regenerateAtlas(int begin, int end,
-                                                   MaskFormat maskFormat,
-                                                   int srcPadding,
-                                                   GrMeshDrawTarget* target) {
+std::tuple<bool, int> GlyphVector::regenerateAtlasForGanesh(
+        int begin, int end, MaskFormat maskFormat, int srcPadding, GrMeshDrawTarget* target) {
     GrAtlasManager* atlasManager = target->atlasManager();
     GrDeferredUploadTarget* uploadTarget = target->deferredUploadTarget();
 

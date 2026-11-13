@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/stl_util.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 // These checks are here because core/ and public/ cannot depend on each other.
 static_assert(static_cast<int>(CFX_GraphStateData::LineCap::kButt) ==
@@ -58,7 +58,7 @@ FPDF_EXPORT FPDF_PAGEOBJECT FPDF_CALLCONV FPDFPageObj_CreateNewPath(float x,
                                                                     float y) {
   auto pPathObj = std::make_unique<CPDF_PathObject>();
   pPathObj->path().AppendPoint(CFX_PointF(x, y), CFX_Path::Point::Type::kMove);
-  pPathObj->DefaultStates();
+  pPathObj->SetDefaultStates();
 
   // Caller takes ownership.
   return FPDFPageObjectFromCPDFPageObject(pPathObj.release());
@@ -70,7 +70,7 @@ FPDF_EXPORT FPDF_PAGEOBJECT FPDF_CALLCONV FPDFPageObj_CreateNewRect(float x,
                                                                     float h) {
   auto pPathObj = std::make_unique<CPDF_PathObject>();
   pPathObj->path().AppendRect(x, y, x + w, y + h);
-  pPathObj->DefaultStates();
+  pPathObj->SetDefaultStates();
 
   // Caller takes ownership.
   return FPDFPageObjectFromCPDFPageObject(pPathObj.release());

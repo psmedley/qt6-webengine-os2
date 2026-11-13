@@ -6,7 +6,9 @@
 
 #include <algorithm>
 
+#include "third_party/blink/renderer/bindings/modules/v8/v8_authenticator_attestation_response_js_on.h"
 #include "third_party/blink/renderer/modules/credentialmanagement/credential_manager_type_converters.h"
+#include "third_party/blink/renderer/modules/credentialmanagement/json.h"
 
 namespace blink {
 
@@ -29,11 +31,24 @@ AuthenticatorAttestationResponse::~AuthenticatorAttestationResponse() = default;
 Vector<String> AuthenticatorAttestationResponse::getTransports() const {
   Vector<String> ret;
   for (auto transport : transports_) {
-    ret.emplace_back(mojo::ConvertTo<String>(transport));
+    ret.emplace_back(
+        mojo::TypeConverter<
+            String,
+            blink::mojom::blink::AuthenticatorTransport>::Convert(transport));
   }
   std::sort(ret.begin(), ret.end(), WTF::CodeUnitCompareLessThan);
   ret.erase(std::unique(ret.begin(), ret.end()), ret.end());
   return ret;
+}
+
+absl::variant<AuthenticatorAssertionResponseJSON*,
+              AuthenticatorAttestationResponseJSON*>
+AuthenticatorAttestationResponse::toJSON() const {
+  auto* json = AuthenticatorAttestationResponseJSON::Create();
+  json->setClientDataJSON(WebAuthnBase64UrlEncode(clientDataJSON()));
+  json->setAttestationObject(WebAuthnBase64UrlEncode(attestationObject()));
+  json->setTransports(getTransports());
+  return json;
 }
 
 void AuthenticatorAttestationResponse::Trace(Visitor* visitor) const {

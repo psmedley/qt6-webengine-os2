@@ -34,8 +34,10 @@ class NodeLink;
 // single NodeLink. Each end of a NodeLink has its own NodeLinkMemory instance
 // cooperatively managing the same dynamic pool of memory, shared exclusively
 // between the two endpoint nodes.
-class NodeLinkMemory : public RefCounted {
+class NodeLinkMemory : public RefCounted<NodeLinkMemory> {
  public:
+  static constexpr BufferId kPrimaryBufferId{0};
+
   // The maximum number of initial portals supported on ConnectNode() API calls.
   // The first kMaxInitialPortals SublinkIds on a NodeLinkMemory will always be
   // reserved for use by initial portals.
@@ -84,13 +86,27 @@ class NodeLinkMemory : public RefCounted {
   // with the same BufferId and dimensions as `descriptor`.
   Fragment GetFragment(const FragmentDescriptor& descriptor);
 
-  // Adopts an existing reference to a RefCountedFragment within `fragment`.
-  // This does NOT increment the ref count of the RefCountedFragment.
+  // Adopts an existing reference to a RefCountedFragment within `fragment`,
+  // which must be a valid, properly aligned, and sufficiently sized fragment to
+  // hold a T. This does NOT increment the ref count of the RefCountedFragment.
   template <typename T>
   FragmentRef<T> AdoptFragmentRef(const Fragment& fragment) {
     ABSL_ASSERT(sizeof(T) <= fragment.size());
-    return FragmentRef<T>(RefCountedFragment::kAdoptExistingRef,
-                          WrapRefCounted(this), fragment);
+    return FragmentRef<T>(kAdoptExistingRef, WrapRefCounted(this), fragment);
+  }
+
+  // Attempts to adopt an existing reference to a RefCountedFragment located at
+  // `fragment`. Returns null if the fragment descriptor is null, misaligned,
+  // or of insufficient size. This does NOT increment the ref count of the
+  // RefCountedFragment.
+  template <typename T>
+  FragmentRef<T> AdoptFragmentRefIfValid(const FragmentDescriptor& descriptor) {
+    if (descriptor.is_null() || descriptor.size() < sizeof(T) ||
+        descriptor.offset() % 8 != 0) {
+      return {};
+    }
+    return AdoptFragmentRef<T>(GetFragment(descriptor));
+
   }
 
   // Adds a new buffer to the underlying BufferPool to use as additional
@@ -139,11 +155,13 @@ class NodeLinkMemory : public RefCounted {
  private:
   struct PrimaryBuffer;
 
+  friend class RefCounted<NodeLinkMemory>;
+
   // Constructs a new NodeLinkMemory over `mapping`, which must correspond to
   // a DriverMemory whose contents have already been initialized as a
   // NodeLinkMemory primary buffer.
   NodeLinkMemory(Ref<Node> node, DriverMemoryMapping mapping);
-  ~NodeLinkMemory() override;
+  ~NodeLinkMemory();
 
   // Indicates whether the NodeLinkMemory should be allowed to expand its
   // allocation capacity further for blocks of size `block_size`.
@@ -162,6 +180,7 @@ class NodeLinkMemory : public RefCounted {
       const Fragment& fragment);
 
   const Ref<Node> node_;
+  const bool allow_memory_expansion_for_parcel_data_;
 
   // The underlying BufferPool. Note that this object is itself thread-safe, so
   // access to it is not synchronized by NodeLinkMemory.

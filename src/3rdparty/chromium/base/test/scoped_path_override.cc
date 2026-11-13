@@ -4,6 +4,8 @@
 
 #include "base/test/scoped_path_override.h"
 
+#include <ostream>
+
 #include "base/check.h"
 #include "base/path_service.h"
 
@@ -36,7 +38,7 @@ ScopedPathOverride::ScopedPathOverride(int key,
 }
 
 void ScopedPathOverride::SaveOriginal() {
-  if (PathService::IsOverriddenForTests(key_)) {
+  if (PathService::IsOverriddenForTesting(key_)) {
     original_override_ = PathService::CheckedGet(key_);
   }
 }

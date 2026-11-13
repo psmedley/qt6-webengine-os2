@@ -11,8 +11,8 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
@@ -94,11 +94,11 @@ struct CastTransportImpl::RtpStreamSession {
   // Packetizer for audio and video frames.
   std::unique_ptr<RtpSender> rtp_sender;
 
+  // RTCP observer for SenderRtcpSession. Must outlive SenderRtcpSession.
+  std::unique_ptr<RtcpObserver> rtcp_observer;
+
   // Maintains RTCP session for audio and video.
   std::unique_ptr<SenderRtcpSession> rtcp_session;
-
-  // RTCP observer for SenderRtcpSession.
-  std::unique_ptr<RtcpObserver> rtcp_observer;
 
   // Encrypts data in EncodedFrames before they are sent.  Note that it's
   // important for the encryption to happen here, in code that would execute in
@@ -304,12 +304,10 @@ void CastTransportImpl::SendRawEvents() {
 }
 
 bool CastTransportImpl::OnReceivedPacket(std::unique_ptr<Packet> packet) {
-  const uint8_t* const data = &packet->front();
-  const size_t length = packet->size();
   uint32_t ssrc;
-  if (IsRtcpPacket(data, length)) {
-    ssrc = GetSsrcOfSender(data, length);
-  } else if (!RtpParser::ParseSsrc(data, length, &ssrc)) {
+  if (IsRtcpPacket(*packet)) {
+    ssrc = GetSsrcOfSender(*packet);
+  } else if (!RtpParser::ParseSsrc(*packet, &ssrc)) {
     VLOG(1) << "Invalid RTP packet.";
     return false;
   }
@@ -319,8 +317,9 @@ bool CastTransportImpl::OnReceivedPacket(std::unique_ptr<Packet> packet) {
   }
 
   for (const auto& session : sessions_) {
-    if (session.second->rtcp_session->IncomingRtcpPacket(data, length))
+    if (session.second->rtcp_session->IncomingRtcpPacket(*packet)) {
       return true;
+    }
   }
 
   transport_client_->ProcessRtpPacket(std::move(packet));

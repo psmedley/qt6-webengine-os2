@@ -1,4 +1,4 @@
-// Copyright 2019 PDFium Authors. All rights reserved.
+// Copyright 2019 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,11 +24,20 @@ constexpr FX_ARGB kRed = 0xFFFF0000;
 constexpr FX_ARGB kWhite = 0xFFFFFFFF;
 
 const char* AnnotationStampWithApBaseContentChecksum() {
-#if BUILDFLAG(IS_APPLE)
-  if (!CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
-    return "243f3d6267d9db09198fed9f8c4957fd";
+  if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
+#if BUILDFLAG(IS_WIN)
+    return "7f8437212ef1cd33ff505ece5a7e99f8";
+#elif BUILDFLAG(IS_APPLE)
+    return "346c4463cf822e39e29a602a504b9153";
+#else
+    return "4fedc838daa6762cf7eee180986a0f1b";
 #endif
+  }
+#if BUILDFLAG(IS_APPLE)
+  return "243f3d6267d9db09198fed9f8c4957fd";
+#else
   return "e31414933c9ff3950773981e5bf61678";
+#endif
 }
 
 }  // namespace
@@ -312,13 +321,20 @@ void FPDFProgressiveRenderEmbedderTest::VerifyRenderingWithColorScheme(
 TEST_F(FPDFProgressiveRenderEmbedderTest, RenderTextWithColorScheme) {
   // Test rendering of text with forced color scheme on.
   const char* content_with_text_checksum = []() {
-    if (CFX_DefaultRenderDevice::SkiaIsDefaultRenderer())
-      return "5ece6059efdc2ecb2894fa3cf329dc94";
-#if BUILDFLAG(IS_APPLE)
-    if (!CFX_DefaultRenderDevice::SkiaPathsIsDefaultRenderer())
-      return "ee4ec12f54ce8d117a73bd9b85a8954d";
+    if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
+#if BUILDFLAG(IS_WIN)
+      return "e970b97a719ce4d8efdfcbc316255aac";
+#elif BUILDFLAG(IS_APPLE)
+      return "9eba0a0147f1d9685514d274e03d574e";
+#else
+      return "edd919ec8b59fab1f16b5f2adb1175f3";
 #endif
+    }
+#if BUILDFLAG(IS_APPLE)
+    return "ee4ec12f54ce8d117a73bd9b85a8954d";
+#else
     return "704db63ed2bf77254ecaa8035b85f21a";
+#endif  // BUILDFLAG(IS_APPLE)
   }();
 
   ASSERT_TRUE(OpenDocument("hello_world.pdf"));
@@ -331,8 +347,9 @@ TEST_F(FPDFProgressiveRenderEmbedderTest, RenderTextWithColorScheme) {
 TEST_F(FPDFProgressiveRenderEmbedderTest, RenderPathWithColorScheme) {
   // Test rendering of paths with forced color scheme on.
   const char* rectangles_checksum = []() {
-    if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
       return "4b0f850a94698d07b6cd2814d1b4ccb7";
+    }
     return "249f59b0d066c4f6bd89782a80822219";
   }();
 
@@ -348,8 +365,9 @@ TEST_F(FPDFProgressiveRenderEmbedderTest,
   // Test rendering of paths with forced color scheme on and conversion from
   // fill to stroke enabled. The fill paths should be rendered as stroke.
   const char* rectangles_checksum = []() {
-    if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
       return "c1cbbd2ce6921f608a3c55140592419b";
+    }
     return "0ebcc11e617635eca1fa9ce475383a80";
   }();
 
@@ -368,10 +386,15 @@ TEST_F(FPDFProgressiveRenderEmbedderTest, RenderHighlightWithColorScheme) {
   // path since highlights have Multiply blend mode, while the other path has
   // Normal blend mode.
   const char* content_with_highlight_fill_checksum = []() {
-    if (CFX_DefaultRenderDevice::SkiaIsDefaultRenderer())
-      return "9b6273fdbc9db780c49f7540756209f8";
-    if (CFX_DefaultRenderDevice::SkiaPathsIsDefaultRenderer())
-      return "1ad601278736432e2f82ea37ab6a28ba";
+    if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
+#if BUILDFLAG(IS_WIN)
+      return "8ed2cbc6a362752fabdf9b50d3358c96";
+#elif BUILDFLAG(IS_APPLE)
+      return "fcd4dd021656f692f346780acaa24895";
+#else
+      return "49dcfcfdc38d200bb3d57a2ca3086034";
+#endif
+    }
 #if BUILDFLAG(IS_APPLE)
     return "a820afec9b99d3d3f2e9e9382bbad7c1";
 #else
@@ -397,10 +420,15 @@ TEST_F(FPDFProgressiveRenderEmbedderTest,
   // Normal blend mode.
 
   const char* md5_content_with_highlight = []() {
-    if (CFX_DefaultRenderDevice::SkiaIsDefaultRenderer())
-      return "772246195d18f75d40a22bee913c098f";
-    if (CFX_DefaultRenderDevice::SkiaPathsIsDefaultRenderer())
-      return "eff6eef2409ef5fbf4612bf6af42e0a0";
+    if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
+#if BUILDFLAG(IS_WIN)
+      return "9389330c006d3e6054057992624684a8";
+#elif BUILDFLAG(IS_APPLE)
+      return "b7039f73f2d8a3ac3e1ef1492e425b99";
+#else
+      return "c609e8810fba2f12db8f8a2b043d97bd";
+#endif
+    }
 #if BUILDFLAG(IS_APPLE)
     return "8837bea0b3520164b1784e513c882a2d";
 #else
@@ -419,8 +447,15 @@ TEST_F(FPDFProgressiveRenderEmbedderTest,
 TEST_F(FPDFProgressiveRenderEmbedderTest, RenderInkWithColorScheme) {
   // Test rendering of multiple ink with forced color scheme on.
   const char* content_with_ink_checksum = []() {
-    if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
-      return "ebc57721e4c8da34156e09b9b2e62fb0";
+    if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
+#if BUILDFLAG(IS_WIN)
+      return "f6dfec1a38800973e57bba5da4fe77fe";
+#elif BUILDFLAG(IS_APPLE)
+      return "5108aa537b6ecc37b3f0a35b76c1b379";
+#else
+      return "b39d9f68ff71963d82c43eb20caa8f4d";
+#endif
+    }
     return "797bce7dc6c50ee86b095405df9fe5aa";
   }();
 
@@ -434,12 +469,19 @@ TEST_F(FPDFProgressiveRenderEmbedderTest, RenderInkWithColorScheme) {
 TEST_F(FPDFProgressiveRenderEmbedderTest, RenderStampWithColorScheme) {
   // Test rendering of static annotation with forced color scheme on.
   const char* content_with_stamp_checksum = []() {
-    if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
-      return "a791fdb4f595bb6c4187cc2aeed5e9e8";
-#if BUILDFLAG(IS_APPLE)
-    return "7a209e29caeeab7d2b25b34570a4ace6";
+    if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
+#if BUILDFLAG(IS_WIN)
+      return "9365cd179a0109640bb2b7456f211524";
+#elif BUILDFLAG(IS_APPLE)
+      return "42d4d73d939cb4a1b40d003985eaf11e";
 #else
-    return "3bbbfc6cc18801906285a232c4a20617";
+      return "6e028012a4854ebfd9ee92da862bf679";
+#endif
+    }
+#if BUILDFLAG(IS_APPLE)
+    return "8170c539e95f22f14eb8f266a5f1bbed";
+#else
+    return "d1fd087e59d4dcebf47b56570bdb8c22";
 #endif
   }();
 
@@ -453,8 +495,9 @@ TEST_F(FPDFProgressiveRenderEmbedderTest, RenderStampWithColorScheme) {
 TEST_F(FPDFProgressiveRenderEmbedderTest, RenderFormWithColorScheme) {
   // Test rendering of form does not change with forced color scheme on.
   const char* content_with_form_checksum = []() {
-    if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+    if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
       return "9f75d98afc6d6313bd87e6562ea6df15";
+    }
     return "080f7a4381606659301440e1b14dca35";
   }();
 

@@ -11,12 +11,11 @@ For scalar T, the result is t * t * (3.0 - 2.0 * t), where t = clamp((x - low) /
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { TypeF32 } from '../../../../../util/conversion.js';
-import { smoothStepInterval } from '../../../../../util/f32_interval.js';
-import { sparseF32Range } from '../../../../../util/math.js';
-import { allInputSources, Case, makeTernaryToF32IntervalCase, run } from '../../expression.js';
+import { TypeF16, TypeF32 } from '../../../../../util/conversion.js';
+import { allInputSources, run } from '../../expression.js';
 
 import { builtin } from './builtin.js';
+import { d } from './smoothstep.cache.js';
 
 export const g = makeTestGroup(GPUTest);
 
@@ -35,21 +34,7 @@ g.test('f32')
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    const makeCase = (x: number, y: number, z: number): Case => {
-      return makeTernaryToF32IntervalCase(x, y, z, smoothStepInterval);
-    };
-
-    // Using sparseF32Range since this will generate N^3 test cases
-    const values = sparseF32Range();
-    const cases: Array<Case> = [];
-    values.forEach(x => {
-      values.forEach(y => {
-        values.forEach(z => {
-          cases.push(makeCase(x, y, z));
-        });
-      });
-    });
-
+    const cases = await d.get(t.params.inputSource === 'const' ? 'f32_const' : 'f32_non_const');
     await run(t, builtin('smoothstep'), [TypeF32, TypeF32, TypeF32], TypeF32, t.params, cases);
   });
 
@@ -59,4 +44,10 @@ g.test('f16')
   .params(u =>
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
-  .unimplemented();
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get(t.params.inputSource === 'const' ? 'f16_const' : 'f16_non_const');
+    await run(t, builtin('smoothstep'), [TypeF16, TypeF16, TypeF16], TypeF16, t.params, cases);
+  });

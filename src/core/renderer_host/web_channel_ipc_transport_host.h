@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef WEB_CHANNEL_IPC_TRANSPORT_H
 #define WEB_CHANNEL_IPC_TRANSPORT_H
@@ -45,6 +46,7 @@ private:
 
     // WebContentsObserver
     void RenderFrameCreated(content::RenderFrameHost *frame) override;
+    void RenderFrameHostChanged(content::RenderFrameHost *oldHost, content::RenderFrameHost *newHost) override;
     void RenderFrameDeleted(content::RenderFrameHost *render_frame_host) override;
 
     // qtwebchannel::mojom::WebChannelTransportHost

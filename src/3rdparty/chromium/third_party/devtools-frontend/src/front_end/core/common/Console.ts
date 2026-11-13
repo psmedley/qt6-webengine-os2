@@ -5,26 +5,28 @@
 import {ObjectWrapper} from './Object.js';
 import {reveal} from './Revealer.js';
 
-let consoleInstance: Console;
+let consoleInstance: Console|undefined;
 
 export class Console extends ObjectWrapper<EventTypes> {
   readonly #messagesInternal: Message[];
   /**
    * Instantiable via the instance() factory below.
    */
-  private constructor() {
+  constructor() {
     super();
     this.#messagesInternal = [];
   }
 
-  static instance({forceNew}: {
-    forceNew: boolean,
-  } = {forceNew: false}): Console {
-    if (!consoleInstance || forceNew) {
+  static instance(opts?: {forceNew: boolean}): Console {
+    if (!consoleInstance || opts?.forceNew) {
       consoleInstance = new Console();
     }
 
     return consoleInstance;
+  }
+
+  static removeInstance(): void {
+    consoleInstance = undefined;
   }
 
   addMessage(text: string, level: MessageLevel, show?: boolean): void {
@@ -58,9 +60,7 @@ export class Console extends ObjectWrapper<EventTypes> {
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   MessageAdded = 'messageAdded',
 }
 
@@ -68,9 +68,7 @@ export type EventTypes = {
   [Events.MessageAdded]: Message,
 };
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum MessageLevel {
+export const enum MessageLevel {
   Info = 'info',
   Warning = 'warning',
   Error = 'error',

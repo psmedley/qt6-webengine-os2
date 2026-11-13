@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/cfx_glyphcache.h"
-#include "core/fxge/freetype/fx_freetype.h"
 
 class CFX_Font;
 
@@ -22,7 +21,7 @@ class CFX_FontCache {
   ~CFX_FontCache();
 
   RetainPtr<CFX_GlyphCache> GetGlyphCache(const CFX_Font* pFont);
-#if defined(_SKIA_SUPPORT_)
+#if defined(PDF_USE_SKIA)
   CFX_TypeFace* GetDeviceCache(const CFX_Font* pFont);
 #endif
 

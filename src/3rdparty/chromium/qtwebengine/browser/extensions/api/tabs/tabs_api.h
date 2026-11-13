@@ -66,7 +66,7 @@ class TabsUpdateFunction : public ExtensionFunction {
   ResponseAction Run() override;
   void OnExecuteCodeFinished(const std::string& error,
                              const GURL& on_url,
-                             const base::ListValue& script_result);
+                             const base::Value::List& script_result);
 
   DECLARE_EXTENSION_FUNCTION("tabs.update", TABS_UPDATE)
 };

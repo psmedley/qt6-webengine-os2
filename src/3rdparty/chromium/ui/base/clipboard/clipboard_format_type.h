@@ -20,8 +20,6 @@
 #if BUILDFLAG(IS_APPLE)
 #ifdef __OBJC__
 @class NSString;
-#else
-class NSString;
 #endif
 #endif  // BUILDFLAG(IS_APPLE)
 
@@ -88,19 +86,28 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD_TYPES) ClipboardFormatType {
   static const ClipboardFormatType& MozUrlType();
 #endif
 
-  // For custom formats we hardcode the web custom format prefix and the index.
-  // Due to Windows/Linux limitations, please place limits on the amount of
-  // `WebCustomFormatName` calls with unique `index` argument.
+  // For custom formats, individual types are added to the clipboard with a type
+  // consisting of a prefix + index, and a map type that maps the custom format
+  // type to the type used on the clipboard. On Windows/Linux, this is done
+  // because there is a limited amount of system resources available to hold
+  // format types, so they must be conserved. On the Mac, there is no limit, but
+  // types must be named using strict alphanumerics, and MIME types do not
+  // conform to that naming restriction, so types must be mapped, and therefore
+  // the same mapping scheme is reused.
+
+  // Returns the format identifier used for web custom format data on the
+  // clipboard. Derived from the provided `index` value.
   static std::string WebCustomFormatName(int index);
-  // Gets the ClipboardFormatType corresponding to a format string,
-  // registering it with the system if needed.
+
+  // Returns the ClipboardFormatType used for web custom format data,
+  // registering it with the system if needed. Pass in a value obtained from
+  // `WebCustomFormatName` above.
   static ClipboardFormatType CustomPlatformType(
       const std::string& format_string);
-  // Returns the web custom format map that has the mapping of MIME types to
-  // custom format names.
+
+  // Returns the ClipboardFormatType used for the web custom format map that has
+  // the mapping of MIME types to custom format names.
   static const ClipboardFormatType& WebCustomFormatMap();
-  // Returns the web custom format map name.
-  static std::string WebCustomFormatMapName();
 
   // ClipboardFormatType can be used in a set on some platforms.
   bool operator<(const ClipboardFormatType& other) const;
@@ -108,12 +115,14 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD_TYPES) ClipboardFormatType {
   // Returns a human-readable format name, or an empty string as an error value
   // if the format isn't found.
   std::string GetName() const;
-#if BUILDFLAG(IS_WIN) && !defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_QTWEBENGINE)
   const FORMATETC& ToFormatEtc() const { return *ChromeToWindowsType(&data_); }
-#elif defined(TOOLKIT_QT)
+#elif BUILDFLAG(IS_QTWEBENGINE)
   const std::string& ToString() const { return data_; }
 #elif BUILDFLAG(IS_APPLE)
-  NSString* ToNSString() const { return data_; }
+#if __OBJC__
+  NSString* ToNSString() const;
+#endif  // __OBJC__
   // Custom copy and assignment constructor to handle NSString.
   ClipboardFormatType(const ClipboardFormatType& other);
   ClipboardFormatType& operator=(const ClipboardFormatType& other);
@@ -136,7 +145,7 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD_TYPES) ClipboardFormatType {
   //
   // In all platforms, format names may be ASCII or UTF8/16.
   // TODO(huangdarwin): Convert interfaces to std::u16string.
-#if BUILDFLAG(IS_WIN) && !defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_QTWEBENGINE)
   // When there are multiple files in the data store and they are described
   // using a file group descriptor, the file contents are retrieved by
   // requesting the CFSTR_FILECONTENTS clipboard format type and also providing
@@ -148,12 +157,15 @@ class COMPONENT_EXPORT(UI_BASE_CLIPBOARD_TYPES) ClipboardFormatType {
   // FORMATETC:
   // https://docs.microsoft.com/en-us/windows/desktop/com/the-formatetc-structure
   CHROME_FORMATETC data_;
-#elif defined(USE_AURA) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || defined(TOOLKIT_QT)
+#elif defined(USE_AURA) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_QTWEBENGINE)
   explicit ClipboardFormatType(const std::string& native_format);
   std::string data_;
 #elif BUILDFLAG(IS_APPLE)
-  explicit ClipboardFormatType(NSString* native_format);
-  NSString* data_;
+#if __OBJC__
+  explicit ClipboardFormatType(NSString* uttype);
+#endif  // __OBJC__
+  struct ObjCStorage;
+  std::unique_ptr<ObjCStorage> objc_storage_;
 #else
 #error No ClipboardFormatType definition.
 #endif

@@ -14,7 +14,9 @@
 
 #include "connections/implementation/mediums/webrtc.h"
 
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
@@ -23,8 +25,9 @@
 #include "internal/platform/listeners.h"
 #include "internal/platform/medium_environment.h"
 #include "internal/platform/mutex_lock.h"
+#include "internal/platform/webrtc.h"
+#include "internal/test/fake_webrtc.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace mediums {
@@ -32,6 +35,7 @@ namespace mediums {
 namespace {
 
 using FeatureFlags = FeatureFlags::Flags;
+using ::location::nearby::connections::LocationHint;
 
 constexpr FeatureFlags kTestCases[] = {
     FeatureFlags{
@@ -42,12 +46,20 @@ constexpr FeatureFlags kTestCases[] = {
     },
 };
 
+class TestWebRtc : public WebRtc {
+ public:
+  explicit TestWebRtc(std::unique_ptr<WebRtcMedium> medium)
+      : WebRtc(std::move(medium)) {}
+
+  int connect_attempts_count(std::string service_id) {
+    return service_id_to_connect_attempts_count_map_[service_id];
+  }
+};
+
 class WebRtcTest : public ::testing::TestWithParam<FeatureFlags> {
  protected:
   using MockAcceptedCallback = testing::MockFunction<void(
       const std::string& service_id, WebRtcSocketWrapper socket)>;
-
-  WebRtcTest() { env_.Stop(); }
 
   MediumEnvironment& env_{MediumEnvironment::Instance()};
 };
@@ -68,11 +80,11 @@ TEST_P(WebRtcTest, ConnectBothDevices_ShutdownSignaling_SendData) {
 
   receiver.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {[&receiver_socket, connected](const std::string& service_id,
-                                     WebRtcSocketWrapper wrapper) mutable {
+      [&receiver_socket, connected](const std::string& service_id,
+                                    WebRtcSocketWrapper wrapper) mutable {
         receiver_socket = wrapper;
         connected.Set(receiver_socket.IsValid());
-      }});
+      });
 
   CancellationFlag flag;
   sender_socket = sender.Connect(service_id, self_id, location_hint, &flag);
@@ -107,11 +119,11 @@ TEST_P(WebRtcTest, CanCancelConnect) {
 
   receiver.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {[&receiver_socket, connected](const std::string& service_id,
-                                     WebRtcSocketWrapper wrapper) mutable {
+      [&receiver_socket, connected](const std::string& service_id,
+                                    WebRtcSocketWrapper wrapper) mutable {
         receiver_socket = wrapper;
         connected.Set(receiver_socket.IsValid());
-      }});
+      });
 
   CancellationFlag flag(true);
   sender_socket = sender.Connect(service_id, self_id, location_hint, &flag);
@@ -161,10 +173,10 @@ TEST_F(WebRtcTest, StartAcceptingConnectionTwice) {
   ASSERT_TRUE(webrtc.IsAvailable());
   ASSERT_TRUE(webrtc.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {mock_accepted_callback_.AsStdFunction()}));
+      mock_accepted_callback_.AsStdFunction()));
   EXPECT_FALSE(webrtc.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {mock_accepted_callback_.AsStdFunction()}));
+      mock_accepted_callback_.AsStdFunction()));
   EXPECT_TRUE(webrtc.IsAcceptingConnections(service_id));
   EXPECT_FALSE(webrtc.IsAcceptingConnections(std::string{}));
   env_.Stop();
@@ -185,8 +197,8 @@ TEST_F(WebRtcTest, Connect_NoPeer) {
       webrtc.Connect(service_id, peer_id, location_hint, &flag);
   EXPECT_FALSE(wrapper_1.IsValid());
 
-  EXPECT_TRUE(webrtc.StartAcceptingConnections(
-      service_id, peer_id, location_hint, AcceptedConnectionCallback()));
+  EXPECT_TRUE(webrtc.StartAcceptingConnections(service_id, peer_id,
+                                               location_hint, nullptr));
   env_.Stop();
 }
 
@@ -203,7 +215,7 @@ TEST_F(WebRtcTest, StartAcceptingConnection_ThenConnect) {
   ASSERT_TRUE(webrtc.IsAvailable());
   ASSERT_TRUE(webrtc.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {mock_accepted_callback_.AsStdFunction()}));
+      mock_accepted_callback_.AsStdFunction()));
   CancellationFlag flag;
   WebRtcSocketWrapper wrapper = webrtc.Connect(
       service_id, WebrtcPeerId("random_peer_id"), location_hint, &flag);
@@ -211,7 +223,7 @@ TEST_F(WebRtcTest, StartAcceptingConnection_ThenConnect) {
   EXPECT_FALSE(wrapper.IsValid());
   EXPECT_FALSE(webrtc.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {mock_accepted_callback_.AsStdFunction()}));
+      mock_accepted_callback_.AsStdFunction()));
   env_.Stop();
 }
 
@@ -228,7 +240,7 @@ TEST_F(WebRtcTest, StartAndStopAcceptingConnections) {
   ASSERT_TRUE(webrtc.IsAvailable());
   ASSERT_TRUE(webrtc.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {mock_accepted_callback_.AsStdFunction()}));
+      mock_accepted_callback_.AsStdFunction()));
   EXPECT_TRUE(webrtc.IsAcceptingConnections(service_id));
   webrtc.StopAcceptingConnections(service_id);
   EXPECT_FALSE(webrtc.IsAcceptingConnections(service_id));
@@ -249,15 +261,15 @@ TEST_F(WebRtcTest, ConnectTwice) {
 
   receiver.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {[&receiver_socket, connected](const std::string& service_id,
-                                     WebRtcSocketWrapper wrapper) mutable {
+      [&receiver_socket, connected](const std::string& service_id,
+                                    WebRtcSocketWrapper wrapper) mutable {
         receiver_socket = wrapper;
         connected.Set(receiver_socket.IsValid());
-      }});
+      });
 
   device_c.StartAcceptingConnections(
       service_id, other_id, location_hint,
-      {[](const std::string& service_id, WebRtcSocketWrapper wrapper) {}});
+      [](const std::string& service_id, WebRtcSocketWrapper wrapper) {});
 
   CancellationFlag flag;
   sender_socket = sender.Connect(service_id, self_id, location_hint, &flag);
@@ -299,11 +311,11 @@ TEST_F(WebRtcTest, ConnectBothDevicesAndAbort) {
 
   receiver.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {[&receiver_socket, connected](const std::string& service_id,
-                                     WebRtcSocketWrapper wrapper) mutable {
+      [&receiver_socket, connected](const std::string& service_id,
+                                    WebRtcSocketWrapper wrapper) mutable {
         receiver_socket = wrapper;
         connected.Set(receiver_socket.IsValid());
-      }});
+      });
 
   CancellationFlag flag;
   sender_socket = sender.Connect(service_id, self_id, location_hint, &flag);
@@ -331,11 +343,11 @@ TEST_F(WebRtcTest, ConnectBothDevicesAndSendData) {
 
   receiver.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {[&receiver_socket, connected](const std::string& service_id,
-                                     WebRtcSocketWrapper wrapper) mutable {
+      [&receiver_socket, connected](const std::string& service_id,
+                                    WebRtcSocketWrapper wrapper) mutable {
         receiver_socket = wrapper;
         connected.Set(receiver_socket.IsValid());
-      }});
+      });
 
   CancellationFlag flag;
   sender_socket = sender.Connect(service_id, self_id, location_hint, &flag);
@@ -387,7 +399,7 @@ TEST_F(WebRtcTest, ContinueAcceptingConnectionsOnComplete) {
   ASSERT_TRUE(webrtc.IsAvailable());
   ASSERT_TRUE(webrtc.StartAcceptingConnections(
       service_id, self_id, location_hint,
-      {mock_accepted_callback_.AsStdFunction()}));
+      mock_accepted_callback_.AsStdFunction()));
   EXPECT_TRUE(webrtc.IsAcceptingConnections(service_id));
 
   // Simulate a failure in receiving messages stream, WebRtc should restart
@@ -406,9 +418,161 @@ TEST_F(WebRtcTest, ContinueAcceptingConnectionsOnComplete) {
   env_.Stop();
 }
 
+// Tests when a CancellationFlag is cancelled during an attempt to
+// `WebRtc::AttemptToConnect` triggered by `WebRtc::Connect`.
+TEST_F(WebRtcTest, CancelDuringConnect) {
+  env_.Start({.webrtc_enabled = true});
+
+  // Enable cancellation flags.
+  env_.SetFeatureFlags(kTestCases[0]);
+
+  WebRtcSocketWrapper receiver_socket, sender_socket;
+  const WebrtcPeerId self_id("self_id");
+  const std::string service_id("NearbySharing");
+  LocationHint location_hint;
+  Future<bool> connected;
+  ByteArray message("message");
+
+  CancellationFlag receiver_flag;
+  std::unique_ptr<WebRtc> receiver = std::make_unique<TestWebRtc>(
+      std::make_unique<FakeWebRtcMedium>(&receiver_flag));
+
+  CancellationFlag sender_flag;
+  std::unique_ptr<WebRtcMedium> sender_medium =
+      std::make_unique<FakeWebRtcMedium>(&sender_flag);
+  FakeWebRtcMedium* fake_sender_medium =
+      static_cast<FakeWebRtcMedium*>(sender_medium.get());
+  auto sender = std::make_unique<TestWebRtc>(std::move(sender_medium));
+
+  // Calls `CancellationFlag::Cancel` during a call to `GetSignalingMessenger`
+  // to simulate the cancellation occuring during an `AttemptToConnect`.
+  fake_sender_medium->TriggerCancellationDuringGetSignalingMessenger();
+
+  receiver->StartAcceptingConnections(
+      service_id, self_id, location_hint,
+      [&receiver_socket, connected](const std::string& service_id,
+                                    WebRtcSocketWrapper wrapper) mutable {
+        receiver_socket = wrapper;
+        connected.Set(receiver_socket.IsValid());
+      });
+
+  sender_socket =
+      sender->Connect(service_id, self_id, location_hint, &sender_flag);
+
+  // Since the flag was cancelled during the initial `AttemptToConnect`, except
+  // only one attempt instead of the usual three, because the cancellation flag
+  // should short-circuit the lengthy connection attempts during shutdown.
+  // Because of the way the iteration happens, the check for is cancelled
+  // happens after the counter has already been incremented, but before the
+  // attempt actually occurs.
+  EXPECT_FALSE(sender_socket.IsValid());
+  EXPECT_EQ(2, sender->connect_attempts_count(service_id));
+
+  env_.Stop();
+}
+
+// Tests when a CancellationFlag is cancelled before `WebRtc::Connect` is
+// called.
+TEST_F(WebRtcTest, CancelBeforeConnect) {
+  env_.Start({.webrtc_enabled = true});
+
+  // Enable cancellation flags.
+  env_.SetFeatureFlags(kTestCases[0]);
+
+  WebRtcSocketWrapper receiver_socket, sender_socket;
+  const WebrtcPeerId self_id("self_id");
+  const std::string service_id("NearbySharing");
+  LocationHint location_hint;
+  Future<bool> connected;
+  ByteArray message("message");
+
+  CancellationFlag receiver_flag;
+  std::unique_ptr<WebRtc> receiver = std::make_unique<TestWebRtc>(
+      std::make_unique<FakeWebRtcMedium>(&receiver_flag));
+
+  CancellationFlag sender_flag(true);
+  auto sender = std::make_unique<TestWebRtc>(
+      std::make_unique<FakeWebRtcMedium>(&sender_flag));
+
+  receiver->StartAcceptingConnections(
+      service_id, self_id, location_hint,
+      [&receiver_socket, connected](const std::string& service_id,
+                                    WebRtcSocketWrapper wrapper) mutable {
+        receiver_socket = wrapper;
+        connected.Set(receiver_socket.IsValid());
+      });
+
+  sender_socket =
+      sender->Connect(service_id, self_id, location_hint, &sender_flag);
+
+  // Expect an invalid socket from stopping during the first attempt to connect,
+  // because `Connect` returned immediatley when it checked for cancellation.
+  EXPECT_FALSE(sender_socket.IsValid());
+  EXPECT_EQ(1, sender->connect_attempts_count(service_id));
+
+  env_.Stop();
+}
+
+// Tests when a CancellationFlag is cancelled during an attempt to
+// `WebRtc::AttemptToConnect` triggered by `WebRtc::Connect` when multiple
+// `WebRTC::Connect` calls are in flight for multiple service ids.
+TEST_F(WebRtcTest, CancelDuringConnect_MultipleConnect) {
+  env_.Start({.webrtc_enabled = true});
+
+  // Enable cancellation flags.
+  env_.SetFeatureFlags(kTestCases[0]);
+
+  WebRtcSocketWrapper receiver_socket, sender_socket;
+  const WebrtcPeerId self_id("self_id");
+  const std::string ns_service_id("NearbySharing");
+  const std::string ph_service_id("PhoneHub");
+  LocationHint location_hint;
+  Future<bool> connected;
+  ByteArray message("message xyz");
+
+  CancellationFlag receiver_flag;
+  std::unique_ptr<WebRtc> receiver = std::make_unique<TestWebRtc>(
+      std::make_unique<FakeWebRtcMedium>(&receiver_flag));
+
+  CancellationFlag flag;
+  auto sender_medium = std::make_unique<FakeWebRtcMedium>(&flag);
+  FakeWebRtcMedium* fake_sender_medium = sender_medium.get();
+  auto sender = std::make_unique<TestWebRtc>(std::move(sender_medium));
+
+  receiver->StartAcceptingConnections(
+      ns_service_id, self_id, location_hint,
+      [&receiver_socket, connected](const std::string& ns_service_id,
+                                    WebRtcSocketWrapper wrapper) mutable {
+        receiver_socket = wrapper;
+        connected.Set(receiver_socket.IsValid());
+      });
+
+  // Simulate a successful connect for the endpoint of NearbySharing.
+  sender_socket = sender->Connect(ns_service_id, self_id, location_hint, &flag);
+  EXPECT_TRUE(sender_socket.IsValid());
+
+  // Calls `CancellationFlag::Cancel` during a call to `GetSignalingMessenger`
+  // to simulate the cancellation occuring during an `AttemptToConnect` for the
+  // endpoint of Phone Hub.
+  fake_sender_medium->TriggerCancellationDuringGetSignalingMessenger();
+  sender_socket = sender->Connect(ph_service_id, self_id, location_hint, &flag);
+  EXPECT_FALSE(sender_socket.IsValid());
+
+  // Since the flag was cancelled during the initial `AttemptToConnect`, except
+  // only one attempt instead of the usual three, because the cancellation flag
+  // should short-circuit the lengthy connection attempts during shutdown.
+  // Because of the way the iteration happens, the check for is cancelled
+  // happens after the counter has already been incremented, but before the
+  // attempt actually occurs. For the successful connect, expect only one
+  // attempt.
+  EXPECT_EQ(1, sender->connect_attempts_count(ns_service_id));
+  EXPECT_EQ(2, sender->connect_attempts_count(ph_service_id));
+
+  env_.Stop();
+}
+
 }  // namespace
 
 }  // namespace mediums
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

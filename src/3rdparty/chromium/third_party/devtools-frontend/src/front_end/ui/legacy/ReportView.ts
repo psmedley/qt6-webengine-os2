@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as VisualLogging from '../visual_logging/visual_logging.js';
+
 import * as ARIAUtils from './ARIAUtils.js';
 import reportViewStyles from './reportView.css.legacy.js';
 import {Toolbar} from './Toolbar.js';
@@ -66,6 +68,7 @@ export class ReportView extends VBox {
     if (link) {
       this.urlElement.appendChild(link);
     }
+    this.urlElement.setAttribute('jslog', `${VisualLogging.link().track({click: true}).context('source-location')}`);
   }
 
   createToolbar(): Toolbar {
@@ -150,7 +153,7 @@ export class Section extends VBox {
    */
   setUiGroupTitle(groupTitle: string): void {
     ARIAUtils.markAsGroup(this.element);
-    ARIAUtils.setAccessibleName(this.element, groupTitle);
+    ARIAUtils.setLabel(this.element, groupTitle);
   }
 
   createToolbar(): Toolbar {
@@ -214,7 +217,7 @@ export class Section extends VBox {
 
   markFieldListAsGroup(): void {
     ARIAUtils.markAsGroup(this.fieldList);
-    ARIAUtils.setAccessibleName(this.fieldList, this.title());
+    ARIAUtils.setLabel(this.fieldList, this.title());
   }
 
   setIconMasked(masked: boolean): void {

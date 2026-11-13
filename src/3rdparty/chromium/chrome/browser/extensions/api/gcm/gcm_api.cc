@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/gcm/gcm_profile_service_factory.h"
@@ -109,9 +109,9 @@ GcmRegisterFunction::GcmRegisterFunction() {}
 GcmRegisterFunction::~GcmRegisterFunction() {}
 
 ExtensionFunction::ResponseAction GcmRegisterFunction::Run() {
-  std::unique_ptr<api::gcm::Register::Params> params(
-      api::gcm::Register::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  std::optional<api::gcm::Register::Params> params =
+      api::gcm::Register::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
   GetGCMDriver()->Register(
       extension()->id(), params->sender_ids,
@@ -159,9 +159,9 @@ GcmSendFunction::GcmSendFunction() {}
 GcmSendFunction::~GcmSendFunction() {}
 
 ExtensionFunction::ResponseAction GcmSendFunction::Run() {
-  std::unique_ptr<api::gcm::Send::Params> params(
-      api::gcm::Send::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  std::optional<api::gcm::Send::Params> params =
+      api::gcm::Send::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
   EXTENSION_FUNCTION_VALIDATE(
       ValidateMessageData(params->message.data.additional_properties));
 
@@ -195,12 +195,11 @@ void GcmSendFunction::CompleteFunctionWithResult(
 
 bool GcmSendFunction::ValidateMessageData(const gcm::MessageData& data) const {
   size_t total_size = 0u;
-  for (auto iter = data.cbegin(); iter != data.cend(); ++iter) {
-    total_size += iter->first.size() + iter->second.size();
+  for (const auto& [key, value] : data) {
+    total_size += key.size() + value.size();
 
-    if (!IsMessageKeyValid(iter->first) ||
-        kMaximumGcmMessageSize < iter->first.size() ||
-        kMaximumGcmMessageSize < iter->second.size() ||
+    if (!IsMessageKeyValid(key) || kMaximumGcmMessageSize < key.size() ||
+        kMaximumGcmMessageSize < value.size() ||
         kMaximumGcmMessageSize < total_size)
       return false;
   }

@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <limits>
 
 #include "core/fxcrt/fx_system.h"
+#include "core/fxcrt/utf16.h"
 #include "third_party/base/check.h"
 
 namespace {
@@ -128,14 +129,14 @@ int32_t FXSYS_wcsnicmp(const wchar_t* s1, const wchar_t* s2, size_t count) {
   DCHECK(s2);
   DCHECK(count > 0);
 
-  wchar_t wch1 = 0, wch2 = 0;
   while (count-- > 0) {
-    wch1 = static_cast<wchar_t>(FXSYS_towlower(*s1++));
-    wch2 = static_cast<wchar_t>(FXSYS_towlower(*s2++));
-    if (wch1 != wch2)
-      break;
+    wchar_t wch1 = static_cast<wchar_t>(FXSYS_towlower(*s1++));
+    wchar_t wch2 = static_cast<wchar_t>(FXSYS_towlower(*s2++));
+    if (wch1 != wch2) {
+      return wch1 > wch2 ? 1 : -1;
+    }
   }
-  return wch1 - wch2;
+  return 0;
 }
 
 void FXSYS_IntToTwoHexChars(uint8_t n, char* buf) {
@@ -150,16 +151,17 @@ void FXSYS_IntToFourHexChars(uint16_t n, char* buf) {
 }
 
 size_t FXSYS_ToUTF16BE(uint32_t unicode, char* buf) {
-  DCHECK(unicode <= 0xD7FF || (unicode > 0xDFFF && unicode <= 0x10FFFF));
+  DCHECK(unicode <= pdfium::kMaximumSupplementaryCodePoint);
+  DCHECK(!pdfium::IsHighSurrogate(unicode));
+  DCHECK(!pdfium::IsLowSurrogate(unicode));
+
   if (unicode <= 0xFFFF) {
     FXSYS_IntToFourHexChars(unicode, buf);
     return 4;
   }
-  unicode -= 0x010000;
-  // High ten bits plus 0xD800
-  FXSYS_IntToFourHexChars(0xD800 + unicode / 0x400, buf);
-  // Low ten bits plus 0xDC00
-  FXSYS_IntToFourHexChars(0xDC00 + unicode % 0x400, buf + 4);
+  pdfium::SurrogatePair surrogate_pair(unicode);
+  FXSYS_IntToFourHexChars(surrogate_pair.high(), buf);
+  FXSYS_IntToFourHexChars(surrogate_pair.low(), buf + 4);
   return 8;
 }
 

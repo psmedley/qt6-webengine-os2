@@ -5,76 +5,77 @@
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import * as Workspace from '../../models/workspace/workspace.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
-import searchViewStyles from './searchView.css.js';
-
-import {SearchConfig, type SearchResult, type SearchScope} from './SearchConfig.js';
 import {SearchResultsPane} from './SearchResultsPane.js';
+import {type SearchResult, type SearchScope} from './SearchScope.js';
+import searchViewStyles from './searchView.css.js';
 
 const UIStrings = {
   /**
-  *@description Title of a search bar or tool
-  */
+   *@description Title of a search bar or tool
+   */
   search: 'Search',
   /**
-  *@description Accessibility label for search query text box
-  */
+   *@description Accessibility label for search query text box
+   */
   searchQuery: 'Search Query',
   /**
-  *@description Text to search by matching case of the input
-  */
+   *@description Text to search by matching case of the input
+   */
   matchCase: 'Match Case',
   /**
-  *@description Text for searching with regular expressinn
-  */
+   *@description Text for searching with regular expressinn
+   */
   useRegularExpression: 'Use Regular Expression',
   /**
-  *@description Text to refresh the page
-  */
+   *@description Text to refresh the page
+   */
   refresh: 'Refresh',
   /**
-  *@description Text to clear content
-  */
+   *@description Text to clear content
+   */
   clear: 'Clear',
   /**
-  *@description Search message element text content in Search View of the Search tab
-  */
+   *@description Search message element text content in Search View of the Search tab
+   */
   indexing: 'Indexing…',
   /**
-  *@description Text to indicate the searching is in progress
-  */
+   *@description Text to indicate the searching is in progress
+   */
   searching: 'Searching…',
   /**
-  *@description Text in Search View of the Search tab
-  */
+   *@description Text in Search View of the Search tab
+   */
   indexingInterrupted: 'Indexing interrupted.',
   /**
-  *@description Search results message element text content in Search View of the Search tab
-  */
+   *@description Search results message element text content in Search View of the Search tab
+   */
   foundMatchingLineInFile: 'Found 1 matching line in 1 file.',
   /**
-  *@description Search results message element text content in Search View of the Search tab
-  *@example {2} PH1
-  */
+   *@description Search results message element text content in Search View of the Search tab
+   *@example {2} PH1
+   */
   foundDMatchingLinesInFile: 'Found {PH1} matching lines in 1 file.',
   /**
-  *@description Search results message element text content in Search View of the Search tab
-  *@example {2} PH1
-  *@example {2} PH2
-  */
+   *@description Search results message element text content in Search View of the Search tab
+   *@example {2} PH1
+   *@example {2} PH2
+   */
   foundDMatchingLinesInDFiles: 'Found {PH1} matching lines in {PH2} files.',
   /**
-  *@description Search results message element text content in Search View of the Search tab
-  */
+   *@description Search results message element text content in Search View of the Search tab
+   */
   noMatchesFound: 'No matches found.',
   /**
-  *@description Text in Search View of the Search tab
-  */
+   *@description Text in Search View of the Search tab
+   */
   searchFinished: 'Search finished.',
   /**
-  *@description Text in Search View of the Search tab
-  */
+   *@description Text in Search View of the Search tab
+   */
   searchInterrupted: 'Search interrupted.',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/search/SearchView.ts', UIStrings);
@@ -89,16 +90,16 @@ export class SearchView extends UI.Widget.VBox {
   private nonEmptySearchResultsCount: number;
   private searchingView: UI.Widget.Widget|null;
   private notFoundView: UI.Widget.Widget|null;
-  private searchConfig: SearchConfig|null;
-  private pendingSearchConfig: SearchConfig|null;
+  private searchConfig: Workspace.SearchConfig.SearchConfig|null;
+  private pendingSearchConfig: Workspace.SearchConfig.SearchConfig|null;
   private searchResultsPane: SearchResultsPane|null;
   private progressIndicator: UI.ProgressIndicator.ProgressIndicator|null;
   private visiblePane: UI.Widget.Widget|null;
   private readonly searchPanelElement: HTMLElement;
   private readonly searchResultsElement: HTMLElement;
-  private search: UI.HistoryInput.HistoryInput;
-  private matchCaseButton: UI.Toolbar.ToolbarToggle;
-  private readonly regexButton: UI.Toolbar.ToolbarToggle;
+  protected readonly search: UI.HistoryInput.HistoryInput;
+  protected readonly matchCaseButton: UI.Toolbar.ToolbarToggle;
+  protected readonly regexButton: UI.Toolbar.ToolbarToggle;
   private searchMessageElement: HTMLElement;
   private readonly searchProgressPlaceholderElement: HTMLElement;
   private searchResultsMessageElement: HTMLElement;
@@ -108,7 +109,13 @@ export class SearchView extends UI.Widget.VBox {
     isRegex: boolean,
   }>;
   private searchScope: SearchScope|null;
-  constructor(settingKey: string) {
+
+  // We throttle adding search results, otherwise we trigger DOM layout for each
+  // result added.
+  #throttler: Common.Throttler.Throttler;
+  #pendingSearchResults: SearchResult[] = [];
+
+  constructor(settingKey: string, throttler: Common.Throttler.Throttler) {
     super(true);
     this.setMinimumSize(0, 40);
 
@@ -125,6 +132,9 @@ export class SearchView extends UI.Widget.VBox {
     this.searchResultsPane = null;
     this.progressIndicator = null;
     this.visiblePane = null;
+    this.#throttler = throttler;
+
+    this.element.setAttribute('jslog', `${VisualLogging.panel().context('search')}`);
 
     this.contentElement.classList.add('search-view');
     this.contentElement.addEventListener('keydown', event => {
@@ -139,24 +149,29 @@ export class SearchView extends UI.Widget.VBox {
     searchContainer.style.flex = 'auto';
     searchContainer.style.justifyContent = 'start';
     searchContainer.style.maxWidth = '300px';
+    searchContainer.style.overflow = 'revert';
     this.search = UI.HistoryInput.HistoryInput.create();
     this.search.addEventListener('keydown', event => {
       this.onKeyDown((event as KeyboardEvent));
     });
+    this.search.setAttribute('jslog', `${VisualLogging.textField().track({keydown: true})}`);
     searchContainer.appendChild(this.search);
     this.search.placeholder = i18nString(UIStrings.search);
-    this.search.setAttribute('type', 'text');
+    this.search.setAttribute('type', 'search');
     this.search.setAttribute('results', '0');
-    this.search.setAttribute('size', '42');
-    UI.ARIAUtils.setAccessibleName(this.search, i18nString(UIStrings.searchQuery));
+    this.search.setAttribute('size', '100');
+    this.search.classList.add('custom-search-input');
+    UI.ARIAUtils.setLabel(this.search, i18nString(UIStrings.searchQuery));
     const searchItem = new UI.Toolbar.ToolbarItem(searchContainer);
 
     const toolbar = new UI.Toolbar.Toolbar('search-toolbar', this.searchPanelElement);
-    this.matchCaseButton = SearchView.appendToolbarToggle(toolbar, 'Aa', i18nString(UIStrings.matchCase));
-    this.regexButton = SearchView.appendToolbarToggle(toolbar, '.*', i18nString(UIStrings.useRegularExpression));
+    this.matchCaseButton = SearchView.appendToolbarToggle(toolbar, 'Aa', i18nString(UIStrings.matchCase), 'match-case');
+    this.regexButton =
+        SearchView.appendToolbarToggle(toolbar, '.*', i18nString(UIStrings.useRegularExpression), 'use-regex');
     toolbar.appendToolbarItem(searchItem);
-    const refreshButton = new UI.Toolbar.ToolbarButton(i18nString(UIStrings.refresh), 'largeicon-refresh');
-    const clearButton = new UI.Toolbar.ToolbarButton(i18nString(UIStrings.clear), 'largeicon-clear');
+    const refreshButton =
+        new UI.Toolbar.ToolbarButton(i18nString(UIStrings.refresh), 'refresh', undefined, 'search.refresh');
+    const clearButton = new UI.Toolbar.ToolbarButton(i18nString(UIStrings.clear), 'clear', undefined, 'search.clear');
     toolbar.appendToolbarItem(refreshButton);
     toolbar.appendToolbarItem(clearButton);
     refreshButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, () => this.onAction());
@@ -171,29 +186,28 @@ export class SearchView extends UI.Widget.VBox {
     this.searchResultsMessageElement = searchStatusBarElement.createChild('div', 'search-message');
 
     this.advancedSearchConfig = Common.Settings.Settings.instance().createLocalSetting(
-        settingKey + 'SearchConfig', new SearchConfig('', true, false).toPlainObject());
+        settingKey + 'SearchConfig', new Workspace.SearchConfig.SearchConfig('', true, false).toPlainObject());
 
     this.load();
     this.searchScope = null;
   }
 
-  private static appendToolbarToggle(toolbar: UI.Toolbar.Toolbar, text: string, tooltip: string):
+  private static appendToolbarToggle(toolbar: UI.Toolbar.Toolbar, text: string, tooltip: string, jslogContext: string):
       UI.Toolbar.ToolbarToggle {
-    const toggle = new UI.Toolbar.ToolbarToggle(tooltip);
+    const toggle = new UI.Toolbar.ToolbarToggle(tooltip, undefined, undefined, jslogContext);
     toggle.setText(text);
     toggle.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, () => toggle.setToggled(!toggle.toggled()));
     toolbar.appendToolbarItem(toggle);
     return toggle;
   }
 
-  private buildSearchConfig(): SearchConfig {
-    return new SearchConfig(this.search.value, !this.matchCaseButton.toggled(), this.regexButton.toggled());
+  private buildSearchConfig(): Workspace.SearchConfig.SearchConfig {
+    return new Workspace.SearchConfig.SearchConfig(
+        this.search.value, !this.matchCaseButton.toggled(), this.regexButton.toggled());
   }
 
-  async toggle(queryCandidate: string, searchImmediately?: boolean): Promise<void> {
-    if (queryCandidate) {
-      this.search.value = queryCandidate;
-    }
+  toggle(queryCandidate: string, searchImmediately?: boolean): void {
+    this.search.value = queryCandidate;
     if (this.isShowing()) {
       this.focus();
     } else {
@@ -216,7 +230,7 @@ export class SearchView extends UI.Widget.VBox {
     this.searchScope = this.createScope();
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     if (this.focusOnShow) {
       this.focus();
       this.focusOnShow = false;
@@ -233,7 +247,7 @@ export class SearchView extends UI.Widget.VBox {
     this.progressIndicator.done();
     this.progressIndicator = null;
     this.isIndexing = false;
-    this.indexingFinished(finished);
+    this.searchMessageElement.textContent = finished ? '' : i18nString(UIStrings.indexingInterrupted);
     if (!finished) {
       this.pendingSearchConfig = null;
     }
@@ -273,15 +287,22 @@ export class SearchView extends UI.Widget.VBox {
       this.onIndexingFinished();
       return;
     }
-    this.addSearchResult(searchResult);
-    if (!searchResult.matchesCount()) {
-      return;
-    }
     if (!this.searchResultsPane) {
-      this.searchResultsPane = new SearchResultsPane((this.searchConfig as SearchConfig));
+      this.searchResultsPane = new SearchResultsPane((this.searchConfig as Workspace.SearchConfig.SearchConfig));
       this.showPane(this.searchResultsPane);
     }
-    this.searchResultsPane.addSearchResult(searchResult);
+    this.#pendingSearchResults.push(searchResult);
+    void this.#throttler.schedule(async () => this.#addPendingSearchResults());
+  }
+
+  #addPendingSearchResults(): void {
+    for (const searchResult of this.#pendingSearchResults) {
+      this.addSearchResult(searchResult);
+      if (searchResult.matchesCount()) {
+        this.searchResultsPane?.addSearchResult(searchResult);
+      }
+    }
+    this.#pendingSearchResults = [];
   }
 
   private onSearchFinished(searchId: number, finished: boolean): void {
@@ -296,17 +317,7 @@ export class SearchView extends UI.Widget.VBox {
     UI.ARIAUtils.alert(this.searchMessageElement.textContent + ' ' + this.searchResultsMessageElement.textContent);
   }
 
-  private async startSearch(searchConfig: SearchConfig): Promise<void> {
-    this.resetSearch();
-    ++this.searchId;
-    this.initScope();
-    if (!this.isIndexing) {
-      this.startIndexing();
-    }
-    this.pendingSearchConfig = searchConfig;
-  }
-
-  private innerStartSearch(searchConfig: SearchConfig): void {
+  private innerStartSearch(searchConfig: Workspace.SearchConfig.SearchConfig): void {
     this.searchConfig = searchConfig;
     if (this.progressIndicator) {
       this.progressIndicator.done();
@@ -324,10 +335,6 @@ export class SearchView extends UI.Widget.VBox {
     this.stopSearch();
     this.showPane(null);
     this.searchResultsPane = null;
-    this.clearSearchMessage();
-  }
-
-  private clearSearchMessage(): void {
     this.searchMessageElement.textContent = '';
     this.searchResultsMessageElement.textContent = '';
   }
@@ -343,7 +350,9 @@ export class SearchView extends UI.Widget.VBox {
   }
 
   private searchStarted(progressIndicator: UI.ProgressIndicator.ProgressIndicator): void {
-    this.resetCounters();
+    this.searchMatchesCount = 0;
+    this.searchResultsCount = 0;
+    this.nonEmptySearchResultsCount = 0;
     if (!this.searchingView) {
       this.searchingView = new UI.EmptyWidget.EmptyWidget(i18nString(UIStrings.searching));
     }
@@ -351,10 +360,6 @@ export class SearchView extends UI.Widget.VBox {
     this.searchMessageElement.textContent = i18nString(UIStrings.searching);
     progressIndicator.show(this.searchProgressPlaceholderElement);
     this.updateSearchResultsMessage();
-  }
-
-  private indexingFinished(finished: boolean): void {
-    this.searchMessageElement.textContent = finished ? '' : i18nString(UIStrings.indexingInterrupted);
   }
 
   private updateSearchResultsMessage(): void {
@@ -384,12 +389,6 @@ export class SearchView extends UI.Widget.VBox {
     this.visiblePane = panel;
   }
 
-  private resetCounters(): void {
-    this.searchMatchesCount = 0;
-    this.searchResultsCount = 0;
-    this.nonEmptySearchResultsCount = 0;
-  }
-
   private nothingFound(): void {
     if (!this.notFoundView) {
       this.notFoundView = new UI.EmptyWidget.EmptyWidget(i18nString(UIStrings.noMatchesFound));
@@ -413,12 +412,12 @@ export class SearchView extends UI.Widget.VBox {
         finished ? i18nString(UIStrings.searchFinished) : i18nString(UIStrings.searchInterrupted);
   }
 
-  focus(): void {
+  override focus(): void {
     this.search.focus();
     this.search.select();
   }
 
-  willHide(): void {
+  override willHide(): void {
     this.stopSearch();
   }
 
@@ -476,7 +475,7 @@ export class SearchView extends UI.Widget.VBox {
   }
 
   private load(): void {
-    const searchConfig = SearchConfig.fromPlainObject(this.advancedSearchConfig.get());
+    const searchConfig = Workspace.SearchConfig.SearchConfig.fromPlainObject(this.advancedSearchConfig.get());
     this.search.value = searchConfig.query();
     this.matchCaseButton.setToggled(!searchConfig.ignoreCase());
     this.regexButton.setToggled(searchConfig.isRegex());
@@ -487,6 +486,16 @@ export class SearchView extends UI.Widget.VBox {
     if (!searchConfig.query() || !searchConfig.query().length) {
       return;
     }
-    void this.startSearch(searchConfig);
+    this.resetSearch();
+    ++this.searchId;
+    this.initScope();
+    if (!this.isIndexing) {
+      this.startIndexing();
+    }
+    this.pendingSearchConfig = searchConfig;
+  }
+
+  get throttlerForTest(): Common.Throttler.Throttler {
+    return this.#throttler;
   }
 }

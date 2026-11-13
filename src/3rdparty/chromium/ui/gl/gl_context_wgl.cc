@@ -12,6 +12,7 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_wgl.h"
+#include "ui/gl/gl_utils.h"
 
 namespace gl {
 
@@ -19,8 +20,8 @@ GLContextWGL::GLContextWGL(GLShareGroup* share_group)
     : GLContextReal(share_group), context_(nullptr) {
 }
 
-bool GLContextWGL::Initialize(GLSurface* compatible_surface,
-                              const GLContextAttribs& attribs) {
+bool GLContextWGL::InitializeImpl(GLSurface* compatible_surface,
+                                  const GLContextAttribs& attribs) {
   // webgl_compatibility_context and disabling bind_generates_resource are not
   // supported.
   DCHECK(!attribs.webgl_compatibility_context &&
@@ -36,8 +37,7 @@ bool GLContextWGL::Initialize(GLSurface* compatible_surface,
       strstr(wglGetExtensionsStringARB(device_context),
              "WGL_ARB_create_context") != nullptr;
   bool create_core_profile = has_wgl_create_context_arb &&
-                             !base::CommandLine::ForCurrentProcess()->HasSwitch(
-                                 switches::kDisableES3GLContext);
+                             !gl::GetGlWorkarounds().disable_es3gl_context;
 
   if (create_core_profile) {
     std::pair<int, int> attempt_versions[] = {
@@ -85,6 +85,7 @@ bool GLContextWGL::Initialize(GLSurface* compatible_surface,
 }
 
 void GLContextWGL::Destroy() {
+  OnContextWillDestroy();
   if (context_) {
     wglDeleteContext(context_);
     context_ = nullptr;

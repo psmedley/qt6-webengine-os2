@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,17 +57,23 @@ bool CPDF_ScaledRenderBuffer::Initialize(CPDF_RenderContext* pContext,
     }
     m_Matrix.Scale(0.5f, 0.5f);
   }
-  pContext->GetBackground(m_pBitmapDevice->GetBitmap(), pObj, pOptions,
-                          m_Matrix);
+  pContext->GetBackgroundToDevice(m_pBitmapDevice.get(), pObj, pOptions,
+                                  m_Matrix);
   return true;
 }
 
 CFX_RenderDevice* CPDF_ScaledRenderBuffer::GetDevice() const {
-  return m_pBitmapDevice ? m_pBitmapDevice.get() : m_pDevice.Get();
+  return m_pBitmapDevice ? static_cast<CFX_RenderDevice*>(m_pBitmapDevice.get())
+                         : m_pDevice.get();
 }
 
 void CPDF_ScaledRenderBuffer::OutputToDevice() {
   if (m_pBitmapDevice) {
+#if defined(PDF_USE_SKIA)
+    if (!m_pBitmapDevice->SyncInternalBitmaps()) {
+      return;
+    }
+#endif
     m_pDevice->StretchDIBits(m_pBitmapDevice->GetBitmap(), m_Rect.left,
                              m_Rect.top, m_Rect.Width(), m_Rect.Height());
   }

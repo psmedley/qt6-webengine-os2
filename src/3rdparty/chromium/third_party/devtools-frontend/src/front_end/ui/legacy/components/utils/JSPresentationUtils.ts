@@ -35,27 +35,32 @@
 
 import * as Common from '../../../../core/common/common.js';
 import * as i18n from '../../../../core/i18n/i18n.js';
-import type * as SDK from '../../../../core/sdk/sdk.js';
-import * as Bindings from '../../../../models/bindings/bindings.js';
+import * as SDK from '../../../../core/sdk/sdk.js';
 import type * as Protocol from '../../../../generated/protocol.js';
+import * as Bindings from '../../../../models/bindings/bindings.js';
+import * as VisualLogging from '../../../visual_logging/visual_logging.js';
 import * as UI from '../../legacy.js';
 
-import {Linkifier} from './Linkifier.js';
 import jsUtilsStyles from './jsUtils.css.js';
+import {Events as LinkifierEvents, Linkifier} from './Linkifier.js';
 
 const UIStrings = {
   /**
-  *@description Text to stop preventing the debugger from stepping into library code
-  */
+   *@description Text to stop preventing the debugger from stepping into library code
+   */
   removeFromIgnore: 'Remove from ignore list',
   /**
-  *@description Text for scripts that should not be stepped into when debugging
-  */
+   *@description Text for scripts that should not be stepped into when debugging
+   */
   addToIgnore: 'Add script to ignore list',
   /**
-  * @description A context menu item to show more frames when they are available. Never 0.
-  */
+   * @description A link to show more frames when they are available. Never 0.
+   */
   showSMoreFrames: '{n, plural, =1 {Show # more frame} other {Show # more frames}}',
+  /**
+   * @description A link to rehide frames that are by default hidden.
+   */
+  showLess: 'Show less',
   /**
    *@description Text indicating that source url of a link is currently unknown
    */
@@ -97,8 +102,9 @@ export function buildStackTraceRows(
 
   if (updateCallback) {
     const throttler = new Common.Throttler.Throttler(100);
-    linkifier.setLiveLocationUpdateCallback(
-        () => throttler.schedule(async () => updateHiddenRows(updateCallback, stackTraceRows)));
+    linkifier.addEventListener(LinkifierEvents.LiveLocationUpdated, () => {
+      void throttler.schedule(async () => updateHiddenRows(updateCallback, stackTraceRows));
+    });
   }
 
   function buildStackTraceRowsHelper(
@@ -113,12 +119,17 @@ export function buildStackTraceRows(
       stackTraceRows.push(asyncRow);
     }
     let hiddenCallFrames = 0;
+    let previousStackFrameWasBreakpointCondition = false;
     for (const stackFrame of stackTrace.callFrames) {
       let ignoreListHide = false;
       const functionName = UI.UIUtils.beautifyFunctionName(stackFrame.functionName);
-      const link =
-          linkifier.maybeLinkifyConsoleCallFrame(target, stackFrame, {tabStop: Boolean(tabStops), inlineFrameIndex: 0});
+      const link = linkifier.maybeLinkifyConsoleCallFrame(target, stackFrame, {
+        tabStop: Boolean(tabStops),
+        inlineFrameIndex: 0,
+        revealBreakpoint: previousStackFrameWasBreakpointCondition,
+      });
       if (link) {
+        link.setAttribute('jslog', `${VisualLogging.link().track({click: true}).context('stack-trace-link')}`);
         link.addEventListener('contextmenu', populateContextMenu.bind(null, link));
         // TODO(crbug.com/1183325): fix race condition with uiLocation still being null here
         // Note: This has always checked whether the call frame location *in the generated
@@ -130,9 +141,7 @@ export function buildStackTraceRows(
                 uiLocation.uiSourceCode)) {
           ignoreListHide = true;
         }
-        // Linkifier is using a workaround with the 'zero width space' (\u200b).
-        // TODO(szuend): Remove once the Linkfier is no longer using the workaround.
-        if (!link.textContent || link.textContent === '\u200b') {
+        if (!link.textContent) {
           link.textContent = i18nString(UIStrings.unknownSource);
         }
       }
@@ -140,6 +149,10 @@ export function buildStackTraceRows(
         ++hiddenCallFrames;
       }
       stackTraceRows.push({functionName, link, ignoreListHide});
+      previousStackFrameWasBreakpointCondition = [
+        SDK.DebuggerModel.COND_BREAKPOINT_SOURCE_URL,
+        SDK.DebuggerModel.LOGPOINT_SOURCE_URL,
+      ].includes(stackFrame.url);
     }
     if (asyncRow && hiddenCallFrames > 0 && hiddenCallFrames === stackTrace.callFrames.length) {
       asyncRow.ignoreListHide = true;
@@ -206,6 +219,7 @@ export function buildStackTracePreviewContents(
   const {stackTrace, tabStops} = options;
   const element = document.createElement('span');
   element.classList.add('monospace');
+  element.classList.add('stack-preview-container');
   element.style.display = 'inline-block';
   const shadowRoot =
       UI.Utils.createShadowRootWithCoreStyles(element, {cssFile: [jsUtilsStyles], delegatesFocus: undefined});
@@ -238,7 +252,7 @@ function renderStackTraceTable(
       row.createChild('td', 'function-name').textContent = item.functionName;
       row.createChild('td').textContent = ' @ ';
       if (item.link) {
-        row.createChild('td').appendChild(item.link);
+        row.createChild('td', 'link').appendChild(item.link);
         links.push(item.link);
       }
       if (item.ignoreListHide) {
@@ -260,6 +274,19 @@ function renderStackTraceTable(
     showAllLink.textContent = i18nString(UIStrings.showSMoreFrames, {n: hiddenCallFramesCount});
     showAllLink.addEventListener('click', () => {
       container.classList.add('show-hidden-rows');
+      // If we are in a popup, this will trigger a re-layout
+      UI.GlassPane.GlassPane.containerMoved(container);
+    }, false);
+    const showLessRow = container.createChild('tr', 'show-less-link');
+    showLessRow.createChild('td').textContent = '\n';
+    const showLesscell = showLessRow.createChild('td') as HTMLTableCellElement;
+    showLesscell.colSpan = 4;
+    const showLessLink = showLesscell.createChild('span', 'link');
+    showLessLink.textContent = i18nString(UIStrings.showLess);
+    showLessLink.addEventListener('click', () => {
+      container.classList.remove('show-hidden-rows');
+      // If we are in a popup, this will trigger a re-layout
+      UI.GlassPane.GlassPane.containerMoved(container);
     }, false);
   }
   return links;

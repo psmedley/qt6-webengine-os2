@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "third_party/base/check.h"
 #include "third_party/base/containers/contains.h"
-#include "third_party/base/notreached.h"
 #include "third_party/base/numerics/safe_conversions.h"
 
 namespace {
@@ -54,11 +53,6 @@ CPDF_DataAvail::DocAvailStatus CPDF_CrossRefAvail::CheckAvail() {
         break;
       case State::kDone:
         break;
-      default: {
-        status_ = CPDF_DataAvail::kDataError;
-        NOTREACHED();
-        break;
-      }
     }
     if (!check_result)
       break;

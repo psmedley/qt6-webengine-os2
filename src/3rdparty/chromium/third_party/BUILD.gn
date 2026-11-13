@@ -2,12 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
+import("//build/config/features.gni")
 import("//build/config/freetype/freetype.gni")
 import("//third_party/harfbuzz-ng/harfbuzz.gni")
 import("//third_party/libjpeg.gni")
-import("//build/config/features.gni")
 
-assert(!is_ios || is_qtwebengine, "This is not used on iOS, don't drag it in unintentionally")
+assert(
+    use_blink || is_ios,
+    "This is not used on if blink is not enabled, don't drag it in unintentionally")
 
 if (use_system_libjpeg) {
   import("//build/config/linux/pkg_config.gni")
@@ -93,4 +96,9 @@ component("freetype_harfbuzz") {
   } else {
     public_deps += [ "//third_party/harfbuzz-ng:harfbuzz_source" ]
   }
+}
+
+buildflag_header("freetype_buildflags") {
+  header = "freetype_buildflags.h"
+  flags = [ "USE_SYSTEM_FREETYPE=$use_system_freetype" ]
 }

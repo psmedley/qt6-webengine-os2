@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 #include <Windows.h>
@@ -137,7 +138,6 @@ bool PagedMemory::AdviseDontNeed(void* p, size_t size) {
 
 #if TRACK_COMMITTED_SIZE()
 void PagedMemory::EnsureCommitted(size_t committed_size) {
-  PERFETTO_DCHECK(committed_size > 0u);
   PERFETTO_DCHECK(committed_size <= size_);
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
   if (committed_size_ >= committed_size)

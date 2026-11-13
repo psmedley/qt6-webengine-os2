@@ -5,23 +5,25 @@
 #ifndef CONTENT_PUBLIC_BROWSER_FIRST_PARTY_SETS_HANDLER_H_
 #define CONTENT_PUBLIC_BROWSER_FIRST_PARTY_SETS_HANDLER_H_
 
+#include <optional>
+#include <set>
 #include <string>
 
-#include "base/callback.h"
 #include "base/files/file.h"
+#include "base/functional/callback.h"
 #include "base/types/expected.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "content/common/content_export.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 namespace net {
-class FirstPartySetEntry;
 class FirstPartySetsCacheFilter;
 class FirstPartySetsContextConfig;
-class GlobalFirstPartySets;
+class FirstPartySetEntry;
+class FirstPartySetMetadata;
 class SchemefulSite;
-}
+}  // namespace net
 
 namespace content {
 
@@ -34,8 +36,12 @@ class CONTENT_EXPORT FirstPartySetsHandler {
   enum class ParseErrorType {
     // The set definition was not the correct data type.
     kInvalidType,
-    // A string in the set was not a registrable domain.
+    // A string in the set could not be parsed as a URL or origin.
     kInvalidOrigin,
+    // An origin in the set was specified using a scheme other than HTTPS.
+    kNonHttpsScheme,
+    // A origin in the set did not use a valid a registrable domain.
+    kInvalidDomain,
     // The set had no members.
     kSingletonSet,
     // The set was non-disjoint with other pre-existing sets.
@@ -65,10 +71,7 @@ class CONTENT_EXPORT FirstPartySetsHandler {
     ~IssueWithMetadata() = default;
     IssueWithMetadata(const IssueWithMetadata<T>&) = default;
 
-    bool operator==(const IssueWithMetadata<T>& other) const {
-      return std::tie(issue_type_, issue_path_) ==
-             std::tie(other.issue_type_, other.issue_path_);
-    }
+    bool operator==(const IssueWithMetadata<T>& other) const = default;
 
     // Inserts path_prefix at the beginning of the path stored for this issue.
     void PrependPath(
@@ -103,15 +106,17 @@ class CONTENT_EXPORT FirstPartySetsHandler {
   // Returns the singleton instance.
   static FirstPartySetsHandler* GetInstance();
 
-  // Validates the First-Party Sets Overrides enterprise policy in `policy`,
-  // and outputs warnings that arise when parsing and an optional error that is
-  // present if `policy` was invalid.
+  // Validates the First-Party Sets Overrides enterprise policy in `policy`.
+  // This function returns whether the validation was successful (or an error if
+  // the policy was invalid), and a list of warnings. Warnings are returned even
+  // if the policy was invalid, in order to surface as many issues as possible
+  // at once.
   //
   // This validation only checks that all sets in this policy are valid
   // First-Party Sets and disjoint from each other. It doesn't require
   // disjointness with other sources, such as the public sets, since this policy
   // will be used override First-Party Sets in those sources.
-  static std::pair<absl::optional<ParseError>, std::vector<ParseWarning>>
+  static std::pair<base::expected<void, ParseError>, std::vector<ParseWarning>>
   ValidateEnterprisePolicy(const base::Value::Dict& policy);
 
   // Returns whether First-Party Sets is enabled.
@@ -129,20 +134,15 @@ class CONTENT_EXPORT FirstPartySetsHandler {
   //
   // Embedder should call this method as early as possible during browser
   // startup if First-Party Sets are enabled, since no First-Party Sets queries
-  // are answered until initialization is complete. Must not be called if
-  // `ContentBrowserClient::WillProvidePublicFirstPartySets` returns false or
-  // `ContentBrowserClient::IsFrstpartySetsEnabled` returns false.
+  // are answered until initialization is complete.
   //
-  // Must be called at most once.
+  // If this is called when First-Party Sets are enabled, or the embedder has
+  // not indicated it will provide the public First-Party Sets, the call is
+  // ignored.
+  //
+  // If this is called more than once, all but the first call are ignored.
   virtual void SetPublicFirstPartySets(const base::Version& version,
                                        base::File sets_file) = 0;
-
-  // Resets the state on the instance for testing.
-  virtual void ResetForTesting() = 0;
-
-  // Allows tests to override the post-initalization global First-Party Sets.
-  virtual void SetGlobalSetsForTesting(
-      net::GlobalFirstPartySets global_sets) = 0;
 
   // Looks up `site` in the global First-Party Sets and `config` to find its
   // associated FirstPartySetEntry.
@@ -151,7 +151,7 @@ class CONTENT_EXPORT FirstPartySetsHandler {
   // - First-Party Sets is disabled or
   // - the list of First-Party Sets isn't initialized yet or
   // - `site` isn't in the global First-Party Sets or `config`
-  virtual absl::optional<net::FirstPartySetEntry> FindEntry(
+  virtual std::optional<net::FirstPartySetEntry> FindEntry(
       const net::SchemefulSite& site,
       const net::FirstPartySetsContextConfig& config) const = 0;
 
@@ -186,6 +186,32 @@ class CONTENT_EXPORT FirstPartySetsHandler {
       net::FirstPartySetsContextConfig context_config,
       base::OnceCallback<void(net::FirstPartySetsContextConfig,
                               net::FirstPartySetsCacheFilter)> callback) = 0;
+
+  // Computes the First-Party Set metadata related to the given request context,
+  // and invokes `callback` with the result.
+  //
+  // This may invoke `callback` synchronously.
+  virtual void ComputeFirstPartySetMetadata(
+      const net::SchemefulSite& site,
+      const net::SchemefulSite* top_frame_site,
+      const net::FirstPartySetsContextConfig& config,
+      base::OnceCallback<void(net::FirstPartySetMetadata)> callback) = 0;
+
+  // Synchronously iterates over all the effective entries (i.e. anything that
+  // could be returned by `FindEntry` given the global First-Party Sets and
+  // `config`, including the manual set, policy sets, and aliases), and invokes
+  // `f` on each entry formed as a net::SchemefulSite and a
+  // net::FirstPartySetEntry. If any of these invocations returns false, then
+  // ForEachEffectiveSetEntry stops iterating over the entries and returns false
+  // to its caller. Otherwise, if each call to `f` returns true, then
+  // ForEachEffectiveSetEntry returns true.
+  //
+  // Also returns false if First-Party Sets was not yet initialized. No
+  // guarantees are made re: iteration order.
+  virtual bool ForEachEffectiveSetEntry(
+      const net::FirstPartySetsContextConfig& config,
+      base::FunctionRef<bool(const net::SchemefulSite&,
+                             const net::FirstPartySetEntry&)> f) const = 0;
 };
 
 }  // namespace content

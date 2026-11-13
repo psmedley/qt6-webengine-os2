@@ -25,28 +25,82 @@ namespace perfetto {
 namespace {
 using ::perfetto::protos::gen::FtraceConfig;
 
-bool Matches(const std::string& prefix, const char* start, size_t size) {
+bool PrefixMatches(const std::string& prefix, const char* start, size_t size) {
   if (prefix.size() > size) {
     return false;
   }
   return strncmp(prefix.c_str(), start, prefix.size()) == 0;
 }
 
+bool AtraceMessageMatches(const std::string& before_pid_part,
+                          const std::string& after_pid_prefix,
+                          const char* start,
+                          size_t size) {
+  base::StringView s(start, size);
+  if (!s.StartsWith(base::StringView(before_pid_part))) {
+    return false;
+  }
+  s = s.substr(before_pid_part.size());
+
+  if (!s.StartsWith("|")) {
+    return false;
+  }
+  s = s.substr(1);
+
+  size_t skip_pid_count = 0;
+  for (;; skip_pid_count++) {
+    if (skip_pid_count == s.size()) {
+      return false;
+    }
+    if (s.at(skip_pid_count) == '|') {
+      break;
+    }
+    if (!isdigit(s.at(skip_pid_count))) {
+      return false;
+    }
+  }
+  skip_pid_count++;
+  s = s.substr(skip_pid_count);
+
+  return PrefixMatches(after_pid_prefix, s.data(), s.size());
+}
+
 }  // namespace
+
+// static
+bool FtracePrintFilter::RuleMatches(const Rule& rule,
+                                    const char* start,
+                                    size_t size) {
+  switch (rule.type) {
+    case Rule::Type::kAtraceMessage:
+      return AtraceMessageMatches(rule.before_pid_part, rule.prefix, start,
+                                  size);
+    case Rule::Type::kPrefixMatch:
+      break;
+  }
+  return PrefixMatches(rule.prefix, start, size);
+}
 
 FtracePrintFilter::FtracePrintFilter(const FtraceConfig::PrintFilter& conf) {
   rules_.reserve(conf.rules().size());
   for (const FtraceConfig::PrintFilter::Rule& conf_rule : conf.rules()) {
     Rule rule;
     rule.allow = conf_rule.allow();
-    rule.prefix = conf_rule.prefix();
+    if (conf_rule.has_atrace_msg()) {
+      rule.type = Rule::Type::kAtraceMessage;
+      rule.before_pid_part = conf_rule.atrace_msg().type();
+      rule.prefix = conf_rule.atrace_msg().prefix();
+    } else {
+      rule.type = Rule::Type::kPrefixMatch;
+      rule.prefix = conf_rule.prefix();
+    }
     rules_.push_back(std::move(rule));
   }
 }
 
 bool FtracePrintFilter::IsAllowed(const char* start, size_t size) const {
   for (const Rule& rule : rules_) {
-    if (Matches(rule.prefix, start, size)) {
+    if (RuleMatches(rule, start, size)) {
       return rule.allow;
     }
   }
@@ -54,12 +108,12 @@ bool FtracePrintFilter::IsAllowed(const char* start, size_t size) const {
 }
 
 // static
-base::Optional<FtracePrintFilterConfig> FtracePrintFilterConfig::Create(
-    const protos::gen::FtraceConfig_PrintFilter& config,
+std::optional<FtracePrintFilterConfig> FtracePrintFilterConfig::Create(
+    const protos::gen::FtraceConfig::PrintFilter& config,
     ProtoTranslationTable* table) {
   const Event* print_event = table->GetEvent(GroupAndName("ftrace", "print"));
   if (!print_event) {
-    return base::nullopt;
+    return std::nullopt;
   }
   const Field* buf_field = nullptr;
   for (const Field& field : print_event->fields) {
@@ -69,11 +123,11 @@ base::Optional<FtracePrintFilterConfig> FtracePrintFilterConfig::Create(
     }
   }
   if (!buf_field) {
-    return base::nullopt;
+    return std::nullopt;
   }
 
   if (buf_field->strategy != kCStringToString) {
-    return base::nullopt;
+    return std::nullopt;
   }
   FtracePrintFilterConfig ret{FtracePrintFilter{config}};
   ret.event_id_ = print_event->ftrace_event_id;

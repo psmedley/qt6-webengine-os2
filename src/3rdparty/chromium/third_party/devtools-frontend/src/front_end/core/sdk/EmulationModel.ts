@@ -81,6 +81,8 @@ export class EmulationModel extends SDKModel<void> {
         Common.Settings.Settings.instance().moduleSetting<string>('emulatedCSSMediaFeaturePrefersContrast');
     const mediaFeaturePrefersReducedDataSetting =
         Common.Settings.Settings.instance().moduleSetting<string>('emulatedCSSMediaFeaturePrefersReducedData');
+    const mediaFeaturePrefersReducedTransparencySetting =
+        Common.Settings.Settings.instance().moduleSetting<string>('emulatedCSSMediaFeaturePrefersReducedTransparency');
     const mediaFeaturePrefersReducedMotionSetting =
         Common.Settings.Settings.instance().moduleSetting<string>('emulatedCSSMediaFeaturePrefersReducedMotion');
     // Note: this uses a different format than what the CDP API expects,
@@ -95,6 +97,7 @@ export class EmulationModel extends SDKModel<void> {
       ['prefers-contrast', mediaFeaturePrefersContrastSetting.get()],
       ['prefers-reduced-data', mediaFeaturePrefersReducedDataSetting.get()],
       ['prefers-reduced-motion', mediaFeaturePrefersReducedMotionSetting.get()],
+      ['prefers-reduced-transparency', mediaFeaturePrefersReducedTransparencySetting.get()],
     ]);
     mediaTypeSetting.addChangeListener(() => {
       this.#mediaConfiguration.set('type', mediaTypeSetting.get());
@@ -122,6 +125,10 @@ export class EmulationModel extends SDKModel<void> {
     });
     mediaFeaturePrefersReducedMotionSetting.addChangeListener(() => {
       this.#mediaConfiguration.set('prefers-reduced-motion', mediaFeaturePrefersReducedMotionSetting.get());
+      void this.updateCssMedia();
+    });
+    mediaFeaturePrefersReducedTransparencySetting.addChangeListener(() => {
+      this.#mediaConfiguration.set('prefers-reduced-transparency', mediaFeaturePrefersReducedTransparencySetting.get());
       void this.updateCssMedia();
     });
     void this.updateCssMedia();
@@ -152,16 +159,12 @@ export class EmulationModel extends SDKModel<void> {
     }
 
     const avifFormatDisabledSetting = Common.Settings.Settings.instance().moduleSetting('avifFormatDisabled');
-    const jpegXlFormatDisabledSetting = Common.Settings.Settings.instance().moduleSetting('jpegXlFormatDisabled');
     const webpFormatDisabledSetting = Common.Settings.Settings.instance().moduleSetting('webpFormatDisabled');
 
     const updateDisabledImageFormats = (): void => {
       const types = [];
       if (avifFormatDisabledSetting.get()) {
         types.push(Protocol.Emulation.DisabledImageType.Avif);
-      }
-      if (jpegXlFormatDisabledSetting.get()) {
-        types.push(Protocol.Emulation.DisabledImageType.Jxl);
       }
       if (webpFormatDisabledSetting.get()) {
         types.push(Protocol.Emulation.DisabledImageType.Webp);
@@ -171,9 +174,8 @@ export class EmulationModel extends SDKModel<void> {
 
     avifFormatDisabledSetting.addChangeListener(updateDisabledImageFormats);
     webpFormatDisabledSetting.addChangeListener(updateDisabledImageFormats);
-    jpegXlFormatDisabledSetting.addChangeListener(updateDisabledImageFormats);
 
-    if (avifFormatDisabledSetting.get() || jpegXlFormatDisabledSetting.get() || webpFormatDisabledSetting.get()) {
+    if (avifFormatDisabledSetting.get() || webpFormatDisabledSetting.get()) {
       updateDisabledImageFormats();
     }
 
@@ -212,9 +214,17 @@ export class EmulationModel extends SDKModel<void> {
   }
 
   async emulateLocation(location: Location|null): Promise<void> {
-    if (!location || location.error) {
+    if (!location) {
       await Promise.all([
         this.#emulationAgent.invoke_clearGeolocationOverride(),
+        this.#emulationAgent.invoke_setTimezoneOverride({timezoneId: ''}),
+        this.#emulationAgent.invoke_setLocaleOverride({locale: ''}),
+        this.#emulationAgent.invoke_setUserAgentOverride(
+            {userAgent: MultitargetNetworkManager.instance().currentUserAgent()}),
+      ]);
+    } else if (location.unavailable) {
+      await Promise.all([
+        this.#emulationAgent.invoke_setGeolocationOverride({}),
         this.#emulationAgent.invoke_setTimezoneOverride({timezoneId: ''}),
         this.#emulationAgent.invoke_setLocaleOverride({locale: ''}),
         this.#emulationAgent.invoke_setUserAgentOverride(
@@ -400,6 +410,10 @@ export class EmulationModel extends SDKModel<void> {
         name: 'prefers-reduced-motion',
         value: this.#mediaConfiguration.get('prefers-reduced-motion') ?? '',
       },
+      {
+        name: 'prefers-reduced-transparency',
+        value: this.#mediaConfiguration.get('prefers-reduced-transparency') ?? '',
+      },
     ];
     return this.emulateCSSMedia(type, features);
   }
@@ -410,21 +424,21 @@ export class Location {
   longitude: number;
   timezoneId: string;
   locale: string;
-  error: boolean;
+  unavailable: boolean;
 
-  constructor(latitude: number, longitude: number, timezoneId: string, locale: string, error: boolean) {
+  constructor(latitude: number, longitude: number, timezoneId: string, locale: string, unavailable: boolean) {
     this.latitude = latitude;
     this.longitude = longitude;
     this.timezoneId = timezoneId;
     this.locale = locale;
-    this.error = error;
+    this.unavailable = unavailable;
   }
 
   static parseSetting(value: string): Location {
     if (value) {
-      const [position, timezoneId, locale, error] = value.split(':');
+      const [position, timezoneId, locale, unavailable] = value.split(':');
       const [latitude, longitude] = position.split('@');
-      return new Location(parseFloat(latitude), parseFloat(longitude), timezoneId, locale, Boolean(error));
+      return new Location(parseFloat(latitude), parseFloat(longitude), timezoneId, locale, Boolean(unavailable));
     }
     return new Location(0, 0, '', '', false);
   }
@@ -494,7 +508,7 @@ export class Location {
   }
 
   toSetting(): string {
-    return `${this.latitude}@${this.longitude}:${this.timezoneId}:${this.locale}:${this.error || ''}`;
+    return `${this.latitude}@${this.longitude}:${this.timezoneId}:${this.locale}:${this.unavailable || ''}`;
   }
 
   static defaultGeoMockAccuracy = 150;

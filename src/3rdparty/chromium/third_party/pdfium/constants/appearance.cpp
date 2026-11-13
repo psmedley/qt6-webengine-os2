@@ -1,11 +1,10 @@
-// Copyright 2021 PDFium Authors. All rights reserved.
+// Copyright 2021 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "constants/appearance.h"
 
-namespace pdfium {
-namespace appearance {
+namespace pdfium::appearance {
 
 // ISO 32000-1:2008 spec, table 189.
 // Entries in an appearance characteristics dictionary.
@@ -19,5 +18,4 @@ const char kI[] = "I";
 const char kRI[] = "RI";
 const char kIX[] = "IX";
 
-}  // namespace appearance
-}  // namespace pdfium
+}  // namespace pdfium::appearance

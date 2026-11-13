@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,23 +15,27 @@
 #ifndef ANALYTICS_ANALYTICS_RECORDER_H_
 #define ANALYTICS_ANALYTICS_RECORDER_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/container/btree_map.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "connections/implementation/analytics/connection_attempt_metadata_params.h"
-#include "connections/payload.h"
+#include "connections/payload_type.h"
 #include "connections/strategy.h"
 #include "internal/analytics/event_logger.h"
 #include "internal/platform/error_code_params.h"
+#include "internal/platform/implementation/system_clock.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/single_thread_executor.h"
 #include "internal/proto/analytics/connections_log.pb.h"
 #include "proto/connections_enums.pb.h"
 
-namespace location {
 namespace nearby {
 namespace analytics {
 
@@ -53,6 +57,11 @@ class AnalyticsRecorder {
       ABSL_LOCKS_EXCLUDED(mutex_);
   void OnStopAdvertising() ABSL_LOCKS_EXCLUDED(mutex_);
 
+  // Connection listening
+  void OnStartedIncomingConnectionListening(connections::Strategy strategy)
+      ABSL_LOCKS_EXCLUDED(mutex_);
+  void OnStoppedIncomingConnectionListening() ABSL_LOCKS_EXCLUDED(mutex_);
+
   // Discovery phase
   void OnStartDiscovery(
       connections::Strategy strategy,
@@ -65,6 +74,10 @@ class AnalyticsRecorder {
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Connection request
+  void OnRequestConnection(const connections::Strategy &strategy,
+                           const std::string &endpoint_id)
+      ABSL_LOCKS_EXCLUDED(mutex_);
+
   void OnConnectionRequestReceived(const std::string &remote_endpoint_id)
       ABSL_LOCKS_EXCLUDED(mutex_);
   void OnConnectionRequestSent(const std::string &remote_endpoint_id)
@@ -175,6 +188,10 @@ class AnalyticsRecorder {
 
   bool IsSessionLogged();
 
+  // Waits until all logs are sent to the backend.
+  // For testing only.
+  void Sync();
+
  private:
   // Tracks the chunks and duration of a Payload on a particular medium.
   class PendingPayload {
@@ -190,7 +207,7 @@ class AnalyticsRecorder {
 
     void AddChunk(std::int64_t chunk_size_bytes);
 
-    proto::ConnectionsLog::Payload GetProtoPayload(
+    location::nearby::analytics::proto::ConnectionsLog::Payload GetProtoPayload(
         location::nearby::proto::connections::PayloadStatus status);
 
     location::nearby::proto::connections::PayloadType type() const {
@@ -249,23 +266,26 @@ class AnalyticsRecorder {
         std::int64_t payload_id,
         location::nearby::proto::connections::PayloadStatus status);
 
-    std::vector<proto::ConnectionsLog::EstablishedConnection>
+    std::vector<location::nearby::analytics::proto::ConnectionsLog::
+                    EstablishedConnection>
     GetEstablisedConnections();
 
    private:
     void FinishPhysicalConnection(
-        proto::ConnectionsLog::EstablishedConnection *established_connection,
+        location::nearby::analytics::proto::ConnectionsLog::
+            EstablishedConnection *established_connection,
         location::nearby::proto::connections::DisconnectionReason reason);
-    std::vector<proto::ConnectionsLog::Payload> ResolvePendingPayloads(
+    std::vector<location::nearby::analytics::proto::ConnectionsLog::Payload>
+    ResolvePendingPayloads(
         absl::btree_map<std::int64_t, std::unique_ptr<PendingPayload>>
             &pending_payloads,
         location::nearby::proto::connections::DisconnectionReason reason);
 
     location::nearby::proto::connections::Medium current_medium_ =
         location::nearby::proto::connections::UNKNOWN_MEDIUM;
-    absl::btree_map<
-        location::nearby::proto::connections::Medium,
-        std::unique_ptr<proto::ConnectionsLog::EstablishedConnection>>
+    absl::btree_map<location::nearby::proto::connections::Medium,
+                    std::unique_ptr<location::nearby::analytics::proto::
+                                        ConnectionsLog::EstablishedConnection>>
         physical_connections_;
     absl::btree_map<std::int64_t, std::unique_ptr<PendingPayload>>
         incoming_payloads_;
@@ -278,7 +298,7 @@ class AnalyticsRecorder {
 
   // Callbacks the ConnectionsLog proto byte array data to the EventLogger with
   // ClientSession sub-proto.
-  void LogClientSession();
+  void LogClientSessionLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   // Callbacks the ConnectionsLog proto byte array data to the EventLogger.
   void LogEvent(location::nearby::proto::connections::EventType event_type);
 
@@ -293,14 +313,14 @@ class AnalyticsRecorder {
       ABSL_SHARED_LOCKS_REQUIRED(mutex_);
   void FinishDiscoveryPhaseLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   bool UpdateAdvertiserConnectionRequestLocked(
-      proto::ConnectionsLog::ConnectionRequest *request)
-      ABSL_SHARED_LOCKS_REQUIRED(mutex_);
+      location::nearby::analytics::proto::ConnectionsLog::ConnectionRequest
+          *request) ABSL_SHARED_LOCKS_REQUIRED(mutex_);
   bool UpdateDiscovererConnectionRequestLocked(
-      proto::ConnectionsLog::ConnectionRequest *request)
-      ABSL_SHARED_LOCKS_REQUIRED(mutex_);
+      location::nearby::analytics::proto::ConnectionsLog::ConnectionRequest
+          *request) ABSL_SHARED_LOCKS_REQUIRED(mutex_);
   bool BothEndpointsRespondedLocked(
-      proto::ConnectionsLog::ConnectionRequest *request)
-      ABSL_SHARED_LOCKS_REQUIRED(mutex_);
+      location::nearby::analytics::proto::ConnectionsLog::ConnectionRequest
+          *request) ABSL_SHARED_LOCKS_REQUIRED(mutex_);
   void LocalEndpointRespondedLocked(
       const std::string &remote_endpoint_id,
       location::nearby::proto::connections::ConnectionRequestResponse response)
@@ -310,8 +330,8 @@ class AnalyticsRecorder {
       location::nearby::proto::connections::ConnectionRequestResponse response)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void MarkConnectionRequestIgnoredLocked(
-      proto::ConnectionsLog::ConnectionRequest *request)
-      ABSL_SHARED_LOCKS_REQUIRED(mutex_);
+      location::nearby::analytics::proto::ConnectionsLog::ConnectionRequest
+          *request) ABSL_SHARED_LOCKS_REQUIRED(mutex_);
   void FinishUpgradeAttemptLocked(
       const std::string &endpoint_id,
       location::nearby::proto::connections::BandwidthUpgradeResult result,
@@ -322,7 +342,8 @@ class AnalyticsRecorder {
 
   // Reset the client cession's logging resources (e.g. current_strategy_,
   // current_advertising_phase_, current_discovery_phase_, etc)
-  void ResetClientSessionLoggingResouces();
+  void ResetClientSessionLoggingResoucesLocked()
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   location::nearby::proto::connections::ConnectionsStrategy
   StrategyToConnectionStrategy(connections::Strategy strategy);
@@ -338,7 +359,9 @@ class AnalyticsRecorder {
   Mutex mutex_;
 
   // ClientSession
-  std::unique_ptr<proto::ConnectionsLog::ClientSession> client_session_;
+  std::unique_ptr<
+      location::nearby::analytics::proto::ConnectionsLog::ClientSession>
+      client_session_;
   absl::Time started_client_session_time_;
   bool session_was_logged_ ABSL_GUARDED_BY(mutex_) = false;
   bool start_client_session_was_logged_ ABSL_GUARDED_BY(mutex_) = false;
@@ -346,36 +369,40 @@ class AnalyticsRecorder {
   // Current StrategySession
   connections::Strategy current_strategy_ ABSL_GUARDED_BY(mutex_) =
       connections::Strategy::kNone;
-  std::unique_ptr<proto::ConnectionsLog::StrategySession>
+  std::unique_ptr<
+      location::nearby::analytics::proto::ConnectionsLog::StrategySession>
       current_strategy_session_ ABSL_GUARDED_BY(mutex_);
   absl::Time started_strategy_session_time_ ABSL_GUARDED_BY(mutex_);
 
   // Current AdvertisingPhase
-  std::unique_ptr<proto::ConnectionsLog::AdvertisingPhase>
+  std::unique_ptr<
+      location::nearby::analytics::proto::ConnectionsLog::AdvertisingPhase>
       current_advertising_phase_;
-  absl::Time started_advertising_phase_time_;
+  absl::Time started_advertising_phase_time_ = absl::InfinitePast();
 
   // Current DiscoveryPhase
-  std::unique_ptr<proto::ConnectionsLog::DiscoveryPhase>
+  std::unique_ptr<
+      location::nearby::analytics::proto::ConnectionsLog::DiscoveryPhase>
       current_discovery_phase_;
-  absl::Time started_discovery_phase_time_;
+  absl::Time started_discovery_phase_time_ = absl::InfinitePast();
 
   absl::btree_map<std::string,
-                  std::unique_ptr<proto::ConnectionsLog::ConnectionRequest>>
+                  std::unique_ptr<location::nearby::analytics::proto::
+                                      ConnectionsLog::ConnectionRequest>>
       incoming_connection_requests_ ABSL_GUARDED_BY(mutex_);
   absl::btree_map<std::string,
-                  std::unique_ptr<proto::ConnectionsLog::ConnectionRequest>>
+                  std::unique_ptr<location::nearby::analytics::proto::
+                                      ConnectionsLog::ConnectionRequest>>
       outgoing_connection_requests_ ABSL_GUARDED_BY(mutex_);
   absl::btree_map<std::string, std::unique_ptr<LogicalConnection>>
       active_connections_ ABSL_GUARDED_BY(mutex_);
-  absl::btree_map<
-      std::string,
-      std::unique_ptr<proto::ConnectionsLog::BandwidthUpgradeAttempt>>
+  absl::btree_map<std::string,
+                  std::unique_ptr<location::nearby::analytics::proto::
+                                      ConnectionsLog::BandwidthUpgradeAttempt>>
       bandwidth_upgrade_attempts_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace analytics
 }  // namespace nearby
-}  // namespace location
 
 #endif  // ANALYTICS_ANALYTICS_RECORDER_H_

@@ -6,12 +6,12 @@
 
 #include <cstdint>
 #include <list>
+#include <optional>
 #include <utility>
 
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "quiche/quic/core/http/quic_spdy_stream.h"
 #include "quiche/quic/core/http/spdy_utils.h"
 #include "quiche/quic/core/http/web_transport_http3.h"
@@ -138,25 +138,6 @@ void QuicSimpleServerStream::OnBodyAvailable() {
   } else {
     SendResponse();
   }
-}
-
-void QuicSimpleServerStream::PushResponse(
-    Http2HeaderBlock push_request_headers) {
-  if (QuicUtils::IsClientInitiatedStreamId(session()->transport_version(),
-                                           id())) {
-    QUIC_BUG(quic_bug_10962_2)
-        << "Client initiated stream shouldn't be used as promised stream.";
-    return;
-  }
-  // Change the stream state to emulate a client request.
-  request_headers_ = std::move(push_request_headers);
-  content_length_ = 0;
-  QUIC_DVLOG(1) << "Stream " << id()
-                << " ready to receive server push response.";
-  QUICHE_DCHECK(reading_stopped());
-
-  // Directly send response based on the emulated request_headers_.
-  SendResponse();
 }
 
 void QuicSimpleServerStream::HandleRequestConnectData(bool fin_received) {
@@ -342,20 +323,6 @@ void QuicSimpleServerStream::Respond(const QuicBackendResponse* response) {
     return;
   }
 
-  if (QuicUtils::IsServerInitiatedStreamId(session()->transport_version(),
-                                           id())) {
-    // A server initiated stream is only used for a server push response,
-    // and only 200 and 30X response codes are supported for server push.
-    // This behavior mirrors the HTTP/2 implementation.
-    bool is_redirection = response_code / 100 == 3;
-    if (response_code != 200 && !is_redirection) {
-      QUIC_LOG(WARNING) << "Response to server push request " << request_url
-                        << " result in response code " << response_code;
-      Reset(QUIC_STREAM_CANCELLED);
-      return;
-    }
-  }
-
   if (response->response_type() == QuicBackendResponse::INCOMPLETE_RESPONSE) {
     QUIC_DVLOG(1)
         << "Stream " << id()
@@ -396,10 +363,10 @@ void QuicSimpleServerStream::SendStreamData(absl::string_view data,
 
   if (close_stream) {
     SendHeadersAndBodyAndTrailers(
-        /*response_headers=*/absl::nullopt, data,
+        /*response_headers=*/std::nullopt, data,
         /*response_trailers=*/spdy::Http2HeaderBlock());
   } else {
-    SendIncompleteResponse(/*response_headers=*/absl::nullopt, data);
+    SendIncompleteResponse(/*response_headers=*/std::nullopt, data);
   }
 }
 
@@ -452,15 +419,20 @@ void QuicSimpleServerStream::SendErrorResponse(int resp_code) {
 }
 
 void QuicSimpleServerStream::SendIncompleteResponse(
-    absl::optional<Http2HeaderBlock> response_headers, absl::string_view body) {
+    std::optional<Http2HeaderBlock> response_headers, absl::string_view body) {
   // Headers should be sent iff not sent in a previous response.
   QUICHE_DCHECK_NE(response_headers.has_value(), response_sent_);
 
   if (response_headers.has_value()) {
     QUIC_DLOG(INFO) << "Stream " << id() << " writing headers (fin = false) : "
                     << response_headers.value().DebugString();
+    // Do not mark response sent for early 100 continue response.
+    int response_code;
+    if (!ParseHeaderStatusCode(*response_headers, &response_code) ||
+        response_code != 100) {
+      response_sent_ = true;
+    }
     WriteHeaders(std::move(response_headers).value(), /*fin=*/false, nullptr);
-    response_sent_ = true;
   }
 
   QUIC_DLOG(INFO) << "Stream " << id()
@@ -477,7 +449,7 @@ void QuicSimpleServerStream::SendHeadersAndBody(
 }
 
 void QuicSimpleServerStream::SendHeadersAndBodyAndTrailers(
-    absl::optional<Http2HeaderBlock> response_headers, absl::string_view body,
+    std::optional<Http2HeaderBlock> response_headers, absl::string_view body,
     Http2HeaderBlock response_trailers) {
   // Headers should be sent iff not sent in a previous response.
   QUICHE_DCHECK_NE(response_headers.has_value(), response_sent_);

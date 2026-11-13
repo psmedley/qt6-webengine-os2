@@ -18,7 +18,7 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/unix_domain_socket.h"
 #include "content/common/zygote/zygote_commands_linux.h"
-#include "content/public/common/child_process_host.h"
+#include "content/public/browser/child_process_host.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "sandbox/policy/switches.h"
@@ -264,8 +264,7 @@ void ZygoteCommunication::Init(
       switches::kCdmWidevinePath,
 #endif
   };
-  cmd_line.CopySwitchesFrom(browser_command_line, kForwardSwitches,
-                            std::size(kForwardSwitches));
+  cmd_line.CopySwitchesFrom(browser_command_line, kForwardSwitches);
 
   pid_ = std::move(launcher).Run(&cmd_line, &control_fd_);
 

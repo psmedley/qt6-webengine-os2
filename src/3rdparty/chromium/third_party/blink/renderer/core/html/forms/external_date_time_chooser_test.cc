@@ -10,8 +10,10 @@
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser_client.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 
 namespace blink {
 
@@ -23,6 +25,7 @@ class ExternalDateTimeChooserTest : public testing::Test {
   Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
 
  private:
+  test::TaskEnvironment task_environment_;
   std::unique_ptr<DummyPageHolder> dummy_page_holder_;
 };
 
@@ -60,8 +63,10 @@ class TestDateTimeChooserClient final
 // This is a regression test for crbug.com/974646. EndChooser can cause a crash
 // when it's called twice because |client_| was already nullptr.
 TEST_F(ExternalDateTimeChooserTest, EndChooserShouldNotCrash) {
+  ScopedNullExecutionContext execution_context;
   ScopedInputMultipleFieldsUIForTest input_multiple_fields_ui(false);
-  auto* document = Document::CreateForTest();
+  auto* document =
+      Document::CreateForTest(execution_context.GetExecutionContext());
   auto* element = document->CreateRawElement(html_names::kInputTag);
   auto* client = MakeGarbageCollected<TestDateTimeChooserClient>(element);
   auto* external_date_time_chooser =
@@ -89,7 +94,8 @@ TEST_F(ExternalDateTimeChooserTest,
       )HTML");
   GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
-  auto* input = To<HTMLInputElement>(GetDocument().getElementById("test"));
+  auto* input =
+      To<HTMLInputElement>(GetDocument().getElementById(AtomicString("test")));
   ASSERT_TRUE(input);
 
   DateTimeChooserParameters params;

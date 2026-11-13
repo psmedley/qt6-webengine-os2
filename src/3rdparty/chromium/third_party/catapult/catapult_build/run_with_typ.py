@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env vpython3
 # Copyright 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -30,7 +30,6 @@ def Run(top_level_dir, path=None, suffixes=None, **kwargs):
       path=(path or []),
       coverage_source=[top_level_dir],
       suffixes=suffixes,
-      coverage=True,
       **kwargs)
 
 

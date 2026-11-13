@@ -33,7 +33,7 @@ UBool U_CALLCONV cleanupDefaultCurrencySpacing() {
     delete UNISET_NOTSZ;
     UNISET_NOTSZ = nullptr;
     gDefaultCurrencySpacingInitOnce.reset();
-    return TRUE;
+    return true;
 }
 
 void U_CALLCONV initDefaultCurrencySpacing(UErrorCode &status) {
@@ -62,10 +62,19 @@ Modifier::Parameters::Parameters(
 
 ModifierStore::~ModifierStore() = default;
 
-AdoptingModifierStore::~AdoptingModifierStore()  {
+AdoptingSignumModifierStore::~AdoptingSignumModifierStore()  {
     for (const Modifier *mod : mods) {
         delete mod;
     }
+}
+
+AdoptingSignumModifierStore&
+AdoptingSignumModifierStore::operator=(AdoptingSignumModifierStore&& other) noexcept {
+    for (size_t i=0; i<SIGNUM_COUNT; i++) {
+        this->mods[i] = other.mods[i];
+        other.mods[i] = nullptr;
+    }
+    return *this;
 }
 
 

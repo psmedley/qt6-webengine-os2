@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,6 +71,16 @@ TEST(ErrorOrTest, ErrorToString) {
   EXPECT_EQ("Failure: AddressInUse = \"\"", error.ToString());
   EXPECT_EQ("Failure: AddressInUse = \"Somebody called dibs\"",
             error_with_msg.ToString());
+}
+
+TEST(ErrorOrTest, ErrorCodeToString) {
+  constexpr auto error_none = Error::Code::kNone;
+  constexpr auto error_transient = Error::Code::kAgain;
+  constexpr auto error = Error::Code::kAddressInUse;
+
+  EXPECT_EQ("Success", ToString(error_none));
+  EXPECT_EQ("Failure: Transient", ToString(error_transient));
+  EXPECT_EQ("Failure: AddressInUse", ToString(error));
 }
 
 TEST(ErrorOrTest, ErrorOrWithError) {

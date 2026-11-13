@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {assertExists} from '../base/logging';
-import {TraceConfig} from '../common/protos';
+import {TraceConfig} from '../protos';
 
 import {createEmptyRecordConfig} from './record_config_types';
 import {genConfigProto, toPbtxt} from './record_controller';
@@ -32,7 +32,8 @@ test('SysConfig', () => {
   const result =
       TraceConfig.decode(genConfigProto(config, {os: 'Q', name: 'Android Q'}));
   const sources = assertExists(result.dataSources);
-  const srcConfig = assertExists(sources[0].config);
+  // TODO(hjd): This is all bad. Should just match the whole config.
+  const srcConfig = assertExists(sources[1].config);
   const ftraceConfig = assertExists(srcConfig.ftraceConfig);
   const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
   expect(ftraceEvents.includes('raw_syscalls/sys_enter')).toBe(true);
@@ -45,7 +46,7 @@ test('cpu scheduling includes kSyms if OS >= S', () => {
   const result =
       TraceConfig.decode(genConfigProto(config, {os: 'S', name: 'Android S'}));
   const sources = assertExists(result.dataSources);
-  const srcConfig = assertExists(sources[1].config);
+  const srcConfig = assertExists(sources[2].config);
   const ftraceConfig = assertExists(srcConfig.ftraceConfig);
   const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
   expect(ftraceConfig.symbolizeKsyms).toBe(true);
@@ -58,7 +59,7 @@ test('cpu scheduling does not include kSyms if OS <= S', () => {
   const result =
       TraceConfig.decode(genConfigProto(config, {os: 'Q', name: 'Android Q'}));
   const sources = assertExists(result.dataSources);
-  const srcConfig = assertExists(sources[1].config);
+  const srcConfig = assertExists(sources[2].config);
   const ftraceConfig = assertExists(srcConfig.ftraceConfig);
   const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
   expect(ftraceConfig.symbolizeKsyms).toBe(false);
@@ -72,7 +73,7 @@ test('kSyms can be enabled individually', () => {
   const result =
       TraceConfig.decode(genConfigProto(config, {os: 'Q', name: 'Android Q'}));
   const sources = assertExists(result.dataSources);
-  const srcConfig = assertExists(sources[0].config);
+  const srcConfig = assertExists(sources[1].config);
   const ftraceConfig = assertExists(srcConfig.ftraceConfig);
   const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
   expect(ftraceConfig.symbolizeKsyms).toBe(true);
@@ -86,7 +87,7 @@ test('kSyms can be disabled individually', () => {
   const result =
       TraceConfig.decode(genConfigProto(config, {os: 'Q', name: 'Android Q'}));
   const sources = assertExists(result.dataSources);
-  const srcConfig = assertExists(sources[0].config);
+  const srcConfig = assertExists(sources[1].config);
   const ftraceConfig = assertExists(srcConfig.ftraceConfig);
   const ftraceEvents = assertExists(ftraceConfig.ftraceEvents);
   expect(ftraceConfig.symbolizeKsyms).toBe(false);
@@ -172,7 +173,8 @@ test('ChromeConfig', () => {
 
   const expectedTraceConfig = '{"record_mode":"record-until-full",' +
       '"included_categories":' +
-      '["toplevel","disabled-by-default-ipc.flow","mojom","v8"],' +
+      '["toplevel","toplevel.flow","disabled-by-default-ipc.flow",' +
+      '"mojom","v8"],' +
       '"excluded_categories":["*"],' +
       '"memory_dump_config":{}}';
   expect(traceConfig).toEqual(expectedTraceConfig);
@@ -353,7 +355,8 @@ test('ChromeConfigRingBuffer', () => {
 
   const expectedTraceConfig = '{"record_mode":"record-continuously",' +
       '"included_categories":' +
-      '["toplevel","disabled-by-default-ipc.flow","mojom","v8"],' +
+      '["toplevel","toplevel.flow","disabled-by-default-ipc.flow",' +
+      '"mojom","v8"],' +
       '"excluded_categories":["*"],"memory_dump_config":{}}';
   expect(traceConfig).toEqual(expectedTraceConfig);
   expect(traceConfigT).toEqual(expectedTraceConfig);
@@ -386,7 +389,8 @@ test('ChromeConfigLongTrace', () => {
 
   const expectedTraceConfig = '{"record_mode":"record-continuously",' +
       '"included_categories":' +
-      '["toplevel","disabled-by-default-ipc.flow","mojom","v8"],' +
+      '["toplevel","toplevel.flow","disabled-by-default-ipc.flow",' +
+      '"mojom","v8"],' +
       '"excluded_categories":["*"],"memory_dump_config":{}}';
   expect(traceConfig).toEqual(expectedTraceConfig);
   expect(traceConfigT).toEqual(expectedTraceConfig);

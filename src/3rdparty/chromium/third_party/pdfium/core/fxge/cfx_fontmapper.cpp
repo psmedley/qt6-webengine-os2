@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,14 @@
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_memory.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
-#include "core/fxcrt/stl_util.h"
+#include "core/fxcrt/unowned_ptr_exclusion.h"
 #include "core/fxge/cfx_fontmgr.h"
 #include "core/fxge/cfx_substfont.h"
 #include "core/fxge/fx_font.h"
 #include "core/fxge/systemfontinfo_iface.h"
 #include "third_party/base/check_op.h"
+#include "third_party/base/containers/adapters.h"
 #include "third_party/base/containers/contains.h"
-#include "third_party/base/cxx17_backports.h"
 
 namespace {
 
@@ -390,7 +390,7 @@ class ScopedFontDeleter {
 
  private:
   UnownedPtr<SystemFontInfoIface> const font_info_;
-  void* const font_;
+  UNOWNED_PTR_EXCLUSION void* const font_;  // void type incompatible.
 };
 
 }  // namespace
@@ -460,7 +460,7 @@ void CFX_FontMapper::AddInstalledFont(const ByteString& name,
     ScopedFontDeleter scoped_font(m_pFontInfo.get(), font_handle);
     ByteString new_name = GetPSNameFromTT(font_handle);
     if (!new_name.IsEmpty())
-      m_LocalizedTTFonts.push_back(std::make_pair(new_name, name));
+      m_LocalizedTTFonts.emplace_back(new_name, name);
   }
   m_InstalledTTFonts.push_back(name);
   m_LastFamily = name;
@@ -476,14 +476,15 @@ void CFX_FontMapper::LoadInstalledFonts() {
 
 ByteString CFX_FontMapper::MatchInstalledFonts(const ByteString& norm_name) {
   LoadInstalledFonts();
-  int i;
-  for (i = fxcrt::CollectionSize<int>(m_InstalledTTFonts) - 1; i >= 0; i--) {
-    if (TT_NormalizeName(m_InstalledTTFonts[i]) == norm_name)
-      return m_InstalledTTFonts[i];
+  for (const ByteString& font : pdfium::base::Reversed(m_InstalledTTFonts)) {
+    if (TT_NormalizeName(font) == norm_name) {
+      return font;
+    }
   }
-  for (i = fxcrt::CollectionSize<int>(m_LocalizedTTFonts) - 1; i >= 0; i--) {
-    if (TT_NormalizeName(m_LocalizedTTFonts[i].first) == norm_name)
-      return m_LocalizedTTFonts[i].second;
+  for (const auto& font_data : pdfium::base::Reversed(m_LocalizedTTFonts)) {
+    if (TT_NormalizeName(font_data.first) == norm_name) {
+      return font_data.second;
+    }
   }
   return ByteString();
 }
@@ -550,11 +551,10 @@ RetainPtr<CFX_Face> CFX_FontMapper::UseExternalSubst(
 
   subst_font->m_Family = face_name;
   subst_font->m_Charset = charset;
-  int face_weight =
-      FXFT_Is_Face_Bold(face->GetRec()) ? FXFONT_FW_BOLD : FXFONT_FW_NORMAL;
+  int face_weight = face->IsBold() ? FXFONT_FW_BOLD : FXFONT_FW_NORMAL;
   if (weight != face_weight)
     subst_font->m_Weight = weight;
-  if (is_italic && !FXFT_Is_Face_Italic(face->GetRec())) {
+  if (is_italic && !face->IsItalic()) {
     if (italic_angle == 0)
       italic_angle = -12;
     else if (abs(italic_angle) < 5)
@@ -715,7 +715,7 @@ RetainPtr<CFX_Face> CFX_FontMapper::FindSubstFont(const ByteString& name,
   }
 
   if (Charset == FX_Charset::kSymbol) {
-#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_WIN)
     if (subst_name == "Symbol") {
       subst_font->m_Family = "Chrome Symbol";
       subst_font->m_Charset = FX_Charset::kSymbol;
@@ -793,25 +793,24 @@ absl::optional<ByteString> CFX_FontMapper::LocalizedFontNameStartingWith(
 #endif  // BUILDFLAG(IS_WIN)
 
 #ifdef PDF_ENABLE_XFA
-FixedUninitDataVector<uint8_t> CFX_FontMapper::RawBytesForIndex(size_t index) {
+FixedSizeDataVector<uint8_t> CFX_FontMapper::RawBytesForIndex(size_t index) {
   CHECK_LT(index, m_FaceArray.size());
 
   void* font_handle = m_pFontInfo->MapFont(0, false, FX_Charset::kDefault, 0,
                                            GetFaceName(index));
-  if (!font_handle)
-    return FixedUninitDataVector<uint8_t>();
-
+  if (!font_handle) {
+    return FixedSizeDataVector<uint8_t>();
+  }
   ScopedFontDeleter scoped_font(m_pFontInfo.get(), font_handle);
   size_t required_size = m_pFontInfo->GetFontData(font_handle, 0, {});
-  if (required_size == 0)
-    return FixedUninitDataVector<uint8_t>();
-
-  FixedUninitDataVector<uint8_t> result(required_size);
-  size_t actual_size =
-      m_pFontInfo->GetFontData(font_handle, 0, result.writable_span());
-  if (actual_size != required_size)
-    return FixedUninitDataVector<uint8_t>();
-
+  if (required_size == 0) {
+    return FixedSizeDataVector<uint8_t>();
+  }
+  auto result = FixedSizeDataVector<uint8_t>::Uninit(required_size);
+  size_t actual_size = m_pFontInfo->GetFontData(font_handle, 0, result.span());
+  if (actual_size != required_size) {
+    return FixedSizeDataVector<uint8_t>();
+  }
   return result;
 }
 #endif  // PDF_ENABLE_XFA
@@ -824,9 +823,9 @@ RetainPtr<CFX_Face> CFX_FontMapper::GetCachedTTCFace(void* font_handle,
   RetainPtr<CFX_FontMgr::FontDesc> pFontDesc =
       m_pFontMgr->GetCachedTTCFontDesc(ttc_size, checksum);
   if (!pFontDesc) {
-    FixedUninitDataVector<uint8_t> font_data(ttc_size);
-    size_t size = m_pFontInfo->GetFontData(font_handle, kTableTTCF,
-                                           font_data.writable_span());
+    auto font_data = FixedSizeDataVector<uint8_t>::Uninit(ttc_size);
+    size_t size =
+        m_pFontInfo->GetFontData(font_handle, kTableTTCF, font_data.span());
     if (size != ttc_size)
       return nullptr;
 
@@ -857,9 +856,8 @@ RetainPtr<CFX_Face> CFX_FontMapper::GetCachedFace(void* font_handle,
   RetainPtr<CFX_FontMgr::FontDesc> pFontDesc =
       m_pFontMgr->GetCachedFontDesc(subst_name, weight, is_italic);
   if (!pFontDesc) {
-    FixedUninitDataVector<uint8_t> font_data(data_size);
-    size_t size =
-        m_pFontInfo->GetFontData(font_handle, 0, font_data.writable_span());
+    auto font_data = FixedSizeDataVector<uint8_t>::Uninit(data_size);
+    size_t size = m_pFontInfo->GetFontData(font_handle, 0, font_data.span());
     if (size != data_size)
       return nullptr;
 

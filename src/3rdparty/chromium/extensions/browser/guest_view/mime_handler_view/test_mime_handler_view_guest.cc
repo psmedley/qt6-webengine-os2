@@ -4,8 +4,9 @@
 
 #include "extensions/browser/guest_view/mime_handler_view/test_mime_handler_view_guest.h"
 
-#include "base/bind.h"
-#include "base/test/test_timeouts.h"
+#include "base/functional/bind.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/run_until.h"
 #include "base/time/time.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -17,8 +18,8 @@ using guest_view::GuestViewBase;
 namespace extensions {
 
 TestMimeHandlerViewGuest::TestMimeHandlerViewGuest(
-    content::WebContents* owner_web_contents)
-    : MimeHandlerViewGuest(owner_web_contents) {}
+    content::RenderFrameHost* owner_rfh)
+    : MimeHandlerViewGuest(owner_rfh) {}
 
 TestMimeHandlerViewGuest::~TestMimeHandlerViewGuest() = default;
 
@@ -33,8 +34,8 @@ void TestMimeHandlerViewGuest::RegisterTestGuestViewType(
 
 // static
 std::unique_ptr<GuestViewBase> TestMimeHandlerViewGuest::Create(
-    content::WebContents* owner_web_contents) {
-  return base::WrapUnique(new TestMimeHandlerViewGuest(owner_web_contents));
+    content::RenderFrameHost* owner_rfh) {
+  return base::WrapUnique(new TestMimeHandlerViewGuest(owner_rfh));
 }
 
 // static
@@ -81,15 +82,11 @@ void TestMimeHandlerViewGuest::DidAttachToEmbedder() {
 void TestMimeHandlerViewGuest::WaitForGuestLoadStartThenStop(
     GuestViewBase* guest_view) {
   auto* guest_contents = guest_view->web_contents();
-
-  while (!guest_contents->IsLoading() &&
-         !guest_view->GetController().GetLastCommittedEntry()) {
-    base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
-    run_loop.Run();
-  }
-
+  // Wait for loading to start.
+  EXPECT_TRUE(base::test::RunUntil([&]() {
+    return guest_contents->IsLoading() ||
+           guest_view->GetController().GetLastCommittedEntry();
+  }));
   ASSERT_TRUE(content::WaitForLoadStop(guest_contents));
 }
 

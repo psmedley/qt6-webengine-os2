@@ -30,7 +30,7 @@ enum GrVkFeatureFlags {
     kSampleRateShading_GrVkFeatureFlag = 0x0004,
 };
 
-// It is not guarenteed VkPhysicalDeviceProperties2 will be in the client's header so we forward
+// It is not guaranteed VkPhysicalDeviceProperties2 will be in the client's header so we forward
 // declare it here to be safe.
 struct VkPhysicalDeviceFeatures2;
 
@@ -72,7 +72,7 @@ struct SK_API GrVkBackendContext {
     bool                                fOwnsInstanceAndDevice = false;
     // Indicates that we are working with protected content and all CommandPool and Queue operations
     // should be done in a protected context.
-    GrProtected                         fProtectedContext = GrProtected::kNo;
+    skgpu::Protected                    fProtectedContext = skgpu::Protected::kNo;
 };
 
 #endif

@@ -119,7 +119,7 @@ void SelectFileDialogQt::SelectFileImpl(Type type, const std::u16string &title,
     if (file_types) {
         for (const auto &type : file_types->extensions) {
             for (const auto &extension : type)
-                acceptedSuffixes.append("." + toQt(extension));
+                acceptedSuffixes.append(u'.' + toQt(extension));
         }
     }
 
@@ -137,7 +137,7 @@ SelectFileDialogFactoryQt::Create(ui::SelectFileDialog::Listener *listener,
                                   std::unique_ptr<ui::SelectFilePolicy> policy)
 {
     content::WebContents *webContents =
-            static_cast<SelectFilePolicyQt *>(policy.get())->webContents();
+            static_cast<SelectFilePolicyQt *>(policy.get())->webContents()->GetOutermostWebContents();
     WebContentsAdapterClient *client =
             WebContentsViewQt::from(static_cast<content::WebContentsImpl *>(webContents)->GetView())
                     ->client();

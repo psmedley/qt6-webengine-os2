@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@
 #include "core/fxcrt/string_view_template.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 namespace fxcrt {
 
@@ -164,9 +164,15 @@ class ByteString {
 
   void Reserve(size_t len);
 
+  // Increase the backing store of the string so that it is capable of storing
+  // at least `nMinBufLength` chars. Returns a span to the entire buffer,
+  // which may be larger than `nMinBufLength` due to rounding by allocators.
   // Note: any modification of the string (including ReleaseBuffer()) may
   // invalidate the span, which must not outlive its buffer.
   pdfium::span<char> GetBuffer(size_t nMinBufLength);
+
+  // Sets the size of the string to `nNewLength` chars. Call this after a call
+  // to GetBuffer(), to indicate how much of the buffer was actually used.
   void ReleaseBuffer(size_t nNewLength);
 
   ByteString Substr(size_t offset) const;
@@ -285,6 +291,13 @@ inline ByteString operator+(ByteStringView str1, const ByteString& str2) {
 
 std::ostream& operator<<(std::ostream& os, const ByteString& str);
 std::ostream& operator<<(std::ostream& os, ByteStringView str);
+
+// This is declared here for use in gtest-based tests but is defined in a test
+// support target. This should not be used in production code. Just use
+// operator<< from above instead.
+// In some cases, gtest will automatically use operator<< as well, but in this
+// case, it needs PrintTo() because ByteString looks like a container to gtest.
+void PrintTo(const ByteString& str, std::ostream* os);
 
 }  // namespace fxcrt
 

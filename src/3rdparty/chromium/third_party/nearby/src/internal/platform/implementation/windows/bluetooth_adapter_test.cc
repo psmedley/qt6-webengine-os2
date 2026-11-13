@@ -21,7 +21,6 @@
 #include "absl/synchronization/notification.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
 namespace {
@@ -164,16 +163,14 @@ TEST(BluetoothAdapter, DISABLED_SetOnScanModeChanged) {
   api::BluetoothAdapter::ScanMode mode =
       api::BluetoothAdapter::ScanMode::kUnknown;
   absl::Notification scan_mode_changed_notification;
-  BluetoothAdapter::ScanModeCallback callback =
-      [&mode, &scan_mode_changed_notification](
-          api::BluetoothAdapter::ScanMode scan_mode) {
-        mode = scan_mode;
-        scan_mode_changed_notification.Notify();
-      };
   BluetoothAdapter bluetooth_adapter;
   bluetooth_adapter.SetScanMode(mode);
 
-  bluetooth_adapter.SetOnScanModeChanged(callback);
+  bluetooth_adapter.SetOnScanModeChanged(
+      [&](api::BluetoothAdapter::ScanMode scan_mode) {
+        mode = scan_mode;
+        scan_mode_changed_notification.Notify();
+      });
   bluetooth_adapter.SetScanMode(
       api::BluetoothAdapter::ScanMode::kConnectableDiscoverable);
   EXPECT_TRUE(scan_mode_changed_notification.WaitForNotificationWithTimeout(
@@ -186,6 +183,21 @@ TEST(BluetoothAdapter, DISABLED_IsExtendedAdvertisingSupported) {
   EXPECT_TRUE(bluetooth_adapter.IsExtendedAdvertisingSupported());
 }
 
+TEST(BluetoothAdapter, DISABLED_IsCentralRoleSupported) {
+  BluetoothAdapter bluetooth_adapter;
+  EXPECT_TRUE(bluetooth_adapter.IsCentralRoleSupported());
+}
+
+TEST(BluetoothAdapter, DISABLED_IsPeripheralRoleSupported) {
+  BluetoothAdapter bluetooth_adapter;
+  EXPECT_TRUE(bluetooth_adapter.IsPeripheralRoleSupported());
+}
+
+TEST(BluetoothAdapter, DISABLED_IsLowEnergySupported) {
+  BluetoothAdapter bluetooth_adapter;
+  EXPECT_TRUE(bluetooth_adapter.IsLowEnergySupported());
+}
+
 TEST(BluetoothAdapter, DISABLED_GetNameFromComputerName) {
   BluetoothAdapter bluetooth_adapter;
   EXPECT_TRUE(!bluetooth_adapter.GetNameFromComputerName().empty());
@@ -194,4 +206,3 @@ TEST(BluetoothAdapter, DISABLED_GetNameFromComputerName) {
 }  // namespace
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef NO_WEBRTC
+
 #include "connections/implementation/mediums/webrtc/connection_flow.h"
 
 #include <iterator>
@@ -28,7 +30,6 @@
 #include "webrtc/api/data_channel_interface.h"
 #include "webrtc/api/jsep.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace mediums {
@@ -421,9 +422,10 @@ void ConnectionFlow::CreateSocketFromDataChannel(
         // Pass socket wrapper by copy on purpose
         data_channel_listener_.data_channel_open_cb(socket_wrapper_);
       }},
-      .socket_closed_cb = [callback =
-                               data_channel_listener_.data_channel_closed_cb](
-                              WebRtcSocket*) { callback(); },
+      .socket_closed_cb =
+          [this](WebRtcSocket*) {
+            data_channel_listener_.data_channel_closed_cb();
+          },
   });
   socket_wrapper_ = WebRtcSocketWrapper(std::move(socket));
 }
@@ -493,12 +495,17 @@ bool ConnectionFlow::CloseOnSignalingThread() {
     return false;
   }
   state_ = State::kEnded;
+  // Close the socket wrapper before terminating the PeerConnection
+  // since the teardown process of the PC may close threads that are
+  // otherwise depended upon by objects kept alive by the socket_wrapper.
+  if (socket_wrapper_.IsValid()) socket_wrapper_.Close();
+
   // This prevents other tasks from queuing on the signaling thread for this
   // object.
   auto pc = GetAndResetPeerConnection();
 
   NEARBY_LOG(INFO, "Closing WebRTC peer connection.");
-  // NOTE: Closing the peer conection will close the data channel and thus the
+  // NOTE: Closing the peer connection will close the data channel and thus the
   // socket implicitly.
   if (pc) pc->Close();
   NEARBY_LOG(INFO, "Closed WebRTC peer connection.");
@@ -521,7 +528,7 @@ bool ConnectionFlow::RunOnSignalingThread(Runnable&& runnable) {
   // but we can access the signaling thread handle.
   pc->signaling_thread()->PostTask(
       [can_run_tasks = std::weak_ptr<void>(can_run_tasks_),
-       task = std::move(runnable)] {
+       task = std::move(runnable)]() mutable {
         // don't run the task if the weak_ptr is no longer valid.
         // shared_ptr |can_run_tasks_| is destroyed on the same thread
         // (signaling thread). This guarantees that if the weak_ptr is valid
@@ -558,4 +565,5 @@ ConnectionFlow::GetAndResetPeerConnection() {
 }  // namespace mediums
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
+
+#endif

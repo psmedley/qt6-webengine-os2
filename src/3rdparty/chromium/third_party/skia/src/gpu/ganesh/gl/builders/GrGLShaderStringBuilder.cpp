@@ -5,57 +5,21 @@
  * found in the LICENSE file.
  */
 
-#include "src/core/SkAutoMalloc.h"
+#include "src/base/SkAutoMalloc.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/gpu/ganesh/gl/GrGLGpu.h"
 #include "src/gpu/ganesh/gl/builders/GrGLShaderStringBuilder.h"
 #include "src/sksl/SkSLCompiler.h"
+#include "src/sksl/SkSLProgramSettings.h"
 #include "src/sksl/codegen/SkSLGLSLCodeGenerator.h"
 #include "src/sksl/ir/SkSLProgram.h"
 #include "src/utils/SkShaderUtils.h"
-
-// Print the source code for all shaders generated.
-static const bool gPrintSKSL = false;
-static const bool gPrintGLSL = false;
-
-std::unique_ptr<SkSL::Program> GrSkSLtoGLSL(const GrGLGpu* gpu,
-                                            SkSL::ProgramKind programKind,
-                                            const std::string& sksl,
-                                            const SkSL::ProgramSettings& settings,
-                                            std::string* glsl,
-                                            GrContextOptions::ShaderErrorHandler* errorHandler) {
-    SkSL::Compiler* compiler = gpu->shaderCompiler();
-    std::unique_ptr<SkSL::Program> program;
-#ifdef SK_DEBUG
-    std::string src = SkShaderUtils::PrettyPrint(sksl);
-#else
-    const std::string& src = sksl;
-#endif
-    program = compiler->convertProgram(programKind, src, settings);
-    if (!program || !compiler->toGLSL(*program, glsl)) {
-        errorHandler->compileError(src.c_str(), compiler->errorText().c_str());
-        return nullptr;
-    }
-
-    if (gPrintSKSL || gPrintGLSL) {
-        SkShaderUtils::PrintShaderBanner(programKind);
-        if (gPrintSKSL) {
-            SkDebugf("SKSL:\n");
-            SkShaderUtils::PrintLineByLine(SkShaderUtils::PrettyPrint(sksl));
-        }
-        if (gPrintGLSL) {
-            SkDebugf("GLSL:\n");
-            SkShaderUtils::PrintLineByLine(SkShaderUtils::PrettyPrint(*glsl));
-        }
-    }
-
-    return program;
-}
 
 GrGLuint GrGLCompileAndAttachShader(const GrGLContext& glCtx,
                                     GrGLuint programId,
                                     GrGLenum type,
                                     const std::string& glsl,
+                                    bool shaderWasCached,
                                     GrThreadSafePipelineBuilder::Stats* stats,
                                     GrContextOptions::ShaderErrorHandler* errorHandler) {
     TRACE_EVENT0_ALWAYS("skia.shaders", "driver_compile_shader");
@@ -68,15 +32,13 @@ GrGLuint GrGLCompileAndAttachShader(const GrGLContext& glCtx,
         return 0;
     }
     const GrGLchar* source = glsl.c_str();
-    GrGLint sourceLength = glsl.size();
+    GrGLint sourceLength = SkToInt(glsl.size());
     GR_GL_CALL(gli, ShaderSource(shaderId, 1, &source, &sourceLength));
 
     stats->incShaderCompilations();
     GR_GL_CALL(gli, CompileShader(shaderId));
 
-    bool checkCompiled = !glCtx.caps()->skipErrorChecks();
-
-    if (checkCompiled) {
+    {
         ATRACE_ANDROID_FRAMEWORK("checkCompiled");
         GrGLint compiled = GR_GL_INIT_ZERO;
         GR_GL_CALL(gli, GetShaderiv(shaderId, GR_GL_COMPILE_STATUS, &compiled));
@@ -91,7 +53,8 @@ GrGLuint GrGLCompileAndAttachShader(const GrGLContext& glCtx,
                 GrGLsizei length = GR_GL_INIT_ZERO;
                 GR_GL_CALL(gli, GetShaderInfoLog(shaderId, infoLen+1, &length, (char*)log.get()));
             }
-            errorHandler->compileError(glsl.c_str(), infoLen > 0 ? (const char*)log.get() : "");
+            errorHandler->compileError(
+                    glsl.c_str(), infoLen > 0 ? (const char*)log.get() : "", shaderWasCached);
             GR_GL_CALL(gli, DeleteShader(shaderId));
             return 0;
         }
@@ -103,4 +66,44 @@ GrGLuint GrGLCompileAndAttachShader(const GrGLContext& glCtx,
     // attached to a program, which then causes glLinkProgram to fail.
     GR_GL_CALL(gli, AttachShader(programId, shaderId));
     return shaderId;
+}
+
+bool GrGLCheckLinkStatus(const GrGLGpu* gpu,
+                         GrGLuint programID,
+                         bool shaderWasCached,
+                         GrContextOptions::ShaderErrorHandler* errorHandler,
+                         const std::string* sksl[kGrShaderTypeCount],
+                         const std::string glsl[kGrShaderTypeCount]) {
+    const GrGLInterface* gli = gpu->glInterface();
+
+    GrGLint linked = GR_GL_INIT_ZERO;
+    GR_GL_CALL(gli, GetProgramiv(programID, GR_GL_LINK_STATUS, &linked));
+    if (!linked && errorHandler) {
+        std::string allShaders;
+        if (sksl) {
+            SkSL::String::appendf(&allShaders, "// Vertex SKSL\n%s\n"
+                                               "// Fragment SKSL\n%s\n",
+                                               sksl[kVertex_GrShaderType]->c_str(),
+                                               sksl[kFragment_GrShaderType]->c_str());
+        }
+        if (glsl) {
+            SkSL::String::appendf(&allShaders, "// Vertex GLSL\n%s\n"
+                                               "// Fragment GLSL\n%s\n",
+                                               glsl[kVertex_GrShaderType].c_str(),
+                                               glsl[kFragment_GrShaderType].c_str());
+        }
+        GrGLint infoLen = GR_GL_INIT_ZERO;
+        GR_GL_CALL(gli, GetProgramiv(programID, GR_GL_INFO_LOG_LENGTH, &infoLen));
+        SkAutoMalloc log(infoLen+1);
+        if (infoLen > 0) {
+            // retrieve length even though we don't need it to workaround
+            // bug in chrome cmd buffer param validation.
+            GrGLsizei length = GR_GL_INIT_ZERO;
+            GR_GL_CALL(gli, GetProgramInfoLog(programID, infoLen+1, &length, (char*)log.get()));
+        }
+        const char* errorMsg = (infoLen > 0) ? (const char*)log.get()
+                                             : "link failed but did not provide an info log";
+        errorHandler->compileError(allShaders.c_str(), errorMsg, shaderWasCached);
+    }
+    return SkToBool(linked);
 }

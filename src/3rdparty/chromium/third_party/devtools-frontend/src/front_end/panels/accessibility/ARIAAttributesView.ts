@@ -3,21 +3,22 @@
 // found in the LICENSE file.
 
 import * as i18n from '../../core/i18n/i18n.js';
+import * as Platform from '../../core/platform/platform.js';
 import type * as SDK from '../../core/sdk/sdk.js';
 import * as UI from '../../ui/legacy/legacy.js';
-import * as Platform from '../../core/platform/platform.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import {AccessibilitySubPane} from './AccessibilitySubPane.js';
 import {ariaMetadata} from './ARIAMetadata.js';
 
 const UIStrings = {
   /**
-  *@description Text in ARIAAttributes View of the Accessibility panel
-  */
+   *@description Text in ARIAAttributes View of the Accessibility panel
+   */
   ariaAttributes: 'ARIA Attributes',
   /**
-  *@description Text in ARIAAttributes View of the Accessibility panel
-  */
+   *@description Text in ARIAAttributes View of the Accessibility panel
+   */
   noAriaAttributes: 'No ARIA attributes',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/accessibility/ARIAAttributesView.ts', UIStrings);
@@ -30,9 +31,10 @@ export class ARIAAttributesPane extends AccessibilitySubPane {
 
     this.noPropertiesInfo = this.createInfo(i18nString(UIStrings.noAriaAttributes));
     this.treeOutline = this.createTreeOutline();
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('aria-attributes')}`);
   }
 
-  setNode(node: SDK.DOMModel.DOMNode|null): void {
+  override setNode(node: SDK.DOMModel.DOMNode|null): void {
     super.setNode(node);
     this.treeOutline.removeChildren();
     if (!node) {
@@ -83,7 +85,7 @@ export class ARIAAttributesTreeElement extends UI.TreeOutline.TreeElement {
     return valueElement;
   }
 
-  onattach(): void {
+  override onattach(): void {
     this.populateListItem();
     this.listItemElement.addEventListener('click', this.mouseClick.bind(this));
   }
@@ -212,7 +214,6 @@ export class ARIAAttributePrompt extends UI.TextPrompt.TextPrompt {
         text: c,
         title: undefined,
         subtitle: undefined,
-        iconType: undefined,
         priority: undefined,
         isSecondary: undefined,
         subtitleRenderer: undefined,

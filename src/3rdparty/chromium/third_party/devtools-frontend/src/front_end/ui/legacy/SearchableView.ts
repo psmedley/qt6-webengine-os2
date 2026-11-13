@@ -48,51 +48,51 @@ import {VBox} from './Widget.js';
 
 const UIStrings = {
   /**
-  *@description Text on a button to replace one instance with input text for the ctrl+F search bar
-  */
+   *@description Text on a button to replace one instance with input text for the ctrl+F search bar
+   */
   replace: 'Replace',
   /**
-  *@description Text to find an item
-  */
+   *@description Text to find an item
+   */
   findString: 'Find',
   /**
-  *@description Text on a button to search previous instance for the ctrl+F search bar
-  */
+   *@description Text on a button to search previous instance for the ctrl+F search bar
+   */
   searchPrevious: 'Search previous',
   /**
-  *@description Text on a button to search next instance for the ctrl+F search bar
-  */
+   *@description Text on a button to search next instance for the ctrl+F search bar
+   */
   searchNext: 'Search next',
   /**
-  *@description Text to search by matching case of the input
-  */
+   *@description Text to search by matching case of the input
+   */
   matchCase: 'Match Case',
   /**
-  *@description Text for searching with regular expressinn
-  */
+   *@description Text for searching with regular expressinn
+   */
   useRegularExpression: 'Use Regular Expression',
   /**
-  *@description Text to cancel something
-  */
+   *@description Text to cancel something
+   */
   cancel: 'Cancel',
   /**
-  *@description Text on a button to replace all instances with input text for the ctrl+F search bar
-  */
+   *@description Text on a button to replace all instances with input text for the ctrl+F search bar
+   */
   replaceAll: 'Replace all',
   /**
-  *@description Text to indicate the current match index and the total number of matches for the ctrl+F search bar
-  *@example {2} PH1
-  *@example {3} PH2
-  */
+   *@description Text to indicate the current match index and the total number of matches for the ctrl+F search bar
+   *@example {2} PH1
+   *@example {3} PH2
+   */
   dOfD: '{PH1} of {PH2}',
   /**
-  *@description Text to indicate search result for the ctrl+F search bar
-  */
+   *@description Text to indicate search result for the ctrl+F search bar
+   */
   matchString: '1 match',
   /**
-  *@description Text to indicate search result for the ctrl+F search bar
-  *@example {2} PH1
-  */
+   *@description Text to indicate search result for the ctrl+F search bar
+   *@example {2} PH1
+   */
   dMatches: '{PH1} matches',
 };
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/SearchableView.ts', UIStrings);
@@ -139,7 +139,7 @@ export class SearchableView extends VBox {
     this.footerElement = this.footerElementContainer.createChild('div', 'toolbar-search');
 
     const replaceToggleToolbar = new Toolbar('replace-toggle-toolbar', this.footerElement);
-    this.replaceToggleButton = new ToolbarToggle(i18nString(UIStrings.replace), 'mediumicon-replace');
+    this.replaceToggleButton = new ToolbarToggle(i18nString(UIStrings.replace), 'replace');
     this.replaceToggleButton.addEventListener(ToolbarButton.Events.Click, this.toggleReplace, this);
     replaceToggleToolbar.appendToolbarItem(this.replaceToggleButton);
 
@@ -162,13 +162,13 @@ export class SearchableView extends VBox {
         searchNavigationElement.createChild('div', 'toolbar-search-navigation toolbar-search-navigation-prev');
     this.searchNavigationPrevElement.addEventListener('click', this.onPrevButtonSearch.bind(this), false);
     Tooltip.install(this.searchNavigationPrevElement, i18nString(UIStrings.searchPrevious));
-    ARIAUtils.setAccessibleName(this.searchNavigationPrevElement, i18nString(UIStrings.searchPrevious));
+    ARIAUtils.setLabel(this.searchNavigationPrevElement, i18nString(UIStrings.searchPrevious));
 
     this.searchNavigationNextElement =
         searchNavigationElement.createChild('div', 'toolbar-search-navigation toolbar-search-navigation-next');
     this.searchNavigationNextElement.addEventListener('click', this.onNextButtonSearch.bind(this), false);
     Tooltip.install(this.searchNavigationNextElement, i18nString(UIStrings.searchNext));
-    ARIAUtils.setAccessibleName(this.searchNavigationNextElement, i18nString(UIStrings.searchNext));
+    ARIAUtils.setLabel(this.searchNavigationNextElement, i18nString(UIStrings.searchNext));
 
     this.searchInputElement.addEventListener('keydown', this.onSearchKeyDown.bind(this), true);
     this.searchInputElement.addEventListener('input', this.onInput.bind(this), false);
@@ -196,19 +196,25 @@ export class SearchableView extends VBox {
       toolbar.appendToolbarItem(this.regexButton);
     }
 
-    const cancelButtonElement =
-        createTextButton(i18nString(UIStrings.cancel), this.closeSearch.bind(this), 'search-action-button');
+    const cancelButtonElement = createTextButton(i18nString(UIStrings.cancel), this.closeSearch.bind(this), {
+      className: 'search-action-button',
+      jslogContext: 'close-search',
+    });
     firstRowButtons.appendChild(cancelButtonElement);
 
     this.secondRowButtons = this.buttonsContainer.createChild('div', 'second-row-buttons hidden');
 
-    this.replaceButtonElement =
-        createTextButton(i18nString(UIStrings.replace), this.replace.bind(this), 'search-action-button');
+    this.replaceButtonElement = createTextButton(i18nString(UIStrings.replace), this.replace.bind(this), {
+      className: 'search-action-button',
+      jslogContext: 'replace',
+    });
     this.replaceButtonElement.disabled = true;
     this.secondRowButtons.appendChild(this.replaceButtonElement);
 
-    this.replaceAllButtonElement =
-        createTextButton(i18nString(UIStrings.replaceAll), this.replaceAll.bind(this), 'search-action-button');
+    this.replaceAllButtonElement = createTextButton(i18nString(UIStrings.replaceAll), this.replaceAll.bind(this), {
+      className: 'search-action-button',
+      jslogContext: 'replace-all',
+    });
     this.secondRowButtons.appendChild(this.replaceAllButtonElement);
     this.replaceAllButtonElement.disabled = true;
 
@@ -277,7 +283,7 @@ export class SearchableView extends VBox {
   setPlaceholder(placeholder: string, ariaLabel?: string): void {
     this.searchInputElement.placeholder = placeholder;
     if (ariaLabel) {
-      ARIAUtils.setAccessibleName(this.searchInputElement, ariaLabel);
+      ARIAUtils.setLabel(this.searchInputElement, ariaLabel);
     }
   }
 
@@ -312,6 +318,8 @@ export class SearchableView extends VBox {
     if (this.footerElementContainer.hasFocus()) {
       this.focus();
     }
+
+    this.searchProvider.onSearchClosed?.();
   }
 
   private toggleSearchBar(toggled: boolean): void {
@@ -482,7 +490,7 @@ export class SearchableView extends VBox {
     delete this.currentQuery;
     if (Boolean(untypedSearchProvider.currentQuery)) {
       delete untypedSearchProvider.currentQuery;
-      this.searchProvider.searchCanceled();
+      this.searchProvider.onSearchCanceled();
     }
     this.updateSearchMatchesCountAndCurrentMatchIndex(0, -1);
   }
@@ -571,7 +579,9 @@ export const _symbol = Symbol('searchableView');
 const searchableViewsByElement = new WeakMap<Element, SearchableView>();
 
 export interface Searchable {
-  searchCanceled(): void;
+  onSearchCanceled(): void;
+  // Called when the search toolbar is closed
+  onSearchClosed?: () => void;
   performSearch(searchConfig: SearchConfig, shouldJump: boolean, jumpBackwards?: boolean): void;
   jumpToNextSearchResult(): void;
   jumpToPreviousSearchResult(): void;

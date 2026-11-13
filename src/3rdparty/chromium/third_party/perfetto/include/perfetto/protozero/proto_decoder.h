@@ -258,7 +258,7 @@ class PackedRepeatedFieldIterator {
   // points at the start of the next element to be decoded.
   // |read_ptr_| might be null if the backing proto field isn't set.
   const uint8_t* read_ptr_;
-  CppType curr_value_ = 0;
+  CppType curr_value_ = {};
 
   // Set to false once we've exhausted the iterator, or encountered an error.
   bool curr_value_valid_ = true;
@@ -340,7 +340,8 @@ class PERFETTO_EXPORT_COMPONENT TypedProtoDecoderBase : public ProtoDecoder {
       uint32_t field_id,
       bool* parse_error_location) const {
     const Field& field = Get(field_id);
-    if (field.valid()) {
+    if (field.valid() &&
+        field.type() == proto_utils::ProtoWireType::kLengthDelimited) {
       return PackedRepeatedFieldIterator<wire_type, cpp_type>(
           field.data(), field.size(), parse_error_location);
     }

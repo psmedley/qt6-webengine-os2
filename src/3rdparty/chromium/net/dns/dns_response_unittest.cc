@@ -6,22 +6,23 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "base/big_endian.h"
 #include "base/check.h"
+#include "base/containers/span.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "net/base/io_buffer.h"
+#include "net/dns/dns_names_util.h"
 #include "net/dns/dns_query.h"
 #include "net/dns/dns_test_util.h"
-#include "net/dns/dns_util.h"
 #include "net/dns/public/dns_protocol.h"
 #include "net/dns/record_rdata.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -490,10 +491,16 @@ TEST(DnsRecordParserTest, RejectReadingPastEnd) {
 
 TEST(DnsResponseTest, InitParse) {
   // This includes \0 at the end.
-  const char qname_data[] = "\x0A""codereview""\x08""chromium""\x03""org";
-  const base::StringPiece qname(qname_data, sizeof(qname_data));
+  const char qname[] =
+      "\x0A"
+      "codereview"
+      "\x08"
+      "chromium"
+      "\x03"
+      "org";
   // Compilers want to copy when binding temporary to const &, so must use heap.
-  auto query = std::make_unique<DnsQuery>(0xcafe, qname, dns_protocol::kTypeA);
+  auto query = std::make_unique<DnsQuery>(0xcafe, base::as_byte_span(qname),
+                                          dns_protocol::kTypeA);
 
   const uint8_t response_data[] = {
       // Header
@@ -558,8 +565,8 @@ TEST(DnsResponseTest, InitParse) {
   EXPECT_THAT(resp.id(), testing::Optional(0xcafe));
 
   // Reject wrong question.
-  auto wrong_query =
-      std::make_unique<DnsQuery>(0xcafe, qname, dns_protocol::kTypeCNAME);
+  auto wrong_query = std::make_unique<DnsQuery>(
+      0xcafe, base::as_byte_span(qname), dns_protocol::kTypeCNAME);
   EXPECT_FALSE(resp.InitParse(sizeof(response_data), *wrong_query));
   EXPECT_FALSE(resp.IsValid());
   EXPECT_THAT(resp.id(), testing::Optional(0xcafe));
@@ -576,9 +583,11 @@ TEST(DnsResponseTest, InitParse) {
   EXPECT_EQ(1u, resp.additional_answer_count());
 
   // Check question access.
-  std::string response_qname;
-  ASSERT_TRUE(DNSDomainFromDot(resp.GetSingleDottedName(), &response_qname));
-  EXPECT_EQ(query->qname(), response_qname);
+  std::optional<std::vector<uint8_t>> response_qname =
+      dns_names_util::DottedNameToNetwork(resp.GetSingleDottedName());
+  ASSERT_TRUE(response_qname.has_value());
+  EXPECT_THAT(query->qname(),
+              testing::ElementsAreArray(response_qname.value()));
   EXPECT_EQ(query->qtype(), resp.GetSingleQType());
   EXPECT_EQ("codereview.chromium.org", resp.GetSingleDottedName());
 
@@ -595,16 +604,16 @@ TEST(DnsResponseTest, InitParse) {
 
 TEST(DnsResponseTest, InitParseInvalidFlags) {
   // This includes \0 at the end.
-  const char qname_data[] =
+  const char qname[] =
       "\x0A"
       "codereview"
       "\x08"
       "chromium"
       "\x03"
       "org";
-  const base::StringPiece qname(qname_data, sizeof(qname_data));
   // Compilers want to copy when binding temporary to const &, so must use heap.
-  auto query = std::make_unique<DnsQuery>(0xcafe, qname, dns_protocol::kTypeA);
+  auto query = std::make_unique<DnsQuery>(0xcafe, base::as_byte_span(qname),
+                                          dns_protocol::kTypeA);
 
   const uint8_t response_data[] = {
       // Header
@@ -662,10 +671,9 @@ TEST(DnsResponseTest, InitParseRejectsResponseWithoutQuestions) {
   // Validate that the response is fine if not matching against a query.
   ASSERT_TRUE(resp.InitParseWithoutQuery(sizeof(kResponse) - 1));
 
-  const char kQueryName[] = "\003www\006google\004test\000";
+  const char kQueryName[] = "\003www\006google\004test";
   DnsQuery query(
-      /*id=*/581, base::StringPiece(kQueryName, sizeof(kQueryName) - 1),
-      dns_protocol::kTypeA);
+      /*id=*/581, base::as_byte_span(kQueryName), dns_protocol::kTypeA);
   EXPECT_FALSE(resp.InitParse(sizeof(kResponse) - 1, query));
 }
 
@@ -690,10 +698,9 @@ TEST(DnsResponseTest, InitParseRejectsResponseWithTooManyQuestions) {
   // Validate that the response is fine if not matching against a query.
   ASSERT_TRUE(resp.InitParseWithoutQuery(sizeof(kResponse) - 1));
 
-  const char kQueryName[] = "\003www\006google\004test\000";
+  const char kQueryName[] = "\003www\006google\004test";
   DnsQuery query(
-      /*id=*/582, base::StringPiece(kQueryName, sizeof(kQueryName) - 1),
-      dns_protocol::kTypeA);
+      /*id=*/582, base::as_byte_span(kQueryName), dns_protocol::kTypeA);
   EXPECT_FALSE(resp.InitParse(sizeof(kResponse) - 1, query));
 }
 
@@ -958,11 +965,7 @@ TEST(DnsResponseTest, InitParseAllowsQuestionWithLongName) {
 
   EXPECT_TRUE(resp1.InitParseWithoutQuery(response_data.size()));
 
-  DnsQuery query(
-      581,
-      base::StringPiece(reinterpret_cast<const char*>(dns_name.data()),
-                        dns_name.size()),
-      dns_protocol::kTypeA);
+  DnsQuery query(581, dns_name, dns_protocol::kTypeA);
 
   DnsResponse resp2(resp1.io_buffer(), response_data.size());
   EXPECT_TRUE(resp2.InitParse(response_data.size(), query));
@@ -1002,10 +1005,9 @@ TEST(DnsResponseTest, InitParseRejectsQuestionWithTooLongName) {
   // too-long name in the response. Test with an arbitrary valid query name to
   // ensure no issues if this code is exercised after receiving a response with
   // a too-long name.
-  const char kQueryName[] = "\005query\004test\000";
+  const char kQueryName[] = "\005query\004test";
   DnsQuery query(
-      /*id=*/581, base::StringPiece(kQueryName, sizeof(kQueryName) - 1),
-      dns_protocol::kTypeA);
+      /*id=*/581, base::as_byte_span(kQueryName), dns_protocol::kTypeA);
   EXPECT_FALSE(resp.InitParse(response_data.size(), query));
 }
 
@@ -1029,10 +1031,9 @@ TEST(DnsResponseTest, InitParseRejectsQuestionWithNonendedName) {
 
   EXPECT_FALSE(resp.InitParseWithoutQuery(sizeof(kResponse) - 1));
 
-  const char kQueryName[] = "\003www\006google\006testtt\000";
+  const char kQueryName[] = "\003www\006google\006testtt";
   DnsQuery query(
-      /*id=*/581, base::StringPiece(kQueryName, sizeof(kQueryName) - 1),
-      dns_protocol::kTypeA);
+      /*id=*/581, base::as_byte_span(kQueryName), dns_protocol::kTypeA);
   EXPECT_FALSE(resp.InitParse(sizeof(kResponse) - 1, query));
 }
 
@@ -1062,10 +1063,9 @@ TEST(DnsResponseTest, InitParseRejectsResponseWithMissingQuestions) {
 
   EXPECT_FALSE(resp.InitParseWithoutQuery(sizeof(kResponse) - 1));
 
-  const char kQueryName[] = "\003www\006google\004test\000";
+  const char kQueryName[] = "\003www\006google\004test";
   DnsQuery query(
-      /*id=*/581, base::StringPiece(kQueryName, sizeof(kQueryName) - 1),
-      dns_protocol::kTypeA);
+      /*id=*/581, base::as_byte_span(kQueryName), dns_protocol::kTypeA);
   EXPECT_FALSE(resp.InitParse(sizeof(kResponse) - 1, query));
 }
 
@@ -1144,10 +1144,9 @@ TEST(DnsResponseTest, ParserLimitedToNumClaimedRecords) {
   DnsResponse resp2;
   memcpy(resp2.io_buffer()->data(), kResponse, sizeof(kResponse) - 1);
 
-  const char kQueryName[] = "\003www\006google\004test\000";
+  const char kQueryName[] = "\003www\006google\004test";
   DnsQuery query(
-      /*id=*/581, base::StringPiece(kQueryName, sizeof(kQueryName) - 1),
-      dns_protocol::kTypeA);
+      /*id=*/581, base::as_byte_span(kQueryName), dns_protocol::kTypeA);
 
   ASSERT_TRUE(resp2.InitParse(sizeof(kResponse) - 1, query));
   DnsRecordParser parser2 = resp2.Parser();
@@ -1248,7 +1247,7 @@ TEST(DnsResponseWriteTest, SingleARecordAnswer) {
   std::vector<DnsResourceRecord> answers(1, answer);
   DnsResponse response(0x1234 /* response_id */, true /* is_authoritative*/,
                        answers, {} /* authority_records */,
-                       {} /* additional records */, absl::nullopt);
+                       {} /* additional records */, std::nullopt);
   ASSERT_NE(nullptr, response.io_buffer());
   EXPECT_TRUE(response.IsValid());
   std::string expected_response(reinterpret_cast<const char*>(response_data),
@@ -1284,7 +1283,7 @@ TEST(DnsResponseWriteTest, SingleARecordAnswerWithFinalDotInName) {
   std::vector<DnsResourceRecord> answers(1, answer);
   DnsResponse response(0x1234 /* response_id */, true /* is_authoritative*/,
                        answers, {} /* authority_records */,
-                       {} /* additional records */, absl::nullopt);
+                       {} /* additional records */, std::nullopt);
   ASSERT_NE(nullptr, response.io_buffer());
   EXPECT_TRUE(response.IsValid());
   std::string expected_response(reinterpret_cast<const char*>(response_data),
@@ -1317,15 +1316,17 @@ TEST(DnsResponseWriteTest, SingleARecordAnswerWithQuestion) {
       0xc0, 0xa8, 0x00, 0x01,  // 192.168.0.1
   };
   std::string dotted_name("www.example.com");
-  std::string dns_name;
-  ASSERT_TRUE(DNSDomainFromDot(dotted_name, &dns_name));
+  std::optional<std::vector<uint8_t>> dns_name =
+      dns_names_util::DottedNameToNetwork(dotted_name);
+  ASSERT_TRUE(dns_name.has_value());
 
   OptRecordRdata opt_rdata;
   opt_rdata.AddOpt(
       OptRecordRdata::UnknownOpt::CreateForTesting(255, "\xde\xad\xbe\xef"));
 
-  absl::optional<DnsQuery> query;
-  query.emplace(0x1234 /* id */, dns_name, dns_protocol::kTypeA, &opt_rdata);
+  std::optional<DnsQuery> query;
+  query.emplace(0x1234 /* id */, dns_name.value(), dns_protocol::kTypeA,
+                &opt_rdata);
   net::DnsResourceRecord answer;
   answer.name = dotted_name;
   answer.type = dns_protocol::kTypeA;
@@ -1369,10 +1370,11 @@ TEST(DnsResponseWriteTest,
       0xc0, 0xa8, 0x00, 0x01,  // 192.168.0.1
   };
   std::string dotted_name("www.example.com");
-  std::string dns_name;
-  ASSERT_TRUE(DNSDomainFromDot(dotted_name, &dns_name));
+  std::optional<std::vector<uint8_t>> dns_name =
+      dns_names_util::DottedNameToNetwork(dotted_name);
+  ASSERT_TRUE(dns_name.has_value());
   size_t buf_size =
-      sizeof(dns_protocol::Header) + dns_name.size() + 2 /* qtype */ +
+      sizeof(dns_protocol::Header) + dns_name.value().size() + 2 /* qtype */ +
       2 /* qclass */ +
       10 /* extra bytes that inflate the internal buffer of a query */;
   auto buf = base::MakeRefCounted<IOBufferWithSize>(buf_size);
@@ -1384,11 +1386,11 @@ TEST(DnsResponseWriteTest,
   writer.WriteU16(0);                                   // ancount
   writer.WriteU16(0);                                   // nscount
   writer.WriteU16(0);                                   // arcount
-  writer.WriteBytes(dns_name.data(), dns_name.size());  // qname
+  writer.WriteBytes(dns_name.value().data(), dns_name.value().size());  // qname
   writer.WriteU16(dns_protocol::kTypeA);                // qtype
   writer.WriteU16(dns_protocol::kClassIN);              // qclass
   // buf contains 10 extra zero bytes.
-  absl::optional<DnsQuery> query;
+  std::optional<DnsQuery> query;
   query.emplace(buf);
   query->Parse(buf_size);
   net::DnsResourceRecord answer;
@@ -1438,7 +1440,7 @@ TEST(DnsResponseWriteTest, SingleQuadARecordAnswer) {
   std::vector<DnsResourceRecord> answers(1, answer);
   DnsResponse response(0x1234 /* id */, true /* is_authoritative*/, answers,
                        {} /* authority_records */, {} /* additional records */,
-                       absl::nullopt);
+                       std::nullopt);
   ASSERT_NE(nullptr, response.io_buffer());
   EXPECT_TRUE(response.IsValid());
   std::string expected_response(reinterpret_cast<const char*>(response_data),
@@ -1482,10 +1484,11 @@ TEST(DnsResponseWriteTest,
                                // length 1, bitmap with bit 1 set
   };
   std::string dotted_name("www.example.com");
-  std::string dns_name;
-  ASSERT_TRUE(DNSDomainFromDot(dotted_name, &dns_name));
-  absl::optional<DnsQuery> query;
-  query.emplace(0x1234 /* id */, dns_name, dns_protocol::kTypeA);
+  std::optional<std::vector<uint8_t>> dns_name =
+      dns_names_util::DottedNameToNetwork(dotted_name);
+  ASSERT_TRUE(dns_name.has_value());
+  std::optional<DnsQuery> query;
+  query.emplace(0x1234 /* id */, dns_name.value(), dns_protocol::kTypeA);
   net::DnsResourceRecord answer;
   answer.name = dotted_name;
   answer.type = dns_protocol::kTypeA;
@@ -1555,7 +1558,7 @@ TEST(DnsResponseWriteTest, TwoAnswersWithAAndQuadARecords) {
   answers[1] = answer2;
   DnsResponse response(0x1234 /* id */, true /* is_authoritative*/, answers,
                        {} /* authority_records */, {} /* additional records */,
-                       absl::nullopt);
+                       std::nullopt);
   ASSERT_NE(nullptr, response.io_buffer());
   EXPECT_TRUE(response.IsValid());
   std::string expected_response(reinterpret_cast<const char*>(response_data),
@@ -1591,7 +1594,7 @@ TEST(DnsResponseWriteTest, AnswerWithAuthorityRecord) {
   std::vector<DnsResourceRecord> authority_records(1, record);
   DnsResponse response(0x1235 /* response_id */, true /* is_authoritative*/,
                        {} /* answers */, authority_records,
-                       {} /* additional records */, absl::nullopt);
+                       {} /* additional records */, std::nullopt);
   ASSERT_NE(nullptr, response.io_buffer());
   EXPECT_TRUE(response.IsValid());
   std::string expected_response(reinterpret_cast<const char*>(response_data),
@@ -1612,7 +1615,7 @@ TEST(DnsResponseWriteTest, AnswerWithRcode) {
   };
   DnsResponse response(0x1212 /* response_id */, false /* is_authoritative*/,
                        {} /* answers */, {} /* authority_records */,
-                       {} /* additional records */, absl::nullopt,
+                       {} /* additional records */, std::nullopt,
                        dns_protocol::kRcodeNXDOMAIN);
   ASSERT_NE(nullptr, response.io_buffer());
   EXPECT_TRUE(response.IsValid());
@@ -1627,19 +1630,22 @@ TEST(DnsResponseWriteTest, AnswerWithRcode) {
 // CNAME answers are always allowed for any question.
 TEST(DnsResponseWriteTest, AAAAQuestionAndCnameAnswer) {
   const std::string kName = "www.example.com";
-  std::string dns_name;
-  ASSERT_TRUE(DNSDomainFromDot(kName, &dns_name));
+  std::optional<std::vector<uint8_t>> dns_name =
+      dns_names_util::DottedNameToNetwork(kName);
+  ASSERT_TRUE(dns_name.has_value());
 
   DnsResourceRecord answer;
   answer.name = kName;
   answer.type = dns_protocol::kTypeCNAME;
   answer.klass = dns_protocol::kClassIN;
   answer.ttl = 120;  // 120 seconds.
-  answer.SetOwnedRdata(dns_name);
+  answer.SetOwnedRdata(
+      std::string(reinterpret_cast<char*>(dns_name.value().data()),
+                  dns_name.value().size()));
   std::vector<DnsResourceRecord> answers(1, answer);
 
-  absl::optional<DnsQuery> query(absl::in_place, 114 /* id */, dns_name,
-                                 dns_protocol::kTypeAAAA);
+  std::optional<DnsQuery> query(std::in_place, 114 /* id */, dns_name.value(),
+                                dns_protocol::kTypeAAAA);
 
   DnsResponse response(114 /* response_id */, true /* is_authoritative*/,
                        answers, {} /* authority_records */,
@@ -1666,7 +1672,7 @@ TEST(DnsResponseWriteTest, WrittenResponseCanBeParsed) {
   std::vector<DnsResourceRecord> additional_records(1, additional_record);
   DnsResponse response(0x1234 /* response_id */, true /* is_authoritative*/,
                        answers, {} /* authority_records */, additional_records,
-                       absl::nullopt);
+                       std::nullopt);
   ASSERT_NE(nullptr, response.io_buffer());
   EXPECT_TRUE(response.IsValid());
   EXPECT_THAT(response.id(), testing::Optional(0x1234));
@@ -1693,7 +1699,8 @@ TEST(DnsResponseWriteTest, WrittenResponseCanBeParsed) {
 TEST(DnsResponseWriteTest, CreateEmptyNoDataResponse) {
   DnsResponse response = DnsResponse::CreateEmptyNoDataResponse(
       /*id=*/4,
-      /*is_authoritative=*/true, "\x04name\x04test\x00", dns_protocol::kTypeA);
+      /*is_authoritative=*/true, base::as_byte_span("\x04name\x04test\x00"),
+      dns_protocol::kTypeA);
 
   EXPECT_TRUE(response.IsValid());
   EXPECT_THAT(response.id(), testing::Optional(4));

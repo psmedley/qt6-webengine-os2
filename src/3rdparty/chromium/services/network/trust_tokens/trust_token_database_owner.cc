@@ -50,6 +50,13 @@ void TrustTokenDatabaseOwner::Create(
 TrustTokenDatabaseOwner::~TrustTokenDatabaseOwner() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  // KeyValueTables are first dereferenced in the DB runner sequence. This
+  // attaches their weak pointers to the DB runner sequence. Post tasks to free
+  // them in the DB task runner.
+  db_task_runner_->DeleteSoon(FROM_HERE, issuer_toplevel_pair_table_.release());
+  db_task_runner_->DeleteSoon(FROM_HERE, toplevel_table_.release());
+  db_task_runner_->DeleteSoon(FROM_HERE, issuer_table_.release());
+
   db_task_runner_->DeleteSoon(FROM_HERE, backing_database_.release());
 }
 
@@ -82,17 +89,17 @@ NOINLINE TrustTokenDatabaseOwner::TrustTokenDatabaseOwner(
       table_manager_(base::MakeRefCounted<sqlite_proto::ProtoTableManager>(
           db_task_runner)),
       db_task_runner_(db_task_runner),
-      backing_database_(std::make_unique<sql::Database>(sql::DatabaseOptions(
+      backing_database_(std::make_unique<sql::Database>(sql::DatabaseOptions{
           // As they work on deleting the feature (crbug.com/1120969), sql/
           // owners prefer to see which clients are explicitly okay with using
           // exclusive locking (the default).
-          /*.exclusive_locking =*/ true,
-          /*.page_size =*/ 4096,
-          /*.cache_size =*/ 500,
+          .exclusive_locking = true,
+          .page_size = 4096,
+          .cache_size = 500,
           // TODO(pwnall): Add a meta table and remove this option.
-          /*.mmap_alt_status_discouraged =*/ true,
-          /*.enable_views_discouraged =*/ true  // Required by mmap_alt_status.
-      ))),
+          .mmap_alt_status_discouraged = true,
+          .enable_views_discouraged = true,  // Required by mmap_alt_status.
+      })),
       issuer_table_(
           std::make_unique<sqlite_proto::KeyValueTable<TrustTokenIssuerConfig>>(
               kIssuerTableName)),

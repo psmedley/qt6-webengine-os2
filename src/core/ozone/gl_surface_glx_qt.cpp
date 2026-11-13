@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -11,12 +12,14 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_display.h"
 #include "ui/gl/gl_display_manager.h"
+#include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_surface_glx.h"
 
 namespace gl {
 
-void GLSurfaceGLX::ShutdownOneOff()
+static bool HasGLXExtension(const char *name)
 {
+    return GLSurface::ExtensionsContain(GLSurfaceQt::g_extensions.c_str(), name);
 }
 
 bool GLSurfaceGLX::IsCreateContextSupported()
@@ -29,16 +32,6 @@ bool GLSurfaceGLX::IsCreateContextRobustnessSupported()
     return GLContextHelper::isCreateContextRobustnessSupported() && HasGLXExtension("GLX_ARB_create_context_robustness");
 }
 
-bool GLSurfaceGLX::IsEXTSwapControlSupported()
-{
-    return HasGLXExtension("GLX_EXT_swap_control");
-}
-
-bool GLSurfaceGLX::IsMESASwapControlSupported()
-{
-    return HasGLXExtension("GLX_MESA_swap_control");
-}
-
 bool GLSurfaceGLX::IsCreateContextProfileSupported()
 {
     return false; // ExtensionsContain(g_extensions, "GLX_ARB_create_context_profile");
@@ -49,29 +42,9 @@ bool GLSurfaceGLX::IsCreateContextES2ProfileSupported()
     return HasGLXExtension("GLX_ARB_create_context_es2_profile");
 }
 
-bool GLSurfaceGLX::IsOMLSyncControlSupported()
-{
-    return false; // ExtensionsContain(g_extensions, "GLX_OML_sync_control");
-}
-
-bool GLSurfaceGLX::HasGLXExtension(const char *name)
-{
-    return ExtensionsContain(GLSurfaceQt::g_extensions.c_str(), name);
-}
-
-bool GLSurfaceGLX::IsTextureFromPixmapSupported()
-{
-    return HasGLXExtension("GLX_EXT_texture_from_pixmap");
-}
-
 bool GLSurfaceGLX::IsRobustnessVideoMemoryPurgeSupported()
 {
     return false;
-}
-
-const char* GLSurfaceGLX::GetGLXExtensions()
-{
-    return GLSurfaceQt::g_extensions.c_str();
 }
 
 
@@ -88,12 +61,12 @@ GLSurfaceGLXQt::~GLSurfaceGLXQt()
     Destroy();
 }
 
-GLDisplay *GLSurfaceGLXQt::InitializeOneOff(uint64_t system_device_id)
+GLDisplay *GLSurfaceGLXQt::InitializeOneOff(gl::GpuPreference preference)
 {
     if (s_initialized)
         return g_display;
 
-    g_display = GLDisplayManagerX11::GetInstance()->GetDisplay(system_device_id);
+    g_display = GLDisplayManagerX11::GetInstance()->GetDisplay(preference);
     if (!g_display->GetDisplay()) {
         LOG(ERROR) << "GLContextHelper::getXDisplay() failed.";
         return nullptr;
@@ -121,7 +94,6 @@ GLDisplay *GLSurfaceGLXQt::InitializeOneOff(uint64_t system_device_id)
     return g_display;
 }
 
-
 bool GLSurfaceGLXQt::InitializeExtensionSettingsOneOff()
 {
     if (!s_initialized)
@@ -131,11 +103,6 @@ bool GLSurfaceGLXQt::InitializeExtensionSettingsOneOff()
     GLSurfaceQt::g_extensions = glXQueryExtensionsString(display, 0);
     g_driver_glx.InitializeExtensionBindings(g_extensions.c_str());
     return true;
-}
-
-bool GLSurfaceGLX::InitializeExtensionSettingsOneOff()
-{
-    return GLSurfaceGLXQt::InitializeExtensionSettingsOneOff();
 }
 
 bool GLSurfaceGLXQt::Initialize(GLSurfaceFormat format)

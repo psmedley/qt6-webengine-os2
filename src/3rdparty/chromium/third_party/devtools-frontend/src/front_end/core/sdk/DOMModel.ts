@@ -33,23 +33,22 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
+import * as Protocol from '../../generated/protocol.js';
 import * as Common from '../common/common.js';
 import * as Host from '../host/host.js';
 import * as Platform from '../platform/platform.js';
 import * as Root from '../root/root.js';
-import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
-import * as Protocol from '../../generated/protocol.js';
 
 import {CSSModel} from './CSSModel.js';
 import {FrameManager} from './FrameManager.js';
 import {OverlayModel} from './OverlayModel.js';
 import {type RemoteObject} from './RemoteObject.js';
-import {RuntimeModel} from './RuntimeModel.js';
-
-import {Capability, type Target} from './Target.js';
-import {SDKModel} from './SDKModel.js';
-import {TargetManager} from './TargetManager.js';
 import {ResourceTreeModel} from './ResourceTreeModel.js';
+import {RuntimeModel} from './RuntimeModel.js';
+import {SDKModel} from './SDKModel.js';
+import {Capability, type Target} from './Target.js';
+import {TargetManager} from './TargetManager.js';
 
 export class DOMNode {
   #domModelInternal: DOMModel;
@@ -75,9 +74,7 @@ export class DOMNode {
   assignedSlot: DOMNodeShortcut|null;
   readonly shadowRootsInternal: DOMNode[];
   #attributesInternal: Map<string, Attribute>;
-  // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  #markers: Map<string, any>;
+  #markers: Map<string, unknown>;
   #subtreeMarkerCount: number;
   childNodeCountInternal!: number;
   childrenInternal: DOMNode[]|null;
@@ -234,6 +231,24 @@ export class DOMNode {
     return this.#isSVGNodeInternal;
   }
 
+  isMediaNode(): boolean {
+    return this.#nodeNameInternal === 'AUDIO' || this.#nodeNameInternal === 'VIDEO';
+  }
+
+  isViewTransitionPseudoNode(): boolean {
+    if (!this.#pseudoTypeInternal) {
+      return false;
+    }
+
+    return [
+      Protocol.DOM.PseudoType.ViewTransition,
+      Protocol.DOM.PseudoType.ViewTransitionGroup,
+      Protocol.DOM.PseudoType.ViewTransitionImagePair,
+      Protocol.DOM.PseudoType.ViewTransitionOld,
+      Protocol.DOM.PseudoType.ViewTransitionNew,
+    ].includes(this.#pseudoTypeInternal);
+  }
+
   creationStackTrace(): Promise<Protocol.Runtime.StackTrace|null> {
     if (this.#creationStackTraceInternal) {
       return this.#creationStackTraceInternal;
@@ -333,28 +348,28 @@ export class DOMNode {
   }
 
   beforePseudoElement(): DOMNode|undefined {
-    return this.#pseudoElements.get(DOMNode.PseudoElementNames.Before)?.at(-1);
+    return this.#pseudoElements.get(Protocol.DOM.PseudoType.Before)?.at(-1);
   }
 
   afterPseudoElement(): DOMNode|undefined {
-    return this.#pseudoElements.get(DOMNode.PseudoElementNames.After)?.at(-1);
+    return this.#pseudoElements.get(Protocol.DOM.PseudoType.After)?.at(-1);
   }
 
   markerPseudoElement(): DOMNode|undefined {
-    return this.#pseudoElements.get(DOMNode.PseudoElementNames.Marker)?.at(-1);
+    return this.#pseudoElements.get(Protocol.DOM.PseudoType.Marker)?.at(-1);
   }
 
   backdropPseudoElement(): DOMNode|undefined {
-    return this.#pseudoElements.get(DOMNode.PseudoElementNames.Backdrop)?.at(-1);
+    return this.#pseudoElements.get(Protocol.DOM.PseudoType.Backdrop)?.at(-1);
   }
 
-  pageTransitionPseudoElements(): DOMNode[] {
+  viewTransitionPseudoElements(): DOMNode[] {
     return [
-      ...this.#pseudoElements.get(DOMNode.PseudoElementNames.PageTransition) || [],
-      ...this.#pseudoElements.get(DOMNode.PseudoElementNames.PageTransitionContainer) || [],
-      ...this.#pseudoElements.get(DOMNode.PseudoElementNames.PageTransitionImageWrapper) || [],
-      ...this.#pseudoElements.get(DOMNode.PseudoElementNames.PageTransitionOutgoingImage) || [],
-      ...this.#pseudoElements.get(DOMNode.PseudoElementNames.PageTransitionIncomingImage) || [],
+      ...this.#pseudoElements.get(Protocol.DOM.PseudoType.ViewTransition) || [],
+      ...this.#pseudoElements.get(Protocol.DOM.PseudoType.ViewTransitionGroup) || [],
+      ...this.#pseudoElements.get(Protocol.DOM.PseudoType.ViewTransitionImagePair) || [],
+      ...this.#pseudoElements.get(Protocol.DOM.PseudoType.ViewTransitionOld) || [],
+      ...this.#pseudoElements.get(Protocol.DOM.PseudoType.ViewTransitionNew) || [],
     ];
   }
 
@@ -789,9 +804,7 @@ export class DOMNode {
     return Boolean(this.#xmlVersion);
   }
 
-  // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setMarker(name: string, value: any): void {
+  setMarker(name: string, value: unknown): void {
     if (value === null) {
       if (!this.#markers.has(name)) {
         return;
@@ -819,7 +832,7 @@ export class DOMNode {
   }
 
   marker<T>(name: string): T|null {
-    return this.#markers.get(name) || null;
+    return this.#markers.get(name) as T || null;
   }
 
   getMarkerKeysForTest(): string[] {
@@ -919,9 +932,7 @@ export class DOMNode {
     if (!object) {
       return;
     }
-    // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
-    // @ts-expect-error
-    void object.callFunction(scrollIntoView);
+    await object.callFunction(scrollIntoView);
     object.release();
     node.highlightForTwoSeconds();
 
@@ -939,8 +950,6 @@ export class DOMNode {
     if (!object) {
       return;
     }
-    // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
-    // @ts-expect-error
     await object.callFunction(focusInPage);
     object.release();
     node.highlightForTwoSeconds();
@@ -970,27 +979,14 @@ export class DOMNode {
       const classList = classes.trim().split(/\s+/g);
       return (lowerCaseName === 'div' ? '' : lowerCaseName) + '.' + classList.map(cls => CSS.escape(cls)).join('.');
     }
+    if (this.pseudoIdentifier()) {
+      return `${lowerCaseName}(${this.pseudoIdentifier()})`;
+    }
     return lowerCaseName;
   }
 }
 
 export namespace DOMNode {
-  // TODO(crbug.com/1167717): Make this a const enum again
-  // eslint-disable-next-line rulesdir/const_enum
-  export enum PseudoElementNames {
-    Before = 'before',
-    After = 'after',
-    Marker = 'marker',
-    PageTransition = 'page-transition',
-    PageTransitionContainer = 'page-transition-container',
-    PageTransitionImageWrapper = 'page-transition-image-wrapper',
-    PageTransitionOutgoingImage = 'page-transition-outgoing-image',
-    PageTransitionIncomingImage = 'page-transition-incoming-image',
-    Backdrop = 'backdrop',
-  }
-
-  // TODO(crbug.com/1167717): Make this a const enum again
-  // eslint-disable-next-line rulesdir/const_enum
   export enum ShadowRootTypes {
     UserAgent = 'user-agent',
     Open = 'open',
@@ -1145,7 +1141,6 @@ export class DOMModel extends SDKModel<EventTypes> {
   private async requestDocumentInternal(): Promise<DOMDocument|null> {
     const response = await this.agent.invoke_getDocument({});
     if (response.getError()) {
-      console.error(response.getError());
       return null;
     }
     const {root: documentPayload} = response;
@@ -1284,11 +1279,16 @@ export class DOMModel extends SDKModel<EventTypes> {
   }
 
   documentUpdated(): void {
+    // If this frame doesn't have a document now,
+    // it means that its document is not requested yet and
+    // it will be requested when needed. (ex: setChildNodes event is received for the frame owner node)
+    // So, we don't need to request the document if we don't
+    // already have a document.
+    const alreadyHasDocument = Boolean(this.#document);
+    this.setDocument(null);
     // If we have this.#pendingDocumentRequestPromise in flight,
     // it will contain most recent result.
-    const documentWasRequested = this.#pendingDocumentRequestPromise;
-    this.setDocument(null);
-    if (this.parentModel() && !documentWasRequested) {
+    if (this.parentModel() && alreadyHasDocument && !this.#pendingDocumentRequestPromise) {
       void this.requestDocument();
     }
   }
@@ -1305,6 +1305,10 @@ export class DOMModel extends SDKModel<EventTypes> {
     if (!this.parentModel()) {
       this.dispatchEventToListeners(Events.DocumentUpdated, this);
     }
+  }
+
+  setDocumentForTest(document: Protocol.DOM.Node|null): void {
+    this.setDocument(document);
   }
 
   private setDetachedRoot(payload: Protocol.DOM.Node): void {
@@ -1405,8 +1409,8 @@ export class DOMModel extends SDKModel<EventTypes> {
     const currentPseudoElements = parent.pseudoElements().get(pseudoType);
     if (currentPseudoElements) {
       Platform.DCHECK(
-          () => pseudoType.startsWith('page-transition'),
-          'DOMModel.pseudoElementAdded expects parent to not already have this pseudo type added; only page-transition* pseudo elements can coexist under the same parent.');
+          () => pseudoType.startsWith('view-transition'),
+          'DOMModel.pseudoElementAdded expects parent to not already have this pseudo type added; only view-transition* pseudo elements can coexist under the same parent.');
       currentPseudoElements.push(node);
     } else {
       parent.pseudoElements().set(pseudoType, [node]);
@@ -1536,8 +1540,11 @@ export class DOMModel extends SDKModel<EventTypes> {
     return this.nodeForId(response.nodeId);
   }
 
-  async getContainerForNode(nodeId: Protocol.DOM.NodeId, containerName?: string): Promise<DOMNode|null> {
-    const {nodeId: containerNodeId} = await this.agent.invoke_getContainerForNode({nodeId, containerName});
+  async getContainerForNode(
+      nodeId: Protocol.DOM.NodeId, containerName?: string, physicalAxes?: Protocol.DOM.PhysicalAxes,
+      logicalAxes?: Protocol.DOM.LogicalAxes): Promise<DOMNode|null> {
+    const {nodeId: containerNodeId} =
+        await this.agent.invoke_getContainerForNode({nodeId, containerName, physicalAxes, logicalAxes});
     if (!containerNodeId) {
       return null;
     }
@@ -1548,15 +1555,15 @@ export class DOMModel extends SDKModel<EventTypes> {
     return object.isNode() && object.objectId ? this.pushNodeToFrontend(object.objectId) : Promise.resolve(null);
   }
 
-  suspendModel(): Promise<void> {
+  override suspendModel(): Promise<void> {
     return this.agent.invoke_disable().then(() => this.setDocument(null));
   }
 
-  async resumeModel(): Promise<void> {
+  override async resumeModel(): Promise<void> {
     await this.agent.invoke_enable({});
   }
 
-  dispose(): void {
+  override dispose(): void {
     DOMModelUndoStack.instance().dispose(this);
   }
 
@@ -1574,8 +1581,6 @@ export class DOMModel extends SDKModel<EventTypes> {
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
 export enum Events {
   AttrModified = 'AttrModified',
   AttrRemoved = 'AttrRemoved',

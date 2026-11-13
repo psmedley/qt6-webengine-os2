@@ -41,6 +41,8 @@ def load_forward_table(path):
 def load_inverse_table(path):
     pairs = load_json(path)
     reject_duplicate_keys(pairs)
+    for x in range(0, 8):
+        pairs.append(("GL_NONE", "EXTERNAL" + str(x)))
     return {angle: gl for gl, angle in pairs}
 
 
@@ -87,6 +89,8 @@ def get_component_type(format_id):
         return "unorm"
     elif "TYPELESS" in format_id:
         return "unorm"
+    elif "EXTERNAL" in format_id:
+        return "unorm"
     elif format_id == "R9G9B9E5_SHAREDEXP":
         return "float"
     else:
@@ -94,6 +98,8 @@ def get_component_type(format_id):
 
 
 def get_channel_tokens(format_id):
+    if 'EXTERNAL' in format_id:
+        return ['R8', 'G8', 'B8', 'A8']
     r = re.compile(r'([' + kChannels + '][\d]+)')
     return list(filter(r.match, r.split(format_id)))
 
@@ -111,11 +117,22 @@ def get_channels(format_id):
 
 def get_bits(format_id):
     bits = {}
-    tokens = get_channel_tokens(format_id)
-    if len(tokens) == 0:
-        return None
-    for token in tokens:
-        bits[token[0]] = int(token[1:])
+    if "_RED_" in format_id:
+        # BC4
+        bits["R"] = 16
+    elif "_RG_" in format_id:
+        # BC5
+        bits["R"] = bits["G"] = 16
+    elif "_RGB_" in format_id:
+        # BC1-3, BC6H, PVRTC
+        bits["R"] = bits["G"] = bits["B"] = 16 if "BC6H" in format_id else 8
+    elif "_RGBA_" in format_id or "ASTC_" in format_id:
+        # ASTC, BC7, PVRTC
+        bits["R"] = bits["G"] = bits["B"] = bits["A"] = 8
+    else:
+        tokens = get_channel_tokens(format_id)
+        for token in tokens:
+            bits[token[0]] = int(token[1:])
     return bits
 
 
@@ -190,7 +207,7 @@ def get_internal_format_initializer(internal_format, format_id):
     elif component_type == 'unorm' and bits['R'] == 8:
         return 'Initialize4ComponentData<GLubyte, 0x00, 0x00, 0x00, 0xFF>'
     elif component_type == 'unorm' and bits['R'] == 16:
-        return 'Initialize4ComponentData<GLubyte, 0x0000, 0x0000, 0x0000, 0xFFFF>'
+        return 'Initialize4ComponentData<GLushort, 0x0000, 0x0000, 0x0000, 0xFFFF>'
     elif component_type == 'int' and bits['R'] == 8:
         return 'Initialize4ComponentData<GLbyte, 0x00, 0x00, 0x00, 0x01>'
     elif component_type == 'snorm' and bits['R'] == 8:

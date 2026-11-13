@@ -10,23 +10,24 @@
 
 #include "include/core/SkTypes.h"
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 
-#include "include/private/SkTArray.h"
-#include "src/core/SkArenaAlloc.h"
+#include "include/private/base/SkTArray.h"
+#include "src/base/SkArenaAlloc.h"
 #include "src/gpu/ganesh/GrSurfaceProxyView.h"
 #include "src/gpu/ganesh/GrTestUtils.h"
 #include "src/gpu/ganesh/GrTextureProxy.h"
 
 #include <tuple>
 
-class SkMatrix;
 class GrCaps;
-class GrProxyProvider;
+class GrFragmentProcessor;
+class GrGeometryProcessor;
 class GrProcessorTestData;
+class GrProxyProvider;
 class GrTexture;
 class GrXPFactory;
-class GrGeometryProcessor;
+class SkMatrix;
 
 namespace GrProcessorUnitTest {
 
@@ -72,7 +73,7 @@ public:
 
 private:
     GrRecordingContext* fContext;
-    SkTArray<ViewInfo> fViews;
+    skia_private::TArray<ViewInfo> fViews;
     std::unique_ptr<SkArenaAlloc> fArena;
     std::unique_ptr<GrFragmentProcessor> fInputFP;
 };
@@ -99,7 +100,7 @@ public:
 private:
     /** A test function which verifies the count of factories. */
     static void VerifyFactoryCount();
-    static SkTArray<GrProcessorTestFactory<ProcessorSmartPtr>*, true>* GetFactories();
+    static skia_private::TArray<GrProcessorTestFactory<ProcessorSmartPtr>*, true>* GetFactories();
 
     MakeProc fMakeProc;
     SkString fName;
@@ -119,7 +120,7 @@ public:
 private:
     /** A test function which verifies the count of factories. */
     static void VerifyFactoryCount();
-    static SkTArray<GrXPFactoryTestFactory*, true>* GetFactories();
+    static skia_private::TArray<GrXPFactoryTestFactory*, true>* GetFactories();
 
     GetFn* fGetProc;
 };
@@ -129,16 +130,16 @@ private:
 /** GrProcessor subclasses should insert this macro in their declaration to be included in the
  *  program generation unit test.
  */
-#define GR_DECLARE_GEOMETRY_PROCESSOR_TEST                         \
-    static GrGeometryProcessorTestFactory* gTestFactory SK_UNUSED; \
+#define GR_DECLARE_GEOMETRY_PROCESSOR_TEST                                \
+    [[maybe_unused]] static GrGeometryProcessorTestFactory* gTestFactory; \
     static GrGeometryProcessor* TestCreate(GrProcessorTestData*);
 
-#define GR_DECLARE_FRAGMENT_PROCESSOR_TEST                         \
-    static GrFragmentProcessorTestFactory* gTestFactory SK_UNUSED; \
+#define GR_DECLARE_FRAGMENT_PROCESSOR_TEST                                \
+    [[maybe_unused]] static GrFragmentProcessorTestFactory* gTestFactory; \
     static std::unique_ptr<GrFragmentProcessor> TestCreate(GrProcessorTestData*);
 
-#define GR_DECLARE_XP_FACTORY_TEST                         \
-    static GrXPFactoryTestFactory* gTestFactory SK_UNUSED; \
+#define GR_DECLARE_XP_FACTORY_TEST                                \
+    [[maybe_unused]] static GrXPFactoryTestFactory* gTestFactory; \
     static const GrXPFactory* TestGet(GrProcessorTestData*);
 
 /** GrProcessor subclasses should insert this macro in their implementation file. They must then
@@ -147,14 +148,14 @@ private:
  */
 #define GR_DEFINE_FRAGMENT_PROCESSOR_TEST(Effect)          \
     GrFragmentProcessorTestFactory* Effect::gTestFactory = \
-            new GrFragmentProcessorTestFactory(Effect::TestCreate, #Effect)
+            new GrFragmentProcessorTestFactory(Effect::TestCreate, #Effect);
 
 #define GR_DEFINE_GEOMETRY_PROCESSOR_TEST(Effect)          \
     GrGeometryProcessorTestFactory* Effect::gTestFactory = \
-            new GrGeometryProcessorTestFactory(Effect::TestCreate, #Effect)
+            new GrGeometryProcessorTestFactory(Effect::TestCreate, #Effect);
 
 #define GR_DEFINE_XP_FACTORY_TEST(Factory) \
-    GrXPFactoryTestFactory* Factory::gTestFactory = new GrXPFactoryTestFactory(Factory::TestGet)
+    GrXPFactoryTestFactory* Factory::gTestFactory = new GrXPFactoryTestFactory(Factory::TestGet);
 
 #else // !SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
 
@@ -177,7 +178,7 @@ private:
 #define GR_DEFINE_XP_FACTORY_TEST(X)
 
 #endif  // !SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
-#else   // GR_TEST_UTILS
+#else   // defined(GR_TEST_UTILS)
     #define GR_DECLARE_GEOMETRY_PROCESSOR_TEST
     #define GR_DECLARE_FRAGMENT_PROCESSOR_TEST
     #define GR_DECLARE_XP_FACTORY_TEST
@@ -190,5 +191,5 @@ private:
     #define GR_DEFINE_GEOMETRY_PROCESSOR_TEST(...)
     #define GR_DECLARE_XP_FACTORY_TEST
     #define GR_DEFINE_XP_FACTORY_TEST(...)
-#endif  // GR_TEST_UTILS
+#endif  // defined(GR_TEST_UTILS)
 #endif  // GrProcessorUnitTest_DEFINED

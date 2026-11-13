@@ -8,8 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/callback_forward.h"
 #include "base/component_export.h"
+#include "base/functional/callback_forward.h"
 #include "build/build_config.h"
 
 namespace storage {
@@ -102,6 +102,17 @@ enum class IPCBlobItemRequestStrategy {
   SHARED_MEMORY,
   FILE,
   LAST = FILE
+};
+
+// Used by BlobURLStoreImpl when determining how to validate Blob URLs received
+// from the renderer over Mojo.
+// TODO(https://crbug.com/1058759): Once fixed, remove this.
+enum class BlobURLValidityCheckBehavior {
+  DEFAULT,
+  // In cases where we know that the storage key may not be opaque when it
+  // should be, allow Blob URLs with opaque origins to be registered and
+  // revoked.
+  ALLOW_OPAQUE_ORIGIN_STORAGE_KEY_MISMATCH
 };
 
 // This is the enum to rule them all in the blob system.

@@ -45,8 +45,7 @@ class ExampleTreeViewDrawingProvider : public views::TreeViewDrawingProvider {
 
 }  // namespace
 
-namespace views {
-namespace examples {
+namespace views::examples {
 
 TreeViewExample::TreeViewExample()
     : ExampleBase(GetStringUTF8(IDS_TREE_VIEW_SELECT_LABEL).c_str()),
@@ -55,9 +54,11 @@ TreeViewExample::TreeViewExample()
           1)) {}
 
 TreeViewExample::~TreeViewExample() {
-  // Remove the model from the view.
-  if (tree_view_)
+  if (tree_view_) {
     tree_view_->SetModel(nullptr);
+    tree_view_->set_context_menu_controller(nullptr);
+    tree_view_->SetController(nullptr);
+  }
 }
 
 void TreeViewExample::CreateExampleView(View* container) {
@@ -219,9 +220,8 @@ void TreeViewExample::ExecuteCommand(int command_id, int event_flags) {
       AddNewNode();
       break;
     default:
-      NOTREACHED();
+      NOTREACHED_NORETURN();
   }
 }
 
-}  // namespace examples
-}  // namespace views
+}  // namespace views::examples

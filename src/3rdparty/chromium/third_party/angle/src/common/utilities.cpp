@@ -1481,9 +1481,9 @@ bool IsQueryEntryPoint(EntryPoint entryPoint)
 }
 }  // namespace angle
 
-#if !defined(ANGLE_ENABLE_WINDOWS_UWP)
 void writeFile(const char *path, const void *content, size_t size)
 {
+#if !defined(ANGLE_ENABLE_WINDOWS_UWP)
     FILE *file = fopen(path, "w");
     if (!file)
     {
@@ -1493,17 +1493,8 @@ void writeFile(const char *path, const void *content, size_t size)
 
     fwrite(content, sizeof(char), size, file);
     fclose(file);
-}
+#else
+    UNREACHABLE();
+    return;
 #endif  // !ANGLE_ENABLE_WINDOWS_UWP
-
-#if defined(ANGLE_PLATFORM_WINDOWS)
-
-// Causes the thread to relinquish the remainder of its time slice to any
-// other thread that is ready to run.If there are no other threads ready
-// to run, the function returns immediately, and the thread continues execution.
-void ScheduleYield()
-{
-    Sleep(0);
 }
-
-#endif

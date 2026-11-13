@@ -389,6 +389,24 @@ static void getPhysicalDeviceGraphicsPipelineLibraryFeatures(T *features)
 }
 
 template<typename T>
+static void getPhysicalDeviceGlobalPriorityQueryFeatures(T *features)
+{
+	features->globalPriorityQuery = VK_TRUE;
+}
+
+template<typename T>
+static void getPhysicalDeviceSwapchainMaintenance1FeaturesKHR(T *features)
+{
+	features->swapchainMaintenance1 = VK_TRUE;
+}
+
+template<typename T>
+static void getPhysicalDeviceHostImageCopyFeatures(T *features)
+{
+	features->hostImageCopy = VK_TRUE;
+}
+
+template<typename T>
 static void getPhysicalDeviceVulkan12Features(T *features)
 {
 	features->samplerMirrorClampToEdge = VK_TRUE;
@@ -521,7 +539,7 @@ void PhysicalDevice::getFeatures2(VkPhysicalDeviceFeatures2 *features) const
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES:
 			getPhysicalDeviceSeparateDepthStencilLayoutsFeaturesKHR(reinterpret_cast<VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures *>(curExtension));
 			break;
-		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES_KHR:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES:
 			getPhysicalDevice8BitStorageFeaturesKHR(reinterpret_cast<VkPhysicalDevice8BitStorageFeaturesKHR *>(curExtension));
 			break;
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT:
@@ -530,7 +548,7 @@ void PhysicalDevice::getFeatures2(VkPhysicalDeviceFeatures2 *features) const
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES:
 			getPhysicalDeviceImagelessFramebufferFeatures(reinterpret_cast<VkPhysicalDeviceImagelessFramebufferFeatures *>(curExtension));
 			break;
-		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES_KHR:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES:
 			getPhysicalDeviceShaderSubgroupExtendedTypesFeatures(reinterpret_cast<VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures *>(curExtension));
 			break;
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES:
@@ -619,15 +637,20 @@ void PhysicalDevice::getFeatures2(VkPhysicalDeviceFeatures2 *features) const
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT:
 			getPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT(reinterpret_cast<struct VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT *>(curExtension));
 			break;
-		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COHERENT_MEMORY_FEATURES_AMD:
-			// Workaround for a test bug (see https://gitlab.khronos.org/Tracker/vk-gl-cts/-/issues/3973)
-			reinterpret_cast<struct VkPhysicalDeviceCoherentMemoryFeaturesAMD *>(curExtension)->deviceCoherentMemory = VK_TRUE;
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES_KHR:
+			getPhysicalDeviceGlobalPriorityQueryFeatures(reinterpret_cast<struct VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR *>(curExtension));
 			break;
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT:
 			getPhysicalDeviceDepthClipControlFeaturesExt(reinterpret_cast<struct VkPhysicalDeviceDepthClipControlFeaturesEXT *>(curExtension));
 			break;
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT:
 			getPhysicalDeviceGraphicsPipelineLibraryFeatures(reinterpret_cast<struct VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *>(curExtension));
+			break;
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT:
+			getPhysicalDeviceSwapchainMaintenance1FeaturesKHR(reinterpret_cast<struct VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT *>(curExtension));
+			break;
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES_EXT:
+			getPhysicalDeviceHostImageCopyFeatures(reinterpret_cast<struct VkPhysicalDeviceHostImageCopyFeaturesEXT *>(curExtension));
 			break;
 		case VK_STRUCTURE_TYPE_MAX_ENUM:  // TODO(b/176893525): This may not be legal. dEQP tests that this value is ignored.
 			break;
@@ -1389,6 +1412,60 @@ void PhysicalDevice::getProperties(VkPhysicalDevicePipelineRobustnessPropertiesE
 	getPipelineRobustnessProperties(properties);
 }
 
+template<typename T>
+static void getHostImageCopyProperties(T *properties)
+{
+	// There are no image layouts in SwiftShader, so support all layouts for host image copy
+	constexpr VkImageLayout kAllLayouts[] = {
+		VK_IMAGE_LAYOUT_GENERAL,
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL,
+		VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+		VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL,
+		VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+		VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+		VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR,
+	};
+	constexpr uint32_t kAllLayoutsCount = std::size(kAllLayouts);
+
+	if(properties->pCopySrcLayouts == nullptr)
+	{
+		properties->copySrcLayoutCount = kAllLayoutsCount;
+	}
+	else
+	{
+		properties->copySrcLayoutCount = std::min(properties->copySrcLayoutCount, kAllLayoutsCount);
+		memcpy(properties->pCopySrcLayouts, kAllLayouts, properties->copySrcLayoutCount * sizeof(*properties->pCopySrcLayouts));
+	}
+
+	if(properties->pCopyDstLayouts == nullptr)
+	{
+		properties->copyDstLayoutCount = kAllLayoutsCount;
+	}
+	else
+	{
+		properties->copyDstLayoutCount = std::min(properties->copyDstLayoutCount, kAllLayoutsCount);
+		memcpy(properties->pCopyDstLayouts, kAllLayouts, properties->copyDstLayoutCount * sizeof(*properties->pCopyDstLayouts));
+	}
+
+	memcpy(properties->optimalTilingLayoutUUID, SWIFTSHADER_UUID, VK_UUID_SIZE);
+	properties->identicalMemoryTypeRequirements = VK_TRUE;
+}
+
+void PhysicalDevice::getProperties(VkPhysicalDeviceHostImageCopyPropertiesEXT *properties) const
+{
+	getHostImageCopyProperties(properties);
+}
+
 void PhysicalDevice::getProperties(VkPhysicalDeviceVulkan12Properties *properties) const
 {
 	getDriverProperties(properties);
@@ -1651,6 +1728,20 @@ bool PhysicalDevice::hasExtendedFeatures(const VkPhysicalDeviceGraphicsPipelineL
 	return CheckFeature(requested, supported, graphicsPipelineLibrary);
 }
 
+bool PhysicalDevice::hasExtendedFeatures(const VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT *requested) const
+{
+	auto supported = getSupportedFeatures(requested);
+
+	return CheckFeature(requested, supported, swapchainMaintenance1);
+}
+
+bool PhysicalDevice::hasExtendedFeatures(const VkPhysicalDeviceHostImageCopyFeaturesEXT *requested) const
+{
+	auto supported = getSupportedFeatures(requested);
+
+	return CheckFeature(requested, supported, hostImageCopy);
+}
+
 bool PhysicalDevice::hasExtendedFeatures(const VkPhysicalDeviceDescriptorIndexingFeatures *requested) const
 {
 	auto supported = getSupportedFeatures(requested);
@@ -1690,7 +1781,178 @@ bool PhysicalDevice::hasExtendedFeatures(const VkPhysicalDeviceProtectedMemoryFe
 
 	return CheckFeature(requested, supported, protectedMemory);
 }
+
+bool PhysicalDevice::hasExtendedFeatures(const VkPhysicalDeviceBufferDeviceAddressFeatures *requested) const
+{
+	auto supported = getSupportedFeatures(requested);
+
+	return CheckFeature(requested, supported, bufferDeviceAddress) &&
+	       CheckFeature(requested, supported, bufferDeviceAddressCaptureReplay) &&
+	       CheckFeature(requested, supported, bufferDeviceAddressMultiDevice);
+}
+
+bool PhysicalDevice::hasExtendedFeatures(const VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR *requested) const
+{
+	auto supported = getSupportedFeatures(requested);
+
+	return CheckFeature(requested, supported, globalPriorityQuery);
+}
 #undef CheckFeature
+
+static bool checkFormatUsage(VkImageUsageFlags usage, VkFormatFeatureFlags2KHR features)
+{
+	// Check for usage conflict with features
+	if((usage & VK_IMAGE_USAGE_SAMPLED_BIT) && !(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
+	{
+		return false;
+	}
+
+	if((usage & VK_IMAGE_USAGE_STORAGE_BIT) && !(features & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT))
+	{
+		return false;
+	}
+
+	if((usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) && !(features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+	{
+		return false;
+	}
+
+	if((usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) && !(features & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+	{
+		return false;
+	}
+
+	if((usage & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT) && !(features & (VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)))
+	{
+		return false;
+	}
+
+	if((usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) && !(features & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT))
+	{
+		return false;
+	}
+
+	if((usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) && !(features & VK_FORMAT_FEATURE_TRANSFER_DST_BIT))
+	{
+		return false;
+	}
+
+	if((usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT) && !(features & VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool vk::PhysicalDevice::isFormatSupported(vk::Format format, VkImageType type, VkImageTiling tiling,
+                                           VkImageUsageFlags usage, VkImageUsageFlags stencilUsage, VkImageCreateFlags flags)
+{
+	VkFormatProperties3 properties = {};
+	vk::PhysicalDevice::GetFormatProperties(format, &properties);
+
+	if(flags & VK_IMAGE_CREATE_EXTENDED_USAGE_BIT)
+	{
+		for(vk::Format f : format.getCompatibleFormats())
+		{
+			VkFormatProperties extendedProperties = {};
+			vk::PhysicalDevice::GetFormatProperties(f, &extendedProperties);
+			properties.linearTilingFeatures |= extendedProperties.linearTilingFeatures;
+			properties.optimalTilingFeatures |= extendedProperties.optimalTilingFeatures;
+			properties.bufferFeatures |= extendedProperties.bufferFeatures;
+		}
+	}
+
+	VkFormatFeatureFlags2KHR features;
+	switch(tiling)
+	{
+	case VK_IMAGE_TILING_LINEAR:
+		features = properties.linearTilingFeatures;
+		break;
+
+	case VK_IMAGE_TILING_OPTIMAL:
+		features = properties.optimalTilingFeatures;
+		break;
+
+	default:
+		UNSUPPORTED("VkImageTiling %d", int(tiling));
+		features = 0;
+	}
+
+	if(features == 0)
+	{
+		return false;
+	}
+
+	// Reject any usage or separate stencil usage that is not compatible with the specified format.
+	if(!checkFormatUsage(usage, features))
+	{
+		return false;
+	}
+	// If stencilUsage is 0 then no separate usage was provided and it takes on the same value as usage,
+	// which has already been checked. So only check non-zero stencilUsage.
+	if(stencilUsage != 0 && !checkFormatUsage(stencilUsage, features))
+	{
+		return false;
+	}
+
+	auto allRecognizedUsageBits = VK_IMAGE_USAGE_SAMPLED_BIT |
+	                              VK_IMAGE_USAGE_STORAGE_BIT |
+	                              VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+	                              VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+	                              VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
+	                              VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+	                              VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+	                              VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
+	                              VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT;
+	ASSERT(!(usage & ~(allRecognizedUsageBits)));
+
+	if(usage & VK_IMAGE_USAGE_SAMPLED_BIT)
+	{
+		if(tiling == VK_IMAGE_TILING_LINEAR)
+		{
+			// TODO(b/171299814): Compressed formats and cube maps are not supported for sampling using VK_IMAGE_TILING_LINEAR; otherwise, sampling
+			// in linear tiling is always supported as long as it can be sampled when using VK_IMAGE_TILING_OPTIMAL.
+			if(!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) ||
+			   vk::Format(format).isCompressed() ||
+			   (flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT))
+			{
+				return false;
+			}
+		}
+		else if(!(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
+		{
+			return false;
+		}
+	}
+
+	// "Images created with tiling equal to VK_IMAGE_TILING_LINEAR have further restrictions on their limits and capabilities
+	//  compared to images created with tiling equal to VK_IMAGE_TILING_OPTIMAL."
+	if(tiling == VK_IMAGE_TILING_LINEAR)
+	{
+		if(type != VK_IMAGE_TYPE_2D)
+		{
+			return false;
+		}
+
+		if(vk::Format(format).isDepth() || vk::Format(format).isStencil())
+		{
+			return false;
+		}
+	}
+
+	// "Images created with a format from one of those listed in Formats requiring sampler Y'CBCR conversion for VK_IMAGE_ASPECT_COLOR_BIT image views
+	//  have further restrictions on their limits and capabilities compared to images created with other formats."
+	if(vk::Format(format).isYcbcrFormat())
+	{
+		if(type != VK_IMAGE_TYPE_2D)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
 
 void PhysicalDevice::GetFormatProperties(Format format, VkFormatProperties *pFormatProperties)
 {
@@ -1843,7 +2105,8 @@ void PhysicalDevice::GetFormatProperties(Format format, VkFormatProperties3 *pFo
 		    VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
 		    VK_FORMAT_FEATURE_BLIT_SRC_BIT |
 		    VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
-		    VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+		    VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+		    VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT;
 		break;
 
 	// YCbCr formats:
@@ -1855,7 +2118,8 @@ void PhysicalDevice::GetFormatProperties(Format format, VkFormatProperties3 *pFo
 		    VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
 		    VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
 		    VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
-		    VK_FORMAT_FEATURE_COSITED_CHROMA_SAMPLES_BIT;
+		    VK_FORMAT_FEATURE_COSITED_CHROMA_SAMPLES_BIT |
+		    VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT;
 		break;
 	default:
 		break;
@@ -2143,9 +2407,16 @@ void PhysicalDevice::GetFormatProperties(Format format, VkFormatProperties3 *pFo
 	{
 		// "Formats that are required to support VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT must also support
 		//  VK_FORMAT_FEATURE_TRANSFER_SRC_BIT and VK_FORMAT_FEATURE_TRANSFER_DST_BIT."
+		//
+		//  Additionally:
+		//  "If VK_EXT_host_image_copy is supported and VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT is supported
+		//  in optimalTilingFeatures or linearTilingFeatures for a color format,
+		//  VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT must also be supported in optimalTilingFeatures
+		//  or linearTilingFeatures respectively."
 
 		pFormatProperties->linearTilingFeatures |= VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
-		                                           VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+		                                           VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+		                                           VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT;
 
 		if(!format.isCompressed())
 		{
@@ -2256,12 +2527,50 @@ void PhysicalDevice::getQueueFamilyProperties(uint32_t pQueueFamilyPropertyCount
 	}
 }
 
+void PhysicalDevice::getQueueFamilyGlobalPriorityProperties(VkQueueFamilyGlobalPriorityPropertiesKHR *pQueueFamilyGlobalPriorityProperties) const
+{
+	pQueueFamilyGlobalPriorityProperties->priorityCount = 1;
+	pQueueFamilyGlobalPriorityProperties->priorities[0] = VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_KHR;
+}
+
+bool PhysicalDevice::validateQueueGlobalPriority(VkQueueGlobalPriorityKHR queueGlobalPriority) const
+{
+	VkQueueFamilyGlobalPriorityPropertiesKHR queueFamilyGlobalPriorityProperties;
+	getQueueFamilyGlobalPriorityProperties(&queueFamilyGlobalPriorityProperties);
+
+	for(uint32_t i = 0; i < queueFamilyGlobalPriorityProperties.priorityCount; ++i)
+	{
+		if(queueGlobalPriority == queueFamilyGlobalPriorityProperties.priorities[i])
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void PhysicalDevice::getQueueFamilyProperties(uint32_t pQueueFamilyPropertyCount,
                                               VkQueueFamilyProperties2 *pQueueFamilyProperties) const
 {
 	for(uint32_t i = 0; i < pQueueFamilyPropertyCount; i++)
 	{
 		pQueueFamilyProperties[i].queueFamilyProperties = getQueueFamilyProperties();
+
+		VkBaseOutStructure *extInfo = reinterpret_cast<VkBaseOutStructure *>(pQueueFamilyProperties[i].pNext);
+		while(extInfo)
+		{
+			switch(extInfo->sType)
+			{
+			case VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES_KHR:
+				getQueueFamilyGlobalPriorityProperties(reinterpret_cast<VkQueueFamilyGlobalPriorityPropertiesKHR *>(extInfo));
+				break;
+			default:
+				UNSUPPORTED("pQueueFamilyProperties->pNext sType = %s", vk::Stringify(extInfo->sType).c_str());
+				break;
+			}
+
+			extInfo = extInfo->pNext;
+		}
 	}
 }
 

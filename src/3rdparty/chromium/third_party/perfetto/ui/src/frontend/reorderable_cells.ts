@@ -14,13 +14,18 @@
  * limitations under the License.
  */
 
-import * as m from 'mithril';
-import {globals} from './globals';
+import m from 'mithril';
 
-export type DropDirection = 'left'|'right';
+import {DropDirection} from '../common/dragndrop_logic';
+import {raf} from '../core/raf_scheduler';
+
+export interface ReorderableCell {
+  content: m.Children;
+  extraClass?: string;
+}
 
 export interface ReorderableCellGroupAttrs {
-  cells: m.Children[];
+  cells: ReorderableCell[];
   onReorder: (from: number, to: number, side: DropDirection) => void;
 }
 
@@ -61,7 +66,7 @@ export class ReorderableCellGroup implements
   view(vnode: m.Vnode<ReorderableCellGroupAttrs>): m.Children {
     return vnode.attrs.cells.map(
         (cell, index) => m(
-            'td.reorderable-cell',
+            `td.reorderable-cell${cell.extraClass ?? ''}`,
             {
               draggable: 'draggable',
               class: this.getClassForIndex(index),
@@ -71,7 +76,7 @@ export class ReorderableCellGroup implements
                   e.dataTransfer.setDragImage(placeholderElement, 0, 0);
                 }
 
-                globals.rafScheduler.scheduleFullRedraw();
+                raf.scheduleFullRedraw();
               },
               ondragover: (e: DragEvent) => {
                 let target = e.target as HTMLElement;
@@ -101,7 +106,7 @@ export class ReorderableCellGroup implements
 
 
                 if (redraw) {
-                  globals.rafScheduler.scheduleFullRedraw();
+                  raf.scheduleFullRedraw();
                 }
               },
               ondragenter: (e: DragEvent) => {
@@ -123,7 +128,7 @@ export class ReorderableCellGroup implements
                 }
 
                 this.draggingTo = -1;
-                globals.rafScheduler.scheduleFullRedraw();
+                raf.scheduleFullRedraw();
               },
               ondragend: () => {
                 if (this.draggingTo !== this.draggingFrom &&
@@ -134,10 +139,10 @@ export class ReorderableCellGroup implements
 
                 this.draggingFrom = -1;
                 this.draggingTo = -1;
-                globals.rafScheduler.scheduleFullRedraw();
+                raf.scheduleFullRedraw();
               },
             },
-            cell));
+            cell.content));
   }
 
   oncreate(vnode: m.VnodeDOM<ReorderableCellGroupAttrs, this>) {

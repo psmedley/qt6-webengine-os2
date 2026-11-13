@@ -21,7 +21,6 @@
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -71,6 +70,7 @@ std::vector<StatusToStringData> GetTestData() {
        "kAlreadyHaveActiveStrategy"},
       {Status{.value = Status::kAlreadyAdvertising}, "kAlreadyAdvertising"},
       {Status{.value = Status::kAlreadyDiscovering}, "kAlreadyDiscovering"},
+      {Status{.value = Status::kAlreadyListening}, "kAlreadyListening"},
       {Status{.value = Status::kEndpointIoError}, "kEndpointIoError"},
       {Status{.value = Status::kEndpointUnknown}, "kEndpointUnknown"},
       {Status{.value = Status::kConnectionRejected}, "kConnectionRejected"},
@@ -96,4 +96,3 @@ INSTANTIATE_TEST_CASE_P(StatusToString, StatusToString,
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

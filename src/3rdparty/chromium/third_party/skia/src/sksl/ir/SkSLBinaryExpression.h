@@ -9,9 +9,10 @@
 #define SKSL_BINARYEXPRESSION
 
 #include "include/core/SkTypes.h"
-#include "include/sksl/SkSLOperator.h"
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLOperator.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 
 #include <memory>
 #include <string>
@@ -28,11 +29,11 @@ class VariableReference;
  */
 class BinaryExpression final : public Expression {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kBinary;
+    inline static constexpr Kind kIRNodeKind = Kind::kBinary;
 
     BinaryExpression(Position pos, std::unique_ptr<Expression> left, Operator op,
                      std::unique_ptr<Expression> right, const Type* type)
-        : INHERITED(pos, kExpressionKind, type)
+        : INHERITED(pos, kIRNodeKind, type)
         , fLeft(std::move(left))
         , fOperator(op)
         , fRight(std::move(right)) {

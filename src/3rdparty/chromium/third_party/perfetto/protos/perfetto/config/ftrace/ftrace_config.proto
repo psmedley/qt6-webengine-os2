@@ -18,7 +18,7 @@ syntax = "proto2";
 
 package perfetto.protos;
 
-// Next id: 23.
+// Next id: 26.
 message FtraceConfig {
   repeated string ftrace_events = 1;
   repeated string atrace_categories = 2;
@@ -33,22 +33,38 @@ message FtraceConfig {
   message CompactSchedConfig {
     // If true, and sched_switch or sched_waking ftrace events are enabled,
     // record those events in the compact format.
+    //
+    // If the field is unset, the default is:
+    // * perfetto v42.0+: enabled
+    // * before: disabled
     optional bool enabled = 1;
   }
   optional CompactSchedConfig compact_sched = 12;
 
   // Optional filter for "ftrace/print" events.
   //
-  // The filter consists of multiple rules. A rule matches if its prefix matches
-  // exactly with the beginning of the "ftrace/print" "buf" field. As soon as a
-  // rule matches (the rules are processed in order), its `allow` field will be
-  // used as the outcome: if `allow` is true, the event will be included in the
-  // trace, otherwise it will be discarded. If an event does not match any rule,
-  // it will be allowed by default (a rule with an empty prefix and allow=false,
-  // disallows everything by default).
+  // The filter consists of multiple rules. As soon as a rule matches (the rules
+  // are processed in order), its `allow` field will be used as the outcome: if
+  // `allow` is true, the event will be included in the trace, otherwise it will
+  // be discarded. If an event does not match any rule, it will be allowed by
+  // default (a rule with an empty prefix and allow=false, disallows everything
+  // by default).
   message PrintFilter {
     message Rule {
-      optional string prefix = 1;
+      // Matches an atrace message of the form:
+      // <type>|pid|<prefix>...
+      message AtraceMessage {
+        optional string type = 1;
+        optional string prefix = 2;
+      }
+      oneof match {
+        // This rule matches if `prefix` matches exactly with the beginning of
+        // the "ftrace/print" "buf" field.
+        string prefix = 1;
+        // This rule matches if the "buf" field contains an atrace-style print
+        // message as specified in `atrace_msg`.
+        AtraceMessage atrace_msg = 3;
+      }
       optional bool allow = 2;
     }
     repeated Rule rules = 1;
@@ -61,7 +77,7 @@ message FtraceConfig {
   // It does not disclose KASLR, symbol addresses are mangled.
   optional bool symbolize_ksyms = 13;
 
-  // When symbolize_ksyms=true, tetermines whether the traced_probes daemon
+  // When symbolize_ksyms=true, determines whether the traced_probes daemon
   // should keep the symbol map in memory (and reuse it for future tracing
   // sessions) or clear it (saving memory) and re-create it on each tracing
   // session (wasting cpu and wall time).
@@ -152,4 +168,30 @@ message FtraceConfig {
   // * Available only on debuggable builds.
   // * Introduced in: Android U.
   repeated string function_graph_roots = 21;
+
+  // If true, does not clear ftrace buffers before the start of the program.
+  // This makes sense only if this is the first ftrace data source instance
+  // created after the daemon has been started. Can be useful for gathering boot
+  // traces, if ftrace has been separately configured (e.g. via kernel
+  // commandline).
+  optional bool preserve_ftrace_buffer = 23;
+
+  // If true, overrides the default timestamp clock and uses a raw hardware
+  // based monotonic clock for getting timestamps.
+  // * Introduced in: Android U.
+  optional bool use_monotonic_raw_clock = 24;
+
+  // If |instance_name| is not empty, then attempt to use that tracefs instance
+  // for event recording. Normally, this means
+  // `/sys/kernel/tracing/instances/$instance_name`.
+  //
+  // The name "hyp" is reserved.
+  //
+  // The instance must already exist, the tracing daemon *will not* create it
+  // for you as it typically doesn't have such permissions.
+  // Only a subset of features is guaranteed to work with non-default instances,
+  // at the time of writing:
+  //  * ftrace_events
+  //  * buffer_size_kb
+  optional string instance_name = 25;
 }

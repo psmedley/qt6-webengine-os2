@@ -1,9 +1,13 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 Google LLC
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
+#endif
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
 #endif
 
 #include "google_breakpad/processor/proc_maps_linux.h"

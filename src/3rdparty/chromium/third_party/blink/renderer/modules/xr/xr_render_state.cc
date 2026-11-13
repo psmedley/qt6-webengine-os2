@@ -21,7 +21,7 @@ namespace {
 constexpr double kMinFieldOfView = 0.01;
 constexpr double kMaxFieldOfView = 3.13;
 constexpr double kDefaultFieldOfView = M_PI * 0.5;
-}  // anonymous namespace
+}  // namespace
 
 XRRenderState::XRRenderState(bool immersive) : immersive_(immersive) {
   if (!immersive_)
@@ -37,6 +37,13 @@ void XRRenderState::Update(const XRRenderStateInit* init) {
   }
   if (init->hasBaseLayer()) {
     base_layer_ = init->baseLayer();
+    layers_ = MakeGarbageCollected<FrozenArray<XRLayer>>();
+  }
+  if (init->hasLayers()) {
+    base_layer_ = nullptr;
+    layers_ = init->layers()
+                  ? MakeGarbageCollected<FrozenArray<XRLayer>>(*init->layers())
+                  : MakeGarbageCollected<FrozenArray<XRLayer>>();
   }
   if (init->hasInlineVerticalFieldOfView()) {
     double fov = init->inlineVerticalFieldOfView();
@@ -63,6 +70,7 @@ absl::optional<double> XRRenderState::inlineVerticalFieldOfView() const {
 
 void XRRenderState::Trace(Visitor* visitor) const {
   visitor->Trace(base_layer_);
+  visitor->Trace(layers_);
   ScriptWrappable::Trace(visitor);
 }
 

@@ -17,6 +17,8 @@ set(CMAKE_SYSTEM_PROCESSOR "arm64")
 set(CMAKE_SYSTEM_NAME "Windows")
 
 if("${CROSS}" STREQUAL "")
+
+  # Default the cross compiler prefix to one used by MSYS2.
   set(CROSS aarch64-w64-mingw32-)
 endif()
 
@@ -32,6 +34,3 @@ endif()
 if(NOT CMAKE_RANLIB)
   set(CMAKE_RANLIB ${CROSS}ranlib CACHE FILEPATH Indexer)
 endif()
-
-# No runtime cpu detect for arm64-mingw-gcc.
-set(CONFIG_RUNTIME_CPU_DETECT 0 CACHE STRING "")

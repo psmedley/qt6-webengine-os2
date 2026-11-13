@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:network-protocol
 
 #ifndef QWEBENGINEURLREQUESTINFO_P_H
 #define QWEBENGINEURLREQUESTINFO_P_H
@@ -27,9 +28,13 @@ namespace net {
 class URLRequest;
 }
 
+namespace QtWebEngineCore {
+class ResourceRequestBody;
+}
+
 QT_BEGIN_NAMESPACE
 
-class QWebEngineUrlRequestInfoPrivate
+class Q_WEBENGINECORE_EXPORT QWebEngineUrlRequestInfoPrivate
 {
     Q_DECLARE_PUBLIC(QWebEngineUrlRequestInfo)
 public:
@@ -37,6 +42,7 @@ public:
                                     QWebEngineUrlRequestInfo::NavigationType navigation,
                                     const QUrl &u, const QUrl &fpu, const QUrl &i,
                                     const QByteArray &m,
+                                    QtWebEngineCore::ResourceRequestBody *const rb = nullptr,
                                     const QHash<QByteArray, QByteArray> &h = {});
 
     QWebEngineUrlRequestInfo::ResourceType resourceType;
@@ -49,8 +55,11 @@ public:
     const QByteArray method;
     bool changed;
     QHash<QByteArray, QByteArray> extraHeaders;
+    QtWebEngineCore::ResourceRequestBody *const resourceRequestBody;
 
     QWebEngineUrlRequestInfo *q_ptr;
+
+    void appendFileToResourceRequestBodyForTest(const QString &path);
 };
 
 QT_END_NAMESPACE

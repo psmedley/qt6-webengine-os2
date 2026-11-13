@@ -6,17 +6,17 @@
 
 #include <math.h>
 
-#include <algorithm>
 #include <memory>
 
-#include "base/bind.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "base/time/time.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
@@ -34,6 +34,7 @@
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/transform_util.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/geometry/vector3d_f.h"
 #include "ui/gfx/interpolated_transform.h"
@@ -101,8 +102,7 @@ class HidingWindowAnimationObserverBase : public aura::WindowObserver {
     if (window_->parent()) {
       const aura::Window::Windows& transient_children =
           GetTransientChildren(window_);
-      auto iter = std::find(window_->parent()->children().begin(),
-                            window_->parent()->children().end(), window_);
+      auto iter = base::ranges::find(window_->parent()->children(), window_);
       DCHECK(iter != window_->parent()->children().end());
       aura::Window* topmost_transient_child = nullptr;
       for (++iter; iter != window_->parent()->children().end(); ++iter) {
@@ -158,8 +158,9 @@ ui::AnimationThroughputReporter::ReportCallback ForSmoothness(
   return base::BindRepeating(
       [](SmoothnessCallback callback,
          const cc::FrameSequenceMetrics::CustomReportData& data) {
-        const int smoothness =
-            std::floor(100.0f * data.frames_produced / data.frames_expected);
+        const int smoothness = std::floor(
+            100.0f * (data.frames_expected_v3 - data.frames_dropped_v3) /
+            data.frames_expected_v3);
         callback.Run(smoothness);
       },
       std::move(callback));

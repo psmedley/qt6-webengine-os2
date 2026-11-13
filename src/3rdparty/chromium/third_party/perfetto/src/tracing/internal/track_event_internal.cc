@@ -42,6 +42,8 @@ void TrackEventSessionObserver::OnStop(const DataSourceBase::StopArgs&) {}
 void TrackEventSessionObserver::WillClearIncrementalState(
     const DataSourceBase::ClearIncrementalStateArgs&) {}
 
+TrackEventTlsStateUserData::~TrackEventTlsStateUserData() = default;
+
 namespace internal {
 
 BaseTrackEventInternedDataIndex::~BaseTrackEventInternedDataIndex() = default;
@@ -51,6 +53,7 @@ namespace {
 static constexpr const char kLegacySlowPrefix[] = "disabled-by-default-";
 static constexpr const char kSlowTag[] = "slow";
 static constexpr const char kDebugTag[] = "debug";
+static constexpr const char kFilteredEventName[] = "FILTERED";
 
 constexpr auto kClockIdIncremental =
     TrackEventIncrementalState::kClockIdIncremental;
@@ -188,6 +191,21 @@ void TrackEventInternal::RemoveSessionObserver(
       registry, observer);
 }
 
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+static constexpr protos::pbzero::BuiltinClock kDefaultTraceClock =
+    protos::pbzero::BUILTIN_CLOCK_BOOTTIME;
+#else
+static constexpr protos::pbzero::BuiltinClock kDefaultTraceClock =
+    protos::pbzero::BUILTIN_CLOCK_MONOTONIC;
+#endif
+
+// static
+protos::pbzero::BuiltinClock TrackEventInternal::clock_ = kDefaultTraceClock;
+
+// static
+bool TrackEventInternal::disallow_merging_with_system_tracks_ = false;
+
 // static
 void TrackEventInternal::EnableTracing(
     const TrackEventCategoryRegistry& registry,
@@ -210,13 +228,18 @@ void TrackEventInternal::OnStart(const TrackEventCategoryRegistry& registry,
 }
 
 // static
-void TrackEventInternal::DisableTracing(
-    const TrackEventCategoryRegistry& registry,
-    const DataSourceBase::StopArgs& args) {
+void TrackEventInternal::OnStop(const TrackEventCategoryRegistry& registry,
+                                const DataSourceBase::StopArgs& args) {
   TrackEventSessionObserverRegistry::GetInstance()->ForEachObserverForRegistry(
       registry, [&](TrackEventSessionObserver* o) { o->OnStop(args); });
+}
+
+// static
+void TrackEventInternal::DisableTracing(
+    const TrackEventCategoryRegistry& registry,
+    uint32_t internal_instance_index) {
   for (size_t i = 0; i < registry.category_count(); i++)
-    registry.DisableCategoryForInstance(i, args.internal_instance_index);
+    registry.DisableCategoryForInstance(i, internal_instance_index);
 }
 
 // static
@@ -302,6 +325,21 @@ bool TrackEventInternal::IsCategoryEnabled(
       return true;
     }
 
+    // 2.5. A special case for Chrome's legacy disabled-by-default categories.
+    // We treat them as having a "slow" tag with one exception: they can be
+    // enabled by a pattern if the pattern starts with "disabled-by-default-"
+    // itself.
+    if (match_type == MatchType::kExact &&
+        !strncmp(category.name, kLegacySlowPrefix, strlen(kLegacySlowPrefix))) {
+      for (const auto& pattern : config.enabled_categories()) {
+        if (!strncmp(pattern.c_str(), kLegacySlowPrefix,
+                     strlen(kLegacySlowPrefix)) &&
+            NameMatchesPattern(pattern, category.name, MatchType::kPattern)) {
+          return true;
+        }
+      }
+    }
+
     // 3. Disabled categories.
     if (NameMatchesPatternList(config.disabled_categories(), category.name,
                                match_type)) {
@@ -331,8 +369,10 @@ bool TrackEventInternal::IsCategoryEnabled(
 uint64_t TrackEventInternal::GetTimeNs() {
   if (GetClockId() == protos::pbzero::BUILTIN_CLOCK_BOOTTIME)
     return static_cast<uint64_t>(perfetto::base::GetBootTimeNs().count());
-  PERFETTO_DCHECK(GetClockId() == protos::pbzero::BUILTIN_CLOCK_MONOTONIC);
-  return static_cast<uint64_t>(perfetto::base::GetWallTimeNs().count());
+  else if (GetClockId() == protos::pbzero::BUILTIN_CLOCK_MONOTONIC)
+    return static_cast<uint64_t>(perfetto::base::GetWallTimeNs().count());
+  PERFETTO_DCHECK(GetClockId() == protos::pbzero::BUILTIN_CLOCK_MONOTONIC_RAW);
+  return static_cast<uint64_t>(perfetto::base::GetWallTimeRawNs().count());
 }
 
 // static
@@ -352,8 +392,7 @@ void TrackEventInternal::ResetIncrementalState(
     const TrackEventTlsState& tls_state,
     const TraceTimestamp& timestamp) {
   auto sequence_timestamp = timestamp;
-  if (timestamp.clock_id != TrackEventInternal::GetClockId() &&
-      timestamp.clock_id != kClockIdIncremental) {
+  if (timestamp.clock_id != kClockIdIncremental) {
     sequence_timestamp = TrackEventInternal::GetTraceTime();
   }
 
@@ -381,11 +420,11 @@ void TrackEventInternal::ResetIncrementalState(
           thread_time_counter_track.uuid);
     }
 
-    if (tls_state.default_clock != GetClockId()) {
+    if (tls_state.default_clock != static_cast<uint32_t>(GetClockId())) {
       ClockSnapshot* clocks = packet->set_clock_snapshot();
       // Trace clock.
       ClockSnapshot::Clock* trace_clock = clocks->add_clocks();
-      trace_clock->set_clock_id(GetClockId());
+      trace_clock->set_clock_id(static_cast<uint32_t>(GetClockId()));
       trace_clock->set_timestamp(sequence_timestamp.value);
 
       if (PERFETTO_LIKELY(tls_state.default_clock == kClockIdIncremental)) {
@@ -444,8 +483,9 @@ TrackEventInternal::NewTracePacket(TraceWriterBase* trace_writer,
       // No need to set the clock id here, since kClockIdIncremental is the
       // clock id assumed by default.
       auto time_diff_ns = timestamp.value - incr_state->last_timestamp_ns;
-      packet->set_timestamp(time_diff_ns / ts_unit_multiplier);
-      incr_state->last_timestamp_ns = timestamp.value;
+      auto time_diff_units = time_diff_ns / ts_unit_multiplier;
+      packet->set_timestamp(time_diff_units);
+      incr_state->last_timestamp_ns += time_diff_units * ts_unit_multiplier;
     } else {
       packet->set_timestamp(timestamp.value / ts_unit_multiplier);
       packet->set_timestamp_clock_id(ts_unit_multiplier == 1
@@ -476,7 +516,10 @@ void TrackEventInternal::WriteEventName(StaticString event_name,
 void TrackEventInternal::WriteEventName(perfetto::DynamicString event_name,
                                         perfetto::EventContext& event_ctx,
                                         const TrackEventTlsState& tls_state) {
-  if (PERFETTO_LIKELY(!tls_state.filter_dynamic_event_names)) {
+  if (PERFETTO_UNLIKELY(tls_state.filter_dynamic_event_names)) {
+    event_ctx.event()->set_name(kFilteredEventName,
+                                sizeof(kFilteredEventName) - 1);
+  } else {
     event_ctx.event()->set_name(event_name.value, event_name.length);
   }
 }
@@ -485,14 +528,14 @@ void TrackEventInternal::WriteEventName(perfetto::DynamicString event_name,
 EventContext TrackEventInternal::WriteEvent(
     TraceWriterBase* trace_writer,
     TrackEventIncrementalState* incr_state,
-    const TrackEventTlsState& tls_state,
+    TrackEventTlsState& tls_state,
     const Category* category,
     perfetto::protos::pbzero::TrackEvent::Type type,
     const TraceTimestamp& timestamp,
     bool on_current_thread_track) {
   PERFETTO_DCHECK(!incr_state->was_cleared);
   auto packet = NewTracePacket(trace_writer, incr_state, tls_state, timestamp);
-  EventContext ctx(std::move(packet), incr_state, &tls_state);
+  EventContext ctx(trace_writer, std::move(packet), incr_state, &tls_state);
 
   auto track_event = ctx.event();
   if (type != protos::pbzero::TrackEvent::TYPE_UNSPECIFIED)

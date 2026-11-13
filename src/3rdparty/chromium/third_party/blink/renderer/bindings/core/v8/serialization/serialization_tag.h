@@ -116,7 +116,8 @@ enum SerializationTag {
   kEncodedAudioChunkTag = 'y',  // uint32_t -> transferred chunk
   kEncodedVideoChunkTag = 'z',  // uint32_t -> transferred chunk
 
-  kCropTargetTag = 'c',  // crop_id:WebCoreString
+  kCropTargetTag = 'c',         // crop_id:WebCoreString
+  kRestrictionTargetTag = 'D',  // restriction_id:WebCoreString
 
   kMediaSourceHandleTag = 'S',  // uint32_t -> transferred MediaSourceHandle
 
@@ -127,8 +128,16 @@ enum SerializationTag {
   kDeprecatedDetectedFaceTag = 'F',
   kDeprecatedDetectedTextTag = 't',
 
+  kFencedFrameConfigTag = 'C',
+
   kDOMExceptionTag = 'x',  // name:String,message:String,stack:String
-  kVersionTag = 0xFF       // version:uint32_t -> Uses this as the file version.
+  kTrailerOffsetTag =
+      0xFE,  // offset:uint64_t (fixed width, network order) from buffer start
+             // size:uint32_t (fixed width, network order)
+  kVersionTag = 0xFF,  // version:uint32_t -> Uses this as the file version.
+
+  // Tags used in trailers.
+  kTrailerRequiresInterfacesTag = 0xA0,
 };
 
 }  // namespace blink

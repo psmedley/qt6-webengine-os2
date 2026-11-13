@@ -4,7 +4,7 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/codegen/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/ic/accessor-assembler.h"
 
 namespace v8 {
@@ -132,6 +132,11 @@ void Builtins::Generate_KeyedStoreICTrampoline(
   AccessorAssembler assembler(state);
   assembler.GenerateKeyedStoreICTrampoline();
 }
+void Builtins::Generate_KeyedStoreICTrampoline_Megamorphic(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateKeyedStoreICTrampoline_Megamorphic();
+}
 void Builtins::Generate_KeyedStoreICBaseline(
     compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
@@ -230,6 +235,11 @@ void Builtins::Generate_LoadGlobalICInsideTypeofBaseline(
   assembler.GenerateLoadGlobalICBaseline(TypeofMode::kInside);
 }
 
+void Builtins::Generate_LookupGlobalIC(compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateLookupGlobalIC(TypeofMode::kNotInside);
+}
+
 void Builtins::Generate_LookupGlobalICTrampoline(
     compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
@@ -240,6 +250,12 @@ void Builtins::Generate_LookupGlobalICBaseline(
     compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
   assembler.GenerateLookupGlobalICBaseline(TypeofMode::kNotInside);
+}
+
+void Builtins::Generate_LookupGlobalICInsideTypeof(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateLookupGlobalIC(TypeofMode::kInside);
 }
 
 void Builtins::Generate_LookupGlobalICInsideTypeofTrampoline(

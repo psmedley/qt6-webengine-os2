@@ -1,9 +1,10 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "ssl_host_state_delegate_qt.h"
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 
 namespace QtWebEngineCore {
 
@@ -111,5 +112,26 @@ bool SSLHostStateDelegateQt::HasAllowException(const std::string &host, content:
            policy_iterator->second.HasAllowException();
 }
 
+bool SSLHostStateDelegateQt::HasAllowExceptionForAnyHost(content::StoragePartition *storage_partition)
+{
+    for (auto const &it : m_certPolicyforHost) {
+        if (it.second.HasAllowException()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void SSLHostStateDelegateQt::SetHttpsEnforcementForHost(const std::string &host, bool enforce,
+                                                        content::StoragePartition *storage_partition)
+{
+    // Intentional no-op see aw_ssl_host_state_delegate
+}
+
+bool SSLHostStateDelegateQt::IsHttpsEnforcedForUrl(const GURL &url,
+                                                   content::StoragePartition *storage_partition)
+{
+    return false;
+}
 
 } // namespace QtWebEngineCore

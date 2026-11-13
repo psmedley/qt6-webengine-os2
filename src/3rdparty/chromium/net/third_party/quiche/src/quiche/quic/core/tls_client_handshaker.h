@@ -23,7 +23,7 @@ namespace quic {
 
 // An implementation of QuicCryptoClientStream::HandshakerInterface which uses
 // TLS 1.3 for the crypto handshake protocol.
-class QUIC_EXPORT_PRIVATE TlsClientHandshaker
+class QUICHE_EXPORT TlsClientHandshaker
     : public TlsHandshaker,
       public QuicCryptoClientStream::HandshakerInterface,
       public TlsClientConnection::Delegate {
@@ -43,6 +43,7 @@ class QUIC_EXPORT_PRIVATE TlsClientHandshaker
   // From QuicCryptoClientStream::HandshakerInterface
   bool CryptoConnect() override;
   int num_sent_client_hellos() const override;
+  bool ResumptionAttempted() const override;
   bool IsResumption() const override;
   bool EarlyDataAccepted() const override;
   ssl_early_data_reason_t EarlyDataReason() const override;

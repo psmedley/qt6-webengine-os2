@@ -10,6 +10,7 @@ module proxy_resolver.mojom;
 import "sandbox/policy/mojom/sandbox.mojom";
 import "services/network/public/mojom/ip_address.mojom";
 import "services/network/public/mojom/network_anonymization_key.mojom";
+import "services/network/public/mojom/network_param.mojom";
 import "url/mojom/url.mojom";
 
 // Mirror of net::ProxyResolveDnsOperation.
@@ -27,28 +28,8 @@ interface HostResolverRequestClient {
   ReportResult(int32 error, array<network.mojom.IPAddress> result);
 };
 
-// Mirror of net::ProxyServer::Scheme.
-enum ProxyScheme {
-  INVALID,
-  DIRECT,
-  HTTP,
-  SOCKS4,
-  SOCKS5,
-  HTTPS,
-  QUIC,
-};
-
-// Mirror of net::ProxyServer.
-struct ProxyServer {
-  ProxyScheme scheme;
-
-  // |host| and |port| are only valid if |scheme| is not INVALID or DIRECT.
-  string host;
-  uint16 port;
-};
-
 struct ProxyInfo {
-  array<ProxyServer> proxy_servers;
+  array<network.mojom.ProxyChain> proxy_chains;
 };
 
 interface ProxyResolver {
@@ -57,9 +38,10 @@ interface ProxyResolver {
   //
   // |network_anonymization_key| is the NetworkAnonymizationKey used by the DNS cache
   // to separate requests made in different contexts.
-  GetProxyForUrl(url.mojom.Url url,
-                 network.mojom.NetworkAnonymizationKey network_anonymization_key,
-                 pending_remote<ProxyResolverRequestClient> client);
+  GetProxyForUrl(
+    url.mojom.Url url,
+    network.mojom.NetworkAnonymizationKey network_anonymization_key,
+    pending_remote<ProxyResolverRequestClient> client);
 };
 
 interface ProxyResolverRequestClient {
@@ -75,10 +57,11 @@ interface ProxyResolverRequestClient {
   // to separate requests made in different contexts. An IP address received
   // from a resolution using one NetworkAnonymizationKey must not be used for a
   // request made with a different NetworkAnonymizationKey.
-  ResolveDns(string host,
-             HostResolveOperation operation,
-             network.mojom.NetworkAnonymizationKey network_anonymization_key,
-             pending_remote<HostResolverRequestClient> client);
+  ResolveDns(
+    string host,
+    HostResolveOperation operation,
+    network.mojom.NetworkAnonymizationKey network_anonymization_key,
+    pending_remote<HostResolverRequestClient> client);
 };
 
 // Creates a ProxyResolver that uses the provided PAC script. The ProxyResolver

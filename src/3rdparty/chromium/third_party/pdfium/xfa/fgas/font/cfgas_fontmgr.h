@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/widestring.h"
 #include "core/fxge/cfx_face.h"
-#include "core/fxge/freetype/fx_freetype.h"
 
 class CFGAS_GEFont;
 class IFX_SeekableReadStream;
@@ -66,9 +65,9 @@ class CFGAS_FontDescriptor {
   uint32_t m_dwCsb[2] = {};
 };
 
-class CFGAS_FontDescriptorInfo {
+struct CFGAS_FontDescriptorInfo {
  public:
-  CFGAS_FontDescriptor* pFont;
+  UNOWNED_PTR_EXCLUSION CFGAS_FontDescriptor* pFont;  // POD struct.
   int32_t nPenalty;
 
   bool operator>(const CFGAS_FontDescriptorInfo& other) const {

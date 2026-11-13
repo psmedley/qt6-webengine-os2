@@ -1,9 +1,10 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "core/fxcrt/unowned_ptr.h"
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <set>
@@ -11,6 +12,10 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/base/containers/contains.h"
+
+#if defined(PDF_USE_PARTITION_ALLOC)
+#include "partition_alloc/shim/allocator_shim_default_dispatch_to_partition_alloc.h"
+#endif
 
 namespace fxcrt {
 namespace {
@@ -35,15 +40,6 @@ void DeleteDangling() {
   }
 }
 
-void ResetDangling() {
-  auto ptr2 = std::make_unique<Clink>();
-  {
-    auto ptr1 = std::make_unique<Clink>();
-    ptr2->next_.Reset(ptr1.get());
-  }
-  ptr2->next_.Reset();
-}
-
 void AssignDangling() {
   auto ptr2 = std::make_unique<Clink>();
   {
@@ -59,25 +55,25 @@ void ReleaseDangling() {
     auto ptr1 = std::make_unique<Clink>();
     ptr2->next_ = ptr1.get();
   }
-  ptr2->next_.Release();
+  ptr2->next_.ExtractAsDangling();
 }
 
 }  // namespace
 
 TEST(UnownedPtr, DefaultCtor) {
   UnownedPtr<Clink> ptr;
-  EXPECT_FALSE(ptr.Get());
+  EXPECT_FALSE(ptr);
 }
 
 TEST(UnownedPtr, NullptrCtor) {
   UnownedPtr<Clink> ptr(nullptr);
-  EXPECT_FALSE(ptr.Get());
+  EXPECT_FALSE(ptr);
 }
 
 TEST(UnownedPtr, RawCtor) {
   auto obj = std::make_unique<Clink>();
   UnownedPtr<Clink> ptr(obj.get());
-  EXPECT_EQ(obj.get(), ptr.Get());
+  EXPECT_EQ(obj.get(), ptr);
 }
 
 TEST(UnownedPtr, CopyCtor) {
@@ -123,7 +119,7 @@ TEST(UnownedPtr, RawAssign) {
   std::unique_ptr<Clink> obj = std::make_unique<Clink>();
   UnownedPtr<Clink> ptr;
   ptr = obj.get();
-  EXPECT_EQ(obj.get(), ptr.Get());
+  EXPECT_EQ(obj.get(), ptr);
 }
 
 TEST(UnownedPtr, CopyAssign) {
@@ -131,8 +127,8 @@ TEST(UnownedPtr, CopyAssign) {
   UnownedPtr<Clink> ptr1(obj.get());
   UnownedPtr<Clink> ptr2;
   ptr2 = ptr1;
-  EXPECT_EQ(obj.get(), ptr1.Get());
-  EXPECT_EQ(obj.get(), ptr2.Get());
+  EXPECT_EQ(obj.get(), ptr1);
+  EXPECT_EQ(obj.get(), ptr2);
 }
 
 TEST(UnownedPtr, MoveAssign) {
@@ -141,7 +137,7 @@ TEST(UnownedPtr, MoveAssign) {
   UnownedPtr<Clink> ptr2;
   ptr2 = std::move(ptr1);
   EXPECT_FALSE(ptr1);
-  EXPECT_EQ(obj.get(), ptr2.Get());
+  EXPECT_EQ(obj.get(), ptr2);
 }
 
 TEST(UnownedPtr, CopyConversionAssign) {
@@ -149,8 +145,8 @@ TEST(UnownedPtr, CopyConversionAssign) {
   UnownedPtr<Clink> ptr1(obj.get());
   UnownedPtr<const Clink> ptr2;
   ptr2 = ptr1;
-  EXPECT_EQ(obj.get(), ptr1.Get());
-  EXPECT_EQ(obj.get(), ptr2.Get());
+  EXPECT_EQ(obj.get(), ptr1);
+  EXPECT_EQ(obj.get(), ptr2);
 }
 
 TEST(UnownedPtr, MoveConversionAssign) {
@@ -159,7 +155,7 @@ TEST(UnownedPtr, MoveConversionAssign) {
   UnownedPtr<const Clink> ptr2;
   ptr2 = std::move(ptr1);
   EXPECT_FALSE(ptr1);
-  EXPECT_EQ(obj.get(), ptr2.Get());
+  EXPECT_EQ(obj.get(), ptr2);
 }
 
 TEST(UnownedPtr, PtrOk) {
@@ -171,27 +167,10 @@ TEST(UnownedPtr, PtrOk) {
 }
 
 TEST(UnownedPtr, PtrNotOk) {
-#if defined(ADDRESS_SANITIZER)
+#if defined(UNOWNED_PTR_DANGLING_CHECKS)
   EXPECT_DEATH(DeleteDangling(), "");
 #else
   DeleteDangling();
-#endif
-}
-
-TEST(UnownedPtr, ResetOk) {
-  auto ptr1 = std::make_unique<Clink>();
-  {
-    auto ptr2 = std::make_unique<Clink>();
-    ptr2->next_.Reset(ptr1.get());
-    ptr2->next_.Reset(nullptr);
-  }
-}
-
-TEST(UnownedPtr, ResetNotOk) {
-#if defined(ADDRESS_SANITIZER)
-  EXPECT_DEATH(ResetDangling(), "");
-#else
-  ResetDangling();
 #endif
 }
 
@@ -205,7 +184,7 @@ TEST(UnownedPtr, AssignOk) {
 }
 
 TEST(UnownedPtr, AssignNotOk) {
-#if defined(ADDRESS_SANITIZER)
+#if defined(UNOWNED_PTR_DANGLING_CHECKS)
   EXPECT_DEATH(AssignDangling(), "");
 #else
   AssignDangling();
@@ -217,12 +196,12 @@ TEST(UnownedPtr, ReleaseOk) {
   {
     auto ptr1 = std::make_unique<Clink>();
     ptr2->next_ = ptr1.get();
-    ptr2->next_.Release();
+    ptr2->next_.ExtractAsDangling();
   }
 }
 
 TEST(UnownedPtr, ReleaseNotOk) {
-#if defined(ADDRESS_SANITIZER)
+#if defined(UNOWNED_PTR_DANGLING_CHECKS)
   EXPECT_DEATH(ReleaseDangling(), "");
 #else
   ReleaseDangling();
@@ -284,5 +263,37 @@ TEST(UnownedPtr, TransparentCompare) {
   EXPECT_TRUE(pdfium::Contains(holder, &foos[0]));
   EXPECT_FALSE(pdfium::Contains(holder, &foos[1]));
 }
+
+#if defined(PDF_USE_PARTITION_ALLOC)
+#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) &&   \
+    BUILDFLAG(ENABLE_BACKUP_REF_PTR_SUPPORT) &&   \
+    !BUILDFLAG(ENABLE_DANGLING_RAW_PTR_CHECKS) && \
+    BUILDFLAG(HAS_64_BIT_POINTERS)
+
+TEST(UnownedPtr, DanglingGetsQuarantined) {
+  partition_alloc::PartitionRoot* root =
+      allocator_shim::internal::PartitionAllocMalloc::Allocator();
+  size_t original_byte_count =
+      root->total_size_of_brp_quarantined_bytes.load(std::memory_order_relaxed);
+
+  auto ptr = std::make_unique<double>(4.0);
+  UnownedPtr<double> dangler = ptr.get();
+  EXPECT_EQ(
+      root->total_size_of_brp_quarantined_bytes.load(std::memory_order_relaxed),
+      original_byte_count);
+
+  ptr.reset();
+  EXPECT_GE(
+      root->total_size_of_brp_quarantined_bytes.load(std::memory_order_relaxed),
+      original_byte_count + sizeof(double));
+
+  dangler = nullptr;
+  EXPECT_EQ(
+      root->total_size_of_brp_quarantined_bytes.load(std::memory_order_relaxed),
+      original_byte_count);
+}
+
+#endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) ...
+#endif  // PDF_USE_PARTITION_ALLOC
 
 }  // namespace fxcrt

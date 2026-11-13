@@ -11,20 +11,23 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
 #include "base/containers/flat_map.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process_handle.h"
 #include "base/sequence_checker.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/discardable_memory/public/mojom/discardable_shared_memory_manager.mojom.h"
 #include "components/viz/common/buildflags.h"
 #include "components/viz/host/viz_host_export.h"
-#include "gpu/command_buffer/common/activity_flags.h"
+#include "components/viz/service/debugger/mojom/viz_debugger.mojom.h"
+#include "gpu/command_buffer/common/shared_image_capabilities.h"
+#include "gpu/command_buffer/common/shm_count.h"
 #include "gpu/config/gpu_domain_guilt.h"
 #include "gpu/ipc/common/gpu_disk_cache_type.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -101,7 +104,7 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
     virtual void BindInterface(
         const std::string& interface_name,
         mojo::ScopedMessagePipeHandle interface_pipe) = 0;
-#if defined(USE_OZONE)
+#if BUILDFLAG(IS_OZONE)
     virtual void TerminateGpuProcess(const std::string& message) = 0;
 #endif
 
@@ -146,6 +149,7 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
       base::OnceCallback<void(mojo::ScopedMessagePipeHandle,
                               const gpu::GPUInfo&,
                               const gpu::GpuFeatureInfo&,
+                              const gpu::SharedImageCapabilities&,
                               EstablishChannelStatus)>;
 
   GpuHostImpl(Delegate* delegate,
@@ -193,7 +197,7 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
 #if BUILDFLAG(USE_VIZ_DEBUGGER)
   // Command as a Json string that the visual debugging instance interprets as
   // stream filtering.
-  void FilterVisualDebugStream(base::Value filter_data);
+  void FilterVisualDebugStream(base::Value::Dict filter_data);
 
   // Establishes the connection between the visual debugging instance and the
   // output stream.
@@ -212,15 +216,17 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
 
 #if BUILDFLAG(IS_WIN)
   mojom::InfoCollectionGpuService* info_collection_gpu_service();
+  void AddChildWindow(gpu::SurfaceHandle parent_window,
+                      gpu::SurfaceHandle child_window);
 #endif
 
  private:
   friend class GpuHostImplTestApi;
 
-#if defined(USE_OZONE)
+#if BUILDFLAG(IS_OZONE)
   void InitOzone();
   void TerminateGpuProcess(const std::string& message);
-#endif  // defined(USE_OZONE)
+#endif  // BUILDFLAG(IS_OZONE)
 
   std::string GetShaderPrefixKey();
 
@@ -229,11 +235,13 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
                   const std::string& data);
   void OnDiskCacheHandleDestoyed(const gpu::GpuDiskCacheHandle& handle);
 
-  void OnChannelEstablished(int client_id,
-                            bool sync,
-                            mojo::ScopedMessagePipeHandle channel_handle,
-                            const gpu::GPUInfo& gpu_info,
-                            const gpu::GpuFeatureInfo& gpu_feature_info);
+  void OnChannelEstablished(
+      int client_id,
+      bool sync,
+      mojo::ScopedMessagePipeHandle channel_handle,
+      const gpu::GPUInfo& gpu_info,
+      const gpu::GpuFeatureInfo& gpu_feature_info,
+      const gpu::SharedImageCapabilities& shared_image_capabilities);
   void MaybeShutdownGpuProcess();
 
   // mojom::GpuHost:
@@ -250,16 +258,13 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
   void DidDestroyOffscreenContext(const GURL& url) override;
   void DidDestroyChannel(int32_t client_id) override;
   void DidDestroyAllChannels() override;
-  void DidLoseContext(bool offscreen,
-                      gpu::error::ContextLostReason reason,
+  void DidLoseContext(gpu::error::ContextLostReason reason,
                       const GURL& active_url) override;
   void DisableGpuCompositing() override;
   void DidUpdateGPUInfo(const gpu::GPUInfo& gpu_info) override;
 #if BUILDFLAG(IS_WIN)
   void DidUpdateOverlayInfo(const gpu::OverlayInfo& overlay_info) override;
   void DidUpdateDXGIInfo(gfx::mojom::DXGIInfoPtr dxgi_info) override;
-  void SetChildSurface(gpu::SurfaceHandle parent,
-                       gpu::SurfaceHandle child) override;
 #endif
   void GetIsolationKey(int32_t client_id,
                        const blink::WebGPUExecutionContextToken& token,
@@ -276,7 +281,9 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
   void LogFrame(base::Value frame_data) override;
 #endif
 
-  const raw_ptr<Delegate> delegate_;
+  // Can be modified in tests by GpuHostImplTestApi.
+  raw_ptr<Delegate> delegate_;
+
   mojo::Remote<mojom::VizMain> viz_main_;
   const InitParams params_;
 
@@ -286,7 +293,7 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
       info_collection_gpu_service_remote_;
 #endif
   mojo::Receiver<mojom::GpuHost> gpu_host_receiver_{this};
-  gpu::GpuProcessHostActivityFlags activity_flags_;
+  gpu::GpuProcessHostShmCount use_shader_cache_shm_count_;
 
 #if BUILDFLAG(USE_VIZ_DEBUGGER)
   mojo::Receiver<mojom::VizDebugOutput> viz_debug_output_{this};
@@ -306,6 +313,8 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost
 
   std::multimap<int32_t, scoped_refptr<gpu::GpuDiskCache>> client_id_to_caches_;
   std::string shader_prefix_key_;
+
+  const bool shared_bitmap_to_shared_image_flag_;
 
   // These are the channel requests that we have already sent to the GPU
   // service, but haven't heard back about yet.

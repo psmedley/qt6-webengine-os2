@@ -21,11 +21,11 @@
 -- category: name of the category column in the input table, which will be
 --   preserved in the output
 
-SELECT RUN_METRIC('chrome/chrome_processes.sql') ;
+SELECT RUN_METRIC('chrome/chrome_processes.sql');
 
 -- CPU time slices for Chrome threads.
 DROP VIEW IF EXISTS chrome_cpu_slices;
-CREATE VIEW chrome_cpu_slices AS
+CREATE PERFETTO VIEW chrome_cpu_slices AS
 SELECT counters.id AS counter_id,
   track_id,
   ts,
@@ -43,7 +43,7 @@ FROM counters,
   (
     SELECT thread_counter_track.id
     FROM chrome_thread
-      JOIN thread_counter_track ON chrome_thread.utid = thread_counter_track.utid
+    JOIN thread_counter_track ON chrome_thread.utid = thread_counter_track.utid
   ) AS t
 WHERE t.id = track_id;
 
@@ -59,13 +59,13 @@ CREATE VIRTUAL TABLE {{input}}_cpu_time USING SPAN_JOIN(
 -- cpu time slices don't always line up with the category slices. However the
 -- CPU slices are small enough this makes very little difference.
 DROP VIEW IF EXISTS {{output}};
-CREATE VIEW {{output}} AS
+CREATE PERFETTO VIEW {{output}} AS
 SELECT s.id,
   s.ts,
   s.dur,
   s.{{category}},
   SUM(cpu_dur) AS cpu_dur
 FROM {{input}}_cpu_time r
-  JOIN {{input}} s
+JOIN {{input}} s
 WHERE r.id = s.id
 GROUP BY r.id;

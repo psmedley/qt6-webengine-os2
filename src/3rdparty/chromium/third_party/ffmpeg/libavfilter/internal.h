@@ -26,9 +26,7 @@
 
 #include "libavutil/internal.h"
 #include "avfilter.h"
-#include "formats.h"
 #include "framequeue.h"
-#include "video.h"
 
 typedef struct AVFilterCommand {
     double time;                ///< time expressed in seconds
@@ -137,6 +135,10 @@ struct AVFilterGraphInternal {
 
 struct AVFilterInternal {
     avfilter_execute_func *execute;
+
+    // 1 when avfilter_init_*() was successfully called on this filter
+    // 0 otherwise
+    int initialized;
 };
 
 static av_always_inline int ff_filter_execute(AVFilterContext *ctx, avfilter_action_func *func,
@@ -239,8 +241,6 @@ av_warn_unused_result
 int ff_parse_channel_layout(AVChannelLayout *ret, int *nret, const char *arg,
                             void *log_ctx);
 
-void ff_update_link_current_pts(AVFilterLink *link, int64_t pts);
-
 /**
  * Set the status field of a link from the source filter.
  * The pts should reflect the timestamp of the status change,
@@ -249,12 +249,6 @@ void ff_update_link_current_pts(AVFilterLink *link, int64_t pts);
  * end time of the last frame.
  */
 void ff_avfilter_link_set_in_status(AVFilterLink *link, int status, int64_t pts);
-
-/**
- * Set the status field of a link from the destination filter.
- * The pts should probably be left unset (AV_NOPTS_VALUE).
- */
-void ff_avfilter_link_set_out_status(AVFilterLink *link, int status, int64_t pts);
 
 #define D2TS(d)      (isnan(d) ? AV_NOPTS_VALUE : (int64_t)(d))
 #define TS2D(ts)     ((ts) == AV_NOPTS_VALUE ? NAN : (double)(ts))
@@ -404,5 +398,18 @@ int ff_filter_process_command(AVFilterContext *ctx, const char *cmd,
  */
 int ff_filter_init_hw_frames(AVFilterContext *avctx, AVFilterLink *link,
                              int default_pool_size);
+
+/**
+ * Parse filter options into a dictionary.
+ *
+ * @param logctx context for logging
+ * @param priv_class a filter's private class for shorthand options or NULL
+ * @param options dictionary to store parsed options in
+ * @param args options string to parse
+ *
+ * @return a non-negative number on success, a negative error code on failure
+ */
+int ff_filter_opt_parse(void *logctx, const AVClass *priv_class,
+                        AVDictionary **options, const char *args);
 
 #endif /* AVFILTER_INTERNAL_H */

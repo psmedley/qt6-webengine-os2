@@ -17,9 +17,9 @@
 #include "src/trace_processor/util/annotated_callsites.h"
 
 #include <iostream>
+#include <optional>
 
-#include "perfetto/ext/base/optional.h"
-#include "src/trace_processor/tables/profiler_tables.h"
+#include "src/trace_processor/tables/profiler_tables_py.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
 namespace perfetto {
@@ -30,13 +30,13 @@ AnnotatedCallsites::AnnotatedCallsites(const TraceProcessorContext* context)
       // String to identify trampoline frames. If the string does not exist in
       // TraceProcessor's StringPool (nullopt) then there will be no trampoline
       // frames in the trace so there is no point in adding it to the pool to do
-      // all comparisons, instead we initialize the member to nullopt and the
-      // string comparisons will all fail.
+      // all comparisons, instead we initialize the member to std::nullopt and
+      // the string comparisons will all fail.
       art_jni_trampoline_(
           context->storage->string_pool().GetId("art_jni_trampoline")) {}
 
 AnnotatedCallsites::State AnnotatedCallsites::GetState(
-    base::Optional<CallsiteId> id) {
+    std::optional<CallsiteId> id) {
   if (!id) {
     return State::kInitial;
   }
@@ -75,8 +75,8 @@ AnnotatedCallsites::Get(
   // only the libart frames does not clean up all of the JNI-related frames.
   auto frame = *context_.storage->stack_profile_frame_table().FindById(
       callsite.frame_id());
-  // art_jni_trampoline_ could be nullopt if the string does not exist in the
-  // StringPool, but that also means no frame will ever have that name.
+  // art_jni_trampoline_ could be std::nullopt if the string does not exist in
+  // the StringPool, but that also means no frame will ever have that name.
   if (art_jni_trampoline_.has_value() &&
       frame.name() == art_jni_trampoline_.value()) {
     return {State::kKeepNext, CallsiteAnnotation::kCommonFrame};
@@ -101,8 +101,34 @@ AnnotatedCallsites::Get(
       return {state, CallsiteAnnotation::kArtAot};
   }
 
+  // Mixed callstack, tag libart frames as uninteresting (common-frame).
+  // Special case a subset of interpreter implementation frames as
+  // "common-frame-interp" using frame name prefixes. Those functions are
+  // actually executed, whereas the managed "interp" frames are synthesised as
+  // their caller by the unwinding library (based on the dex_pc virtual
+  // register restored using the libart's DWARF info). The heuristic covers
+  // the "nterp" and "switch" interpreter implementations.
+  //
+  // Example:
+  //  <towards root>
+  //  android.view.WindowLayout.computeFrames [interp]
+  //  nterp_op_iget_object_slow_path [common-frame-interp]
+  //
+  // This annotation is helpful when trying to answer "what mode was the
+  // process in?" based on the leaf frame of the callstack. As we want to
+  // classify such cases as interpreted, even though the leaf frame is
+  // libart.so.
+  //
+  // For "switch" interpreter, we match any frame starting with
+  // "art::interpreter::" according to itanium mangling.
   if (state == State::kEraseLibart && map_type == MapType::kNativeLibart) {
-    states_.emplace(callsite.id(), state);
+    NullTermStringView fname = context_.storage->GetString(frame.name());
+    if (fname.StartsWith("nterp_") || fname.StartsWith("Nterp") ||
+        fname.StartsWith("ExecuteNterp") ||
+        fname.StartsWith("ExecuteSwitchImpl") ||
+        fname.StartsWith("_ZN3art11interpreter")) {
+      return {state, CallsiteAnnotation::kCommonFrameInterp};
+    }
     return {state, CallsiteAnnotation::kCommonFrame};
   }
 
@@ -129,33 +155,47 @@ AnnotatedCallsites::MapType AnnotatedCallsites::ClassifyMap(
     return MapType::kOther;
 
   // Primary mapping where modern ART puts jitted code.
-  // TODO(rsavitski): look into /memfd:jit-zygote-cache.
-  if (!strncmp(map.c_str(), "/memfd:jit-cache", 16))
+  // The Zygote's JIT region is inherited by all descendant apps, so it can
+  // still appear in their callstacks.
+  if (map.StartsWith("/memfd:jit-cache") ||
+      map.StartsWith("/memfd:jit-zygote-cache")) {
     return MapType::kArtJit;
+  }
 
   size_t last_slash_pos = map.rfind('/');
   if (last_slash_pos != NullTermStringView::npos) {
-    if (!strncmp(map.c_str() + last_slash_pos, "/libart.so", 10))
-      return MapType::kNativeLibart;
-    if (!strncmp(map.c_str() + last_slash_pos, "/libartd.so", 11))
+    base::StringView suffix = map.substr(last_slash_pos);
+    if (suffix.StartsWith("/libart.so") || suffix.StartsWith("/libartd.so"))
       return MapType::kNativeLibart;
   }
 
   size_t extension_pos = map.rfind('.');
   if (extension_pos != NullTermStringView::npos) {
-    if (!strncmp(map.c_str() + extension_pos, ".so", 3))
+    base::StringView suffix = map.substr(extension_pos);
+    if (suffix.StartsWith(".so"))
       return MapType::kNativeOther;
+    // unqualified dex
+    if (suffix.StartsWith(".dex"))
+      return MapType::kArtInterp;
     // dex with verification speedup info, produced by dex2oat
-    if (!strncmp(map.c_str() + extension_pos, ".vdex", 5))
+    if (suffix.StartsWith(".vdex"))
       return MapType::kArtInterp;
     // possibly uncompressed dex in a jar archive
-    if (!strncmp(map.c_str() + extension_pos, ".jar", 4))
+    if (suffix.StartsWith(".jar"))
+      return MapType::kArtInterp;
+    // android package (zip file), this can contain uncompressed dexes or
+    // native libraries that are mmap'd directly into the process. We rely on
+    // libunwindstack's MapInfo::GetFullName, which suffixes the mapping with
+    // "!lib.so" if it knows that the referenced piece of the archive is an
+    // uncompressed ELF file. So an unadorned ".apk" is assumed to be a dex
+    // file.
+    if (suffix.StartsWith(".apk"))
       return MapType::kArtInterp;
     // ahead of time compiled ELFs
-    if (!strncmp(map.c_str() + extension_pos, ".oat", 4))
+    if (suffix.StartsWith(".oat"))
       return MapType::kArtAot;
     // older/alternative name for .oat
-    if (!strncmp(map.c_str() + extension_pos, ".odex", 5))
+    if (suffix.StartsWith(".odex"))
       return MapType::kArtAot;
   }
   return MapType::kOther;

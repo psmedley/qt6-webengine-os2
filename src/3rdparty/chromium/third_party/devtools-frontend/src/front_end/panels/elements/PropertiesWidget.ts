@@ -34,48 +34,47 @@
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as ObjectUI from '../../ui/legacy/components/object_ui/object_ui.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import propertiesWidgetStyles from './propertiesWidget.css.js';
-import {StylesSidebarPane} from './StylesSidebarPane.js';
 
 const OBJECT_GROUP_NAME = 'properties-sidebar-pane';
 
 const UIStrings = {
   /**
-  * @description Placeholder text for a text input used to filter which DOM element properties show up in
-  * the Properties tab of the Elements panel.
-  */
+   * @description Placeholder text for a text input used to filter which DOM element properties show up in
+   * the Properties tab of the Elements panel.
+   */
   filter: 'Filter',
   /**
-  * @description ARIA accessible name for the text input used to filter which DOM element properties show up
-  * in the Properties tab of the Elements panel.
-  */
+   * @description ARIA accessible name for the text input used to filter which DOM element properties show up
+   * in the Properties tab of the Elements panel.
+   */
   filterProperties: 'Filter Properties',
   /**
-  * @description Text on the checkbox in the Properties tab of the Elements panel, which controls whether
-  * all properties of the currently selected DOM element are shown, or only meaningful properties (i.e.
-  * excluding properties whose values aren't set for example).
-  */
+   * @description Text on the checkbox in the Properties tab of the Elements panel, which controls whether
+   * all properties of the currently selected DOM element are shown, or only meaningful properties (i.e.
+   * excluding properties whose values aren't set for example).
+   */
   showAll: 'Show all',
   /**
    * @description Tooltip on the checkbox in the Properties tab of the Elements panel, which controls whether
-  * all properties of the currently selected DOM element are shown, or only meaningful properties (i.e.
-  * excluding properties whose values aren't set for example).
+   * all properties of the currently selected DOM element are shown, or only meaningful properties (i.e.
+   * excluding properties whose values aren't set for example).
    */
   showAllTooltip: 'When unchecked, only properties whose values are neither null nor undefined will be shown',
   /**
-  * @description Text shown to the user when a filter is applied in the Properties tab of the Elements panel, but
-  * no properties matched the filter and thus no results were returned.
-  */
+   * @description Text shown to the user when a filter is applied in the Properties tab of the Elements panel, but
+   * no properties matched the filter and thus no results were returned.
+   */
   noMatchingProperty: 'No matching property',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/elements/PropertiesWidget.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
-
-let propertiesWidgetInstance: PropertiesWidget;
 
 export class PropertiesWidget extends UI.ThrottledWidget.ThrottledWidget {
   private node: SDK.DOMModel.DOMNode|null;
@@ -85,34 +84,33 @@ export class PropertiesWidget extends UI.ThrottledWidget.ThrottledWidget {
   private readonly treeOutline: ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeOutline;
   private readonly expandController: ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeExpandController;
   private lastRequestedNode?: SDK.DOMModel.DOMNode;
-  constructor() {
-    super(true /* isWebComponent */);
+  constructor(throttlingTimeout?: number) {
+    super(true /* isWebComponent */, throttlingTimeout);
 
     this.showAllPropertiesSetting = Common.Settings.Settings.instance().createSetting('showAllProperties', false);
     this.showAllPropertiesSetting.addChangeListener(this.filterList.bind(this));
 
     SDK.TargetManager.TargetManager.instance().addModelListener(
-        SDK.DOMModel.DOMModel, SDK.DOMModel.Events.AttrModified, this.onNodeChange, this);
+        SDK.DOMModel.DOMModel, SDK.DOMModel.Events.AttrModified, this.onNodeChange, this, {scoped: true});
     SDK.TargetManager.TargetManager.instance().addModelListener(
-        SDK.DOMModel.DOMModel, SDK.DOMModel.Events.AttrRemoved, this.onNodeChange, this);
+        SDK.DOMModel.DOMModel, SDK.DOMModel.Events.AttrRemoved, this.onNodeChange, this, {scoped: true});
     SDK.TargetManager.TargetManager.instance().addModelListener(
-        SDK.DOMModel.DOMModel, SDK.DOMModel.Events.CharacterDataModified, this.onNodeChange, this);
+        SDK.DOMModel.DOMModel, SDK.DOMModel.Events.CharacterDataModified, this.onNodeChange, this, {scoped: true});
     SDK.TargetManager.TargetManager.instance().addModelListener(
-        SDK.DOMModel.DOMModel, SDK.DOMModel.Events.ChildNodeCountUpdated, this.onNodeChange, this);
+        SDK.DOMModel.DOMModel, SDK.DOMModel.Events.ChildNodeCountUpdated, this.onNodeChange, this, {scoped: true});
     UI.Context.Context.instance().addFlavorChangeListener(SDK.DOMModel.DOMNode, this.setNode, this);
     this.node = UI.Context.Context.instance().flavor(SDK.DOMModel.DOMNode);
 
     const hbox = this.contentElement.createChild('div', 'hbox properties-widget-toolbar');
-    const filterContainerElement = hbox.createChild('div', 'properties-widget-filter-box');
-    const filterInput = StylesSidebarPane.createPropertyFilterElement(
-        i18nString(UIStrings.filter), hbox, this.filterProperties.bind(this));
-    UI.ARIAUtils.setAccessibleName(filterInput, i18nString(UIStrings.filterProperties));
-    filterContainerElement.appendChild(filterInput);
-
     const toolbar = new UI.Toolbar.Toolbar('styles-pane-toolbar', hbox);
+    const filterInput = new UI.Toolbar.ToolbarInput(
+        i18nString(UIStrings.filter), i18nString(UIStrings.filterProperties), 1, 1, undefined, undefined, false);
+    filterInput.addEventListener(UI.Toolbar.ToolbarInput.Event.TextChanged, this.onFilterChanged, this);
+    toolbar.appendToolbarItem(filterInput);
     toolbar.appendToolbarItem(new UI.Toolbar.ToolbarSettingCheckbox(
         this.showAllPropertiesSetting, i18nString(UIStrings.showAllTooltip), i18nString(UIStrings.showAll)));
 
+    this.contentElement.setAttribute('jslog', `${VisualLogging.pane().context('element-properties')}`);
     this.noMatchesElement = this.contentElement.createChild('div', 'gray-info-message hidden');
     this.noMatchesElement.textContent = i18nString(UIStrings.noMatchingProperty);
 
@@ -129,19 +127,8 @@ export class PropertiesWidget extends UI.ThrottledWidget.ThrottledWidget {
     this.update();
   }
 
-  static instance(opts: {
-    forceNew: boolean|null,
-  }|undefined = {forceNew: null}): PropertiesWidget {
-    const {forceNew} = opts;
-    if (!propertiesWidgetInstance || forceNew) {
-      propertiesWidgetInstance = new PropertiesWidget();
-    }
-
-    return propertiesWidgetInstance;
-  }
-
-  private filterProperties(this: PropertiesWidget, regex: RegExp|null): void {
-    this.filterRegex = regex;
+  private onFilterChanged(event: Common.EventTarget.EventTargetEvent<string>): void {
+    this.filterRegex = event.data ? new RegExp(Platform.StringUtilities.escapeForRegExp(event.data), 'i') : null;
     this.filterList();
   }
 
@@ -149,7 +136,7 @@ export class PropertiesWidget extends UI.ThrottledWidget.ThrottledWidget {
     let noMatches = true;
     for (const element of this.treeOutline.rootElement().children()) {
       const {property} = element as ObjectUI.ObjectPropertiesSection.ObjectPropertyTreeElement;
-      const hidden = !property.match({
+      const hidden = !property?.match({
         includeNullOrUndefinedValues: this.showAllPropertiesSetting.get(),
         regex: this.filterRegex,
       });
@@ -166,7 +153,7 @@ export class PropertiesWidget extends UI.ThrottledWidget.ThrottledWidget {
     this.update();
   }
 
-  async doUpdate(): Promise<void> {
+  override async doUpdate(): Promise<void> {
     if (this.lastRequestedNode) {
       this.lastRequestedNode.domModel().runtimeModel().releaseObjectGroup(OBJECT_GROUP_NAME);
       delete this.lastRequestedNode;
@@ -207,7 +194,7 @@ export class PropertiesWidget extends UI.ThrottledWidget.ThrottledWidget {
     this.update();
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([propertiesWidgetStyles]);
   }

@@ -12,40 +12,69 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
-import {fromNs} from '../common/time';
+import m from 'mithril';
+
+import {Time} from '../base/time';
 
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
-import {gridlines} from './gridline_helper';
-import {Panel, PanelSize} from './panel';
+import {
+  getMaxMajorTicks,
+  TickGenerator,
+  TickType,
+  timeScaleForVisibleWindow,
+} from './gridline_helper';
+import {PanelSize} from './panel';
+import {Panel} from './panel_container';
 
 // This is used to display the summary of search results.
-export class TickmarkPanel extends Panel {
-  view() {
+export class TickmarkPanel implements Panel {
+  readonly kind = 'panel';
+  readonly selectable = false;
+  readonly trackKey = undefined;
+
+  constructor(readonly key: string) {}
+
+  get mithril(): m.Children {
     return m('.tickbar');
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
-    const {timeScale, visibleWindowTime} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
 
     ctx.fillStyle = '#999';
     ctx.fillRect(TRACK_SHELL_WIDTH - 2, 0, 2, size.height);
-    for (const xAndTime of gridlines(
-             size.width, visibleWindowTime, timeScale)) {
-      ctx.fillRect(xAndTime[0], 0, 1, size.height);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(TRACK_SHELL_WIDTH, 0, size.width - TRACK_SHELL_WIDTH, size.height);
+    ctx.clip();
+
+    const visibleSpan = globals.timeline.visibleTimeSpan;
+    if (size.width > TRACK_SHELL_WIDTH && visibleSpan.duration > 0n) {
+      const maxMajorTicks = getMaxMajorTicks(size.width - TRACK_SHELL_WIDTH);
+      const map = timeScaleForVisibleWindow(TRACK_SHELL_WIDTH, size.width);
+
+      const offset = globals.timestampOffset();
+      const tickGen = new TickGenerator(visibleSpan, maxMajorTicks, offset);
+      for (const {type, time} of tickGen) {
+        const px = Math.floor(map.timeToPx(time));
+        if (type === TickType.MAJOR) {
+          ctx.fillRect(px, 0, 1, size.height);
+        }
+      }
     }
 
     const data = globals.searchSummary;
     for (let i = 0; i < data.tsStarts.length; i++) {
-      const tStart = data.tsStarts[i];
-      const tEnd = data.tsEnds[i];
-      if (tEnd <= visibleWindowTime.start || tStart >= visibleWindowTime.end) {
+      const tStart = Time.fromRaw(data.tsStarts[i]);
+      const tEnd = Time.fromRaw(data.tsEnds[i]);
+      if (!visibleSpan.intersects(tStart, tEnd)) {
         continue;
       }
       const rectStart =
-          Math.max(timeScale.timeToPx(tStart), 0) + TRACK_SHELL_WIDTH;
-      const rectEnd = timeScale.timeToPx(tEnd) + TRACK_SHELL_WIDTH;
+          Math.max(visibleTimeScale.timeToPx(tStart), 0) + TRACK_SHELL_WIDTH;
+      const rectEnd = visibleTimeScale.timeToPx(tEnd) + TRACK_SHELL_WIDTH;
       ctx.fillStyle = '#ffe263';
       ctx.fillRect(
           Math.floor(rectStart),
@@ -54,16 +83,21 @@ export class TickmarkPanel extends Panel {
           size.height);
     }
     const index = globals.state.searchIndex;
-    const startSec = fromNs(globals.currentSearchResults.tsStarts[index]);
-    const triangleStart =
-        Math.max(timeScale.timeToPx(startSec), 0) + TRACK_SHELL_WIDTH;
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.moveTo(triangleStart, size.height);
-    ctx.lineTo(triangleStart - 3, 0);
-    ctx.lineTo(triangleStart + 3, 0);
-    ctx.lineTo(triangleStart, size.height);
-    ctx.fill();
-    ctx.closePath();
+    if (index !== -1 && index < globals.currentSearchResults.tsStarts.length) {
+      const start = globals.currentSearchResults.tsStarts[index];
+      const triangleStart =
+          Math.max(visibleTimeScale.timeToPx(Time.fromRaw(start)), 0) +
+          TRACK_SHELL_WIDTH;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.moveTo(triangleStart, size.height);
+      ctx.lineTo(triangleStart - 3, 0);
+      ctx.lineTo(triangleStart + 3, 0);
+      ctx.lineTo(triangleStart, size.height);
+      ctx.fill();
+      ctx.closePath();
+    }
+
+    ctx.restore();
   }
 }

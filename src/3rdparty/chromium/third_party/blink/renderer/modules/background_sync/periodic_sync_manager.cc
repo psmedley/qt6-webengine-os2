@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/background_sync/periodic_sync_manager.h"
 
+#include "base/task/sequenced_task_runner.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
@@ -46,7 +47,8 @@ ScriptPromise PeriodicSyncManager::registerPeriodicSync(
     return ScriptPromise();
   }
 
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+      script_state, exception_state.GetContext());
   ScriptPromise promise = resolver->Promise();
 
   mojom::blink::SyncRegistrationOptionsPtr sync_registration =
@@ -175,7 +177,7 @@ void PeriodicSyncManager::GetRegistrationsCallback(
       Vector<String> tags;
       for (const auto& registration : registrations)
         tags.push_back(registration->tag);
-      resolver->Resolve(tags);
+      resolver->Resolve<IDLSequence<IDLString>>(tags);
       break;
     }
     case mojom::blink::BackgroundSyncError::NOT_FOUND:

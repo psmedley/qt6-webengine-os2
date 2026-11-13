@@ -29,6 +29,7 @@
 #include "net/base/network_anonymization_key.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/test/test_dns_util.h"
 
 namespace extensions {
@@ -64,16 +65,14 @@ IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketsTcpCreateGood) {
   socket_create_function->set_extension(empty_extension.get());
   socket_create_function->set_has_callback(true);
 
-  std::unique_ptr<base::Value> result(
+  std::optional<base::Value> result(
       api_test_utils::RunFunctionAndReturnSingleResult(
           socket_create_function.get(), "[]", browser_context()));
-
-  ASSERT_EQ(base::Value::Type::DICTIONARY, result->type());
-  std::unique_ptr<base::DictionaryValue> value =
-      base::DictionaryValue::From(std::move(result));
-  absl::optional<int> socketId = value->FindIntKey("socketId");
-  ASSERT_TRUE(socketId);
-  ASSERT_TRUE(*socketId > 0);
+  ASSERT_TRUE(result);
+  ASSERT_TRUE(result->is_dict());
+  std::optional<int> socket_id = result->GetDict().FindInt("socketId");
+  ASSERT_TRUE(socket_id);
+  ASSERT_GT(*socket_id, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketTcpExtension) {
@@ -113,7 +112,8 @@ IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketTcpExtension) {
   // Cache only lookup.
   params->source = net::HostResolverSource::LOCAL_ONLY;
   net::SchemefulSite site = net::SchemefulSite(test_extension->url());
-  net::NetworkAnonymizationKey network_anonymization_key(site, site);
+  auto network_anonymization_key =
+      net::NetworkAnonymizationKey::CreateSameSite(site);
   network::DnsLookupResult result1 =
       network::BlockingDnsLookup(network_context, host_port_pair,
                                  std::move(params), network_anonymization_key);
@@ -139,7 +139,7 @@ IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketTcpExtensionTLS) {
   // EmbeddedTestServer won't be recognized, so inject mock cert verifier
   // through the test helper interface.
   mojo::Remote<network::mojom::NetworkServiceTest> network_service_test;
-  content::GetNetworkService()->BindTestInterface(
+  content::GetNetworkService()->BindTestInterfaceForTesting(
       network_service_test.BindNewPipeAndPassReceiver());
   mojo::ScopedAllowSyncCallForTesting allow_sync_call;
   network_service_test->MockCertVerifierSetDefaultResult(net::OK);

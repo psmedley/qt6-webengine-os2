@@ -17,10 +17,11 @@
 #include "gtest/gtest.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "internal/platform/count_down_latch.h"
+#include "internal/platform/direct_executor.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/single_thread_executor.h"
 
-namespace location {
 namespace nearby {
 
 namespace {
@@ -120,10 +121,9 @@ TEST(FutureTest, CallsListenerOnSet) {
   {
     SingleThreadExecutor executor;
     future.AddListener(
-        [&]() {
-          ASSERT_TRUE(future.IsSet());
-          ASSERT_TRUE(future.Get().ok());
-          ASSERT_EQ(future.Get().GetResult(), kValue);
+        [&](ExceptionOr<int> result) {
+          ASSERT_TRUE(result.ok());
+          ASSERT_EQ(result.GetResult(), kValue);
           ++call_count;
         },
         &executor);
@@ -143,18 +143,16 @@ TEST(FutureTest, CallsAllListenersOnSet) {
   {
     SingleThreadExecutor executor;
     future.AddListener(
-        [&]() {
-          ASSERT_TRUE(future.IsSet());
-          ASSERT_TRUE(future.Get().ok());
-          ASSERT_EQ(future.Get().GetResult(), kValue);
+        [&](ExceptionOr<int> result) {
+          ASSERT_TRUE(result.ok());
+          ASSERT_EQ(result.GetResult(), kValue);
           ++call_count_listener_1;
         },
         &executor);
     future.AddListener(
-        [&]() {
-          ASSERT_TRUE(future.IsSet());
-          ASSERT_TRUE(future.Get().ok());
-          ASSERT_EQ(future.Get().GetResult(), kValue);
+        [&](ExceptionOr<int> result) {
+          ASSERT_TRUE(result.ok());
+          ASSERT_EQ(result.GetResult(), kValue);
           ++call_count_listener_2;
         },
         &executor);
@@ -175,10 +173,9 @@ TEST(FutureTest, AddListenerWhenAlreadySetCallsCallback) {
   {
     SingleThreadExecutor executor;
     future.AddListener(
-        [&]() {
-          ASSERT_TRUE(future.IsSet());
-          ASSERT_TRUE(future.Get().ok());
-          ASSERT_EQ(future.Get().GetResult(), kValue);
+        [&](ExceptionOr<int> result) {
+          ASSERT_TRUE(result.ok());
+          ASSERT_EQ(result.GetResult(), kValue);
           ++call_count;
         },
         &executor);
@@ -195,10 +192,9 @@ TEST(FutureTest, CallsListenerOnSetException) {
   {
     SingleThreadExecutor executor;
     future.AddListener(
-        [&]() {
-          ASSERT_TRUE(future.IsSet());
-          ASSERT_FALSE(future.Get().ok());
-          ASSERT_EQ(future.Get().GetException(), kException);
+        [&](ExceptionOr<int> result) {
+          ASSERT_FALSE(result.ok());
+          ASSERT_EQ(result.GetException(), kException);
           ++call_count;
         },
         &executor);
@@ -219,10 +215,9 @@ TEST(FutureTest, AddListenerWhenAlreadySetExceptionCallsCallback) {
     SingleThreadExecutor executor;
 
     future.AddListener(
-        [&]() {
-          ASSERT_TRUE(future.IsSet());
-          ASSERT_FALSE(future.Get().ok());
-          ASSERT_EQ(future.Get().GetException(), kException);
+        [&](ExceptionOr<int> result) {
+          ASSERT_FALSE(result.ok());
+          ASSERT_EQ(result.GetException(), kException);
           ++call_count;
         },
         &executor);
@@ -233,5 +228,42 @@ TEST(FutureTest, AddListenerWhenAlreadySetExceptionCallsCallback) {
   EXPECT_EQ(call_count, 1);
 }
 
+TEST(FutureTest, TimeoutSetsException) {
+  Future<int> future(absl::Milliseconds(10));
+
+  EXPECT_EQ(future.Get().exception(), Exception::kTimeout);
+}
+
+TEST(FutureTest, TimeoutCallsListeners) {
+  Future<int> future(absl::Milliseconds(10));
+  CountDownLatch latch(1);
+  future.AddListener(
+      [&](ExceptionOr<int> result) {
+        ASSERT_FALSE(result.ok());
+        ASSERT_EQ(result.exception(), Exception::kTimeout);
+        latch.CountDown();
+      },
+      &DirectExecutor::GetInstance());
+
+  EXPECT_TRUE(latch.Await().Ok());
+
+  EXPECT_EQ(future.Get().exception(), Exception::kTimeout);
+}
+
+TEST(FutureTest, SetValueBeforeTimeout) {
+  Future<int> future(absl::Minutes(1));
+
+  future.Set(5);
+
+  EXPECT_EQ(future.Get().result(), 5);
+}
+
+TEST(FutureTest, SetExceptionBeforeTimeout) {
+  Future<int> future(absl::Minutes(1));
+
+  future.SetException({Exception::kExecution});
+
+  EXPECT_EQ(future.Get().exception(), Exception::kExecution);
+}
+
 }  // namespace nearby
-}  // namespace location

@@ -4,7 +4,7 @@
  *
  *   TrueType GX Font Variation loader
  *
- * Copyright (C) 2004-2022 by
+ * Copyright (C) 2004-2023 by
  * David Turner, Robert Wilhelm, Werner Lemberg, and George Williams.
  *
  * This file is part of the FreeType project, and may only be used,
@@ -42,8 +42,10 @@
 #include <ft2build.h>
 #include <freetype/internal/ftdebug.h>
 #include FT_CONFIG_CONFIG_H
+#include <freetype/internal/ftcalc.h>
 #include <freetype/internal/ftstream.h>
 #include <freetype/internal/sfnt.h>
+#include <freetype/internal/services/svmetric.h>
 #include <freetype/tttags.h>
 #include <freetype/ttnameid.h>
 #include <freetype/ftmm.h>
@@ -353,15 +355,24 @@
   static void
   ft_var_load_avar( TT_Face  face )
   {
-    FT_Stream       stream = FT_FACE_STREAM( face );
-    FT_Memory       memory = stream->memory;
+    FT_Error   error;
+    FT_Stream  stream = FT_FACE_STREAM( face );
+    FT_Memory  memory = stream->memory;
+    FT_Int     i, j;
+
     GX_Blend        blend  = face->blend;
     GX_AVarSegment  segment;
-    FT_Error        error;
-    FT_Long         version;
-    FT_Long         axisCount;
-    FT_Int          i, j;
-    FT_ULong        table_len;
+    GX_AVarTable    table;
+
+    FT_Long   version;
+    FT_Long   axisCount;
+    FT_ULong  table_len;
+
+#ifndef TT_CONFIG_OPTION_NO_BORING_EXPANSION
+    FT_ULong  table_offset;
+    FT_ULong  store_offset;
+    FT_ULong  axisMap_offset;
+#endif
 
 
     FT_TRACE2(( "AVAR " ));
@@ -374,13 +385,21 @@
       return;
     }
 
+#ifndef TT_CONFIG_OPTION_NO_BORING_EXPANSION
+    table_offset = FT_STREAM_POS();
+#endif
+
     if ( FT_FRAME_ENTER( table_len ) )
       return;
 
     version   = FT_GET_LONG();
     axisCount = FT_GET_LONG();
 
-    if ( version != 0x00010000L )
+    if ( version != 0x00010000L
+#ifndef TT_CONFIG_OPTION_NO_BORING_EXPANSION
+         && version != 0x00020000L
+#endif
+       )
     {
       FT_TRACE2(( "bad table version\n" ));
       goto Exit;
@@ -396,10 +415,14 @@
       goto Exit;
     }
 
-    if ( FT_QNEW_ARRAY( blend->avar_segment, axisCount ) )
+    if ( FT_NEW( blend->avar_table ) )
+      goto Exit;
+    table = blend->avar_table;
+
+    if ( FT_QNEW_ARRAY( table->avar_segment, axisCount ) )
       goto Exit;
 
-    segment = &blend->avar_segment[0];
+    segment = &table->avar_segment[0];
     for ( i = 0; i < axisCount; i++, segment++ )
     {
       FT_TRACE5(( "  axis %d:\n", i ));
@@ -412,9 +435,9 @@
         /* it right now since loading the `avar' table is optional.   */
 
         for ( j = i - 1; j >= 0; j-- )
-          FT_FREE( blend->avar_segment[j].correspondence );
+          FT_FREE( table->avar_segment[j].correspondence );
 
-        FT_FREE( blend->avar_segment );
+        FT_FREE( table->avar_segment );
         goto Exit;
       }
 
@@ -426,12 +449,43 @@
           FT_fdot14ToFixed( FT_GET_SHORT() );
 
         FT_TRACE5(( "    mapping %.5f to %.5f\n",
-                    segment->correspondence[j].fromCoord / 65536.0,
-                    segment->correspondence[j].toCoord / 65536.0 ));
+                    (double)segment->correspondence[j].fromCoord / 65536,
+                    (double)segment->correspondence[j].toCoord / 65536 ));
       }
 
       FT_TRACE5(( "\n" ));
     }
+
+#ifndef TT_CONFIG_OPTION_NO_BORING_EXPANSION
+    if ( version < 0x00020000L )
+      goto Exit;
+
+    axisMap_offset = FT_GET_ULONG();
+    store_offset   = FT_GET_ULONG();
+
+    if ( store_offset )
+    {
+      error = tt_var_load_item_variation_store(
+                FT_FACE( face ),
+                table_offset + store_offset,
+                &table->itemStore );
+      if ( error )
+        goto Exit;
+    }
+
+    if ( axisMap_offset )
+    {
+      error = tt_var_load_delta_set_index_mapping(
+                FT_FACE( face ),
+                table_offset + axisMap_offset,
+                &table->axisMap,
+                &table->itemStore,
+                table_len );
+      if ( error )
+        goto Exit;
+    }
+#endif
+
 
   Exit:
     FT_FRAME_EXIT();
@@ -439,23 +493,26 @@
 
 
   FT_LOCAL_DEF( FT_Error )
-  tt_var_load_item_variation_store( TT_Face          face,
+  tt_var_load_item_variation_store( FT_Face          face,      /* TT_Face */
                                     FT_ULong         offset,
                                     GX_ItemVarStore  itemStore )
   {
+    TT_Face    ttface = (TT_Face)face;
     FT_Stream  stream = FT_FACE_STREAM( face );
     FT_Memory  memory = stream->memory;
 
     FT_Error   error;
     FT_UShort  format;
     FT_ULong   region_offset;
-    FT_UInt    i, j, k;
-    FT_UInt    wordDeltaCount;
-    FT_Bool    long_words;
 
-    GX_Blend        blend = face->blend;
-    GX_ItemVarData  varData;
+    FT_UInt    data_count;
+    FT_UShort  axis_count;
+    FT_UInt    region_count;
 
+    FT_UInt  i, j;
+    FT_Bool  long_words;
+
+    GX_Blend   blend           = ttface->blend;
     FT_ULong*  dataOffsetArray = NULL;
 
 
@@ -472,34 +529,24 @@
     }
 
     /* read top level fields */
-    if ( FT_READ_ULONG( region_offset )         ||
-         FT_READ_USHORT( itemStore->dataCount ) )
+    if ( FT_READ_ULONG( region_offset ) ||
+         FT_READ_USHORT( data_count )   )
       goto Exit;
 
     /* we need at least one entry in `itemStore->varData' */
-    if ( !itemStore->dataCount )
+    if ( !data_count )
     {
       FT_TRACE2(( "tt_var_load_item_variation_store: missing varData\n" ));
       error = FT_THROW( Invalid_Table );
       goto Exit;
     }
 
-    /* new in OpenType 1.8.4: inner & outer index equal to 0xFFFF    */
-    /* has a special meaning (i.e., no variation data for this item) */
-    if ( itemStore->dataCount == 0xFFFFU )
-    {
-      FT_TRACE2(( "ft_var_load_item_variation_store:"
-                  " dataCount too large\n" ));
-      error = FT_THROW( Invalid_Table );
-      goto Exit;
-    }
-
     /* make temporary copy of item variation data offsets; */
     /* we will parse region list first, then come back     */
-    if ( FT_QNEW_ARRAY( dataOffsetArray, itemStore->dataCount ) )
+    if ( FT_QNEW_ARRAY( dataOffsetArray, data_count ) )
       goto Exit;
 
-    for ( i = 0; i < itemStore->dataCount; i++ )
+    for ( i = 0; i < data_count; i++ )
     {
       if ( FT_READ_ULONG( dataOffsetArray[i] ) )
         goto Exit;
@@ -509,11 +556,11 @@
     if ( FT_STREAM_SEEK( offset + region_offset ) )
       goto Exit;
 
-    if ( FT_READ_USHORT( itemStore->axisCount )   ||
-         FT_READ_USHORT( itemStore->regionCount ) )
+    if ( FT_READ_USHORT( axis_count )   ||
+         FT_READ_USHORT( region_count ) )
       goto Exit;
 
-    if ( itemStore->axisCount != (FT_Long)blend->mmvar->num_axis )
+    if ( axis_count != (FT_Long)blend->mmvar->num_axis )
     {
       FT_TRACE2(( "tt_var_load_item_variation_store:"
                   " number of axes in item variation store\n" ));
@@ -522,9 +569,10 @@
       error = FT_THROW( Invalid_Table );
       goto Exit;
     }
+    itemStore->axisCount = axis_count;
 
     /* new constraint in OpenType 1.8.4 */
-    if ( itemStore->regionCount >= 32768U )
+    if ( region_count >= 32768U )
     {
       FT_TRACE2(( "tt_var_load_item_variation_store:"
                   " too many variation region tables\n" ));
@@ -532,16 +580,16 @@
       goto Exit;
     }
 
-    if ( FT_NEW_ARRAY( itemStore->varRegionList, itemStore->regionCount ) )
+    if ( FT_NEW_ARRAY( itemStore->varRegionList, region_count ) )
       goto Exit;
+    itemStore->regionCount = region_count;
 
     for ( i = 0; i < itemStore->regionCount; i++ )
     {
       GX_AxisCoords  axisCoords;
 
 
-      if ( FT_NEW_ARRAY( itemStore->varRegionList[i].axisList,
-                         itemStore->axisCount ) )
+      if ( FT_NEW_ARRAY( itemStore->varRegionList[i].axisList, axis_count ) )
         goto Exit;
 
       axisCoords = itemStore->varRegionList[i].axisList;
@@ -565,47 +613,56 @@
     /* end of region list parse */
 
     /* use dataOffsetArray now to parse varData items */
-    if ( FT_NEW_ARRAY( itemStore->varData, itemStore->dataCount ) )
+    if ( FT_NEW_ARRAY( itemStore->varData, data_count ) )
       goto Exit;
+    itemStore->dataCount = data_count;
 
-    for ( i = 0; i < itemStore->dataCount; i++ )
+    for ( i = 0; i < data_count; i++ )
     {
-      varData = &itemStore->varData[i];
+      GX_ItemVarData  varData = &itemStore->varData[i];
+
+      FT_UInt    item_count;
+      FT_UShort  word_delta_count;
+      FT_UInt    region_idx_count;
+      FT_UInt    per_region_size;
+
 
       if ( FT_STREAM_SEEK( offset + dataOffsetArray[i] ) )
         goto Exit;
 
-      if ( FT_READ_USHORT( varData->itemCount )      ||
-           FT_READ_USHORT( wordDeltaCount )          ||
-           FT_READ_USHORT( varData->regionIdxCount ) )
+      if ( FT_READ_USHORT( item_count )       ||
+           FT_READ_USHORT( word_delta_count ) ||
+           FT_READ_USHORT( region_idx_count ) )
         goto Exit;
 
-      long_words      = !!( wordDeltaCount & 0x8000 );
-      wordDeltaCount &= 0x7FFF;
+      long_words        = !!( word_delta_count & 0x8000 );
+      word_delta_count &= 0x7FFF;
 
       /* check some data consistency */
-      if ( wordDeltaCount > varData->regionIdxCount )
+      if ( word_delta_count > region_idx_count )
       {
         FT_TRACE2(( "bad short count %d or region count %d\n",
-                    wordDeltaCount,
-                    varData->regionIdxCount ));
+                    word_delta_count,
+                    region_idx_count ));
         error = FT_THROW( Invalid_Table );
         goto Exit;
       }
 
-      if ( varData->regionIdxCount > itemStore->regionCount )
+      if ( region_idx_count > itemStore->regionCount )
       {
         FT_TRACE2(( "inconsistent regionCount %d in varData[%d]\n",
-                    varData->regionIdxCount,
+                    region_idx_count,
                     i ));
         error = FT_THROW( Invalid_Table );
         goto Exit;
       }
 
       /* parse region indices */
-      if ( FT_NEW_ARRAY( varData->regionIndices,
-                         varData->regionIdxCount ) )
+      if ( FT_NEW_ARRAY( varData->regionIndices, region_idx_count ) )
         goto Exit;
+      varData->regionIdxCount = region_idx_count;
+      varData->wordDeltaCount = word_delta_count;
+      varData->longWords      = long_words;
 
       for ( j = 0; j < varData->regionIdxCount; j++ )
       {
@@ -621,37 +678,22 @@
         }
       }
 
-      /* Parse delta set.                                                */
-      /*                                                                 */
-      /* On input, deltas are (wordDeltaCount + regionIdxCount) bytes    */
-      /* each if `long_words` isn't set, and twice as much otherwise.    */
-      /*                                                                 */
-      /* On output, deltas are expanded to `regionIdxCount` shorts each. */
-      if ( FT_NEW_ARRAY( varData->deltaSet,
-                         varData->regionIdxCount * varData->itemCount ) )
-        goto Exit;
+      per_region_size = word_delta_count + region_idx_count;
+      if ( long_words )
+        per_region_size *= 2;
 
-      for ( j = 0; j < varData->itemCount * varData->regionIdxCount; )
+      if ( FT_NEW_ARRAY( varData->deltaSet, per_region_size * item_count ) )
+        goto Exit;
+      if ( FT_Stream_Read( stream,
+                           varData->deltaSet,
+                           per_region_size * item_count ) )
       {
-        if ( long_words )
-        {
-          for ( k = 0; k < wordDeltaCount; k++, j++ )
-            if ( FT_READ_LONG( varData->deltaSet[j] ) )
-              goto Exit;
-          for ( ; k < varData->regionIdxCount; k++, j++ )
-            if ( FT_READ_SHORT( varData->deltaSet[j] ) )
-              goto Exit;
-        }
-        else
-        {
-          for ( k = 0; k < wordDeltaCount; k++, j++ )
-            if ( FT_READ_SHORT( varData->deltaSet[j] ) )
-              goto Exit;
-          for ( ; k < varData->regionIdxCount; k++, j++ )
-            if ( FT_READ_CHAR( varData->deltaSet[j] ) )
-              goto Exit;
-        }
+        FT_TRACE2(( "deltaSet read failed." ));
+        error = FT_THROW( Invalid_Table );
+        goto Exit;
       }
+
+      varData->itemCount = item_count;
     }
 
   Exit:
@@ -662,7 +704,7 @@
 
 
   FT_LOCAL_DEF( FT_Error )
-  tt_var_load_delta_set_index_mapping( TT_Face            face,
+  tt_var_load_delta_set_index_mapping( FT_Face            face, /* TT_Face */
                                        FT_ULong           offset,
                                        GX_DeltaSetIdxMap  map,
                                        GX_ItemVarStore    itemStore,
@@ -889,7 +931,7 @@
     }
 
     error = tt_var_load_item_variation_store(
-              face,
+              FT_FACE( face ),
               table_offset + store_offset,
               &table->itemStore );
     if ( error )
@@ -898,7 +940,7 @@
     if ( widthMap_offset )
     {
       error = tt_var_load_delta_set_index_mapping(
-                face,
+                FT_FACE( face ),
                 table_offset + widthMap_offset,
                 &table->widthMap,
                 &table->itemStore,
@@ -940,37 +982,85 @@
 
 
   FT_LOCAL_DEF( FT_ItemVarDelta )
-  tt_var_get_item_delta( TT_Face          face,
+  tt_var_get_item_delta( FT_Face          face,        /* TT_Face */
                          GX_ItemVarStore  itemStore,
                          FT_UInt          outerIndex,
                          FT_UInt          innerIndex )
   {
+    TT_Face    ttface = (TT_Face)face;
     FT_Stream  stream = FT_FACE_STREAM( face );
     FT_Memory  memory = stream->memory;
     FT_Error   error  = FT_Err_Ok;
 
     GX_ItemVarData    varData;
-    FT_ItemVarDelta*  deltaSet;
+    FT_ItemVarDelta*  deltaSet = NULL;
+    FT_ItemVarDelta   deltaSetStack[16];
 
-    FT_UInt           master, j;
-    FT_Fixed*         scalars;
-    FT_ItemVarDelta   returnValue;
+    FT_Fixed*  scalars = NULL;
+    FT_Fixed   scalarsStack[16];
+
+    FT_UInt          master, j;
+    FT_ItemVarDelta  returnValue = 0;
+    FT_UInt          per_region_size;
+    FT_Byte*         bytes;
 
 
-    /* OpenType 1.8.4+: No variation data for this item
-     *  as indices have special value 0xFFFF. */
+    if ( !ttface->blend || !ttface->blend->normalizedcoords )
+      return 0;
+
+    /* OpenType 1.8.4+: No variation data for this item */
+    /* as indices have special value 0xFFFF.            */
     if ( outerIndex == 0xFFFF && innerIndex == 0xFFFF )
       return 0;
 
     /* See pseudo code from `Font Variations Overview' */
     /* in the OpenType specification.                  */
 
-    varData  = &itemStore->varData[outerIndex];
-    deltaSet = FT_OFFSET( varData->deltaSet,
-                          varData->regionIdxCount * innerIndex );
+    if ( outerIndex >= itemStore->dataCount )
+      return 0; /* Out of range. */
 
-    if ( FT_QNEW_ARRAY( scalars, varData->regionIdxCount ) )
-      return 0;
+    varData = &itemStore->varData[outerIndex];
+
+    if ( innerIndex >= varData->itemCount )
+      return 0; /* Out of range. */
+
+    if ( varData->regionIdxCount < 16 )
+    {
+      deltaSet = deltaSetStack;
+      scalars  = scalarsStack;
+    }
+    else
+    {
+      if ( FT_QNEW_ARRAY( deltaSet, varData->regionIdxCount ) )
+        goto Exit;
+      if ( FT_QNEW_ARRAY( scalars, varData->regionIdxCount ) )
+        goto Exit;
+    }
+
+    /* Parse delta set.                                            */
+    /*                                                             */
+    /* Deltas are (word_delta_count + region_idx_count) bytes each */
+    /* if `longWords` isn't set, and twice as much otherwise.      */
+    per_region_size = varData->wordDeltaCount + varData->regionIdxCount;
+    if ( varData->longWords )
+      per_region_size *= 2;
+
+    bytes = varData->deltaSet + per_region_size * innerIndex;
+
+    if ( varData->longWords )
+    {
+      for ( master = 0; master < varData->wordDeltaCount; master++ )
+        deltaSet[master] = FT_NEXT_LONG( bytes );
+      for ( ; master < varData->regionIdxCount; master++ )
+        deltaSet[master] = FT_NEXT_SHORT( bytes );
+    }
+    else
+    {
+      for ( master = 0; master < varData->wordDeltaCount; master++ )
+        deltaSet[master] = FT_NEXT_SHORT( bytes );
+      for ( ; master < varData->regionIdxCount; master++ )
+        deltaSet[master] = FT_NEXT_CHAR( bytes );
+    }
 
     /* outer loop steps through master designs to be blended */
     for ( master = 0; master < varData->regionIdxCount; master++ )
@@ -999,27 +1089,27 @@
         else if ( axis->peakCoord == 0 )
           continue;
 
-        else if ( face->blend->normalizedcoords[j] == axis->peakCoord )
+        else if ( ttface->blend->normalizedcoords[j] == axis->peakCoord )
           continue;
 
         /* ignore this region if coords are out of range */
-        else if ( face->blend->normalizedcoords[j] <= axis->startCoord ||
-                  face->blend->normalizedcoords[j] >= axis->endCoord   )
+        else if ( ttface->blend->normalizedcoords[j] <= axis->startCoord ||
+                  ttface->blend->normalizedcoords[j] >= axis->endCoord   )
         {
           scalar = 0;
           break;
         }
 
         /* cumulative product of all the axis scalars */
-        else if ( face->blend->normalizedcoords[j] < axis->peakCoord )
+        else if ( ttface->blend->normalizedcoords[j] < axis->peakCoord )
           scalar =
             FT_MulDiv( scalar,
-                       face->blend->normalizedcoords[j] - axis->startCoord,
+                       ttface->blend->normalizedcoords[j] - axis->startCoord,
                        axis->peakCoord - axis->startCoord );
         else
           scalar =
             FT_MulDiv( scalar,
-                       axis->endCoord - face->blend->normalizedcoords[j],
+                       axis->endCoord - ttface->blend->normalizedcoords[j],
                        axis->endCoord - axis->peakCoord );
 
       } /* per-axis loop */
@@ -1045,7 +1135,11 @@
      */
     returnValue = FT_MulAddFix( scalars, deltaSet, varData->regionIdxCount );
 
-    FT_FREE( scalars );
+  Exit:
+    if ( scalars != scalarsStack )
+      FT_FREE( scalars );
+    if ( deltaSet != deltaSetStack )
+      FT_FREE( deltaSet );
 
     return returnValue;
   }
@@ -1140,23 +1234,12 @@
     }
     else
     {
-      GX_ItemVarData  varData;
-
-
       /* no widthMap data */
       outerIndex = 0;
       innerIndex = gindex;
-
-      varData = &table->itemStore.varData[outerIndex];
-      if ( gindex >= varData->itemCount )
-      {
-        FT_TRACE2(( "gindex %d out of range\n", gindex ));
-        error = FT_THROW( Invalid_Argument );
-        goto Exit;
-      }
     }
 
-    delta = tt_var_get_item_delta( face,
+    delta = tt_var_get_item_delta( FT_FACE( face ),
                                    &table->itemStore,
                                    outerIndex,
                                    innerIndex );
@@ -1170,7 +1253,7 @@
                   delta == 1 ? "" : "s",
                   vertical ? "VVAR" : "HVAR" ));
 
-      *avalue += delta;
+      *avalue = ADD_INT( *avalue, delta );
     }
 
   Exit:
@@ -1179,20 +1262,20 @@
 
 
   FT_LOCAL_DEF( FT_Error )
-  tt_hadvance_adjust( TT_Face  face,
+  tt_hadvance_adjust( FT_Face  face,    /* TT_Face */
                       FT_UInt  gindex,
                       FT_Int  *avalue )
   {
-    return tt_hvadvance_adjust( face, gindex, avalue, 0 );
+    return tt_hvadvance_adjust( (TT_Face)face, gindex, avalue, 0 );
   }
 
 
   FT_LOCAL_DEF( FT_Error )
-  tt_vadvance_adjust( TT_Face  face,
+  tt_vadvance_adjust( FT_Face  face,    /* TT_Face */
                       FT_UInt  gindex,
                       FT_Int  *avalue )
   {
-    return tt_hvadvance_adjust( face, gindex, avalue, 1 );
+    return tt_hvadvance_adjust( (TT_Face)face, gindex, avalue, 1 );
   }
 
 
@@ -1339,7 +1422,7 @@
     records_offset = FT_STREAM_POS();
 
     error = tt_var_load_item_variation_store(
-              face,
+              FT_FACE( face ),
               table_offset + store_offset,
               &blend->mvar_table->itemStore );
     if ( error )
@@ -1412,15 +1495,14 @@
 
 
   static FT_Error
-  tt_size_reset_iterator( FT_ListNode  node,
+  ft_size_reset_iterator( FT_ListNode  node,
                           void*        user )
   {
-    TT_Size  size = (TT_Size)node->data;
+    FT_Size                       size = (FT_Size)node->data;
+    FT_Service_MetricsVariations  var  = (FT_Service_MetricsVariations)user;
 
-    FT_UNUSED( user );
 
-
-    tt_size_reset( size, 1 );
+    var->size_reset( size );
 
     return FT_Err_Ok;
   }
@@ -1439,16 +1521,19 @@
    *     The font face.
    */
   FT_LOCAL_DEF( void )
-  tt_apply_mvar( TT_Face  face )
+  tt_apply_mvar( FT_Face  face )  /* TT_Face */
   {
-    GX_Blend  blend = face->blend;
+    TT_Face  ttface = (TT_Face)face;
+
+    GX_Blend  blend = ttface->blend;
     GX_Value  value, limit;
+
     FT_Short  mvar_hasc_delta = 0;
     FT_Short  mvar_hdsc_delta = 0;
     FT_Short  mvar_hlgp_delta = 0;
 
 
-    if ( !( face->variation_support & TT_FACE_FLAG_VAR_MVAR ) )
+    if ( !( ttface->variation_support & TT_FACE_FLAG_VAR_MVAR ) )
       return;
 
     value = blend->mvar_table->values;
@@ -1456,7 +1541,7 @@
 
     for ( ; value < limit; value++ )
     {
-      FT_Short*  p = ft_var_get_value_pointer( face, value->tag );
+      FT_Short*  p = ft_var_get_value_pointer( ttface, value->tag );
       FT_Int     delta;
 
 
@@ -1493,7 +1578,8 @@
 
     /* adjust all derived values */
     {
-      FT_Face  root = &face->root;
+      FT_Service_MetricsVariations  var =
+        (FT_Service_MetricsVariations)ttface->face_var;
 
       /*
        * Apply the deltas of hasc, hdsc and hlgp to the FT_Face's ascender,
@@ -1521,24 +1607,25 @@
        *    whether they were actually changed or the font had the OS/2 table's
        *    fsSelection's bit 7 (USE_TYPO_METRICS) set.
        */
-      FT_Short  current_line_gap = root->height - root->ascender +
-                                   root->descender;
+      FT_Short  current_line_gap = face->height - face->ascender +
+                                   face->descender;
 
 
-      root->ascender  = root->ascender + mvar_hasc_delta;
-      root->descender = root->descender + mvar_hdsc_delta;
-      root->height    = root->ascender - root->descender +
+      face->ascender  = face->ascender + mvar_hasc_delta;
+      face->descender = face->descender + mvar_hdsc_delta;
+      face->height    = face->ascender - face->descender +
                         current_line_gap + mvar_hlgp_delta;
 
-      root->underline_position  = face->postscript.underlinePosition -
-                                  face->postscript.underlineThickness / 2;
-      root->underline_thickness = face->postscript.underlineThickness;
+      face->underline_position  = ttface->postscript.underlinePosition -
+                                  ttface->postscript.underlineThickness / 2;
+      face->underline_thickness = ttface->postscript.underlineThickness;
 
-      /* iterate over all FT_Size objects and call `tt_size_reset' */
-      /* to propagate the metrics changes                          */
-      FT_List_Iterate( &root->sizes_list,
-                       tt_size_reset_iterator,
-                       NULL );
+      /* iterate over all FT_Size objects and call `var->size_reset' */
+      /* to propagate the metrics changes                            */
+      if ( var && var->size_reset )
+        FT_List_Iterate( &face->sizes_list,
+                         ft_size_reset_iterator,
+                         (void*)var );
     }
   }
 
@@ -1763,7 +1850,7 @@
           blend->tuplecoords[i * gvar_head.axisCount + j] =
             FT_fdot14ToFixed( FT_GET_SHORT() );
           FT_TRACE5(( "%.5f ",
-            blend->tuplecoords[i * gvar_head.axisCount + j] / 65536.0 ));
+            (double)blend->tuplecoords[i * gvar_head.axisCount + j] / 65536 ));
         }
         FT_TRACE5(( "]\n" ));
       }
@@ -1834,7 +1921,7 @@
     for ( i = 0; i < blend->num_axis; i++ )
     {
       FT_TRACE6(( "    axis %d coordinate %.5f:\n",
-                  i, blend->normalizedcoords[i] / 65536.0 ));
+                  i, (double)blend->normalizedcoords[i] / 65536 ));
 
       /* It's not clear why (for intermediate tuples) we don't need     */
       /* to check against start/end -- the documentation says we don't. */
@@ -1857,7 +1944,7 @@
       if ( blend->normalizedcoords[i] == tuple_coords[i] )
       {
         FT_TRACE6(( "      tuple coordinate %.5f fits perfectly\n",
-                    tuple_coords[i] / 65536.0 ));
+                    (double)tuple_coords[i] / 65536 ));
         /* `apply' does not change */
         continue;
       }
@@ -1870,13 +1957,13 @@
              blend->normalizedcoords[i] > FT_MAX( 0, tuple_coords[i] ) )
         {
           FT_TRACE6(( "      tuple coordinate %.5f is exceeded, stop\n",
-                      tuple_coords[i] / 65536.0 ));
+                      (double)tuple_coords[i] / 65536 ));
           apply = 0;
           break;
         }
 
         FT_TRACE6(( "      tuple coordinate %.5f fits\n",
-                    tuple_coords[i] / 65536.0 ));
+                    (double)tuple_coords[i] / 65536 ));
         apply = FT_MulDiv( apply,
                            blend->normalizedcoords[i],
                            tuple_coords[i] );
@@ -1890,15 +1977,15 @@
         {
           FT_TRACE6(( "      intermediate tuple range ]%.5f;%.5f[ is exceeded,"
                       " stop\n",
-                      im_start_coords[i] / 65536.0,
-                      im_end_coords[i] / 65536.0 ));
+                      (double)im_start_coords[i] / 65536,
+                      (double)im_end_coords[i] / 65536 ));
           apply = 0;
           break;
         }
 
         FT_TRACE6(( "      intermediate tuple range ]%.5f;%.5f[ fits\n",
-                    im_start_coords[i] / 65536.0,
-                    im_end_coords[i] / 65536.0 ));
+                    (double)im_start_coords[i] / 65536,
+                    (double)im_end_coords[i] / 65536 ));
         if ( blend->normalizedcoords[i] < tuple_coords[i] )
           apply = FT_MulDiv( apply,
                              blend->normalizedcoords[i] - im_start_coords[i],
@@ -1910,7 +1997,7 @@
       }
     }
 
-    FT_TRACE6(( "    apply factor is %.5f\n", apply / 65536.0 ));
+    FT_TRACE6(( "    apply factor is %.5f\n", (double)apply / 65536 ));
 
     return apply;
   }
@@ -1924,11 +2011,17 @@
                         FT_Fixed*  coords,
                         FT_Fixed*  normalized )
   {
+    FT_Error   error  = FT_Err_Ok;
+    FT_Memory  memory = face->root.memory;
+    FT_UInt    i, j;
+
     GX_Blend        blend;
     FT_MM_Var*      mmvar;
-    FT_UInt         i, j;
     FT_Var_Axis*    a;
     GX_AVarSegment  av;
+
+    FT_Fixed*  new_normalized = NULL;
+    FT_Fixed*  old_normalized;
 
 
     blend = face->blend;
@@ -1952,15 +2045,15 @@
       FT_Fixed  coord = coords[i];
 
 
-      FT_TRACE5(( "    %d: %.5f\n", i, coord / 65536.0 ));
+      FT_TRACE5(( "    %d: %.5f\n", i, (double)coord / 65536 ));
       if ( coord > a->maximum || coord < a->minimum )
       {
         FT_TRACE1(( "ft_var_to_normalized: design coordinate %.5f\n",
-                    coord / 65536.0 ));
+                    (double)coord / 65536 ));
         FT_TRACE1(( "                      is out of range [%.5f;%.5f];"
                     " clamping\n",
-                    a->minimum / 65536.0,
-                    a->maximum / 65536.0 ));
+                    (double)a->minimum / 65536,
+                    (double)a->maximum / 65536 ));
       }
 
       if ( coord > a->def )
@@ -1980,30 +2073,92 @@
     for ( ; i < mmvar->num_axis; i++ )
       normalized[i] = 0;
 
-    if ( blend->avar_segment )
+    if ( blend->avar_table )
     {
+      GX_AVarTable  table = blend->avar_table;
+
+
       FT_TRACE5(( "normalized design coordinates"
                   " before applying `avar' data:\n" ));
 
-      av = blend->avar_segment;
-      for ( i = 0; i < mmvar->num_axis; i++, av++ )
+      if ( table->avar_segment )
       {
-        for ( j = 1; j < (FT_UInt)av->pairCount; j++ )
-        {
-          if ( normalized[i] < av->correspondence[j].fromCoord )
-          {
-            FT_TRACE5(( "  %.5f\n", normalized[i] / 65536.0 ));
+        av = table->avar_segment;
 
-            normalized[i] =
-              FT_MulDiv( normalized[i] - av->correspondence[j - 1].fromCoord,
-                         av->correspondence[j].toCoord -
-                           av->correspondence[j - 1].toCoord,
-                         av->correspondence[j].fromCoord -
-                           av->correspondence[j - 1].fromCoord ) +
-              av->correspondence[j - 1].toCoord;
-            break;
+        for ( i = 0; i < mmvar->num_axis; i++, av++ )
+        {
+          for ( j = 1; j < (FT_UInt)av->pairCount; j++ )
+          {
+            if ( normalized[i] < av->correspondence[j].fromCoord )
+            {
+              FT_TRACE5(( "  %.5f\n", (double)normalized[i] / 65536 ));
+
+              normalized[i] =
+                FT_MulDiv( normalized[i] - av->correspondence[j - 1].fromCoord,
+                           av->correspondence[j].toCoord -
+                             av->correspondence[j - 1].toCoord,
+                           av->correspondence[j].fromCoord -
+                             av->correspondence[j - 1].fromCoord ) +
+                av->correspondence[j - 1].toCoord;
+              break;
+            }
           }
         }
+      }
+
+      if ( table->itemStore.varData )
+      {
+        if ( FT_QNEW_ARRAY( new_normalized, mmvar->num_axis ) )
+          return;
+
+        /* Install our half-normalized coordinates for the next */
+        /* Item Variation Store to work with.                   */
+        old_normalized                = face->blend->normalizedcoords;
+        face->blend->normalizedcoords = normalized;
+
+        for ( i = 0; i < mmvar->num_axis; i++ )
+        {
+          FT_Fixed  v          = normalized[i];
+          FT_UInt   innerIndex = i;
+          FT_UInt   outerIndex = 0;
+          FT_Int    delta;
+
+
+          if ( table->axisMap.innerIndex )
+          {
+            FT_UInt  idx = i;
+
+
+            if ( idx >= table->axisMap.mapCount )
+              idx = table->axisMap.mapCount - 1;
+
+            outerIndex = table->axisMap.outerIndex[idx];
+            innerIndex = table->axisMap.innerIndex[idx];
+          }
+
+          delta = tt_var_get_item_delta( FT_FACE( face ),
+                                         &table->itemStore,
+                                         outerIndex,
+                                         innerIndex );
+
+          /* Convert to 16.16 format before adding. */
+	  v += delta * 4;
+
+	  /* Clamp value range. */
+	  v = v >=  0x10000L ?  0x10000 : v;
+	  v = v <= -0x10000L ? -0x10000 : v;
+
+          new_normalized[i] = v;
+        }
+
+        for ( i = 0; i < mmvar->num_axis; i++ )
+        {
+          normalized[i] = new_normalized[i];
+        }
+
+        face->blend->normalizedcoords = old_normalized;
+
+        FT_FREE( new_normalized );
       }
     }
   }
@@ -2041,9 +2196,9 @@
     for ( ; i < num_coords; i++ )
       design[i] = 0;
 
-    if ( blend->avar_segment )
+    if ( blend->avar_table && blend->avar_table->avar_segment )
     {
-      GX_AVarSegment  av = blend->avar_segment;
+      GX_AVarSegment  av = blend->avar_table->avar_segment;
 
 
       FT_TRACE5(( "design coordinates"
@@ -2063,7 +2218,7 @@
                            av->correspondence[j - 1].toCoord ) +
               av->correspondence[j - 1].fromCoord;
 
-            FT_TRACE5(( "  %.5f\n", design[i] / 65536.0 ));
+            FT_TRACE5(( "  %.5f\n", (double)design[i] / 65536 ));
             break;
           }
         }
@@ -2144,11 +2299,12 @@
    *   FreeType error code.  0 means success.
    */
   FT_LOCAL_DEF( FT_Error )
-  TT_Get_MM_Var( TT_Face      face,
+  TT_Get_MM_Var( FT_Face      face,    /* TT_Face */
                  FT_MM_Var*  *master )
   {
-    FT_Stream            stream     = face->root.stream;
-    FT_Memory            memory     = face->root.memory;
+    TT_Face              ttface     = (TT_Face)face;
+    FT_Stream            stream     = FT_FACE_STREAM( face );
+    FT_Memory            memory     = FT_FACE_MEMORY( face );
     FT_ULong             table_len;
     FT_Error             error      = FT_Err_Ok;
     FT_ULong             fvar_start = 0;
@@ -2212,19 +2368,19 @@
     /* the default instance, which might be missing in the table of named */
     /* instances (in 'fvar').  This value is validated in `sfobjs.c` and  */
     /* may be reset to 0 if consistency checks fail.                      */
-    num_instances = (FT_UInt)face->root.style_flags >> 16;
+    num_instances = (FT_UInt)face->style_flags >> 16;
 
     /* read the font data and set up the internal representation */
     /* if not already done                                       */
 
-    need_init = !face->blend;
+    need_init = !ttface->blend;
 
     if ( need_init )
     {
       FT_TRACE2(( "FVAR " ));
 
-      if ( FT_SET_ERROR( face->goto_table( face, TTAG_fvar,
-                                           stream, &table_len ) ) )
+      if ( FT_SET_ERROR( ttface->goto_table( ttface, TTAG_fvar,
+                                             stream, &table_len ) ) )
       {
         FT_TRACE1(( "is missing\n" ));
         goto Exit;
@@ -2257,14 +2413,14 @@
                   fvar_head.axisCount,
                   fvar_head.axisCount == 1 ? "is" : "es" ));
 
-      if ( FT_NEW( face->blend ) )
+      if ( FT_NEW( ttface->blend ) )
         goto Exit;
 
-      num_axes              = fvar_head.axisCount;
-      face->blend->num_axis = num_axes;
+      num_axes                = fvar_head.axisCount;
+      ttface->blend->num_axis = num_axes;
     }
     else
-      num_axes = face->blend->num_axis;
+      num_axes = ttface->blend->num_axis;
 
     /* prepare storage area for MM data; this cannot overflow   */
     /* 32-bit arithmetic because of the size limits used in the */
@@ -2293,16 +2449,16 @@
 
     if ( need_init )
     {
-      face->blend->mmvar_len = mmvar_size       +
-                               axis_flags_size  +
-                               axis_size        +
-                               namedstyle_size  +
-                               next_coords_size +
-                               next_name_size;
+      ttface->blend->mmvar_len = mmvar_size       +
+                                 axis_flags_size  +
+                                 axis_size        +
+                                 namedstyle_size  +
+                                 next_coords_size +
+                                 next_name_size;
 
-      if ( FT_ALLOC( mmvar, face->blend->mmvar_len ) )
+      if ( FT_ALLOC( mmvar, ttface->blend->mmvar_len ) )
         goto Exit;
-      face->blend->mmvar = mmvar;
+      ttface->blend->mmvar = mmvar;
 
       /* set up pointers and offsets into the `mmvar' array; */
       /* the data gets filled in later on                    */
@@ -2393,9 +2549,9 @@
                     "  %10.5f  %10.5f  %10.5f  0x%04X%s\n",
                     i,
                     a->name,
-                    a->minimum / 65536.0,
-                    a->def / 65536.0,
-                    a->maximum / 65536.0,
+                    (double)a->minimum / 65536,
+                    (double)a->def / 65536,
+                    (double)a->maximum / 65536,
                     *axis_flags,
                     invalid ? " (invalid, disabled)" : "" ));
 #endif
@@ -2408,27 +2564,27 @@
 
       /* named instance coordinates are stored as design coordinates; */
       /* we have to convert them to normalized coordinates also       */
-      if ( FT_NEW_ARRAY( face->blend->normalized_stylecoords,
+      if ( FT_NEW_ARRAY( ttface->blend->normalized_stylecoords,
                          num_axes * num_instances ) )
         goto Exit;
 
-      if ( fvar_head.instanceCount && !face->blend->avar_loaded )
+      if ( fvar_head.instanceCount && !ttface->blend->avar_loaded )
       {
         FT_ULong  offset = FT_STREAM_POS();
 
 
-        ft_var_load_avar( face );
+        ft_var_load_avar( ttface );
 
         if ( FT_STREAM_SEEK( offset ) )
           goto Exit;
       }
 
-      FT_TRACE5(( "%d instance%s\n",
+      FT_TRACE5(( "%d named instance%s\n",
                   fvar_head.instanceCount,
                   fvar_head.instanceCount == 1 ? "" : "s" ));
 
       ns  = mmvar->namedstyle;
-      nsc = face->blend->normalized_stylecoords;
+      nsc = ttface->blend->normalized_stylecoords;
       for ( i = 0; i < fvar_head.instanceCount; i++, ns++ )
       {
         /* PostScript names add 2 bytes to the instance record size */
@@ -2451,7 +2607,7 @@
 
 #ifdef FT_DEBUG_LEVEL_TRACE
         {
-          SFNT_Service  sfnt = (SFNT_Service)face->sfnt;
+          SFNT_Service  sfnt = (SFNT_Service)ttface->sfnt;
 
           FT_String*  strname = NULL;
           FT_String*  psname  = NULL;
@@ -2463,7 +2619,7 @@
 
           if ( ns->strid != 0xFFFF )
           {
-            (void)sfnt->get_name( face,
+            (void)sfnt->get_name( ttface,
                                   (FT_UShort)ns->strid,
                                   &strname );
             if ( strname && !ft_strcmp( strname, ".notdef" ) )
@@ -2472,7 +2628,7 @@
 
           if ( ns->psid != 0xFFFF )
           {
-            (void)sfnt->get_name( face,
+            (void)sfnt->get_name( ttface,
                                   (FT_UShort)ns->psid,
                                   &psname );
             if ( psname && !ft_strcmp( psname, ".notdef" ) )
@@ -2481,7 +2637,7 @@
 
           (void)FT_STREAM_SEEK( pos );
 
-          FT_TRACE5(( "  instance %d (%s%s%s, %s%s%s)\n",
+          FT_TRACE5(( "  named instance %d (%s%s%s, %s%s%s)\n",
                       i,
                       strname ? "name: `" : "",
                       strname ? strname : "unnamed",
@@ -2495,7 +2651,7 @@
         }
 #endif /* FT_DEBUG_LEVEL_TRACE */
 
-        ft_var_to_normalized( face, num_axes, ns->coords, nsc );
+        ft_var_to_normalized( ttface, num_axes, ns->coords, nsc );
         nsc += num_axes;
 
         FT_FRAME_EXIT();
@@ -2503,15 +2659,17 @@
 
       if ( num_instances != fvar_head.instanceCount )
       {
-        SFNT_Service  sfnt = (SFNT_Service)face->sfnt;
+        SFNT_Service  sfnt = (SFNT_Service)ttface->sfnt;
 
         FT_Int   found, dummy1, dummy2;
         FT_UInt  strid = ~0U;
 
 
-        /* the default instance is missing in array the   */
-        /* of named instances; try to synthesize an entry */
-        found = sfnt->get_name_id( face,
+        /* The default instance is missing in array the    */
+        /* of named instances; try to synthesize an entry. */
+        /* If this fails, `default_named_instance` remains */
+        /* at value zero, which doesn't do any harm.       */
+        found = sfnt->get_name_id( ttface,
                                    TT_NAME_ID_TYPOGRAPHIC_SUBFAMILY,
                                    &dummy1,
                                    &dummy2 );
@@ -2519,7 +2677,7 @@
           strid = TT_NAME_ID_TYPOGRAPHIC_SUBFAMILY;
         else
         {
-          found = sfnt->get_name_id( face,
+          found = sfnt->get_name_id( ttface,
                                      TT_NAME_ID_FONT_SUBFAMILY,
                                      &dummy1,
                                      &dummy2 );
@@ -2529,7 +2687,7 @@
 
         if ( found )
         {
-          found = sfnt->get_name_id( face,
+          found = sfnt->get_name_id( ttface,
                                      TT_NAME_ID_PS_NAME,
                                      &dummy1,
                                      &dummy2 );
@@ -2537,6 +2695,9 @@
           {
             FT_TRACE5(( "TT_Get_MM_Var:"
                         " Adding default instance to named instances\n" ));
+
+            /* named instance indices start with value 1 */
+            ttface->var_default_named_instance = num_instances;
 
             ns = &mmvar->namedstyle[fvar_head.instanceCount];
 
@@ -2551,7 +2712,7 @@
         }
       }
 
-      ft_var_load_mvar( face );
+      ft_var_load_mvar( ttface );
     }
 
     /* fill the output array if requested */
@@ -2561,9 +2722,9 @@
       FT_UInt  n;
 
 
-      if ( FT_ALLOC( mmvar, face->blend->mmvar_len ) )
+      if ( FT_ALLOC( mmvar, ttface->blend->mmvar_len ) )
         goto Exit;
-      FT_MEM_COPY( mmvar, face->blend->mmvar, face->blend->mmvar_len );
+      FT_MEM_COPY( mmvar, ttface->blend->mmvar, ttface->blend->mmvar_len );
 
       axis_flags =
         (FT_UShort*)( (char*)mmvar + mmvar_size );
@@ -2596,6 +2757,8 @@
           a->name = (char*)"OpticalSize";
         else if ( a->tag == TTAG_slnt )
           a->name = (char*)"Slant";
+        else if ( a->tag == TTAG_ital )
+          a->name = (char*)"Italic";
 
         next_name += 5;
         a++;
@@ -2637,7 +2800,7 @@
 
     if ( !face->blend )
     {
-      if ( FT_SET_ERROR( TT_Get_MM_Var( face, NULL ) ) )
+      if ( FT_SET_ERROR( TT_Get_MM_Var( FT_FACE( face ), NULL ) ) )
         goto Exit;
     }
 
@@ -2657,11 +2820,11 @@
 
     for ( i = 0; i < num_coords; i++ )
     {
-      FT_TRACE5(( "    %.5f\n", coords[i] / 65536.0 ));
+      FT_TRACE5(( "    %.5f\n", (double)coords[i] / 65536 ));
       if ( coords[i] < -0x00010000L || coords[i] > 0x00010000L )
       {
         FT_TRACE1(( "TT_Set_MM_Blend: normalized design coordinate %.5f\n",
-                    coords[i] / 65536.0 ));
+                    (double)coords[i] / 65536 ));
         FT_TRACE1(( "                 is out of range [-1;1]\n" ));
         error = FT_THROW( Invalid_Argument );
         goto Exit;
@@ -2722,26 +2885,29 @@
         }
       }
 
-      if ( FT_IS_NAMED_INSTANCE( FT_FACE( face ) ) )
+      if ( !have_diff )
       {
-        FT_UInt  instance_index = (FT_UInt)face->root.face_index >> 16;
+        if ( FT_IS_NAMED_INSTANCE( FT_FACE( face ) ) )
+        {
+          FT_UInt  instance_index = (FT_UInt)face->root.face_index >> 16;
 
 
-        c = blend->normalizedcoords + i;
-        n = blend->normalized_stylecoords            +
-            ( instance_index - 1 ) * mmvar->num_axis +
-            i;
+          c = blend->normalizedcoords + i;
+          n = blend->normalized_stylecoords            +
+              ( instance_index - 1 ) * mmvar->num_axis +
+              i;
 
-        for ( j = i; j < mmvar->num_axis; j++, n++, c++ )
-          if ( *c != *n )
-            have_diff = 1;
-      }
-      else
-      {
-        c = blend->normalizedcoords + i;
-        for ( j = i; j < mmvar->num_axis; j++, c++ )
-          if ( *c != 0 )
-            have_diff = 1;
+          for ( j = i; j < mmvar->num_axis; j++, n++, c++ )
+            if ( *c != *n )
+              have_diff = 1;
+        }
+        else
+        {
+          c = blend->normalizedcoords + i;
+          for ( j = i; j < mmvar->num_axis; j++, c++ )
+            if ( *c != 0 )
+              have_diff = 1;
+        }
       }
 
       /* return value -1 indicates `no change' */
@@ -2805,9 +2971,6 @@
       }
     }
 
-    /* enforce recomputation of the PostScript name; */
-    FT_FREE( face->postscript_name );
-
   Exit:
     return error;
   }
@@ -2839,26 +3002,15 @@
    *     An array of `num_coords', each between [-1,1].
    *
    * @Return:
-   *   FreeType error code.  0 means success.
+   *   FreeType error code.  0 means success, -1 means success and unchanged
+   *   axis values.
    */
   FT_LOCAL_DEF( FT_Error )
-  TT_Set_MM_Blend( TT_Face    face,
+  TT_Set_MM_Blend( FT_Face    face,       /* TT_Face */
                    FT_UInt    num_coords,
                    FT_Fixed*  coords )
   {
-    FT_Error  error;
-
-
-    error = tt_set_mm_blend( face, num_coords, coords, 1 );
-    if ( error )
-      return error;
-
-    if ( num_coords )
-      face->root.face_flags |= FT_FACE_FLAG_VARIATION;
-    else
-      face->root.face_flags &= ~FT_FACE_FLAG_VARIATION;
-
-    return FT_Err_Ok;
+    return tt_set_mm_blend( (TT_Face)face, num_coords, coords, 1 );
   }
 
 
@@ -2886,31 +3038,34 @@
    *     An array of `num_coords', each between [-1,1].
    *
    * @Return:
-   *   FreeType error code.  0 means success.
+   *   FreeType error code.  0 means success, -1 means success and unchanged
+   *   axis values.
    */
   FT_LOCAL_DEF( FT_Error )
-  TT_Get_MM_Blend( TT_Face    face,
+  TT_Get_MM_Blend( FT_Face    face,       /* TT_Face */
                    FT_UInt    num_coords,
                    FT_Fixed*  coords )
   {
+    TT_Face  ttface = (TT_Face)face;
+
     FT_Error  error = FT_Err_Ok;
     GX_Blend  blend;
     FT_UInt   i, nc;
 
 
-    if ( !face->blend )
+    if ( !ttface->blend )
     {
       if ( FT_SET_ERROR( TT_Get_MM_Var( face, NULL ) ) )
         return error;
     }
 
-    blend = face->blend;
+    blend = ttface->blend;
 
     if ( !blend->coords )
     {
       /* select default instance coordinates */
       /* if no instance is selected yet      */
-      if ( FT_SET_ERROR( tt_set_mm_blend( face, 0, NULL, 1 ) ) )
+      if ( FT_SET_ERROR( tt_set_mm_blend( ttface, 0, NULL, 1 ) ) )
         return error;
     }
 
@@ -2923,7 +3078,7 @@
       nc = blend->num_axis;
     }
 
-    if ( face->doblend )
+    if ( ttface->doblend )
     {
       for ( i = 0; i < nc; i++ )
         coords[i] = blend->normalizedcoords[i];
@@ -2970,15 +3125,16 @@
    *   FreeType error code.  0 means success.
    */
   FT_LOCAL_DEF( FT_Error )
-  TT_Set_Var_Design( TT_Face    face,
+  TT_Set_Var_Design( FT_Face    face,       /* TT_Face */
                      FT_UInt    num_coords,
                      FT_Fixed*  coords )
   {
+    TT_Face     ttface = (TT_Face)face;
     FT_Error    error  = FT_Err_Ok;
     GX_Blend    blend;
     FT_MM_Var*  mmvar;
     FT_UInt     i;
-    FT_Memory   memory = face->root.memory;
+    FT_Memory   memory = FT_FACE_MEMORY( face );
 
     FT_Fixed*  c;
     FT_Fixed*  n;
@@ -2987,13 +3143,13 @@
     FT_Bool  have_diff = 0;
 
 
-    if ( !face->blend )
+    if ( !ttface->blend )
     {
       if ( FT_SET_ERROR( TT_Get_MM_Var( face, NULL ) ) )
         goto Exit;
     }
 
-    blend = face->blend;
+    blend = ttface->blend;
     mmvar = blend->mmvar;
 
     if ( num_coords > mmvar->num_axis )
@@ -3021,13 +3177,13 @@
       }
     }
 
-    if ( FT_IS_NAMED_INSTANCE( FT_FACE( face ) ) )
+    if ( FT_IS_NAMED_INSTANCE( face ) )
     {
       FT_UInt              instance_index;
       FT_Var_Named_Style*  named_style;
 
 
-      instance_index = (FT_UInt)face->root.face_index >> 16;
+      instance_index = (FT_UInt)face->face_index >> 16;
       named_style    = mmvar->namedstyle + instance_index - 1;
 
       n = named_style->coords + num_coords;
@@ -3064,21 +3220,16 @@
     if ( FT_NEW_ARRAY( normalized, mmvar->num_axis ) )
       goto Exit;
 
-    if ( !face->blend->avar_loaded )
-      ft_var_load_avar( face );
+    if ( !ttface->blend->avar_loaded )
+      ft_var_load_avar( ttface );
 
     FT_TRACE5(( "TT_Set_Var_Design:\n" ));
     FT_TRACE5(( "  normalized design coordinates:\n" ));
-    ft_var_to_normalized( face, num_coords, blend->coords, normalized );
+    ft_var_to_normalized( ttface, num_coords, blend->coords, normalized );
 
-    error = tt_set_mm_blend( face, mmvar->num_axis, normalized, 0 );
+    error = tt_set_mm_blend( ttface, mmvar->num_axis, normalized, 0 );
     if ( error )
       goto Exit;
-
-    if ( num_coords )
-      face->root.face_flags |= FT_FACE_FLAG_VARIATION;
-    else
-      face->root.face_flags &= ~FT_FACE_FLAG_VARIATION;
 
   Exit:
     FT_FREE( normalized );
@@ -3112,28 +3263,29 @@
    *   FreeType error code.  0~means success.
    */
   FT_LOCAL_DEF( FT_Error )
-  TT_Get_Var_Design( TT_Face    face,
+  TT_Get_Var_Design( FT_Face    face,       /* TT_Face */
                      FT_UInt    num_coords,
                      FT_Fixed*  coords )
   {
-    FT_Error  error = FT_Err_Ok;
+    TT_Face   ttface = (TT_Face)face;
+    FT_Error  error  = FT_Err_Ok;
     GX_Blend  blend;
     FT_UInt   i, nc;
 
 
-    if ( !face->blend )
+    if ( !ttface->blend )
     {
       if ( FT_SET_ERROR( TT_Get_MM_Var( face, NULL ) ) )
         return error;
     }
 
-    blend = face->blend;
+    blend = ttface->blend;
 
     if ( !blend->coords )
     {
       /* select default instance coordinates */
       /* if no instance is selected yet      */
-      if ( FT_SET_ERROR( tt_set_mm_blend( face, 0, NULL, 1 ) ) )
+      if ( FT_SET_ERROR( tt_set_mm_blend( ttface, 0, NULL, 1 ) ) )
         return error;
     }
 
@@ -3146,7 +3298,7 @@
       nc = blend->num_axis;
     }
 
-    if ( face->doblend )
+    if ( ttface->doblend )
     {
       for ( i = 0; i < nc; i++ )
         coords[i] = blend->coords[i];
@@ -3182,29 +3334,33 @@
    *     Value 0 indicates to not use an instance.
    *
    * @Return:
-   *   FreeType error code.  0~means success.
+   *   FreeType error code.  0~means success, -1 means success and unchanged
+   *   axis values.
    */
   FT_LOCAL_DEF( FT_Error )
-  TT_Set_Named_Instance( TT_Face  face,
+  TT_Set_Named_Instance( FT_Face  face,            /* TT_Face */
                          FT_UInt  instance_index )
   {
+    TT_Face     ttface = (TT_Face)face;
     FT_Error    error;
     GX_Blend    blend;
     FT_MM_Var*  mmvar;
 
+    FT_Memory  memory = FT_FACE_MEMORY( face );
+
     FT_UInt  num_instances;
 
 
-    if ( !face->blend )
+    if ( !ttface->blend )
     {
       if ( FT_SET_ERROR( TT_Get_MM_Var( face, NULL ) ) )
         goto Exit;
     }
 
-    blend = face->blend;
+    blend = ttface->blend;
     mmvar = blend->mmvar;
 
-    num_instances = (FT_UInt)face->root.style_flags >> 16;
+    num_instances = (FT_UInt)face->style_flags >> 16;
 
     /* `instance_index' starts with value 1, thus `>' */
     if ( instance_index > num_instances )
@@ -3215,8 +3371,7 @@
 
     if ( instance_index > 0 )
     {
-      FT_Memory     memory = face->root.memory;
-      SFNT_Service  sfnt   = (SFNT_Service)face->sfnt;
+      SFNT_Service  sfnt = (SFNT_Service)ttface->sfnt;
 
       FT_Var_Named_Style*  named_style;
       FT_String*           style_name;
@@ -3224,37 +3379,86 @@
 
       named_style = mmvar->namedstyle + instance_index - 1;
 
-      error = sfnt->get_name( face,
+      error = sfnt->get_name( ttface,
                               (FT_UShort)named_style->strid,
                               &style_name );
       if ( error )
         goto Exit;
 
       /* set (or replace) style name */
-      FT_FREE( face->root.style_name );
-      face->root.style_name = style_name;
+      FT_FREE( face->style_name );
+      face->style_name = style_name;
 
       /* finally, select the named instance */
       error = TT_Set_Var_Design( face,
                                  mmvar->num_axis,
                                  named_style->coords );
-      if ( error )
-      {
-        /* internal error code -1 means `no change' */
-        if ( error == -1 )
-          error = FT_Err_Ok;
-        goto Exit;
-      }
     }
     else
+    {
+      /* restore non-VF style name */
+      FT_FREE( face->style_name );
+      if ( FT_STRDUP( face->style_name, ttface->non_var_style_name ) )
+        goto Exit;
       error = TT_Set_Var_Design( face, 0, NULL );
-
-    face->root.face_index  = ( instance_index << 16 )             |
-                             ( face->root.face_index & 0xFFFFL );
-    face->root.face_flags &= ~FT_FACE_FLAG_VARIATION;
+    }
 
   Exit:
     return error;
+  }
+
+
+  /**************************************************************************
+   *
+   * @Function:
+   *   TT_Get_Default_Named_Instance
+   *
+   * @Description:
+   *   Get the default named instance.
+   *
+   * @Input:
+   *   face ::
+   *     A handle to the source face.
+   *
+   * @Output:
+   *   instance_index ::
+   *     The default named instance index.
+   *
+   * @Return:
+   *   FreeType error code.  0~means success.
+   */
+  FT_LOCAL_DEF( FT_Error )
+  TT_Get_Default_Named_Instance( FT_Face   face,
+                                 FT_UInt  *instance_index )
+  {
+    TT_Face   ttface = (TT_Face)face;
+    FT_Error  error  = FT_Err_Ok;
+
+
+    if ( !ttface->blend )
+    {
+      if ( FT_SET_ERROR( TT_Get_MM_Var( face, NULL ) ) )
+        goto Exit;
+    }
+
+    *instance_index = ttface->var_default_named_instance;
+
+  Exit:
+    return error;
+  }
+
+
+  /* This function triggers (lazy) recomputation of the `postscript_name` */
+  /* field in `TT_Face`.                                                  */
+
+  FT_LOCAL_DEF( void )
+  tt_construct_ps_name( FT_Face  face )
+  {
+    TT_Face    ttface = (TT_Face)face;
+    FT_Memory  memory = FT_FACE_MEMORY( face );
+
+
+    FT_FREE( ttface->postscript_name );
   }
 
 
@@ -3546,10 +3750,10 @@
           {
             FT_TRACE7(( "      %d: %f -> %f\n",
                         j,
-                        ( FT_fdot6ToFixed( face->cvt[j] ) +
-                          old_cvt_delta ) / 65536.0,
-                        ( FT_fdot6ToFixed( face->cvt[j] ) +
-                          cvt_deltas[j] ) / 65536.0 ));
+                        (double)( FT_fdot6ToFixed( face->cvt[j] ) +
+                                    old_cvt_delta ) / 65536,
+                        (double)( FT_fdot6ToFixed( face->cvt[j] ) +
+                                    cvt_deltas[j] ) / 65536 ));
             count++;
           }
 #endif
@@ -3588,10 +3792,10 @@
           {
             FT_TRACE7(( "      %d: %f -> %f\n",
                         pindex,
-                        ( FT_fdot6ToFixed( face->cvt[pindex] ) +
-                          old_cvt_delta ) / 65536.0,
-                        ( FT_fdot6ToFixed( face->cvt[pindex] ) +
-                          cvt_deltas[pindex] ) / 65536.0 ));
+                        (double)( FT_fdot6ToFixed( face->cvt[pindex] ) +
+                                    old_cvt_delta ) / 65536,
+                        (double)( FT_fdot6ToFixed( face->cvt[pindex] ) +
+                                    cvt_deltas[pindex] ) / 65536 ));
             count++;
           }
 #endif
@@ -3877,11 +4081,11 @@
                               FT_Vector*   unrounded )
   {
     FT_Error   error;
-    TT_Face    face = loader->face;
-    FT_Stream  stream = face->root.stream;
-    FT_Memory  memory = stream->memory;
+    TT_Face    face        = loader->face;
+    FT_Stream  stream      = face->root.stream;
+    FT_Memory  memory      = stream->memory;
     FT_UInt    glyph_index = loader->glyph_index;
-    FT_UInt    n_points = (FT_UInt)outline->n_points + 4;
+    FT_UInt    n_points    = (FT_UInt)outline->n_points + 4;
 
     FT_Vector*  points_org = NULL;  /* coordinates in 16.16 format */
     FT_Vector*  points_out = NULL;  /* coordinates in 16.16 format */
@@ -4107,14 +4311,14 @@
           {
             FT_TRACE7(( "      %d: (%f, %f) -> (%f, %f)\n",
                         j,
-                        ( FT_intToFixed( outline->points[j].x ) +
-                          old_point_delta_x ) / 65536.0,
-                        ( FT_intToFixed( outline->points[j].y ) +
-                          old_point_delta_y ) / 65536.0,
-                        ( FT_intToFixed( outline->points[j].x ) +
-                          point_deltas_x[j] ) / 65536.0,
-                        ( FT_intToFixed( outline->points[j].y ) +
-                          point_deltas_y[j] ) / 65536.0 ));
+                        (double)( FT_intToFixed( outline->points[j].x ) +
+                                    old_point_delta_x ) / 65536,
+                        (double)( FT_intToFixed( outline->points[j].y ) +
+                                    old_point_delta_y ) / 65536,
+                        (double)( FT_intToFixed( outline->points[j].x ) +
+                                    point_deltas_x[j] ) / 65536,
+                        (double)( FT_intToFixed( outline->points[j].y ) +
+                                    point_deltas_y[j] ) / 65536 ));
             count++;
           }
 #endif
@@ -4181,14 +4385,14 @@
           {
             FT_TRACE7(( "      %d: (%f, %f) -> (%f, %f)\n",
                         j,
-                        ( FT_intToFixed( outline->points[j].x ) +
-                          old_point_delta_x ) / 65536.0,
-                        ( FT_intToFixed( outline->points[j].y ) +
-                          old_point_delta_y ) / 65536.0,
-                        ( FT_intToFixed( outline->points[j].x ) +
-                          point_deltas_x[j] ) / 65536.0,
-                        ( FT_intToFixed( outline->points[j].y ) +
-                          point_deltas_y[j] ) / 65536.0 ));
+                        (double)( FT_intToFixed( outline->points[j].x ) +
+                                    old_point_delta_x ) / 65536,
+                        (double)( FT_intToFixed( outline->points[j].y ) +
+                                    old_point_delta_y ) / 65536,
+                        (double)( FT_intToFixed( outline->points[j].x ) +
+                                    point_deltas_x[j] ) / 65536,
+                        (double)( FT_intToFixed( outline->points[j].y ) +
+                                    point_deltas_y[j] ) / 65536 ));
             count++;
           }
 #endif
@@ -4290,22 +4494,25 @@
    *   the MM machinery in case it isn't loaded yet.
    */
   FT_LOCAL_DEF( FT_Error )
-  tt_get_var_blend( TT_Face      face,
+  tt_get_var_blend( FT_Face      face,             /* TT_Face */
                     FT_UInt     *num_coords,
                     FT_Fixed*   *coords,
                     FT_Fixed*   *normalizedcoords,
                     FT_MM_Var*  *mm_var )
   {
-    if ( face->blend )
+    TT_Face  ttface = (TT_Face)face;
+
+
+    if ( ttface->blend )
     {
       if ( num_coords )
-        *num_coords       = face->blend->num_axis;
+        *num_coords       = ttface->blend->num_axis;
       if ( coords )
-        *coords           = face->blend->coords;
+        *coords           = ttface->blend->coords;
       if ( normalizedcoords )
-        *normalizedcoords = face->blend->normalizedcoords;
+        *normalizedcoords = ttface->blend->normalizedcoords;
       if ( mm_var )
-        *mm_var           = face->blend->mmvar;
+        *mm_var           = ttface->blend->mmvar;
     }
     else
     {
@@ -4322,7 +4529,7 @@
 
 
   FT_LOCAL_DEF( void )
-  tt_var_done_item_variation_store( TT_Face          face,
+  tt_var_done_item_variation_store( FT_Face          face,
                                     GX_ItemVarStore  itemStore )
   {
     FT_Memory  memory = FT_FACE_MEMORY( face );
@@ -4351,7 +4558,7 @@
 
 
   FT_LOCAL_DEF( void )
-  tt_var_done_delta_set_index_map( TT_Face            face,
+  tt_var_done_delta_set_index_map( FT_Face            face,
                                    GX_DeltaSetIdxMap  deltaSetIdxMap )
   {
     FT_Memory  memory = FT_FACE_MEMORY( face );
@@ -4371,10 +4578,11 @@
    *   Free the blend internal data structure.
    */
   FT_LOCAL_DEF( void )
-  tt_done_blend( TT_Face  face )
+  tt_done_blend( FT_Face  face )
   {
+    TT_Face    ttface = (TT_Face)face;
     FT_Memory  memory = FT_FACE_MEMORY( face );
-    GX_Blend   blend  = face->blend;
+    GX_Blend   blend  = ttface->blend;
 
 
     if ( blend )
@@ -4390,11 +4598,22 @@
       FT_FREE( blend->normalized_stylecoords );
       FT_FREE( blend->mmvar );
 
-      if ( blend->avar_segment )
+      if ( blend->avar_table )
       {
-        for ( i = 0; i < num_axes; i++ )
-          FT_FREE( blend->avar_segment[i].correspondence );
-        FT_FREE( blend->avar_segment );
+        if ( blend->avar_table->avar_segment )
+        {
+          for ( i = 0; i < num_axes; i++ )
+            FT_FREE( blend->avar_table->avar_segment[i].correspondence );
+          FT_FREE( blend->avar_table->avar_segment );
+        }
+
+        tt_var_done_item_variation_store( face,
+                                          &blend->avar_table->itemStore );
+
+        tt_var_done_delta_set_index_map( face,
+                                         &blend->avar_table->axisMap );
+
+        FT_FREE( blend->avar_table );
       }
 
       if ( blend->hvar_table )
@@ -4435,7 +4654,7 @@
 #else /* !TT_CONFIG_OPTION_GX_VAR_SUPPORT */
 
   /* ANSI C doesn't like empty source files */
-  typedef int  _tt_gxvar_dummy;
+  typedef int  tt_gxvar_dummy_;
 
 #endif /* !TT_CONFIG_OPTION_GX_VAR_SUPPORT */
 

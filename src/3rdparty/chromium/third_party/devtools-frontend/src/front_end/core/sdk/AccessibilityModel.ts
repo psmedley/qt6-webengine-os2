@@ -10,9 +10,7 @@ import {DeferredDOMNode, type DOMNode} from './DOMModel.js';
 import {Capability, type Target} from './Target.js';
 import {SDKModel} from './SDKModel.js';
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum CoreAxPropertyName {
+export const enum CoreAxPropertyName {
   Name = 'name',
   Description = 'description',
   Value = 'value',
@@ -195,9 +193,7 @@ export class AccessibilityNode {
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   TreeUpdated = 'TreeUpdated',
 }
 
@@ -233,11 +229,11 @@ export class AccessibilityModel extends SDKModel<EventTypes> implements Protocol
     this.#frameIdToAXNode.clear();
   }
 
-  async resumeModel(): Promise<void> {
+  override async resumeModel(): Promise<void> {
     await this.agent.invoke_enable();
   }
 
-  async suspendModel(): Promise<void> {
+  override async suspendModel(): Promise<void> {
     await this.agent.invoke_disable();
   }
 

@@ -17,12 +17,13 @@
 #include <string>
 
 #include "gtest/gtest.h"
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/mediums/ble_v2/discovered_peripheral_callback.h"
 #include "connections/implementation/mediums/bluetooth_radio.h"
+#include "internal/flags/nearby_flags.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/medium_environment.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace {
@@ -39,6 +40,7 @@ constexpr FeatureFlags kTestCases[] = {
 };
 
 constexpr absl::Duration kWaitDuration = absl::Milliseconds(1000);
+constexpr int64_t kPeripheralLostTimeoutInMillis = 1000;
 constexpr absl::string_view kServiceIDA =
     "com.google.location.nearby.apps.test.a";
 constexpr absl::string_view kServiceIDB =
@@ -46,9 +48,15 @@ constexpr absl::string_view kServiceIDB =
 constexpr absl::string_view kAdvertisementString = "\x0a\x0b\x0c\x0d";
 
 class BleV2Test : public testing::TestWithParam<FeatureFlags> {
- protected:
-  BleV2Test() { env_.Stop(); }
+ public:
+  void SetUp() override {
+    NearbyFlags::GetInstance().OverrideInt64FlagValue(
+        config_package_nearby::nearby_connections_feature::
+            kBlePeripheralLostTimeoutMillis,
+        /*ms=*/kPeripheralLostTimeoutInMillis);
+  }
 
+ protected:
   MediumEnvironment& env_{MediumEnvironment::Instance()};
 };
 
@@ -69,14 +77,10 @@ TEST_P(BleV2Test, CanConnect) {
 
   BleV2Socket socket_for_server;
   EXPECT_TRUE(ble_server.StartAcceptingConnections(
-      service_id, {
-                      .accepted_cb =
-                          [&socket_for_server, &accept_latch](
-                              BleV2Socket socket, const std::string&) {
-                            socket_for_server = std::move(socket);
-                            accept_latch.CountDown();
-                          },
-                  }));
+      service_id, [&](BleV2Socket socket, const std::string&) {
+        socket_for_server = std::move(socket);
+        accept_latch.CountDown();
+      }));
 
   ble_server.StartAdvertising(service_id, advertisement_bytes,
                               PowerLevel::kHighPower,
@@ -92,10 +96,9 @@ TEST_P(BleV2Test, CanConnect) {
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 discovered_peripheral = peripheral;
-                NEARBY_LOG(
-                    INFO,
-                    "Discovered peripheral=%p [impl=%p], fast advertisement=%d",
-                    &peripheral, &peripheral.GetImpl(), fast_advertisement);
+                NEARBY_LOG(INFO,
+                           "Discovered peripheral=%p, fast advertisement=%d",
+                           &peripheral, fast_advertisement);
                 discovered_latch.CountDown();
               },
       });
@@ -132,14 +135,10 @@ TEST_P(BleV2Test, CanCancelConnect) {
 
   BleV2Socket socket_for_server;
   EXPECT_TRUE(ble_server.StartAcceptingConnections(
-      service_id, {
-                      .accepted_cb =
-                          [&socket_for_server, &accept_latch](
-                              BleV2Socket socket, const std::string&) {
-                            socket_for_server = std::move(socket);
-                            accept_latch.CountDown();
-                          },
-                  }));
+      service_id, [&](BleV2Socket socket, const std::string&) {
+        socket_for_server = std::move(socket);
+        accept_latch.CountDown();
+      }));
 
   ble_server.StartAdvertising(service_id, advertisement_bytes,
                               PowerLevel::kHighPower,
@@ -155,10 +154,9 @@ TEST_P(BleV2Test, CanCancelConnect) {
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 discovered_peripheral = peripheral;
-                NEARBY_LOG(
-                    INFO,
-                    "Discovered peripheral=%p [impl=%p], fast advertisement=%d",
-                    &peripheral, &peripheral.GetImpl(), fast_advertisement);
+                NEARBY_LOG(INFO,
+                           "Discovered peripheral=%p, fast advertisement=%d",
+                           &peripheral, fast_advertisement);
                 discovered_latch.CountDown();
               },
       });
@@ -430,7 +428,7 @@ TEST_F(BleV2Test, StartFastScanningDiscoverAndLostPeripheral) {
 
   // Wait for a while (2 times delay) to let the alarm occur twice and
   // `ProcessLostGattAdvertisements` twice to lost periperal.
-  SystemClock::Sleep(BleV2::kPeripheralLostTimeout * 2);
+  SystemClock::Sleep(absl::Milliseconds(kPeripheralLostTimeoutInMillis) * 2);
 
   EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
 
@@ -525,7 +523,7 @@ TEST_F(BleV2Test, StartScanningDiscoverAndLostPeripheral) {
 
   // Wait for a while (2 times delay) to let the alarm occur twice and
   // `ProcessLostGattAdvertisements` twice to lost periperal.
-  SystemClock::Sleep(BleV2::kPeripheralLostTimeout * 2);
+  SystemClock::Sleep(absl::Milliseconds(kPeripheralLostTimeoutInMillis) * 2);
 
   EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
 
@@ -582,4 +580,3 @@ TEST_F(BleV2Test, StartScanningDiscoverButNoPeripheralLostAfterStopScanning) {
 }  // namespace
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

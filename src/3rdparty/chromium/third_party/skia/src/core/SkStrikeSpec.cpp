@@ -7,17 +7,20 @@
 
 #include "src/core/SkStrikeSpec.h"
 
-#include "include/core/SkGraphics.h"
-#include "src/core/SkDraw.h"
+#include "include/core/SkFont.h"
+#include "include/core/SkFontTypes.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPathEffect.h"
+#include "include/core/SkSurfaceProps.h"
+#include "src/base/SkTLazy.h"
 #include "src/core/SkFontPriv.h"
+#include "src/core/SkGlyph.h"
+#include "src/core/SkStrike.h"
 #include "src/core/SkStrikeCache.h"
-#include "src/core/SkTLazy.h"
+#include "src/text/StrikeForGPU.h"
 
-#if SK_SUPPORT_GPU || defined(SK_GRAPHITE_ENABLED)
-#include "src/text/gpu/SDFMaskFilter.h"
-#include "src/text/gpu/SDFTControl.h"
-#include "src/text/gpu/StrikeCache.h"
-#endif
+#include <utility>
 
 SkStrikeSpec::SkStrikeSpec(const SkDescriptor& descriptor, sk_sp<SkTypeface> typeface)
     : fAutoDescriptor{descriptor}
@@ -144,36 +147,10 @@ SkStrikeSpec SkStrikeSpec::MakePDFVector(const SkTypeface& typeface, int* size) 
 
     return SkStrikeSpec(font,
                         SkPaint(),
-                        SkSurfaceProps(0, kUnknown_SkPixelGeometry),
+                        SkSurfaceProps(),
                         SkScalerContextFlags::kFakeGammaAndBoostContrast,
                         SkMatrix::I());
 }
-
-#if SK_SUPPORT_GPU || defined(SK_GRAPHITE_ENABLED)
-std::tuple<SkStrikeSpec, SkScalar, sktext::gpu::SDFTMatrixRange>
-SkStrikeSpec::MakeSDFT(const SkFont& font, const SkPaint& paint,
-                       const SkSurfaceProps& surfaceProps, const SkMatrix& deviceMatrix,
-                       const SkPoint& textLocation, const sktext::gpu::SDFTControl& control) {
-    // Add filter to the paint which creates the SDFT data for A8 masks.
-    SkPaint dfPaint{paint};
-    dfPaint.setMaskFilter(sktext::gpu::SDFMaskFilter::Make());
-
-    auto [dfFont, strikeToSourceScale, matrixRange] = control.getSDFFont(font, deviceMatrix,
-                                                                         textLocation);
-
-    // Fake-gamma and subpixel antialiasing are applied in the shader, so we ignore the
-    // passed-in scaler context flags. (It's only used when we fall-back to bitmap text).
-    SkScalerContextFlags flags = SkScalerContextFlags::kNone;
-    SkStrikeSpec strikeSpec(dfFont, dfPaint, surfaceProps, flags, SkMatrix::I());
-
-    return std::make_tuple(std::move(strikeSpec), strikeToSourceScale, matrixRange);
-}
-
-sk_sp<sktext::gpu::TextStrike> SkStrikeSpec::findOrCreateTextStrike(
-            sktext::gpu::StrikeCache* cache) const {
-    return cache->findOrCreateStrike(*this);
-}
-#endif
 
 SkStrikeSpec::SkStrikeSpec(const SkFont& font, const SkPaint& paint,
                            const SkSurfaceProps& surfaceProps,
@@ -187,10 +164,10 @@ SkStrikeSpec::SkStrikeSpec(const SkFont& font, const SkPaint& paint,
 
     fMaskFilter = sk_ref_sp(effects.fMaskFilter);
     fPathEffect = sk_ref_sp(effects.fPathEffect);
-    fTypeface = font.refTypefaceOrDefault();
+    fTypeface = font.refTypeface();
 }
 
-sktext::ScopedStrikeForGPU SkStrikeSpec::findOrCreateScopedStrike(
+sk_sp<sktext::StrikeForGPU> SkStrikeSpec::findOrCreateScopedStrike(
         sktext::StrikeForGPUCacheInterface* cache) const {
     return cache->findOrCreateScopedStrike(*this);
 }
@@ -207,6 +184,8 @@ sk_sp<SkStrike> SkStrikeSpec::findOrCreateStrike(SkStrikeCache* cache) const {
 
 SkBulkGlyphMetrics::SkBulkGlyphMetrics(const SkStrikeSpec& spec)
     : fStrike{spec.findOrCreateStrike()} { }
+
+SkBulkGlyphMetrics::~SkBulkGlyphMetrics() = default;
 
 SkSpan<const SkGlyph*> SkBulkGlyphMetrics::glyphs(SkSpan<const SkGlyphID> glyphIDs) {
     fGlyphs.reset(glyphIDs.size());

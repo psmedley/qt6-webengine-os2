@@ -26,7 +26,7 @@
 
 // Version number for shader translation API.
 // It is incremented every time the API changes.
-#define ANGLE_SH_VERSION 308
+#define ANGLE_SH_VERSION 346
 
 enum ShShaderSpec
 {
@@ -72,26 +72,37 @@ enum ShShaderOutput
     // Output SPIR-V for the Vulkan backend.
     SH_SPIRV_VULKAN_OUTPUT = 0x8B4B,
 
-    // Output SPIR-V to be cross compiled to Metal.
-    SH_SPIRV_METAL_OUTPUT = 0x8B4C,
-
     // Output for MSL
     SH_MSL_METAL_OUTPUT = 0x8B4D,
 };
 
+struct ShCompileOptionsMetal
+{
+    // Direct-to-metal backend constants:
+
+    // Binding index for driver uniforms:
+    int driverUniformsBindingIndex;
+    // Binding index for default uniforms:
+    int defaultUniformsBindingIndex;
+    // Binding index for UBO's argument buffer
+    int UBOArgumentBufferBindingIndex;
+
+    bool generateShareableShaders;
+};
+
 // For ANGLE_shader_pixel_local_storage.
 // Instructs the compiler which pixel local storage configuration to generate code for.
-enum class ShPixelLocalStorageType
+enum class ShPixelLocalStorageType : uint8_t
 {
     NotSupported,
-    ImageStoreR32PackedFormats,
-    ImageStoreNativeFormats,
-    FramebufferFetch
+    ImageLoadStore,
+    FramebufferFetch,
+    PixelLocalStorageEXT,  // GL_EXT_shader_pixel_local_storage.
 };
 
 // For ANGLE_shader_pixel_local_storage_coherent.
 // Instructs the compiler which fragment synchronization method to use, if any.
-enum class ShFragmentSynchronizationType
+enum class ShFragmentSynchronizationType : uint8_t
 {
     NotSupported,  // Fragments cannot be ordered or synchronized.
 
@@ -109,25 +120,21 @@ enum class ShFragmentSynchronizationType
     EnumCount = InvalidEnum,
 };
 
-// Compile options.
-struct ShCompileOptionsMetal
-{
-    // Direct-to-metal backend constants:
-
-    // Binding index for driver uniforms:
-    int driverUniformsBindingIndex;
-    // Binding index for default uniforms:
-    int defaultUniformsBindingIndex;
-    // Binding index for UBO's argument buffer
-    int UBOArgumentBufferBindingIndex;
-};
-
-struct ShCompileOptionsPLS
+struct ShPixelLocalStorageOptions
 {
     ShPixelLocalStorageType type = ShPixelLocalStorageType::NotSupported;
+
     // For ANGLE_shader_pixel_local_storage_coherent.
-    ShFragmentSynchronizationType fragmentSynchronizationType =
-        ShFragmentSynchronizationType::NotSupported;
+    ShFragmentSynchronizationType fragmentSyncType = ShFragmentSynchronizationType::NotSupported;
+
+    // ShPixelLocalStorageType::ImageLoadStore only: Can we use rgba8/rgba8i/rgba8ui image formats?
+    // Or do we need to manually pack and unpack from r32i/r32ui?
+    bool supportsNativeRGBA8ImageFormats = false;
+
+    // anglebug.com/7792 -- Metal [[raster_order_group()]] does not work for read_write textures on
+    // AMD when the render pass doesn't have a color attachment on slot 0. To work around this we
+    // attach one of the PLS textures to GL_COLOR_ATTACHMENT0, if there isn't one already.
+    bool renderPassNeedsAMDRasterOrderGroupsWorkaround = false;
 };
 
 struct ShCompileOptions
@@ -140,8 +147,8 @@ struct ShCompileOptions
     // calling sh::GetObjectCode().
     uint64_t objectCode : 1;
 
-    // Extracts attributes, uniforms, and varyings.  Can be queried by calling ShGetVariableInfo().
-    uint64_t variables : 1;
+    // Whether debug info should be output in the shader.
+    uint64_t outputDebugInfo : 1;
 
     // Tracks the source path for shaders.  Can be queried with getSourcePath().
     uint64_t sourcePath : 1;
@@ -389,9 +396,8 @@ struct ShCompileOptions
     // if gl_FragColor is not written.
     uint64_t initFragmentOutputVariables : 1;
 
-    // Transitory flag to select between producing SPIR-V directly vs using glslang.  Ignored in
-    // non-assert-enabled builds to avoid increasing ANGLE's binary size.
-    uint64_t generateSpirvThroughGlslang : 1;
+    // Always write explicit location layout qualifiers for fragment outputs.
+    uint64_t explicitFragmentLocations : 1;
 
     // Insert explicit casts for float/double/unsigned/signed int on macOS 10.15 with Intel driver
     uint64_t addExplicitBoolCasts : 1;
@@ -400,17 +406,40 @@ struct ShCompileOptions
     // ceil()ed instead.
     uint64_t roundOutputAfterDithering : 1;
 
-    // Even when the dividend and divisor have the same value some platforms do not return 1.0f.
-    // Need to emit different division code for such platforms.
-    uint64_t precisionSafeDivision : 1;
+    // issuetracker.google.com/274859104 add OpQuantizeToF16 instruction to cast
+    // mediump floating-point values to 16 bit. ARM compiler utilized RelaxedPrecision
+    // to minimize type case and keep a mediump float as 32 bit when assigning it with
+    // a highp floating-point value. It is possible that GLSL shader code is comparing
+    // two meiump values, but ARM compiler is comparing a 32 bit value with a 16 bit value,
+    // causing the comparison to fail.
+    uint64_t castMediumpFloatTo16Bit : 1;
 
     // anglebug.com/7527: packUnorm4x8 fails on Pixel 4 if it is not passed a highp vec4.
     // TODO(anglebug.com/7527): This workaround is currently only applied for pixel local storage.
     // We may want to apply it generally.
     uint64_t passHighpToPackUnormSnormBuiltins : 1;
 
+    // Use an integer uniform to pass a bitset of enabled clip distances.
+    uint64_t emulateClipDistanceState : 1;
+
+    // Use a uniform to emulate GL_CLIP_ORIGIN_EXT state.
+    uint64_t emulateClipOrigin : 1;
+
+    // issuetracker.google.com/266235549 add aliased memory decoration to ssbo if the variable is
+    // not declared with "restrict" memory qualifier in GLSL
+    uint64_t aliasedUnlessRestrict : 1;
+
+    // Use fragment shaders to compute and set coverage mask based on the alpha value
+    uint64_t emulateAlphaToCoverage : 1;
+
+    // Rescope globals that are only used in one function to be function-local.
+    uint64_t rescopeGlobalVariables : 1;
+
+    // Pre-transform explicit cubemap derivatives for Apple GPUs.
+    uint64_t preTransformTextureCubeGradDerivatives : 1;
+
     ShCompileOptionsMetal metal;
-    ShCompileOptionsPLS pls;
+    ShPixelLocalStorageOptions pls;
 };
 
 // The 64 bits hash function. The first parameter is the input string; the
@@ -445,6 +474,7 @@ struct ShBuiltInResources
     int NV_EGL_stream_consumer_external;
     int ARB_texture_rectangle;
     int EXT_blend_func_extended;
+    int EXT_conservative_depth;
     int EXT_draw_buffers;
     int EXT_frag_depth;
     int EXT_shader_texture_lod;
@@ -483,8 +513,10 @@ struct ShBuiltInResources
     int EXT_texture_buffer;
     int OES_sample_variables;
     int EXT_clip_cull_distance;
+    int ANGLE_clip_cull_distance;
     int EXT_primitive_bounding_box;
     int OES_primitive_bounding_box;
+    int EXT_separate_shader_objects;
     int ANGLE_base_vertex_base_instance_shader_builtin;
     int ANDROID_extension_pack_es31a;
     int KHR_blend_equation_advanced;
@@ -610,6 +642,9 @@ struct ShBuiltInResources
     // maximum number of shader storage buffer bindings
     int MaxShaderStorageBufferBindings;
 
+    // minimum point size (lower limit from ALIASED_POINT_SIZE_RANGE)
+    float MinPointSize;
+
     // maximum point size (higher limit from ALIASED_POINT_SIZE_RANGE)
     float MaxPointSize;
 
@@ -652,7 +687,7 @@ struct ShBuiltInResources
     // Subpixel bits used in rasterization.
     int SubPixelBits;
 
-    // APPLE_clip_distance/EXT_clip_cull_distance constant
+    // APPLE_clip_distance / EXT_clip_cull_distance / ANGLE_clip_cull_distance constants
     int MaxClipDistances;
     int MaxCullDistances;
     int MaxCombinedClipAndCullDistances;
@@ -674,7 +709,8 @@ using ShHandle = void *;
 
 namespace sh
 {
-using BinaryBlob = std::vector<uint32_t>;
+using BinaryBlob       = std::vector<uint32_t>;
+using ShaderBinaryBlob = std::vector<uint8_t>;
 
 //
 // Driver must call this first, once, before doing any other compiler operations.
@@ -764,6 +800,15 @@ const std::string &GetObjectCode(const ShHandle handle);
 // handle: Specifies the compiler
 const BinaryBlob &GetObjectBinaryBlob(const ShHandle handle);
 
+// Returns a full binary for a compiled shader, to be loaded with glShaderBinary during runtime.
+// Parameters:
+// handle: Specifies the compiler
+bool GetShaderBinary(const ShHandle handle,
+                     const char *const shaderStrings[],
+                     size_t numStrings,
+                     const ShCompileOptions &compileOptions,
+                     ShaderBinaryBlob *const binaryOut);
+
 // Returns a (original_name, hash) map containing all the user defined names in the shader,
 // including variable names, function names, struct names, and struct field names.
 // Parameters:
@@ -789,9 +834,6 @@ sh::WorkGroupSize GetComputeShaderLocalGroupSize(const ShHandle handle);
 // Returns the number of views specified through the num_views layout qualifier. If num_views is
 // not set, the function returns -1.
 int GetVertexShaderNumViews(const ShHandle handle);
-// Returns true if the shader has specified the |sample| qualifier, implying that per-sample shading
-// should be enabled
-bool EnablesPerSampleShading(const ShHandle handle);
 
 // Returns specialization constant usage bits
 uint32_t GetShaderSpecConstUsageBits(const ShHandle handle);
@@ -848,14 +890,8 @@ unsigned int GetImage2DRegisterIndex(const ShHandle handle);
 // handle: Specifies the compiler
 const std::set<std::string> *GetUsedImage2DFunctionNames(const ShHandle handle);
 
-bool HasDiscardInFragmentShader(const ShHandle handle);
-bool HasValidGeometryShaderInputPrimitiveType(const ShHandle handle);
-bool HasValidGeometryShaderOutputPrimitiveType(const ShHandle handle);
-bool HasValidGeometryShaderMaxVertices(const ShHandle handle);
-bool HasValidTessGenMode(const ShHandle handle);
-bool HasValidTessGenSpacing(const ShHandle handle);
-bool HasValidTessGenVertexOrder(const ShHandle handle);
-bool HasValidTessGenPointMode(const ShHandle handle);
+uint8_t GetClipDistanceArraySize(const ShHandle handle);
+uint8_t GetCullDistanceArraySize(const ShHandle handle);
 GLenum GetGeometryShaderInputPrimitiveType(const ShHandle handle);
 GLenum GetGeometryShaderOutputPrimitiveType(const ShHandle handle);
 int GetGeometryShaderInvocations(const ShHandle handle);
@@ -866,6 +902,9 @@ GLenum GetTessGenMode(const ShHandle handle);
 GLenum GetTessGenSpacing(const ShHandle handle);
 GLenum GetTessGenVertexOrder(const ShHandle handle);
 GLenum GetTessGenPointMode(const ShHandle handle);
+
+// Returns a bitset of sh::MetadataFlags.  This bundles various bits purely for convenience.
+uint32_t GetMetadataFlags(const ShHandle handle);
 
 // Returns the blend equation list supported in the fragment shader.  This is a bitset of
 // gl::BlendEquationType, and can only include bits from KHR_blend_equation_advanced.
@@ -891,6 +930,28 @@ inline bool IsDesktopGLSpec(ShShaderSpec spec)
 // in GLSL (ESSL 3.00.6 section 3.8: All identifiers containing a double underscore are reserved for
 // use by the underlying implementation). u is short for user-defined.
 extern const char kUserDefinedNamePrefix[];
+
+enum class MetadataFlags
+{
+    // Applicable to vertex shaders (technically all pre-rasterization shaders could use this flag,
+    // but the current and only user is GL, which does not support geometry/tessellation).
+    HasClipDistance,
+    // Applicable to fragment shaders
+    HasDiscard,
+    EnablesPerSampleShading,
+    // Applicable to geometry shaders
+    HasValidGeometryShaderInputPrimitiveType,
+    HasValidGeometryShaderOutputPrimitiveType,
+    HasValidGeometryShaderMaxVertices,
+    // Applicable to tessellation shaders
+    HasValidTessGenMode,
+    HasValidTessGenSpacing,
+    HasValidTessGenVertexOrder,
+    HasValidTessGenPointMode,
+
+    InvalidEnum,
+    EnumCount = InvalidEnum,
+};
 
 namespace vk
 {
@@ -923,17 +984,116 @@ enum ColorAttachmentDitherControl
     kDitherControlDither565  = 3,
 };
 
-// Interface block name containing the aggregate default uniforms
-extern const char kDefaultUniformsNameVS[];
-extern const char kDefaultUniformsNameTCS[];
-extern const char kDefaultUniformsNameTES[];
-extern const char kDefaultUniformsNameGS[];
-extern const char kDefaultUniformsNameFS[];
-extern const char kDefaultUniformsNameCS[];
+namespace spirv
+{
+enum NonSemanticInstruction
+{
+    // The overview instruction containing information such as what predefined ids are present in
+    // the SPIR-V.  Simultaneously, this instruction identifies the location where the
+    // types/constants/variables section ends and the functions section starts.
+    kNonSemanticOverview,
+    // The instruction identifying the entry to the shader, i.e. at the start of main()
+    kNonSemanticEnter,
+    // The instruction identifying where vertex or fragment data is output.
+    // This is before return from main() in vertex, tessellation, and fragment shaders,
+    // and before OpEmitVertex in geometry shaders.
+    kNonSemanticOutput,
+    // The instruction identifying the location where transform feedback emulation should be
+    // written.
+    kNonSemanticTransformFeedbackEmulation,
+};
 
-// Interface block and variable names containing driver uniforms
-extern const char kDriverUniformsBlockName[];
-extern const char kDriverUniformsVarName[];
+// The non-semantic instruction id has many bits available.  With kNonSemanticOverview, they are
+// used to provide additional overview details.  Providing this information in the instruction's
+// payload require OpConstants and recovering those, which is unnecessary complexity.
+constexpr uint32_t kNonSemanticInstructionBits       = 4;
+constexpr uint32_t kNonSemanticInstructionMask       = 0xF;
+constexpr uint32_t kOverviewHasSampleRateShadingMask = 0x10;
+constexpr uint32_t kOverviewHasSampleIDMask          = 0x20;
+constexpr uint32_t kOverviewHasOutputPerVertexMask   = 0x40;
+
+enum ReservedIds
+{
+    kIdInvalid = 0,
+
+    // =============================================================================================
+    // Ids that are fixed and are always present in the SPIR-V where applicable.  The SPIR-V
+    // transformer can thus reliably use these ids.
+
+    // Global information
+    kIdNonSemanticInstructionSet,
+    kIdEntryPoint,
+
+    // Basic types
+    kIdVoid,
+    kIdFloat,
+    kIdVec2,
+    kIdVec3,
+    kIdVec4,
+    kIdMat2,
+    kIdMat3,
+    kIdMat4,
+    kIdInt,
+    kIdIVec4,
+    kIdUint,
+
+    // Common constants
+    kIdIntZero,
+    kIdIntOne,
+    kIdIntTwo,
+    kIdIntThree,
+
+    // Type pointers
+    kIdIntInputTypePointer,
+    kIdVec4OutputTypePointer,
+    kIdIVec4FunctionTypePointer,
+    kIdOutputPerVertexTypePointer,
+
+    // Pre-rotation and Z-correction support
+    kIdTransformPositionFunction,
+    kIdInputPerVertexBlockArray,
+    kIdOutputPerVertexBlockArray,
+    kIdOutputPerVertexVar,
+
+    // Transform feedback support
+    kIdXfbEmulationGetOffsetsFunction,
+    kIdXfbEmulationCaptureFunction,
+    kIdXfbEmulationBufferVarZero,
+    kIdXfbEmulationBufferVarOne,
+    kIdXfbEmulationBufferVarTwo,
+    kIdXfbEmulationBufferVarThree,
+
+    // Multisampling support
+    kIdSampleID,
+
+    // =============================================================================================
+    // ANGLE internal shader variables, which are not produced as ShaderVariables.
+    // kIdShaderVariablesBegin marks the beginning of these ids.  variableId -> info maps in the
+    // backend can use |variableId - kIdShaderVariablesBegin| as key into a flat array.
+    //
+    // Note that for blocks, only the block id is in this section as that is the id used in the
+    // variableId -> info maps.
+    kIdShaderVariablesBegin,
+
+    // gl_PerVertex
+    kIdInputPerVertexBlock = kIdShaderVariablesBegin,
+    kIdOutputPerVertexBlock,
+    // The driver and default uniform blocks
+    kIdDriverUniformsBlock,
+    kIdDefaultUniformsBlock,
+    // The atomic counter block
+    kIdAtomicCounterBlock,
+    // Buffer block used for transform feedback emulation
+    kIdXfbEmulationBufferBlockZero,
+    kIdXfbEmulationBufferBlockOne,
+    kIdXfbEmulationBufferBlockTwo,
+    kIdXfbEmulationBufferBlockThree,
+    // Additional varying added to hold untransformed gl_Position for transform feedback capture
+    kIdXfbExtensionPosition,
+
+    kIdFirstUnreserved,
+};
+}  // namespace spirv
 
 // Packing information for driver uniform's misc field:
 // - 1 bit for whether surface rotation results in swapped axes
@@ -941,7 +1101,8 @@ extern const char kDriverUniformsVarName[];
 // - 6 bits for sample count
 // - 8 bits for enabled clip planes
 // - 1 bit for whether depth should be transformed to Vulkan clip space
-// - 11 bits unused
+// - 1 bit for whether alpha to coverage is enabled
+// - 10 bits unused
 constexpr uint32_t kDriverUniformsMiscSwapXYMask                  = 0x1;
 constexpr uint32_t kDriverUniformsMiscAdvancedBlendEquationOffset = 1;
 constexpr uint32_t kDriverUniformsMiscAdvancedBlendEquationMask   = 0x1F;
@@ -951,45 +1112,30 @@ constexpr uint32_t kDriverUniformsMiscEnabledClipPlanesOffset     = 12;
 constexpr uint32_t kDriverUniformsMiscEnabledClipPlanesMask       = 0xFF;
 constexpr uint32_t kDriverUniformsMiscTransformDepthOffset        = 20;
 constexpr uint32_t kDriverUniformsMiscTransformDepthMask          = 0x1;
-
-// Interface block array name used for atomic counter emulation
-extern const char kAtomicCountersBlockName[];
-
-// Transform feedback emulation support
-extern const char kXfbEmulationGetOffsetsFunctionName[];
-extern const char kXfbEmulationCaptureFunctionName[];
-extern const char kXfbEmulationBufferBlockName[];
-extern const char kXfbEmulationBufferName[];
-extern const char kXfbEmulationBufferFieldName[];
-
-// Transform feedback extension support
-extern const char kXfbExtensionPositionOutName[];
-
-// Pre-rotation support
-extern const char kTransformPositionFunctionName[];
-
-// EXT_shader_framebuffer_fetch and EXT_shader_framebuffer_fetch_non_coherent
-extern const char kInputAttachmentName[];
-
+constexpr uint32_t kDriverUniformsMiscAlphaToCoverageOffset       = 21;
+constexpr uint32_t kDriverUniformsMiscAlphaToCoverageMask         = 0x1;
 }  // namespace vk
 
 namespace mtl
 {
-// Specialization constant to enable GL_SAMPLE_COVERAGE_VALUE emulation.
-extern const char kCoverageMaskEnabledConstName[];
+// Specialization constant to enable multisampled rendering behavior.
+extern const char kMultisampledRenderingConstName[];
 
 // Specialization constant to emulate rasterizer discard.
 extern const char kRasterizerDiscardEnabledConstName[];
 
 // Specialization constant to enable depth write in fragment shaders.
 extern const char kDepthWriteEnabledConstName[];
-}  // namespace mtl
 
-// For backends that use glslang (the Vulkan shader compiler), i.e. Vulkan and Metal, call these to
-// initialize and finalize glslang itself.  This can be called independently from Initialize() and
-// Finalize().
-void InitializeGlslang();
-void FinalizeGlslang();
+// Specialization constant to enable alpha to coverage.
+extern const char kEmulateAlphaToCoverageConstName[];
+
+// Specialization constant to write helper sample mask output.
+extern const char kWriteHelperSampleMaskConstName[];
+
+// Specialization constant to enable sample mask output.
+extern const char kSampleMaskWriteEnabledConstName[];
+}  // namespace mtl
 
 }  // namespace sh
 

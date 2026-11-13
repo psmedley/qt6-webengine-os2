@@ -7,6 +7,7 @@ import * as AppProvider from './AppProvider.js';
 import * as Base64 from './Base64.js';
 import * as CharacterIdMap from './CharacterIdMap.js';
 import * as Color from './Color.js';
+import * as ColorConverter from './ColorConverter.js';
 import * as ColorUtils from './ColorUtils.js';
 import * as Console from './Console.js';
 import * as Debouncer from './Debouncer.js';
@@ -24,6 +25,7 @@ import * as ResourceType from './ResourceType.js';
 import * as Revealer from './Revealer.js';
 import * as Runnable from './Runnable.js';
 import * as SegmentedRange from './SegmentedRange.js';
+import * as SettingRegistration from './SettingRegistration.js';
 import * as Settings from './Settings.js';
 import * as SimpleHistoryManager from './SimpleHistoryManager.js';
 import * as StringOutputStream from './StringOutputStream.js';
@@ -40,12 +42,6 @@ import * as Worker from './Worker.js';
  */
 export {UIString} from '../platform/platform.js';
 
-/**
- * @type {!Settings.Settings}
- */
-// @ts-ignore typedef
-export let settings;
-
 export {
   App,
   AppProvider,
@@ -53,6 +49,7 @@ export {
   CharacterIdMap,
   Color,
   ColorUtils,
+  ColorConverter,
   Console,
   Debouncer,
   EventTarget,
@@ -70,6 +67,7 @@ export {
   Runnable,
   SegmentedRange,
   Settings,
+  SettingRegistration,
   SimpleHistoryManager,
   StringOutputStream,
   TextDictionary,

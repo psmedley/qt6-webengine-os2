@@ -38,15 +38,15 @@ CREATE TABLE rail_modes (
 -- https://source.chromium.org/chromium/chromium/src/+/master:third_party/blink/renderer/platform/scheduler/public/rail_mode_observer.h
 INSERT INTO rail_modes
 VALUES ('RAIL_MODE_IDLE', 0, 'background'),
-  ('RAIL_MODE_ANIMATION', 1, "animation"),
-  ('RAIL_MODE_LOAD', 2, "load"),
-  ('RAIL_MODE_RESPONSE', 3, "response");
+('RAIL_MODE_ANIMATION', 1, "animation"),
+('RAIL_MODE_LOAD', 2, "load"),
+('RAIL_MODE_RESPONSE', 3, "response");
 
 
 -- Find the max ts + dur for every process
 DROP TABLE IF EXISTS max_ts_per_process;
-CREATE TABLE max_ts_per_process AS
- -- MAX(dur, 0) means unclosed slices just contribute their start time.
+CREATE PERFETTO TABLE max_ts_per_process AS
+-- MAX(dur, 0) means unclosed slices just contribute their start time.
 SELECT upid,
   MAX(ts + MAX(dur, 0)) AS ts
 FROM (
@@ -54,15 +54,15 @@ FROM (
       ts,
       dur
     FROM process_track t
-      JOIN slice s
+    JOIN slice s
     WHERE s.track_id = t.id
     UNION ALL
     SELECT upid,
       ts,
       dur
     FROM thread_track t
-      JOIN thread
-      JOIN slice
+    JOIN thread
+    JOIN slice
     WHERE slice.track_id = t.id
       AND thread.utid = t.utid
   )
@@ -71,13 +71,13 @@ GROUP BY upid;
 -- View containing all Scheduler.RAILMode slices across all Chrome renderer
 -- processes.
 DROP VIEW IF EXISTS original_rail_mode_slices;
-CREATE VIEW original_rail_mode_slices AS
+CREATE PERFETTO VIEW original_rail_mode_slices AS
 SELECT slice.id,
   slice.ts,
   CASE
     -- Add 1 to the duration to ensure you cannot get a zero-sized RAIL mode
     -- slice, which can throw off the later queries.
-    WHEN dur == -1 THEN max_ts_per_process.ts - slice.ts + 1
+    WHEN dur = -1 THEN max_ts_per_process.ts - slice.ts + 1
     ELSE dur
   END AS dur,
   track_id,
@@ -96,26 +96,26 @@ WHERE slice.name = "Scheduler.RAILMode"
 -- means some trace events have faulty timestamps and which could throw off any
 -- metrics that use the trace.
 DROP VIEW IF EXISTS trace_has_realistic_length;
-CREATE VIEW trace_has_realistic_length AS
+CREATE PERFETTO VIEW trace_has_realistic_length AS
 SELECT (end_ts - start_ts) < 1e9 * 60 * 10 AS value
 FROM trace_bounds;
 
 -- RAIL_MODE_LOAD seems to get stuck which makes it not very useful so remap it
 -- to RAIL_MODE_ANIMATION so it doesn't dominate the overall RAIL mode.
 DROP VIEW IF EXISTS rail_mode_slices;
-CREATE VIEW rail_mode_slices AS
+CREATE PERFETTO VIEW rail_mode_slices AS
 SELECT ts, dur, track_id,
-    CASE
-      WHEN rail_mode == "RAIL_MODE_LOAD" THEN "RAIL_MODE_ANIMATION"
-      ELSE rail_mode
-    END AS rail_mode
+  CASE
+    WHEN rail_mode = "RAIL_MODE_LOAD" THEN "RAIL_MODE_ANIMATION"
+    ELSE rail_mode
+  END AS rail_mode
 FROM original_rail_mode_slices;
 
 -- View containing a collapsed view of rail_mode_slices where there is only one
 -- RAIL mode active at a given time. The mode is derived using the priority
 -- order in rail_modes.
 DROP VIEW IF EXISTS overall_rail_mode_slices;
-CREATE VIEW overall_rail_mode_slices AS
+CREATE PERFETTO VIEW overall_rail_mode_slices AS
 SELECT s.ts,
   s.end_ts,
   rail_modes.short_name AS rail_mode,
@@ -141,14 +141,14 @@ WHERE (
       s.end_ts > r.ts AND s.end_ts <= r.ts + r.dur
     )
   )
-  AND r.rail_mode == rail_modes.mode
+  AND r.rail_mode = rail_modes.mode
   AND trace_has_realistic_length.value
 GROUP BY s.ts;
 
 -- Contains the same data as overall_rail_mode_slices except adjacent slices
 -- with the same RAIL mode are combined.
 DROP TABLE IF EXISTS combined_overall_rail_slices;
-CREATE TABLE combined_overall_rail_slices AS
+CREATE PERFETTO TABLE combined_overall_rail_slices AS
 SELECT ROW_NUMBER() OVER () AS id,
   ts,
   end_ts - ts AS dur,
@@ -188,7 +188,7 @@ FROM (
 -- The value in "not_animating" is always 1. It's just there to be a non-NULL
 -- value so the later SPAN_JOIN can find the set-difference.
 DROP VIEW IF EXISTS not_animating_slices;
-CREATE VIEW not_animating_slices AS
+CREATE PERFETTO VIEW not_animating_slices AS
 WITH const (vsync_padding, large_gap) AS (
   SELECT
     -- Pad 50ms either side of a vsync
@@ -214,14 +214,14 @@ SELECT
   dur,
   1
 FROM (SELECT start_ts AS ts,
-          COALESCE((
-              SELECT MIN(ts)
-              FROM slice
-              WHERE name = "VSync"
-            ) - start_ts - const.vsync_padding,
-            end_ts - start_ts
-          ) AS dur
-FROM trace_bounds, const)
+  COALESCE((
+    SELECT MIN(ts)
+    FROM slice
+    WHERE name = "VSync"
+  ) - start_ts - const.vsync_padding,
+  end_ts - start_ts
+  ) AS dur
+  FROM trace_bounds, const)
 WHERE dur > 0
 UNION
 -- Insert a slice between the last vsync and end_ts
@@ -264,36 +264,36 @@ CREATE TABLE input_latency_begin_end_names
 );
 
 INSERT
-  OR IGNORE INTO input_latency_begin_end_names
+OR IGNORE INTO input_latency_begin_end_names
 VALUES
-  ("InputLatency::GestureScrollBegin",
-     "InputLatency::GestureScroll", 1, 0, 0, 0, 0, 0),
-  ("InputLatency::GestureScrollEnd",
-     "InputLatency::GestureScroll", -1, 0, 0, 0, 0, 1),
-  ("InputLatency::GesturePinchBegin",
-     "InputLatency::GesturePinch", 0, 1, 0, 0, 0, 0),
-  ("InputLatency::GesturePinchEnd",
-     "InputLatency::GesturePinch", 0, -1, 0, 0, 0, 1),
-  ("InputLatency::TouchStart",
-     "InputLatency::Touch", 0, 0, 1, 0, 0, 0),
-  ("InputLatency::TouchEnd",
-     "InputLatency::Touch", 0, 0, -1, 0, 0, 1),
-  ("InputLatency::GestureFlingStart",
-     "InputLatency::GestureFling", 0, 0, 0, 1, 0, 0),
-  ("InputLatency::GestureFlingCancel",
-     "InputLatency::GestureFling", 0, 0, 0, -1, 0, 1),
-  ("InputLatency::PointerDown",
-     "InputLatency::Pointer", 0, 0, 0, 0, 1, 0),
-  ("InputLatency::PointerUp",
-     "InputLatency::Pointer", 0, 0, 0, 0, -1, 1),
-  ("InputLatency::PointerCancel",
-     "InputLatency::Pointer", 0, 0, 0, 0, -1, 1);
+("InputLatency::GestureScrollBegin",
+  "InputLatency::GestureScroll", 1, 0, 0, 0, 0, 0),
+("InputLatency::GestureScrollEnd",
+  "InputLatency::GestureScroll", -1, 0, 0, 0, 0, 1),
+("InputLatency::GesturePinchBegin",
+  "InputLatency::GesturePinch", 0, 1, 0, 0, 0, 0),
+("InputLatency::GesturePinchEnd",
+  "InputLatency::GesturePinch", 0, -1, 0, 0, 0, 1),
+("InputLatency::TouchStart",
+  "InputLatency::Touch", 0, 0, 1, 0, 0, 0),
+("InputLatency::TouchEnd",
+  "InputLatency::Touch", 0, 0, -1, 0, 0, 1),
+("InputLatency::GestureFlingStart",
+  "InputLatency::GestureFling", 0, 0, 0, 1, 0, 0),
+("InputLatency::GestureFlingCancel",
+  "InputLatency::GestureFling", 0, 0, 0, -1, 0, 1),
+("InputLatency::PointerDown",
+  "InputLatency::Pointer", 0, 0, 0, 0, 1, 0),
+("InputLatency::PointerUp",
+  "InputLatency::Pointer", 0, 0, 0, 0, -1, 1),
+("InputLatency::PointerCancel",
+  "InputLatency::Pointer", 0, 0, 0, 0, -1, 1);
 
 -- Find all the slices that have split "begin" and "end" slices and maintain a
 -- running total for each type, where >0 means that type of input event is
 -- ongoing.
 DROP VIEW IF EXISTS input_begin_end_slices;
-CREATE VIEW input_begin_end_slices AS
+CREATE PERFETTO VIEW input_begin_end_slices AS
 SELECT prefix,
   -- Mark the change at the start of "start" slices and the end of "end" slices.
   ts + dur * dur_multiplier AS ts,
@@ -309,13 +309,13 @@ ORDER BY ts;
 -- Combine all the paired input events to get an indication of when any paired
 -- input event is ongoing.
 DROP VIEW IF EXISTS unified_input_pair_increments;
-CREATE VIEW unified_input_pair_increments AS
+CREATE PERFETTO VIEW unified_input_pair_increments AS
 SELECT ts,
-  scroll_increment +
-  pinch_increment +
-  touch_increment +
-  fling_increment +
-  pointer_increment AS increment
+  scroll_increment
+  + pinch_increment
+  + touch_increment
+  + fling_increment
+  + pointer_increment AS increment
 FROM input_begin_end_slices;
 
 -- It's possible there's an end slice without a start slice (as it occurred
@@ -326,27 +326,27 @@ FROM input_begin_end_slices;
 -- which case it should count as covering the entire trace, but it's impossible
 -- to compensate for that without augmenting the trace events themselves.
 DROP VIEW IF EXISTS initial_paired_increment;
-CREATE VIEW initial_paired_increment AS
+CREATE PERFETTO VIEW initial_paired_increment AS
 SELECT ts,
-  MIN(0, MIN(scroll_total)) +
-  MIN(0, MIN(pinch_total))  +
-  MIN(0, MIN(touch_total))  +
-  MIN(0, MIN(fling_total))  +
-  MIN(0, MIN(pointer_total)) AS offset
+  MIN(0, MIN(scroll_total))
+  + MIN(0, MIN(pinch_total))
+  + MIN(0, MIN(touch_total))
+  + MIN(0, MIN(fling_total))
+  + MIN(0, MIN(pointer_total)) AS offset
 FROM (
     SELECT ts,
       SUM(scroll_increment) OVER(ROWS UNBOUNDED PRECEDING) AS scroll_total,
-      SUM(pinch_increment)  OVER(ROWS UNBOUNDED PRECEDING) AS pinch_total,
-      SUM(touch_increment)  OVER(ROWS UNBOUNDED PRECEDING) AS touch_total,
-      SUM(fling_increment)  OVER(ROWS UNBOUNDED PRECEDING) AS fling_total,
-      SUM(pointer_increment)  OVER(ROWS UNBOUNDED PRECEDING) AS pointer_total
+      SUM(pinch_increment) OVER(ROWS UNBOUNDED PRECEDING) AS pinch_total,
+      SUM(touch_increment) OVER(ROWS UNBOUNDED PRECEDING) AS touch_total,
+      SUM(fling_increment) OVER(ROWS UNBOUNDED PRECEDING) AS fling_total,
+      SUM(pointer_increment) OVER(ROWS UNBOUNDED PRECEDING) AS pointer_total
     FROM input_begin_end_slices
   );
 
 -- Now find all the simple input slices that fully enclose the input they're
 -- marking (i.e. not the start or end of a pair).
 DROP VIEW IF EXISTS simple_input_slices;
-CREATE VIEW simple_input_slices AS
+CREATE PERFETTO VIEW simple_input_slices AS
 SELECT id,
   name,
   ts,
@@ -356,14 +356,14 @@ WHERE name GLOB "InputLatency::*"
   AND NOT EXISTS (
     SELECT 1
     FROM slice
-      JOIN input_latency_begin_end_names
-    WHERE s.name == full_name
+    JOIN input_latency_begin_end_names
+    WHERE s.name = full_name
   );
 
 -- Turn the simple input slices into +1s and -1s at the start and end of each
 -- slice.
 DROP VIEW IF EXISTS simple_input_increments;
-CREATE VIEW simple_input_increments AS
+CREATE PERFETTO VIEW simple_input_increments AS
 SELECT ts,
   1 AS increment
 FROM simple_input_slices
@@ -376,7 +376,7 @@ ORDER BY ts;
 -- Combine simple and paired inputs into one, summing all the increments at a
 -- given ts.
 DROP VIEW IF EXISTS all_input_increments;
-CREATE VIEW all_input_increments AS
+CREATE PERFETTO VIEW all_input_increments AS
 SELECT ts,
   SUM(increment) AS increment
 FROM (
@@ -392,7 +392,7 @@ GROUP BY ts;
 -- Now calculate the cumulative sum of the increments as each ts, giving the
 -- total number of outstanding input events at a given time.
 DROP VIEW IF EXISTS all_input_totals;
-CREATE VIEW all_input_totals AS
+CREATE PERFETTO VIEW all_input_totals AS
 SELECT ts,
   SUM(increment) OVER(ROWS UNBOUNDED PRECEDING) > 0 AS input_total
 FROM all_input_increments;
@@ -402,8 +402,8 @@ FROM all_input_increments;
 -- is there so that the SPAN_JOIN_LEFT can put NULL in it for RAIL Mode slices
 -- that do not have corresponding input events.
 DROP VIEW IF EXISTS all_input_slices;
-CREATE VIEW all_input_slices AS
-SELECT ts,
+CREATE PERFETTO VIEW all_input_slices AS
+SELECT cast(ts as int) as ts,
   dur,
   input_active
 FROM (
@@ -420,7 +420,7 @@ FROM (
               lag(input_total) OVER() AS prev_input_total
             FROM all_input_totals
           )
-        WHERE (input_total > 0 <> prev_input_total > 0)
+        WHERE (input_total > 0 != prev_input_total > 0)
           OR prev_input_total IS NULL
       )
   )
@@ -432,7 +432,7 @@ WHERE input_active > 0;
 -- So instead we try to divide up animation in other buckets based on other
 -- trace events.
 DROP VIEW IF EXISTS rail_mode_animation_slices;
-CREATE VIEW rail_mode_animation_slices AS
+CREATE PERFETTO VIEW rail_mode_animation_slices AS
 SELECT * FROM combined_overall_rail_slices WHERE rail_mode = "animation";
 
 -- Left-join rail mode animation slices with all_input_slices to find all
@@ -448,12 +448,12 @@ CREATE VIRTUAL TABLE rail_mode_join_inputs_join_animation
 USING SPAN_LEFT_JOIN(rail_mode_join_inputs, not_animating_slices);
 
 DROP VIEW IF EXISTS has_modified_rail_slices;
-CREATE VIEW has_modified_rail_slices AS
+CREATE PERFETTO VIEW has_modified_rail_slices AS
 SELECT (
     SELECT value
     FROM chrome_event_metadata
-    WHERE name == "os-name"
-  ) == "Android" AS value;
+    WHERE name = "os-name"
+  ) = "Android" AS value;
 
 -- Mapping to allow CamelCased names to be produced from the modified rail
 -- modes.
@@ -464,15 +464,15 @@ CREATE TABLE modified_rail_mode_prettier (
 );
 INSERT INTO modified_rail_mode_prettier
 VALUES ("background", "Background"),
-  ("foreground_idle", "ForegroundIdle"),
-  ("animation", "Animation"),
-  ("load", "Load"),
-  ("response", "Response");
+("foreground_idle", "ForegroundIdle"),
+("animation", "Animation"),
+("load", "Load"),
+("response", "Response");
 
 -- When the RAIL mode is animation, use input/vsync data to conditionally change
 -- the mode to response or foreground_idle.
 DROP VIEW IF EXISTS unmerged_modified_rail_slices;
-CREATE VIEW unmerged_modified_rail_slices AS
+CREATE PERFETTO VIEW unmerged_modified_rail_slices AS
 SELECT ROW_NUMBER() OVER () AS id,
   ts,
   dur,
@@ -491,12 +491,12 @@ FROM (
       dur,
       rail_mode AS mode
     FROM combined_overall_rail_slices
-    WHERE rail_mode <> "animation"
+    WHERE rail_mode != "animation"
   )
-  -- Since VSync events are only emitted on Android (and the concept of a
-  -- unified RAIL mode only makes sense if there's just a single Chrome window),
-  -- don't output anything on other platforms. This will result in all the power
-  -- and cpu time tables being empty rather than containing bogus results.
+-- Since VSync events are only emitted on Android (and the concept of a
+-- unified RAIL mode only makes sense if there's just a single Chrome window),
+-- don't output anything on other platforms. This will result in all the power
+-- and cpu time tables being empty rather than containing bogus results.
 WHERE (
     SELECT value
     FROM has_modified_rail_slices
@@ -508,11 +508,12 @@ WHERE (
 -- together, this instead looks for all the transitions and uses this to
 -- reconstruct the slices that should occur between them.
 DROP TABLE IF EXISTS modified_rail_slices;
-CREATE TABLE modified_rail_slices AS
+CREATE PERFETTO TABLE modified_rail_slices AS
 WITH const (end_ts) AS (SELECT ts + dur
-              FROM unmerged_modified_rail_slices
-              ORDER BY ts DESC
-              LIMIT 1)
+  FROM unmerged_modified_rail_slices
+  ORDER BY ts DESC
+  LIMIT 1
+)
 SELECT ROW_NUMBER() OVER () AS id, lag(next_ts) OVER() AS ts,
   ts + dur - lag(next_ts) OVER() AS dur,
   mode AS mode
@@ -557,6 +558,6 @@ FROM (
         LIMIT 1
       )
   )
-WHERE mode <> next_mode
+WHERE mode != next_mode
 -- Retrieve all but the first row.
 LIMIT -1 OFFSET 1;

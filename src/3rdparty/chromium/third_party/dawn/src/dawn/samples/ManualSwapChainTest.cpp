@@ -1,16 +1,29 @@
-// Copyright 2020 The Dawn Authors
+// Copyright 2020 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // This is an example to manually test swapchain code. Controls are the following, scoped to the
 // currently focused window:
@@ -63,7 +76,6 @@
 #include "dawn/dawn_proc.h"
 #include "dawn/native/DawnNative.h"
 #include "dawn/utils/ComboRenderPipelineDescriptor.h"
-#include "dawn/utils/ScopedAutoreleasePool.h"
 #include "dawn/utils/WGPUHelpers.h"
 #include "dawn/webgpu_cpp.h"
 #include "webgpu/webgpu_glfw.h"
@@ -136,7 +148,7 @@ void DoRender(WindowData* data) {
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
 
     if (data->renderTriangle) {
-        utils::ComboRenderPassDescriptor desc({view});
+        dawn::utils::ComboRenderPassDescriptor desc({view});
         // Use Load to check the swapchain is lazy cleared (we shouldn't see garbage from previous
         // frames).
         desc.cColorAttachments[0].loadOp = wgpu::LoadOp::Load;
@@ -151,7 +163,7 @@ void DoRender(WindowData* data) {
             data->clearCycle = 1.0f;
         }
 
-        utils::ComboRenderPassDescriptor desc({view});
+        dawn::utils::ComboRenderPassDescriptor desc({view});
         desc.cColorAttachments[0].loadOp = wgpu::LoadOp::Clear;
         desc.cColorAttachments[0].clearValue = {data->clearCycle, 1.0f - data->clearCycle, 0.0f,
                                                 1.0f};
@@ -168,12 +180,12 @@ void DoRender(WindowData* data) {
 
 std::ostream& operator<<(std::ostream& o, const wgpu::SwapChainDescriptor& desc) {
     // For now only render attachment is possible.
-    ASSERT(desc.usage == wgpu::TextureUsage::RenderAttachment);
+    DAWN_ASSERT(desc.usage == wgpu::TextureUsage::RenderAttachment);
     o << "RenderAttachment ";
     o << desc.width << "x" << desc.height << " ";
 
     // For now only BGRA is allowed
-    ASSERT(desc.format == wgpu::TextureFormat::BGRA8Unorm);
+    DAWN_ASSERT(desc.format == wgpu::TextureFormat::BGRA8Unorm);
     o << "BGRA8Unorm ";
 
     switch (desc.presentMode) {
@@ -213,7 +225,7 @@ void OnKeyPress(GLFWwindow* window, int key, int, int action, int) {
         return;
     }
 
-    ASSERT(windows.count(window) == 1);
+    DAWN_ASSERT(windows.count(window) == 1);
 
     WindowData* data = windows[window].get();
     switch (key) {
@@ -272,19 +284,9 @@ int main(int argc, const char* argv[]) {
     dawnProcSetProcs(&procs);
 
     instance = std::make_unique<dawn::native::Instance>();
-    instance->DiscoverDefaultAdapters();
 
-    std::vector<dawn::native::Adapter> adapters = instance->GetAdapters();
-    dawn::native::Adapter chosenAdapter;
-    for (dawn::native::Adapter& adapter : adapters) {
-        wgpu::AdapterProperties properties;
-        adapter.GetProperties(&properties);
-        if (properties.backendType != wgpu::BackendType::Null) {
-            chosenAdapter = adapter;
-            break;
-        }
-    }
-    ASSERT(chosenAdapter);
+    dawn::native::Adapter chosenAdapter = instance->EnumerateAdapters()[0];
+    DAWN_ASSERT(chosenAdapter);
 
     // Setup the device on that adapter.
     device = wgpu::Device::Acquire(chosenAdapter.CreateDevice());
@@ -305,7 +307,7 @@ int main(int argc, const char* argv[]) {
                     errorTypeName = "Device lost";
                     break;
                 default:
-                    UNREACHABLE();
+                    DAWN_UNREACHABLE();
                     return;
             }
             dawn::ErrorLog() << errorTypeName << " error: " << message;
@@ -314,20 +316,20 @@ int main(int argc, const char* argv[]) {
     queue = device.GetQueue();
 
     // The hacky pipeline to render a triangle.
-    utils::ComboRenderPipelineDescriptor pipelineDesc;
-    pipelineDesc.vertex.module = utils::CreateShaderModule(device, R"(
+    dawn::utils::ComboRenderPipelineDescriptor pipelineDesc;
+    pipelineDesc.vertex.module = dawn::utils::CreateShaderModule(device, R"(
         @vertex fn main(@builtin(vertex_index) VertexIndex : u32)
-                            -> @builtin(position) vec4<f32> {
-            var pos = array<vec2<f32>, 3>(
-                vec2<f32>( 0.0,  0.5),
-                vec2<f32>(-0.5, -0.5),
-                vec2<f32>( 0.5, -0.5)
+                            -> @builtin(position) vec4f {
+            var pos = array(
+                vec2f( 0.0,  0.5),
+                vec2f(-0.5, -0.5),
+                vec2f( 0.5, -0.5)
             );
-            return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+            return vec4f(pos[VertexIndex], 0.0, 1.0);
         })");
-    pipelineDesc.cFragment.module = utils::CreateShaderModule(device, R"(
-        @fragment fn main() -> @location(0) vec4<f32> {
-            return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    pipelineDesc.cFragment.module = dawn::utils::CreateShaderModule(device, R"(
+        @fragment fn main() -> @location(0) vec4f {
+            return vec4f(1.0, 0.0, 0.0, 1.0);
         })");
     // BGRA shouldn't be hardcoded. Consider having a map[format -> pipeline].
     pipelineDesc.cTargets[0].format = wgpu::TextureFormat::BGRA8Unorm;
@@ -337,8 +339,8 @@ int main(int argc, const char* argv[]) {
     AddWindow();
 
     while (windows.size() != 0) {
-        utils::ScopedAutoreleasePool pool;
         glfwPollEvents();
+        wgpuInstanceProcessEvents(instance->Get());
 
         for (auto it = windows.begin(); it != windows.end();) {
             GLFWwindow* window = it->first;

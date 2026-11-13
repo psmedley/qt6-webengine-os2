@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {isString} from '../../base/object_utils';
 import {
   AggregateData,
   Column,
   ColumnDef,
   ThreadStateExtra,
 } from '../../common/aggregation_data';
-import {Engine} from '../../common/engine';
-import {NUM} from '../../common/query_result';
 import {Area, Sorting} from '../../common/state';
+import {globals} from '../../frontend/globals';
 import {publishAggregateData} from '../../frontend/publish';
+import {Engine} from '../../trace_processor/engine';
+import {NUM} from '../../trace_processor/query_result';
 import {AreaSelectionHandler} from '../area_selection_handler';
 import {Controller} from '../controller';
-import {globals} from '../globals';
 
 export interface AggregationControllerArgs {
   engine: Engine;
@@ -73,6 +74,7 @@ export abstract class AggregationController extends Controller<'main'> {
     const aggregatePreferences =
         globals.state.aggregatePreferences[this.args.kind];
 
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     const sortingChanged = aggregatePreferences &&
         this.previousSorting !== aggregatePreferences.sorting;
     const [hasAreaChanged, area] = this.areaSelectionHandler.getAreaChange();
@@ -114,6 +116,7 @@ export abstract class AggregationController extends Controller<'main'> {
     const pref = globals.state.aggregatePreferences[this.kind];
     let sorting = `${this.getDefaultSorting().column} ${
         this.getDefaultSorting().direction}`;
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     if (pref && pref.sorting) {
       sorting = `${pref.sorting.column} ${pref.sorting.direction}`;
     }
@@ -144,8 +147,18 @@ export abstract class AggregationController extends Controller<'main'> {
         const item = it.get(column.columnId);
         if (item === null) {
           column.data[i] = isStringColumn(column) ? internString('NULL') : 0;
-        } else if (typeof item === 'string') {
+        } else if (isString(item)) {
           column.data[i] = internString(item);
+        } else if (item instanceof Uint8Array) {
+          column.data[i] = internString('<Binary blob>');
+        } else if (typeof item === 'bigint') {
+          // TODO(stevegolton) It would be nice to keep bigints as bigints for
+          // the purposes of aggregation, however the aggregation infrastructure
+          // is likely to be significantly reworked when we introduce EventSet,
+          // and the complexity of supporting bigints throughout the aggregation
+          // panels in its current form is not worth it. Thus, we simply
+          // convert bigints to numbers.
+          column.data[i] = Number(item);
         } else {
           column.data[i] = item;
         }

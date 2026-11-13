@@ -89,9 +89,15 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ThrottlingNetworkTransaction
       net::ResponseHeadersCallback callback) override;
   void SetEarlyResponseHeadersCallback(
       net::ResponseHeadersCallback callback) override;
+  void SetModifyRequestHeadersCallback(
+      base::RepeatingCallback<void(net::HttpRequestHeaders*)> callback)
+      override;
+  void SetIsSharedDictionaryReadAllowedCallback(
+      base::RepeatingCallback<bool()> callback) override;
   int ResumeNetworkStart() override;
   net::ConnectionAttempts GetConnectionAttempts() const override;
   void CloseConnectionOnDestruction() override;
+  bool IsMdlMatchForMetrics() const override;
 
  protected:
   friend class ThrottlingControllerTestHelper;
@@ -122,7 +128,8 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ThrottlingNetworkTransaction
   // User callback.
   net::CompletionOnceCallback callback_;
 
-  raw_ptr<const net::HttpRequestInfo> request_;
+  // TODO(https://crbug.com/1427078): Prevent this pointer from dangling.
+  raw_ptr<const net::HttpRequestInfo, DanglingUntriaged> request_;
 
   // True if Fail was already invoked.
   bool failed_;

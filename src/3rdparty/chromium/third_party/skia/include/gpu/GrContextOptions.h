@@ -20,7 +20,6 @@
 
 class SkExecutor;
 
-#if SK_SUPPORT_GPU
 struct SK_API GrContextOptions {
     enum class Enable {
         /** Forces an option to be disabled. */
@@ -80,8 +79,9 @@ struct SK_API GrContextOptions {
 
     /**
      * Controls whether we check for GL errors after functions that allocate resources (e.g.
-     * glTexImage2D), for shader compilation success, and program link success. Ignored on
-     * backends other than GL.
+     * glTexImage2D), at the end of a GPU submission, or checking framebuffer completeness. The
+     * results of shader compilation and program linking are always checked, regardless of this
+     * option. Ignored on backends other than GL.
      */
     Enable fSkipGLErrorChecks = Enable::kDefault;
 
@@ -95,6 +95,12 @@ struct SK_API GrContextOptions {
         buffers to CPU memory in order to update them.  A value of -1 means the GrContext should
         deduce the optimal value for this platform. */
     int  fBufferMapThreshold = -1;
+
+    /** Default minimum size to use when allocating buffers for uploading data to textures. The
+        larger the value the more uploads can be packed into one buffer, but at the cost of
+        more gpu memory allocated that may not be used. Uploads larger than the minimum will still
+        work by allocating a dedicated buffer. */
+    size_t fMinimumStagingBufferSize = 64 * 1024;
 
     /**
      * Executor to handle threaded work within Ganesh. If this is nullptr, then all work will be
@@ -245,6 +251,12 @@ struct SK_API GrContextOptions {
     bool fSuppressMipmapSupport = false;
 
     /**
+     * If true, the TessellationPathRenderer will not be used for path rendering.
+     * If false, will fallback to any driver workarounds, if set.
+     */
+    bool fDisableTessellationPathRenderer = false;
+
+    /**
      * If true, and if supported, enables hardware tessellation in the caps.
      * DEPRECATED: This value is ignored; experimental hardware tessellation is always disabled.
      */
@@ -254,13 +266,7 @@ struct SK_API GrContextOptions {
      * If true, then add 1 pixel padding to all glyph masks in the atlas to support bi-lerp
      * rendering of all glyphs. This must be set to true to use Slugs.
      */
-    #if defined(SK_EXPERIMENTAL_SIMULATE_DRAWGLYPHRUNLIST_WITH_SLUG) || \
-        defined(SK_EXPERIMENTAL_SIMULATE_DRAWGLYPHRUNLIST_WITH_SLUG_SERIALIZE) || \
-        defined(SK_EXPERIMENTAL_SIMULATE_DRAWGLYPHRUNLIST_WITH_SLUG_STRIKE_SERIALIZE)
-    bool fSupportBilerpFromGlyphAtlas = true;
-    #else
     bool fSupportBilerpFromGlyphAtlas = false;
-    #endif
 
     /**
      * Uses a reduced variety of shaders. May perform less optimally in steady state but can reduce
@@ -273,7 +279,25 @@ struct SK_API GrContextOptions {
      */
     bool fAllowMSAAOnNewIntel = false;
 
-#if GR_TEST_UTILS
+    /**
+     * Currently on ARM Android we disable the use of GL TexStorage because of memory regressions.
+     * However, some clients may still want to use TexStorage. For example, TexStorage support is
+     * required for creating protected textures.
+     *
+     * This flag has no impact on non GL backends.
+     */
+    bool fAlwaysUseTexStorageWhenAvailable = false;
+
+    /**
+     * Optional callback that can be passed into the GrDirectContext which will be called when the
+     * GrDirectContext is about to be destroyed. When this call is made, it will be safe for the
+     * client to delete the GPU backend context that is backing the GrDirectContext. The
+     * GrDirectContextDestroyedContext will be passed back to the client in the callback.
+     */
+    GrDirectContextDestroyedContext fContextDeleteContext = nullptr;
+    GrDirectContextDestroyedProc fContextDeleteProc = nullptr;
+
+#if defined(GR_TEST_UTILS)
     /**
      * Private options that are only meant for testing within Skia's tools.
      */
@@ -346,10 +370,5 @@ struct SK_API GrContextOptions {
 
     GrDriverBugWorkarounds fDriverBugWorkarounds;
 };
-#else
-struct GrContextOptions {
-    struct PersistentCache {};
-};
-#endif
 
 #endif

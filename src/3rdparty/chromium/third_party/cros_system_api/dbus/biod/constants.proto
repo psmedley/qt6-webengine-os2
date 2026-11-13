@@ -8,6 +8,8 @@ option optimize_for = LITE_RUNTIME;
 
 package biod;
 
+option go_package = "chromiumos/system_api/biod_messages_proto";
+
 // Included in FingerprintMessage.
 // Android codes end at 1000. Everything above is intended to be used for
 // returning vendor specific codes. Chrome OS specific codes start from
@@ -47,4 +49,10 @@ enum ScanResult {
   // Chrome OS specific error codes.
   SCAN_RESULT_NO_MATCH = 10000;  // Scan was success, but no template matched.
   SCAN_RESULT_MAX = 10001;
+}
+
+// Included in biod's BiometricsManagerStatusChanged.
+enum BiometricsManagerStatus {
+  INITIALIZED = 1;
+  // In the future, other values such as ERROR and UNINITIALIZED may be added.
 }

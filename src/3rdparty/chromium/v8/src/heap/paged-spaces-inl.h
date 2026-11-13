@@ -15,34 +15,61 @@
 namespace v8 {
 namespace internal {
 
-// -----------------------------------------------------------------------------
-// PagedSpaceObjectIterator
+HeapObjectRange::iterator::iterator() : cage_base_(kNullAddress) {}
 
-HeapObject PagedSpaceObjectIterator::Next() {
-  do {
-    HeapObject next_obj = FromCurrentPage();
-    if (!next_obj.is_null()) return next_obj;
-  } while (AdvanceToNextPage());
-  return HeapObject();
+HeapObjectRange::iterator::iterator(const Page* page)
+    : cage_base_(page->heap()->isolate()),
+      cur_addr_(page->area_start()),
+      cur_end_(page->area_end()) {
+  AdvanceToNextObject();
 }
 
-HeapObject PagedSpaceObjectIterator::FromCurrentPage() {
+HeapObjectRange::iterator& HeapObjectRange::iterator::operator++() {
+  DCHECK_GT(cur_size_, 0);
+  cur_addr_ += cur_size_;
+  AdvanceToNextObject();
+  return *this;
+}
+
+HeapObjectRange::iterator HeapObjectRange::iterator::operator++(int) {
+  iterator retval = *this;
+  ++(*this);
+  return retval;
+}
+
+void HeapObjectRange::iterator::AdvanceToNextObject() {
+  DCHECK_NE(cur_addr_, kNullAddress);
   while (cur_addr_ != cur_end_) {
-    HeapObject obj = HeapObject::FromAddress(cur_addr_);
-    const int obj_size = ALIGN_TO_ALLOCATION_ALIGNMENT(obj.Size(cage_base()));
-    cur_addr_ += obj_size;
-    DCHECK_LE(cur_addr_, cur_end_);
-    if (!obj.IsFreeSpaceOrFiller(cage_base())) {
-      if (obj.IsCode(cage_base())) {
-        DCHECK_EQ(space_->identity(), CODE_SPACE);
-        DCHECK_CODEOBJECT_SIZE(obj_size, space_);
+    DCHECK_LT(cur_addr_, cur_end_);
+    Tagged<HeapObject> obj = HeapObject::FromAddress(cur_addr_);
+    cur_size_ = ALIGN_TO_ALLOCATION_ALIGNMENT(obj->Size(cage_base()));
+    DCHECK_LE(cur_addr_ + cur_size_, cur_end_);
+    if (IsFreeSpaceOrFiller(obj, cage_base())) {
+      cur_addr_ += cur_size_;
+    } else {
+      if (IsInstructionStream(obj, cage_base())) {
+        DCHECK_EQ(Page::FromHeapObject(obj)->owner_identity(), CODE_SPACE);
+        DCHECK_CODEOBJECT_SIZE(cur_size_);
       } else {
-        DCHECK_OBJECT_SIZE(obj_size);
+        DCHECK_OBJECT_SIZE(cur_size_);
       }
-      return obj;
+      return;
     }
   }
-  return HeapObject();
+  cur_addr_ = kNullAddress;
+}
+
+HeapObjectRange::iterator HeapObjectRange::begin() { return iterator(page_); }
+
+HeapObjectRange::iterator HeapObjectRange::end() { return iterator(); }
+
+Tagged<HeapObject> PagedSpaceObjectIterator::Next() {
+  do {
+    if (cur_ != end_) {
+      return *cur_++;
+    }
+  } while (AdvanceToNextPage());
+  return Tagged<HeapObject>();
 }
 
 bool PagedSpaceBase::Contains(Address addr) const {
@@ -52,41 +79,45 @@ bool PagedSpaceBase::Contains(Address addr) const {
   return Page::FromAddress(addr)->owner() == this;
 }
 
-bool PagedSpaceBase::Contains(Object o) const {
-  if (!o.IsHeapObject()) return false;
+bool PagedSpaceBase::Contains(Tagged<Object> o) const {
+  if (!IsHeapObject(o)) return false;
   return Page::FromAddress(o.ptr())->owner() == this;
 }
 
-bool PagedSpaceBase::TryFreeLast(Address object_address, int object_size) {
-  if (allocation_info_.top() != kNullAddress) {
-    return allocation_info_.DecrementTopIfAdjacent(object_address, object_size);
+template <bool during_sweep>
+size_t PagedSpaceBase::FreeInternal(Address start, size_t size_in_bytes) {
+  if (size_in_bytes == 0) return 0;
+  size_t wasted;
+  if (executable_) {
+    WritableJitPage jit_page(start, size_in_bytes);
+    WritableFreeSpace free_space = jit_page.FreeRange(start, size_in_bytes);
+    heap()->CreateFillerObjectAtBackground(free_space);
+    wasted = free_list_->Free(
+        free_space, during_sweep ? kDoNotLinkCategory : kLinkCategory);
+  } else {
+    WritableFreeSpace free_space =
+        WritableFreeSpace::ForNonExecutableMemory(start, size_in_bytes);
+    heap()->CreateFillerObjectAtBackground(free_space);
+    wasted = free_list_->Free(
+        free_space, during_sweep ? kDoNotLinkCategory : kLinkCategory);
   }
-  return false;
+
+  if constexpr (!during_sweep) {
+    Page* page = Page::FromAddress(start);
+    accounting_stats_.DecreaseAllocatedBytes(size_in_bytes, page);
+    free_list()->increase_wasted_bytes(wasted);
+  }
+
+  DCHECK_GE(size_in_bytes, wasted);
+  return size_in_bytes - wasted;
 }
 
-V8_INLINE bool PagedSpaceBase::EnsureAllocation(int size_in_bytes,
-                                                AllocationAlignment alignment,
-                                                AllocationOrigin origin,
-                                                int* out_max_aligned_size) {
-  if ((identity() != NEW_SPACE) && !is_compaction_space()) {
-    // Start incremental marking before the actual allocation, this allows the
-    // allocation function to mark the object black when incremental marking is
-    // running.
-    heap()->StartIncrementalMarkingIfAllocationLimitIsReached(
-        heap()->GCFlagsForIncrementalMarking(),
-        kGCCallbackScheduleIdleGarbageCollection);
-  }
+size_t PagedSpaceBase::Free(Address start, size_t size_in_bytes) {
+  return FreeInternal</*during_sweep=*/false>(start, size_in_bytes);
+}
 
-  // We don't know exactly how much filler we need to align until space is
-  // allocated, so assume the worst case.
-  size_in_bytes += Heap::GetMaximumFillToAlign(alignment);
-  if (out_max_aligned_size) {
-    *out_max_aligned_size = size_in_bytes;
-  }
-  if (allocation_info_.top() + size_in_bytes <= allocation_info_.limit()) {
-    return true;
-  }
-  return RefillLabMain(size_in_bytes, origin);
+size_t PagedSpaceBase::FreeDuringSweep(Address start, size_t size_in_bytes) {
+  return FreeInternal</*during_sweep=*/true>(start, size_in_bytes);
 }
 
 }  // namespace internal

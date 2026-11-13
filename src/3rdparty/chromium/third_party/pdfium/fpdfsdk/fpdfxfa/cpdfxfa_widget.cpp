@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -409,6 +409,12 @@ WideString CPDFXFA_Widget::GetSelectedText() {
   if (!widget_handler)
     return WideString();
   return widget_handler->GetSelectedText(GetXFAFFWidget());
+}
+
+void CPDFXFA_Widget::ReplaceAndKeepSelection(const WideString& text) {
+  // XFA does not seem to support IME input at all. Therefore we don't bother
+  // to keep selection for IMEs.
+  ReplaceSelection(text);
 }
 
 void CPDFXFA_Widget::ReplaceSelection(const WideString& text) {

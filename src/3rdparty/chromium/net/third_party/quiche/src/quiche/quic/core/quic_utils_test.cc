@@ -9,7 +9,6 @@
 #include "absl/base/macros.h"
 #include "absl/numeric/int128.h"
 #include "absl/strings/string_view.h"
-#include "quiche/quic/core/crypto/crypto_protocol.h"
 #include "quiche/quic/core/quic_connection_id.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/platform/api/quic_test.h"
@@ -167,91 +166,6 @@ TEST_F(QuicUtilsTest, IsIetfPacketHeader) {
   EXPECT_FALSE(QuicUtils::IsIetfPacketShortHeader(first_byte));
 }
 
-TEST_F(QuicUtilsTest, ReplacementConnectionIdIsDeterministic) {
-  // Verify that two equal connection IDs get the same replacement.
-  QuicConnectionId connection_id64a = TestConnectionId(33);
-  QuicConnectionId connection_id64b = TestConnectionId(33);
-  EXPECT_EQ(connection_id64a, connection_id64b);
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id64a),
-            QuicUtils::CreateReplacementConnectionId(connection_id64b));
-  QuicConnectionId connection_id72a = TestConnectionIdNineBytesLong(42);
-  QuicConnectionId connection_id72b = TestConnectionIdNineBytesLong(42);
-  EXPECT_EQ(connection_id72a, connection_id72b);
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id72a),
-            QuicUtils::CreateReplacementConnectionId(connection_id72b));
-  // Test variant with custom length.
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id64a, 7),
-            QuicUtils::CreateReplacementConnectionId(connection_id64b, 7));
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id64a, 9),
-            QuicUtils::CreateReplacementConnectionId(connection_id64b, 9));
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id64a, 16),
-            QuicUtils::CreateReplacementConnectionId(connection_id64b, 16));
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id72a, 7),
-            QuicUtils::CreateReplacementConnectionId(connection_id72b, 7));
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id72a, 9),
-            QuicUtils::CreateReplacementConnectionId(connection_id72b, 9));
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id72a, 16),
-            QuicUtils::CreateReplacementConnectionId(connection_id72b, 16));
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id72a, 32),
-            QuicUtils::CreateReplacementConnectionId(connection_id72b, 32));
-  EXPECT_EQ(QuicUtils::CreateReplacementConnectionId(connection_id72a, 255),
-            QuicUtils::CreateReplacementConnectionId(connection_id72b, 255));
-}
-
-TEST_F(QuicUtilsTest, ReplacementConnectionIdLengthIsCorrect) {
-  // Verify that all lengths get replaced by kQuicDefaultConnectionIdLength.
-  const char connection_id_bytes[255] = {};
-  for (uint8_t i = 0; i < sizeof(connection_id_bytes) - 1; ++i) {
-    QuicConnectionId connection_id(connection_id_bytes, i);
-    QuicConnectionId replacement_connection_id =
-        QuicUtils::CreateReplacementConnectionId(connection_id);
-    EXPECT_EQ(kQuicDefaultConnectionIdLength,
-              replacement_connection_id.length());
-    // Test variant with custom length.
-    QuicConnectionId replacement_connection_id7 =
-        QuicUtils::CreateReplacementConnectionId(connection_id, 7);
-    EXPECT_EQ(7, replacement_connection_id7.length());
-    QuicConnectionId replacement_connection_id9 =
-        QuicUtils::CreateReplacementConnectionId(connection_id, 9);
-    EXPECT_EQ(9, replacement_connection_id9.length());
-    QuicConnectionId replacement_connection_id16 =
-        QuicUtils::CreateReplacementConnectionId(connection_id, 16);
-    EXPECT_EQ(16, replacement_connection_id16.length());
-    QuicConnectionId replacement_connection_id32 =
-        QuicUtils::CreateReplacementConnectionId(connection_id, 32);
-    EXPECT_EQ(32, replacement_connection_id32.length());
-    QuicConnectionId replacement_connection_id255 =
-        QuicUtils::CreateReplacementConnectionId(connection_id, 255);
-    EXPECT_EQ(255, replacement_connection_id255.length());
-  }
-}
-
-TEST_F(QuicUtilsTest, ReplacementConnectionIdHasEntropy) {
-  // Make sure all these test connection IDs have different replacements.
-  for (uint64_t i = 0; i < 256; ++i) {
-    QuicConnectionId connection_id_i = TestConnectionId(i);
-    EXPECT_NE(connection_id_i,
-              QuicUtils::CreateReplacementConnectionId(connection_id_i));
-    for (uint64_t j = i + 1; j <= 256; ++j) {
-      QuicConnectionId connection_id_j = TestConnectionId(j);
-      EXPECT_NE(connection_id_i, connection_id_j);
-      EXPECT_NE(QuicUtils::CreateReplacementConnectionId(connection_id_i),
-                QuicUtils::CreateReplacementConnectionId(connection_id_j));
-      // Test variant with custom length.
-      EXPECT_NE(QuicUtils::CreateReplacementConnectionId(connection_id_i, 7),
-                QuicUtils::CreateReplacementConnectionId(connection_id_j, 7));
-      EXPECT_NE(QuicUtils::CreateReplacementConnectionId(connection_id_i, 9),
-                QuicUtils::CreateReplacementConnectionId(connection_id_j, 9));
-      EXPECT_NE(QuicUtils::CreateReplacementConnectionId(connection_id_i, 16),
-                QuicUtils::CreateReplacementConnectionId(connection_id_j, 16));
-      EXPECT_NE(QuicUtils::CreateReplacementConnectionId(connection_id_i, 32),
-                QuicUtils::CreateReplacementConnectionId(connection_id_j, 32));
-      EXPECT_NE(QuicUtils::CreateReplacementConnectionId(connection_id_i, 255),
-                QuicUtils::CreateReplacementConnectionId(connection_id_j, 255));
-    }
-  }
-}
-
 TEST_F(QuicUtilsTest, RandomConnectionId) {
   MockRandom random(33);
   QuicConnectionId connection_id = QuicUtils::CreateRandomConnectionId(&random);
@@ -289,17 +203,17 @@ TEST_F(QuicUtilsTest, RandomConnectionIdVariableLength) {
 }
 
 TEST_F(QuicUtilsTest, VariableLengthConnectionId) {
-  EXPECT_FALSE(VersionAllowsVariableLengthConnectionIds(QUIC_VERSION_43));
+  EXPECT_FALSE(VersionAllowsVariableLengthConnectionIds(QUIC_VERSION_46));
   EXPECT_TRUE(QuicUtils::IsConnectionIdValidForVersion(
-      QuicUtils::CreateZeroConnectionId(QUIC_VERSION_43), QUIC_VERSION_43));
+      QuicUtils::CreateZeroConnectionId(QUIC_VERSION_46), QUIC_VERSION_46));
   EXPECT_TRUE(QuicUtils::IsConnectionIdValidForVersion(
       QuicUtils::CreateZeroConnectionId(QUIC_VERSION_50), QUIC_VERSION_50));
-  EXPECT_NE(QuicUtils::CreateZeroConnectionId(QUIC_VERSION_43),
+  EXPECT_NE(QuicUtils::CreateZeroConnectionId(QUIC_VERSION_46),
             EmptyQuicConnectionId());
   EXPECT_EQ(QuicUtils::CreateZeroConnectionId(QUIC_VERSION_50),
             EmptyQuicConnectionId());
   EXPECT_FALSE(QuicUtils::IsConnectionIdValidForVersion(EmptyQuicConnectionId(),
-                                                        QUIC_VERSION_43));
+                                                        QUIC_VERSION_46));
 }
 
 TEST_F(QuicUtilsTest, StatelessResetToken) {
@@ -318,6 +232,13 @@ TEST_F(QuicUtilsTest, StatelessResetToken) {
   EXPECT_FALSE(QuicUtils::AreStatelessResetTokensEqual(token1a, token2));
 }
 
+TEST_F(QuicUtilsTest, EcnCodepointToString) {
+  EXPECT_EQ(EcnCodepointToString(ECN_NOT_ECT), "Not-ECT");
+  EXPECT_EQ(EcnCodepointToString(ECN_ECT0), "ECT(0)");
+  EXPECT_EQ(EcnCodepointToString(ECN_ECT1), "ECT(1)");
+  EXPECT_EQ(EcnCodepointToString(ECN_CE), "CE");
+}
+
 enum class TestEnumClassBit : uint8_t {
   BIT_ZERO = 0,
   BIT_ONE,
@@ -331,7 +252,8 @@ enum TestEnumBit {
 };
 
 TEST(QuicBitMaskTest, EnumClass) {
-  BitMask64 mask(TestEnumClassBit::BIT_ZERO, TestEnumClassBit::BIT_TWO);
+  BitMask<TestEnumClassBit> mask(
+      {TestEnumClassBit::BIT_ZERO, TestEnumClassBit::BIT_TWO});
   EXPECT_TRUE(mask.IsSet(TestEnumClassBit::BIT_ZERO));
   EXPECT_FALSE(mask.IsSet(TestEnumClassBit::BIT_ONE));
   EXPECT_TRUE(mask.IsSet(TestEnumClassBit::BIT_TWO));
@@ -343,7 +265,7 @@ TEST(QuicBitMaskTest, EnumClass) {
 }
 
 TEST(QuicBitMaskTest, Enum) {
-  BitMask64 mask(TEST_BIT_1, TEST_BIT_2);
+  BitMask<TestEnumBit> mask({TEST_BIT_1, TEST_BIT_2});
   EXPECT_FALSE(mask.IsSet(TEST_BIT_0));
   EXPECT_TRUE(mask.IsSet(TEST_BIT_1));
   EXPECT_TRUE(mask.IsSet(TEST_BIT_2));
@@ -355,9 +277,11 @@ TEST(QuicBitMaskTest, Enum) {
 }
 
 TEST(QuicBitMaskTest, Integer) {
-  BitMask64 mask(1, 3);
+  BitMask<int> mask({1, 3});
+  EXPECT_EQ(mask.Max(), 3);
   mask.Set(3);
-  mask.Set(5, 7, 9);
+  mask.Set({5, 7, 9});
+  EXPECT_EQ(mask.Max(), 9);
   EXPECT_FALSE(mask.IsSet(0));
   EXPECT_TRUE(mask.IsSet(1));
   EXPECT_FALSE(mask.IsSet(2));
@@ -371,26 +295,44 @@ TEST(QuicBitMaskTest, Integer) {
 }
 
 TEST(QuicBitMaskTest, NumBits) {
-  EXPECT_EQ(64u, BitMask64::NumBits());
-  EXPECT_EQ(32u, BitMask<uint32_t>::NumBits());
+  EXPECT_EQ(64u, BitMask<int>::NumBits());
+  EXPECT_EQ(32u, (BitMask<int, uint32_t>::NumBits()));
 }
 
 TEST(QuicBitMaskTest, Constructor) {
-  BitMask64 empty_mask;
+  BitMask<int> empty_mask;
   for (size_t bit = 0; bit < empty_mask.NumBits(); ++bit) {
     EXPECT_FALSE(empty_mask.IsSet(bit));
   }
 
-  BitMask64 mask(1, 3);
-  BitMask64 mask2 = mask;
-  BitMask64 mask3(mask2);
+  BitMask<int> mask({1, 3});
+  BitMask<int> mask2 = mask;
+  BitMask<int> mask3(mask2);
 
   for (size_t bit = 0; bit < mask.NumBits(); ++bit) {
     EXPECT_EQ(mask.IsSet(bit), mask2.IsSet(bit));
     EXPECT_EQ(mask.IsSet(bit), mask3.IsSet(bit));
   }
 
-  EXPECT_TRUE(std::is_trivially_copyable<BitMask64>::value);
+  EXPECT_TRUE(std::is_trivially_copyable<BitMask<int>>::value);
+}
+
+TEST(QuicBitMaskTest, Any) {
+  BitMask<int> mask;
+  EXPECT_FALSE(mask.Any());
+  mask.Set(3);
+  EXPECT_TRUE(mask.Any());
+  mask.Set(2);
+  EXPECT_TRUE(mask.Any());
+  mask.ClearAll();
+  EXPECT_FALSE(mask.Any());
+}
+
+TEST(QuicBitMaskTest, And) {
+  using Mask = BitMask<int>;
+  EXPECT_EQ(Mask({1, 3, 6}) & Mask({3, 5, 6}), Mask({3, 6}));
+  EXPECT_EQ(Mask({1, 2, 4}) & Mask({3, 5}), Mask({}));
+  EXPECT_EQ(Mask({1, 2, 3, 4, 5}) & Mask({}), Mask({}));
 }
 
 }  // namespace

@@ -103,6 +103,12 @@ void HistogramBase::ClearFlags(int32_t flags) {
   flags_.fetch_and(~flags, std::memory_order_relaxed);
 }
 
+bool HistogramBase::HasFlags(int32_t flags) const {
+  // Check this->flags() is a superset of |flags|, i.e. every flag in |flags| is
+  // included.
+  return (this->flags() & flags) == flags;
+}
+
 void HistogramBase::AddScaled(Sample value, int count, int scale) {
   DCHECK_GT(scale, 0);
 
@@ -153,8 +159,6 @@ uint32_t HistogramBase::FindCorruption(const HistogramSamples& samples) const {
   return NO_INCONSISTENCIES;
 }
 
-void HistogramBase::ValidateHistogramContents() const {}
-
 void HistogramBase::WriteJSON(std::string* output,
                               JSONVerbosityLevel verbosity_level) const {
   CountAndBucketData count_and_bucket_data = GetCountAndBucketData();
@@ -181,8 +185,9 @@ void HistogramBase::FindAndRunCallbacks(HistogramBase::Sample sample) const {
 
   // We check the flag first since it is very cheap and we can avoid the
   // function call and lock overhead of FindAndRunHistogramCallbacks().
-  if ((flags() & kCallbackExists) == 0)
+  if (!HasFlags(kCallbackExists)) {
     return;
+  }
 
   StatisticsRecorder::FindAndRunHistogramCallbacks(
       base::PassKey<HistogramBase>(), histogram_name(), name_hash(), sample);
@@ -245,7 +250,7 @@ void HistogramBase::WriteAscii(std::string* output) const {
 }
 
 // static
-char const* HistogramBase::GetPermanentName(const std::string& name) {
+char const* HistogramBase::GetPermanentName(std::string_view name) {
   // A set of histogram names that provides the "permanent" lifetime required
   // by histogram objects for those strings that are not already code constants
   // or held in persistent memory.
@@ -253,7 +258,7 @@ char const* HistogramBase::GetPermanentName(const std::string& name) {
   static base::NoDestructor<Lock> permanent_names_lock;
 
   AutoLock lock(*permanent_names_lock);
-  auto result = permanent_names->insert(name);
+  auto result = permanent_names->insert(std::string(name));
   return result.first->c_str();
 }
 

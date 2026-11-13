@@ -6,9 +6,15 @@
 
 #include <memory>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/values.h"
+#if !BUILDFLAG(IS_QTWEBENGINE)
+#include "chrome/browser/browser_features.h"
+#endif  // !BUILDFLAG(IS_QTWEBENGINE)
 #include "chrome/browser/devtools/devtools_settings.h"
+#if !BUILDFLAG(IS_QTWEBENGINE)
+#include "chrome/browser/devtools/visual_logging.h"
+#endif
 
 namespace {
 
@@ -49,10 +55,11 @@ bool GetValue(const base::Value& value, bool* result) {
 bool GetValue(const base::Value& value, gfx::Rect* rect) {
   if (!value.is_dict())
     return false;
-  absl::optional<int> x = value.FindIntKey("x");
-  absl::optional<int> y = value.FindIntKey("y");
-  absl::optional<int> width = value.FindIntKey("width");
-  absl::optional<int> height = value.FindIntKey("height");
+  const base::Value::Dict& dict = value.GetDict();
+  std::optional<int> x = dict.FindInt("x");
+  std::optional<int> y = dict.FindInt("y");
+  std::optional<int> width = dict.FindInt("width");
+  std::optional<int> height = dict.FindInt("height");
   if (!x.has_value() || !y.has_value() || !width.has_value() ||
       !height.has_value()) {
     return false;
@@ -66,11 +73,148 @@ bool GetValue(const base::Value& value, RegisterOptions* options) {
   if (!value.is_dict())
     return false;
 
-  const bool synced = value.FindBoolKey("synced").value_or(false);
+  const bool synced = value.GetDict().FindBool("synced").value_or(false);
   options->sync_mode = synced ? RegisterOptions::SyncMode::kSync
                               : RegisterOptions::SyncMode::kDontSync;
   return true;
 }
+
+#if !BUILDFLAG(IS_QTWEBENGINE)
+bool GetValue(const base::Value& value, ImpressionEvent* event) {
+  if (!value.is_dict()) {
+    return false;
+  }
+
+  const base::Value::List* impressions =
+      value.GetDict().FindList("impressions");
+  if (!impressions) {
+    return false;
+  }
+  for (const auto& impression : *impressions) {
+    if (!impression.is_dict()) {
+      return false;
+    }
+    std::optional<int> id = impression.GetDict().FindInt("id");
+    std::optional<int> type = impression.GetDict().FindInt("type");
+    if (!id || !type) {
+      return false;
+    }
+    event->impressions.emplace_back(VisualElementImpression{*id, *type});
+
+    std::optional<int> parent = impression.GetDict().FindInt("parent");
+    if (parent) {
+      event->impressions.back().parent = *parent;
+    }
+    std::optional<int> context = impression.GetDict().FindInt("context");
+    if (context) {
+      event->impressions.back().context = *context;
+    }
+  }
+  return true;
+}
+
+bool GetValue(const base::Value& value, ClickEvent* event) {
+  if (!value.is_dict()) {
+    return false;
+  }
+
+  std::optional<int> veid = value.GetDict().FindInt("veid");
+  if (!veid) {
+    return false;
+  }
+  event->veid = *veid;
+
+  std::optional<int> mouse_button = value.GetDict().FindInt("mouseButton");
+  if (mouse_button) {
+    event->mouse_button = *mouse_button;
+  }
+  std::optional<int> context = value.GetDict().FindInt("context");
+  if (context) {
+    event->context = *context;
+  }
+  return true;
+}
+
+bool GetValue(const base::Value& value, HoverEvent* event) {
+  if (!value.is_dict()) {
+    return false;
+  }
+
+  std::optional<int> veid = value.GetDict().FindInt("veid");
+  if (!veid) {
+    return false;
+  }
+  event->veid = *veid;
+
+  std::optional<int> time = value.GetDict().FindInt("time");
+  if (time) {
+    event->time = *time;
+  }
+  std::optional<int> context = value.GetDict().FindInt("context");
+  if (context) {
+    event->context = *context;
+  }
+  return true;
+}
+
+bool GetValue(const base::Value& value, DragEvent* event) {
+  if (!value.is_dict()) {
+    return false;
+  }
+
+  std::optional<int> veid = value.GetDict().FindInt("veid");
+  if (!veid) {
+    return false;
+  }
+  event->veid = *veid;
+
+  std::optional<int> distance = value.GetDict().FindInt("distance");
+  if (distance) {
+    event->distance = *distance;
+  }
+  std::optional<int> context = value.GetDict().FindInt("context");
+  if (context) {
+    event->context = *context;
+  }
+  return true;
+}
+
+bool GetValue(const base::Value& value, ChangeEvent* event) {
+  if (!value.is_dict()) {
+    return false;
+  }
+
+  std::optional<int> veid = value.GetDict().FindInt("veid");
+  if (!veid) {
+    return false;
+  }
+  event->veid = *veid;
+
+  std::optional<int> context = value.GetDict().FindInt("context");
+  if (context) {
+    event->context = *context;
+  }
+  return true;
+}
+
+bool GetValue(const base::Value& value, KeyDownEvent* event) {
+  if (!value.is_dict()) {
+    return false;
+  }
+
+  std::optional<int> veid = value.GetDict().FindInt("veid");
+  if (!veid) {
+    return false;
+  }
+  event->veid = *veid;
+
+  std::optional<int> context = value.GetDict().FindInt("context");
+  if (context) {
+    event->context = *context;
+  }
+  return true;
+}
+#endif  // !BUILDFLAG(IS_QTWEBENGINE)
 
 template <typename T>
 struct StorageTraits {
@@ -226,12 +370,12 @@ DevToolsEmbedderMessageDispatcher::CreateForDevToolsFrontend(
                      &Delegate::SetDevicesDiscoveryConfig, delegate);
   d->RegisterHandler("setDevicesUpdatesEnabled",
                      &Delegate::SetDevicesUpdatesEnabled, delegate);
-  d->RegisterHandler("performActionOnRemotePage",
-                     &Delegate::PerformActionOnRemotePage, delegate);
   d->RegisterHandler("openRemotePage", &Delegate::OpenRemotePage, delegate);
   d->RegisterHandler("openNodeFrontend", &Delegate::OpenNodeFrontend, delegate);
   d->RegisterHandler("dispatchProtocolMessage",
                      &Delegate::DispatchProtocolMessageFromDevToolsFrontend,
+                     delegate);
+  d->RegisterHandler("recordCountHistogram", &Delegate::RecordCountHistogram,
                      delegate);
   d->RegisterHandler("recordEnumeratedHistogram",
                      &Delegate::RecordEnumeratedHistogram, delegate);
@@ -239,6 +383,14 @@ DevToolsEmbedderMessageDispatcher::CreateForDevToolsFrontend(
                      &Delegate::RecordPerformanceHistogram, delegate);
   d->RegisterHandler("recordUserMetricsAction",
                      &Delegate::RecordUserMetricsAction, delegate);
+#if !BUILDFLAG(IS_QTWEBENGINE)
+  d->RegisterHandler("recordImpression", &Delegate::RecordImpression, delegate);
+  d->RegisterHandler("recordClick", &Delegate::RecordClick, delegate);
+  d->RegisterHandler("recordHover", &Delegate::RecordHover, delegate);
+  d->RegisterHandler("recordDrag", &Delegate::RecordDrag, delegate);
+  d->RegisterHandler("recordChange", &Delegate::RecordChange, delegate);
+  d->RegisterHandler("recordKeyDown", &Delegate::RecordKeyDown, delegate);
+#endif  // !BUILDFLAG(IS_QTWEBENGINE)
   d->RegisterHandlerWithCallback("sendJsonRequest",
                                  &Delegate::SendJsonRequest, delegate);
   d->RegisterHandler("registerPreference", &Delegate::RegisterPreference,
@@ -267,5 +419,11 @@ DevToolsEmbedderMessageDispatcher::CreateForDevToolsFrontend(
   d->RegisterHandlerWithCallback("showSurvey", &Delegate::ShowSurvey, delegate);
   d->RegisterHandlerWithCallback("canShowSurvey", &Delegate::CanShowSurvey,
                                  delegate);
+#if !BUILDFLAG(IS_QTWEBENGINE)
+  if (base::FeatureList::IsEnabled(::features::kDevToolsConsoleInsights)) {
+    d->RegisterHandlerWithCallback("doAidaConversation",
+                                   &Delegate::DoAidaConversation, delegate);
+  }
+#endif  // !BUILDFLAG(IS_QTWEBENGINE)
   return d;
 }

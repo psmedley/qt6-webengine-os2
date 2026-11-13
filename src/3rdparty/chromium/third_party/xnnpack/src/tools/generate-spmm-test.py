@@ -30,7 +30,7 @@ def split_ukernel_name(name):
   common_parts = common_name.split("_")
   param_spec = common_parts[-1]
   mr, nr = map(int, param_spec.split("x"))
-  arch, isa = xnncommon.parse_target_name(target_name)
+  arch, isa, assembly = xnncommon.parse_target_name(target_name)
   return mr, nr, arch, isa
 
 
@@ -449,21 +449,11 @@ def main(args):
       pipelined = bool(ukernel_spec.get("pipelined", False))
       mr, nr, arch, isa = split_ukernel_name(name)
 
-      # specification can override architecture
-      arch = ukernel_spec.get("arch", arch)
-
       test_case = generate_test_cases(name, init_fn, mr, nr, k_block,
                                       pipelined, isa)
       tests += "\n\n" + xnncommon.postprocess_test_case(test_case, arch, isa)
 
-    txt_changed = True
-    if os.path.exists(options.output):
-      with codecs.open(options.output, "r", encoding="utf-8") as output_file:
-        txt_changed = output_file.read() != tests
-
-    if txt_changed:
-      with codecs.open(options.output, "w", encoding="utf-8") as output_file:
-        output_file.write(tests)
+    xnncommon.overwrite_if_changed(options.output, tests)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,15 +18,16 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <utility>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "connections/implementation/analytics/packet_meta_data.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/time/time.h"
+#include "connections/implementation/analytics/packet_meta_data.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/endpoint_channel_manager.h"
@@ -38,7 +39,6 @@
 #include "internal/platform/runnable.h"
 #include "internal/platform/single_thread_executor.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -60,10 +60,10 @@ namespace connections {
 // to PayloadManager::ProcessFrame() (still running on that
 // same dedicated reader thread).
 
-using analytics::PacketMetaData;
-
 class EndpointManager {
  public:
+  using OfflineFrame = ::location::nearby::connections::OfflineFrame;
+
   class FrameProcessor {
    public:
     virtual ~FrameProcessor() = default;
@@ -76,11 +76,11 @@ class EndpointManager {
     // To achieve that, OfflineFrame needs to be either mutabe lvalue reference,
     // or rvalue reference. Rvalue references are discouraged by go/cstyle,
     // and that leaves us with mutable lvalue reference.
-    virtual void OnIncomingFrame(OfflineFrame& offline_frame,
-                                 const std::string& from_endpoint_id,
-                                 ClientProxy* to_client,
-                                 proto::connections::Medium current_medium,
-                                 PacketMetaData& packet_meta_data) = 0;
+    virtual void OnIncomingFrame(
+        location::nearby::connections::OfflineFrame& offline_frame,
+        const std::string& from_endpoint_id, ClientProxy* to_client,
+        location::nearby::proto::connections::Medium current_medium,
+        analytics::PacketMetaData& packet_meta_data) = 0;
 
     // Implementations must call barrier.CountDown() once
     // they're done. This parallelizes the disconnection event across all frame
@@ -90,7 +90,8 @@ class EndpointManager {
     virtual void OnEndpointDisconnect(ClientProxy* client,
                                       const std::string& service_id,
                                       const std::string& endpoint_id,
-                                      CountDownLatch barrier) = 0;
+                                      CountDownLatch barrier,
+                                      DisconnectionReason reason) = 0;
   };
 
   explicit EndpointManager(EndpointChannelManager* manager);
@@ -100,10 +101,12 @@ class EndpointManager {
   // up the OfflineServiceController implementation.
   // FrameProcessor* instances are of dynamic duration and survive all sessions.
   // Blocks until registration is complete.
-  void RegisterFrameProcessor(V1Frame::FrameType frame_type,
-                              FrameProcessor* processor);
-  void UnregisterFrameProcessor(V1Frame::FrameType frame_type,
-                                const FrameProcessor* processor);
+  void RegisterFrameProcessor(
+      location::nearby::connections::V1Frame::FrameType frame_type,
+      FrameProcessor* processor);
+  void UnregisterFrameProcessor(
+      location::nearby::connections::V1Frame::FrameType frame_type,
+      const FrameProcessor* processor);
 
   // Invoked from the different PcpHandler implementations (of which there can
   // be only one at a time).
@@ -126,13 +129,17 @@ class EndpointManager {
   //
   // Invoked from the PayloadManager's sendPayload() method.
   std::vector<std::string> SendPayloadChunk(
-      const PayloadTransferFrame::PayloadHeader& payload_header,
-      const PayloadTransferFrame::PayloadChunk& payload_chunk,
+      const location::nearby::connections::PayloadTransferFrame::PayloadHeader&
+          payload_header,
+      const location::nearby::connections::PayloadTransferFrame::PayloadChunk&
+          payload_chunk,
       const std::vector<std::string>& endpoint_ids,
-      PacketMetaData& packet_meta_data);
+      analytics::PacketMetaData& packet_meta_data);
   std::vector<std::string> SendControlMessage(
-      const PayloadTransferFrame::PayloadHeader& payload_header,
-      const PayloadTransferFrame::ControlMessage& control_message,
+      const location::nearby::connections::PayloadTransferFrame::PayloadHeader&
+          payload_header,
+      const location::nearby::connections::PayloadTransferFrame::ControlMessage&
+          control_message,
       const std::vector<std::string>& endpoint_ids);
 
   // Called when we internally want to get rid of the endpoint, without the
@@ -148,7 +155,13 @@ class EndpointManager {
   // ask everyone who's registered an FrameProcessor to
   // processEndpointDisconnection() while the caller of DiscardEndpoint() is
   // blocked here.
-  void DiscardEndpoint(ClientProxy* client, const std::string& endpoint_id);
+  void DiscardEndpoint(ClientProxy* client, const std::string& endpoint_id,
+                       DisconnectionReason reason);
+
+ protected:
+  // For unit tests only to control executing tasks on the executor.
+  EndpointManager(EndpointChannelManager* manager,
+                  std::unique_ptr<SingleThreadExecutor> serial_executor);
 
  private:
   class EndpointState {
@@ -179,7 +192,7 @@ class EndpointManager {
 
     void StartEndpointReader(Runnable&& runnable);
     void StartEndpointKeepAliveManager(
-        std::function<void(Mutex*, ConditionVariable*)> runnable);
+        absl::AnyInvocable<void(Mutex*, ConditionVariable*)> runnable);
 
    private:
     const std::string endpoint_id_;
@@ -212,7 +225,8 @@ class EndpointManager {
     friend class LockedFrameProcessor;
   };
 
-  LockedFrameProcessor GetFrameProcessor(V1Frame::FrameType frame_type);
+  LockedFrameProcessor GetFrameProcessor(
+      location::nearby::connections::V1Frame::FrameType frame_type);
 
   ExceptionOr<bool> HandleData(const std::string& endpoint_id,
                                ClientProxy* client_proxy,
@@ -234,16 +248,12 @@ class EndpointManager {
   void EndpointChannelLoopRunnable(
       const std::string& runnable_name, ClientProxy* client_proxy,
       const std::string& endpoint_id,
-      std::function<ExceptionOr<bool>(EndpointChannel*)> handler);
+      absl::AnyInvocable<ExceptionOr<bool>(EndpointChannel*)> handler);
 
   static void WaitForLatch(const std::string& method_name,
                            CountDownLatch* latch);
   static void WaitForLatch(const std::string& method_name,
                            CountDownLatch* latch, std::int32_t timeout_millis);
-
-  static constexpr absl::Duration kProcessEndpointDisconnectionTimeout =
-      absl::Milliseconds(2000);
-  static constexpr absl::Time kInvalidTimestamp = absl::InfinitePast();
 
   // It should be noted that this method may be called multiple times (because
   // invoking this method closes the endpoint channel, which causes the
@@ -252,35 +262,56 @@ class EndpointManager {
   // this method is idempotent.
   // @EndpointManagerThread
   void RemoveEndpoint(ClientProxy* client, const std::string& endpoint_id,
-                      bool notify);
-
+                      bool notify, DisconnectionReason reason);
+  bool ApplySafeToDisconnect(const std::string& endpoint_id,
+                             EndpointChannel* endpoint_channel,
+                             DisconnectionReason reason);
   void WaitForEndpointDisconnectionProcessing(ClientProxy* client,
                                               const std::string& service_id,
-                                              const std::string& endpoint_id);
-
+                                              const std::string& endpoint_id,
+                                              DisconnectionReason reason);
+  void ProcessDisconnectionFrame(
+      ClientProxy* client, const std::string& endpoint_id,
+      EndpointChannel* endpoint_channel,
+      location::nearby::connections::OfflineFrame& frame);
   CountDownLatch NotifyFrameProcessorsOnEndpointDisconnect(
       ClientProxy* client, const std::string& service_id,
-      const std::string& endpoint_id);
+      const std::string& endpoint_id, DisconnectionReason reason);
 
   std::vector<std::string> SendTransferFrameBytes(
       const std::vector<std::string>& endpoint_ids,
       const ByteArray& payload_transfer_frame_bytes, std::int64_t payload_id,
       std::int64_t offset, const std::string& packet_type,
-      PacketMetaData& packet_meta_data);
+      analytics::PacketMetaData& packet_meta_data);
 
   // Executes all jobs sequentially, on a serial_executor_.
   void RunOnEndpointManagerThread(const std::string& name, Runnable runnable);
 
+  ExceptionOr<OfflineFrame> TryDecryptFrame(const ByteArray& data,
+                                            EndpointChannel* endpoint_channel);
   EndpointChannelManager* channel_manager_;
 
   RecursiveMutex frame_processors_lock_;
-  absl::flat_hash_map<V1Frame::FrameType, FrameProcessorWithMutex>
+  absl::flat_hash_map<location::nearby::connections::V1Frame::FrameType,
+                      FrameProcessorWithMutex>
       frame_processors_ ABSL_GUARDED_BY(frame_processors_lock_);
 
   // We keep track of all registered channel endpoints here.
   absl::flat_hash_map<std::string, EndpointState> endpoints_;
 
-  SingleThreadExecutor serial_executor_;
+  // Indicates whether the destructor has been called yet. If `is_shutdown_`
+  // is true, assume any `ClientProxy` pointers are invalid, and should not
+  // be used.
+  //
+  // The ordering of these objects is important: `serial_executor_` must be
+  // destroyed before `is_shutdown_` because `serial_executor_` runs all
+  // pending tasks during it's destruction, and the "discard-endpoints"
+  // task checks `is_shutdown_` to prevent accessing an invalid `ClientProxy`
+  // pointer.
+  mutable RecursiveMutex mutex_;
+  bool is_shutdown_ ABSL_GUARDED_BY(mutex_) = false;
+
+  std::unique_ptr<SingleThreadExecutor> serial_executor_;
 };
 
 // Operator overloads when comparing FrameProcessor*.
@@ -291,6 +322,5 @@ bool operator<(const EndpointManager::FrameProcessor& lhs,
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_ENDPOINT_MANAGER_H_

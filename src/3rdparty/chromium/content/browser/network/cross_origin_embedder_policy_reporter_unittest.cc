@@ -4,6 +4,7 @@
 
 #include "content/browser/network/cross_origin_embedder_policy_reporter.h"
 
+#include <optional>
 #include <vector>
 
 #include "base/strings/string_piece.h"
@@ -16,7 +17,6 @@
 #include "services/network/public/cpp/request_destination.h"
 #include "services/network/test/test_network_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/frame/reporting_observer.mojom.h"
 
 namespace content {
@@ -31,18 +31,18 @@ class TestNetworkContext : public network::TestNetworkContext {
     Report(const std::string& type,
            const std::string& group,
            const GURL& url,
-           const net::NetworkAnonymizationKey& network_isolation_key,
+           const net::NetworkAnonymizationKey& network_anonymization_key,
            base::Value::Dict body)
         : type(type),
           group(group),
           url(url),
-          network_isolation_key(network_isolation_key),
+          network_anonymization_key(network_anonymization_key),
           body(std::move(body)) {}
 
     std::string type;
     std::string group;
     GURL url;
-    net::NetworkAnonymizationKey network_isolation_key;
+    net::NetworkAnonymizationKey network_anonymization_key;
     base::Value::Dict body;
   };
 
@@ -50,13 +50,13 @@ class TestNetworkContext : public network::TestNetworkContext {
       const std::string& type,
       const std::string& group,
       const GURL& url,
-      const absl::optional<base::UnguessableToken>& reporting_source,
-      const net::NetworkAnonymizationKey& network_isolation_key,
-      const absl::optional<std::string>& user_agent,
+      const std::optional<base::UnguessableToken>& reporting_source,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
+      const std::optional<std::string>& user_agent,
       base::Value::Dict body) override {
     DCHECK(!user_agent);
     reports_.emplace_back(
-        Report(type, group, url, network_isolation_key, std::move(body)));
+        Report(type, group, url, network_anonymization_key, std::move(body)));
   }
 
   const std::vector<Report>& reports() const { return reports_; }
@@ -197,7 +197,7 @@ class CrossOriginEmbedderPolicyReporterTest : public testing::Test {
 TEST_F(CrossOriginEmbedderPolicyReporterTest, NullEndpointsForCorp) {
   const GURL kContextUrl("https://example.com/path");
   CrossOriginEmbedderPolicyReporter reporter(
-      GetStoragePartition(), kContextUrl, absl::nullopt, absl::nullopt,
+      GetStoragePartition(), kContextUrl, std::nullopt, std::nullopt,
       base::UnguessableToken::Create(), net::NetworkAnonymizationKey());
 
   reporter.QueueCorpViolationReport(GURL("https://www1.example.com/y"),
@@ -234,13 +234,13 @@ TEST_F(CrossOriginEmbedderPolicyReporterTest, BasicCorp) {
   EXPECT_EQ(r1.type, "coep");
   EXPECT_EQ(r1.group, "e1");
   EXPECT_EQ(r1.url, kContextUrl);
-  EXPECT_EQ(r1.network_isolation_key, kNetworkIsolationKey);
+  EXPECT_EQ(r1.network_anonymization_key, kNetworkIsolationKey);
   EXPECT_EQ(r1.body, CreateBodyForCorp("https://www1.example.com/x#foo?bar=baz",
                                        RequestDestination::kScript, "enforce"));
   EXPECT_EQ(r2.type, "coep");
   EXPECT_EQ(r2.group, "e2");
   EXPECT_EQ(r2.url, kContextUrl);
-  EXPECT_EQ(r2.network_isolation_key, kNetworkIsolationKey);
+  EXPECT_EQ(r2.network_anonymization_key, kNetworkIsolationKey);
   EXPECT_EQ(r2.body,
             CreateBodyForCorp("http://www2.example.com:41/y",
                               RequestDestination::kEmpty, "reporting"));
@@ -282,7 +282,7 @@ TEST_F(CrossOriginEmbedderPolicyReporterTest, ObserverForCorp) {
   TestObserver observer(observer_remote.InitWithNewPipeAndPassReceiver());
 
   CrossOriginEmbedderPolicyReporter reporter(
-      GetStoragePartition(), kContextUrl, absl::nullopt, absl::nullopt,
+      GetStoragePartition(), kContextUrl, std::nullopt, std::nullopt,
       base::UnguessableToken::Create(), net::NetworkAnonymizationKey());
   reporter.BindObserver(std::move(observer_remote));
   reporter.QueueCorpViolationReport(GURL("https://u:p@www1.example.com/x"),
@@ -348,7 +348,7 @@ TEST_F(CrossOriginEmbedderPolicyReporterTest, Clone) {
 TEST_F(CrossOriginEmbedderPolicyReporterTest, NullEndpointsForNavigation) {
   const GURL kContextUrl("https://example.com/path");
   CrossOriginEmbedderPolicyReporter reporter(
-      GetStoragePartition(), kContextUrl, absl::nullopt, absl::nullopt,
+      GetStoragePartition(), kContextUrl, std::nullopt, std::nullopt,
       base::UnguessableToken::Create(), net::NetworkAnonymizationKey());
 
   reporter.QueueNavigationReport(GURL("https://www1.example.com/y"),
@@ -392,7 +392,7 @@ TEST_F(CrossOriginEmbedderPolicyReporterTest, ObserverForNavigation) {
   TestObserver observer(observer_remote.InitWithNewPipeAndPassReceiver());
 
   CrossOriginEmbedderPolicyReporter reporter(
-      GetStoragePartition(), kContextUrl, absl::nullopt, absl::nullopt,
+      GetStoragePartition(), kContextUrl, std::nullopt, std::nullopt,
       base::UnguessableToken::Create(), net::NetworkAnonymizationKey());
   reporter.BindObserver(std::move(observer_remote));
   reporter.QueueNavigationReport(GURL("https://www1.example.com/x#foo?bar=baz"),
@@ -447,7 +447,7 @@ TEST_F(CrossOriginEmbedderPolicyReporterTest,
        NullEndpointsForWorkerInitialization) {
   const GURL kContextUrl("https://example.com/path");
   CrossOriginEmbedderPolicyReporter reporter(
-      GetStoragePartition(), kContextUrl, absl::nullopt, absl::nullopt,
+      GetStoragePartition(), kContextUrl, std::nullopt, std::nullopt,
       base::UnguessableToken::Create(), net::NetworkAnonymizationKey());
 
   reporter.QueueWorkerInitializationReport(
@@ -495,7 +495,7 @@ TEST_F(CrossOriginEmbedderPolicyReporterTest, ObserverForWorkerInitialization) {
   TestObserver observer(observer_remote.InitWithNewPipeAndPassReceiver());
 
   CrossOriginEmbedderPolicyReporter reporter(
-      GetStoragePartition(), kContextUrl, absl::nullopt, absl::nullopt,
+      GetStoragePartition(), kContextUrl, std::nullopt, std::nullopt,
       base::UnguessableToken::Create(), net::NetworkAnonymizationKey());
   reporter.BindObserver(std::move(observer_remote));
   reporter.QueueWorkerInitializationReport(

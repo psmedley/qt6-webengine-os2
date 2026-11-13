@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "renderer/content_renderer_client_qt.h"
 
@@ -10,8 +11,7 @@
 #include "renderer/web_engine_page_render_frame.h"
 #include "web_engine_library_info.h"
 
-#include "components/autofill/content/renderer/autofill_agent.h"
-#include "components/autofill/content/renderer/autofill_assistant_agent.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/autofill/content/renderer/password_autofill_agent.h"
 #include "components/autofill/content/renderer/password_generation_agent.h"
 #include "components/cdm/renderer/external_clear_key_key_system_info.h"
@@ -37,6 +37,7 @@
 #include "third_party/blink/public/platform/web_url_error.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
+#include "ui/base/webui/web_ui_util.h"
 
 #if QT_CONFIG(webengine_spellchecker)
 #include "components/spellcheck/renderer/spellcheck.h"
@@ -76,6 +77,7 @@
 #include "content/public/renderer/key_system_support.h"
 #include "media/base/media_switches.h"
 #include "media/base/video_codecs.h"
+#include "media/cdm/clear_key_cdm_common.h"
 #include "third_party/widevine/cdm/buildflags.h"
 #if BUILDFLAG(ENABLE_WIDEVINE)
 #include "third_party/widevine/cdm/widevine_cdm_common.h"
@@ -131,12 +133,12 @@ void ContentRendererClientQt::RenderThreadStarted()
 void ContentRendererClientQt::ExposeInterfacesToBrowser(mojo::BinderMap* binders)
 {
     binders->Add<visitedlink::mojom::VisitedLinkNotificationSink>(
-                m_visitedLinkReader->GetBindCallback(), base::SequencedTaskRunnerHandle::Get());
+                m_visitedLinkReader->GetBindCallback(), base::SingleThreadTaskRunner::GetCurrentDefault());
 
     binders->Add<web_cache::mojom::WebCache>(
                 base::BindRepeating(&web_cache::WebCacheImpl::BindReceiver,
                                     base::Unretained(m_webCacheImpl.get())),
-                base::SequencedTaskRunnerHandle::Get());
+                base::SingleThreadTaskRunner::GetCurrentDefault());
 
 #if QT_CONFIG(webengine_spellchecker)
     binders->Add<spellcheck::mojom::SpellChecker>(
@@ -147,7 +149,7 @@ void ContentRendererClientQt::ExposeInterfacesToBrowser(mojo::BinderMap* binders
                                  client->InitSpellCheck();
                              client->m_spellCheck->BindReceiver(std::move(receiver));
                          }, this),
-                 base::SequencedTaskRunnerHandle::Get());
+                 base::SingleThreadTaskRunner::GetCurrentDefault());
 #endif
 
 #if QT_CONFIG(webengine_webrtc) && QT_CONFIG(webengine_extensions)
@@ -157,7 +159,7 @@ void ContentRendererClientQt::ExposeInterfacesToBrowser(mojo::BinderMap* binders
                             mojo::PendingReceiver<chrome::mojom::WebRtcLoggingAgent> receiver) {
                                 client->GetWebRtcLoggingAgent()->AddReceiver(std::move(receiver));
                          }, this),
-                 base::SequencedTaskRunnerHandle::Get());
+                 base::SingleThreadTaskRunner::GetCurrentDefault());
 #endif
 }
 
@@ -177,7 +179,7 @@ void ContentRendererClientQt::RenderFrameCreated(content::RenderFrame *render_fr
     new QtWebEngineCore::ContentSettingsObserverQt(render_frame);
 
 #if QT_CONFIG(webengine_spellchecker)
-    new SpellCheckProvider(render_frame, m_spellCheck.data(), this);
+    new SpellCheckProvider(render_frame, m_spellCheck.data());
 #endif
 #if QT_CONFIG(webengine_printing_and_pdf)
     new printing::PrintRenderFrameHelper(render_frame, base::WrapUnique(new PrintWebViewHelperDelegateQt()));
@@ -187,24 +189,24 @@ void ContentRendererClientQt::RenderFrameCreated(content::RenderFrame *render_fr
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     associated_interfaces->AddInterface<extensions::mojom::MimeHandlerViewContainerManager>(
-                base::BindRepeating(
-                    &extensions::MimeHandlerViewContainerManager::BindReceiver,
-                    render_frame->GetRoutingID()));
+            base::BindRepeating(&extensions::MimeHandlerViewContainerManager::BindReceiver,
+                                base::Unretained(render_frame)));
 
     auto registry = std::make_unique<service_manager::BinderRegistry>();
     ExtensionsRendererClientQt::GetInstance()->RenderFrameCreated(render_frame, render_frame_observer->registry());
 #endif
 
-    autofill::AutofillAssistantAgent *autofill_assistant_agent =
-            new autofill::AutofillAssistantAgent(render_frame);
-    autofill::PasswordAutofillAgent *password_autofill_agent =
-            new autofill::PasswordAutofillAgent(render_frame, associated_interfaces);
-    autofill::PasswordGenerationAgent *password_generation_agent =
-            new autofill::PasswordGenerationAgent(render_frame, password_autofill_agent,
-                                                  associated_interfaces);
+    auto password_autofill_agent =
+            std::make_unique<autofill::PasswordAutofillAgent>(render_frame, associated_interfaces);
+    auto password_generation_agent =
+            std::make_unique<autofill::PasswordGenerationAgent>(render_frame, password_autofill_agent.get(), associated_interfaces);
 
-    new autofill::AutofillAgent(render_frame, password_autofill_agent, password_generation_agent,
-                                autofill_assistant_agent, associated_interfaces);
+    new autofill::AutofillAgent(
+            render_frame,
+            { autofill::AutofillAgent::UsesKeyboardAccessoryForSuggestions(false),
+              autofill::AutofillAgent::ExtractAllDatalists(false) },
+            std::move(password_autofill_agent), std::move(password_generation_agent),
+            associated_interfaces);
 }
 
 void ContentRendererClientQt::WebViewCreated(blink::WebView *web_view,
@@ -290,11 +292,12 @@ void ContentRendererClientQt::GetNavigationErrorStringsInternal(content::RenderF
         // TODO(elproxy): We could potentially get better diagnostics here by first calling
         // NetErrorHelper::GetErrorStringsForDnsProbe, but that one is harder to untangle.
 
+        base::Value::Dict error_page_params;
         error_page::LocalizedError::PageState errorPageState =
                 error_page::LocalizedError::GetPageState(
                         error.reason(), error.domain(), error.url(), isPost, false,
                         error.stale_copy_in_cache(), false,
-                        RenderConfiguration::is_incognito_process(), false, false, false, locale, false);
+                        RenderConfiguration::is_incognito_process(), false, false, false, locale, false, &error_page_params);
 
         resourceId = IDR_NET_ERROR_HTML;
 
@@ -303,13 +306,13 @@ void ContentRendererClientQt::GetNavigationErrorStringsInternal(content::RenderF
         if (template_html.empty())
             NOTREACHED() << "unable to load template. ID: " << resourceId;
         else // "t" is the id of the templates root node.
-            *errorHtml = webui::GetTemplatesHtml(template_html, errorPageState.strings, "t");
+            *errorHtml = webui::GetLocalizedHtml(template_html, errorPageState.strings);
     }
 }
 
-uint64_t ContentRendererClientQt::VisitedLinkHash(const char *canonicalUrl, size_t length)
+uint64_t ContentRendererClientQt::VisitedLinkHash(std::string_view canonicalUrl)
 {
-    return m_visitedLinkReader->ComputeURLFingerprint(canonicalUrl, length);
+    return m_visitedLinkReader->ComputeURLFingerprint(canonicalUrl);
 }
 
 bool ContentRendererClientQt::IsLinkVisited(uint64_t linkHash)
@@ -355,8 +358,8 @@ void AppendParams(const std::vector<content::WebPluginMimeType::Param> &addition
         values[existing_size + i] = blink::WebString::FromUTF16(additional_params[i].value);
     }
 
-    existing_names->Swap(names);
-    existing_values->Swap(values);
+    existing_names->swap(names);
+    existing_values->swap(values);
 }
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 
@@ -419,11 +422,12 @@ bool ContentRendererClientQt::OverrideCreatePlugin(content::RenderFrame *render_
 
 #if BUILDFLAG(ENABLE_PLUGINS)
     content::WebPluginInfo info;
-    std::string mime_type;
+    std::string actual_mime_type;
     bool found = false;
 
-    static_cast<content::RenderFrameImpl *>(render_frame)->GetPepperHost()->GetPluginInfo(
-                params.url, params.mime_type.Utf8(), &found, &info, &mime_type);
+    static_cast<content::RenderFrameImpl *>(render_frame)
+            ->GetPepperHost()
+            ->GetPluginInfo(params.url, params.mime_type.Utf8(), &found, &info, &actual_mime_type);
     if (!found) {
         *plugin = LoadablePluginPlaceholderQt::CreateLoadableMissingPlugin(render_frame, params)->plugin();
         return true;
@@ -473,11 +477,9 @@ void ContentRendererClientQt::GetInterface(const std::string &interface_name, mo
 // found in the LICENSE.Chromium file.
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-static const char kExternalClearKeyKeySystem[] = "org.chromium.externalclearkey";
-
 // External Clear Key (used for testing).
 static void AddExternalClearKey(const media::mojom::KeySystemCapabilityPtr &capability,
-                                media::KeySystemInfoVector *key_systems)
+                                media::KeySystemInfos* key_systems)
 {
     Q_UNUSED(capability);
     if (!base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting)) {
@@ -486,7 +488,7 @@ static void AddExternalClearKey(const media::mojom::KeySystemCapabilityPtr &capa
     }
 
     // TODO(xhwang): Actually use `capability` to determine capabilities.
-    key_systems->push_back(std::make_unique<cdm::ExternalClearKeyProperties>());
+    key_systems->push_back(std::make_unique<cdm::ExternalClearKeyKeySystemInfo>());
 }
 
 #if BUILDFLAG(ENABLE_WIDEVINE)
@@ -603,7 +605,7 @@ static media::SupportedCodecs GetSupportedCodecs(const media::CdmCapability& cap
 }
 
 static void AddWidevine(const media::mojom::KeySystemCapabilityPtr &capability,
-                        media::KeySystemInfoVector *key_systems)
+                        media::KeySystemInfos *key_systems)
 {
     // Codecs and encryption schemes.
     media::SupportedCodecs codecs = media::EME_CODEC_NONE;
@@ -658,11 +660,11 @@ static void AddWidevine(const media::mojom::KeySystemCapabilityPtr &capability,
 void OnKeySystemSupportUpdated(media::GetSupportedKeySystemsCB cb,
                                content::KeySystemCapabilityPtrMap key_system_capabilities)
 {
-    media::KeySystemInfoVector key_systems;
+    media::KeySystemInfos key_systems;
     for (const auto &entry : key_system_capabilities) {
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
         const auto &key_system = entry.first;
         const auto &capability = entry.second;
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 #if BUILDFLAG(ENABLE_WIDEVINE)
         if (key_system == kWidevineKeySystem) {
             AddWidevine(capability, &key_systems);
@@ -670,13 +672,13 @@ void OnKeySystemSupportUpdated(media::GetSupportedKeySystemsCB cb,
         }
 #endif // BUILDFLAG(ENABLE_WIDEVINE)
 
-        if (key_system == kExternalClearKeyKeySystem) {
+        if (key_system == media::kExternalClearKeyKeySystem) {
             AddExternalClearKey(capability, &key_systems);
             continue;
         }
-#endif // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
         DLOG(ERROR) << "Unrecognized key system: " << key_system;
+#endif // BUILDFLAG(ENABLE_LIBRARY_CDMS)
     }
 
     cb.Run(std::move(key_systems));

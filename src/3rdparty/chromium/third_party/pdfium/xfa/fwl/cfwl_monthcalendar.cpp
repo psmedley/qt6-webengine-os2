@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,8 +50,7 @@ WideString GetAbbreviatedDayOfWeek(int day) {
     case 6:
       return L"Sat";
     default:
-      NOTREACHED();
-      return L"";
+      NOTREACHED_NORETURN();
   }
 }
 
@@ -82,8 +81,7 @@ WideString GetMonth(int month) {
     case 11:
       return L"December";
     default:
-      NOTREACHED();
-      return L"";
+      NOTREACHED_NORETURN();
   }
 }
 

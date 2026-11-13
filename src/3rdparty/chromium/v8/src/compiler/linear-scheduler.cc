@@ -32,6 +32,9 @@ void LinearScheduler::ComputeControlLevel() {
     for (Edge const edge : node->use_edges()) {
       if (!NodeProperties::IsControlEdge(edge)) continue;
       Node* use = edge.from();
+      if (use->opcode() == IrOpcode::kLoopExit &&
+          node->opcode() == IrOpcode::kLoop)
+        continue;
       if (control_level_.find(use) == control_level_.end() &&
           use->opcode() != IrOpcode::kEnd) {
         SetControlLevel(use, level + 1);
@@ -99,8 +102,8 @@ Node* LinearScheduler::GetEarlySchedulePosition(Node* node) {
       NodeState& use = stack.top();
       if (use.early_schedule_position == nullptr ||
           GetControlLevel(use.early_schedule_position) <
-              GetControlLevel(top.early_schedule_position)) {
-        use.early_schedule_position = top.early_schedule_position;
+              GetControlLevel(early_schedule_position)) {
+        use.early_schedule_position = early_schedule_position;
       }
     }
   }

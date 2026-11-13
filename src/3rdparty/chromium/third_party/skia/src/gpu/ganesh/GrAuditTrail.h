@@ -12,9 +12,8 @@
 
 #include "include/core/SkRect.h"
 #include "include/core/SkString.h"
-#include "include/gpu/GrConfig.h"
-#include "include/private/SkTArray.h"
-#include "include/private/SkTHash.h"
+#include "include/private/base/SkTArray.h"
+#include "src/core/SkTHash.h"
 #include "src/gpu/ganesh/GrRenderTargetProxy.h"
 
 class GrOp;
@@ -111,10 +110,10 @@ public:
 
         SkRect                   fBounds;
         GrSurfaceProxy::UniqueID fProxyUniqueID;
-        SkTArray<Op>             fOps;
+        skia_private::TArray<Op> fOps;
     };
 
-    void getBoundsByClientID(SkTArray<OpInfo>* outInfo, int clientID);
+    void getBoundsByClientID(skia_private::TArray<OpInfo>* outInfo, int clientID);
     void getBoundsByOpsTaskID(OpInfo* outInfo, int opsTaskID);
 
     void fullReset();
@@ -126,15 +125,15 @@ private:
     struct Op {
         void toJson(SkJSONWriter& writer) const;
         SkString fName;
-        SkTArray<SkString> fStackTrace;
+        skia_private::TArray<SkString> fStackTrace;
         SkRect fBounds;
         int fClientID;
         int fOpsTaskID;
         int fChildID;
     };
-    typedef SkTArray<std::unique_ptr<Op>, true> OpPool;
+    typedef skia_private::TArray<std::unique_ptr<Op>, true> OpPool;
 
-    typedef SkTArray<Op*> Ops;
+    typedef skia_private::TArray<Op*> Ops;
 
     struct OpNode {
         OpNode(const GrSurfaceProxy::UniqueID& proxyID) : fProxyUniqueID(proxyID) { }
@@ -144,7 +143,7 @@ private:
         Ops                            fChildren;
         const GrSurfaceProxy::UniqueID fProxyUniqueID;
     };
-    typedef SkTArray<std::unique_ptr<OpNode>, true> OpsTask;
+    typedef skia_private::TArray<std::unique_ptr<OpNode>, true> OpsTask;
 
     void copyOutFromOpsTask(OpInfo* outOpInfo, int opsTask);
 
@@ -152,10 +151,10 @@ private:
     static void JsonifyTArray(SkJSONWriter& writer, const char* name, const T& array);
 
     OpPool fOpPool;
-    SkTHashMap<uint32_t, int> fIDLookup;
-    SkTHashMap<int, Ops*> fClientIDLookup;
+    skia_private::THashMap<uint32_t, int> fIDLookup;
+    skia_private::THashMap<int, Ops*> fClientIDLookup;
     OpsTask fOpsTask;
-    SkTArray<SkString> fCurrentStackTrace;
+    skia_private::TArray<SkString> fCurrentStackTrace;
 
     // The client can pass in an optional client ID which we will use to mark the ops
     int fClientID;

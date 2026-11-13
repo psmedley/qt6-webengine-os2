@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/retain_ptr.h"
+#include "core/fxcrt/unowned_ptr.h"
 #include "core/fxcrt/widestring.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -53,7 +54,7 @@ class CFX_XMLParser final {
   void ProcessTextChar(wchar_t ch);
   void ProcessTargetData();
 
-  CFX_XMLNode* current_node_ = nullptr;
+  UnownedPtr<CFX_XMLNode> current_node_;
   RetainPtr<CFX_SeekableStreamProxy> stream_;
   DataVector<wchar_t> current_text_;
   size_t xml_plane_size_ = 1024;

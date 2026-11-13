@@ -17,8 +17,9 @@
 #ifndef SRC_TRACE_PROCESSOR_UTIL_ANNOTATED_CALLSITES_H_
 #define SRC_TRACE_PROCESSOR_UTIL_ANNOTATED_CALLSITES_H_
 
+#include <optional>
+
 #include <unordered_map>
-#include "perfetto/ext/base/optional.h"
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/storage/trace_storage.h"
 
@@ -30,6 +31,7 @@ class TraceProcessorContext;
 enum class CallsiteAnnotation {
   kNone,
   kCommonFrame,
+  kCommonFrameInterp,
   kArtInterpreted,
   kArtJit,
   kArtAot,
@@ -38,7 +40,7 @@ enum class CallsiteAnnotation {
 // Helper class to augment callsite with (currently Android-specific)
 // annotations. A given callsite will always have the same annotation. This
 // class will internally cache already computed annotations. An annotation
-// depends only of the current callsite and the annotation sof its parent
+// depends only of the current callsite and the annotations of its parent
 // callsites (going to the root).
 class AnnotatedCallsites {
  public:
@@ -70,7 +72,7 @@ class AnnotatedCallsites {
   // mode, based on the mapping.
   enum class State { kInitial, kEraseLibart, kKeepNext };
 
-  State GetState(base::Optional<CallsiteId> id);
+  State GetState(std::optional<CallsiteId> id);
 
   std::pair<State, CallsiteAnnotation> Get(
       const tables::StackProfileCallsiteTable::ConstRowReference& callsite);
@@ -79,7 +81,7 @@ class AnnotatedCallsites {
   MapType ClassifyMap(NullTermStringView map);
 
   const TraceProcessorContext& context_;
-  const base::Optional<StringPool::Id> art_jni_trampoline_;
+  const std::optional<StringPool::Id> art_jni_trampoline_;
 
   std::unordered_map<MappingId, MapType> map_types_;
   std::unordered_map<CallsiteId, State> states_;

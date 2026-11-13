@@ -11,6 +11,8 @@
 #include "libANGLE/renderer/metal/mtl_command_buffer.h"
 
 #include <cassert>
+#include <cstdint>
+#include "mtl_command_buffer.h"
 #if ANGLE_MTL_SIMULATE_DISCARD_FRAMEBUFFER
 #    include <random>
 #endif
@@ -18,6 +20,7 @@
 #include "common/debug.h"
 #include "libANGLE/renderer/metal/mtl_occlusion_query_pool.h"
 #include "libANGLE/renderer/metal/mtl_resources.h"
+#include "libANGLE/renderer/metal/mtl_utils.h"
 
 // Use to compare the new values with the values already set in the command encoder:
 static inline bool operator==(const MTLViewport &lhs, const MTLViewport &rhs)
@@ -46,6 +49,7 @@ namespace
     PROC(SetCullMode)                                \
     PROC(SetDepthStencilState)                       \
     PROC(SetDepthBias)                               \
+    PROC(SetDepthClipMode)                           \
     PROC(SetStencilRefVals)                          \
     PROC(SetViewport)                                \
     PROC(SetScissorRect)                             \
@@ -68,6 +72,7 @@ namespace
     PROC(DrawIndexedInstancedBaseVertexBaseInstance) \
     PROC(SetVisibilityResultMode)                    \
     PROC(UseResource)                                \
+    PROC(MemoryBarrier)                              \
     PROC(MemoryBarrierWithResource)                  \
     PROC(InsertDebugsign)                            \
     PROC(PushDebugGroup)                             \
@@ -129,6 +134,13 @@ inline void SetDepthBiasCmd(id<MTLRenderCommandEncoder> encoder, IntermediateCom
     float slopeScale = stream->fetch<float>();
     float clamp      = stream->fetch<float>();
     [encoder setDepthBias:depthBias slopeScale:slopeScale clamp:clamp];
+}
+
+inline void SetDepthClipModeCmd(id<MTLRenderCommandEncoder> encoder,
+                                IntermediateCommandStream *stream)
+{
+    MTLDepthClipMode depthClipMode = stream->fetch<MTLDepthClipMode>();
+    [encoder setDepthClipMode:depthClipMode];
 }
 
 inline void SetStencilRefValsCmd(id<MTLRenderCommandEncoder> encoder,
@@ -368,16 +380,34 @@ inline void UseResourceCmd(id<MTLRenderCommandEncoder> encoder, IntermediateComm
     mtl::RenderStages stages = stream->fetch<mtl::RenderStages>();
     ANGLE_UNUSED_VARIABLE(stages);
 #if defined(__IPHONE_13_0) || defined(__MAC_10_15)
-    if (ANGLE_APPLE_AVAILABLE_XCI(10.15, 13.0, 13.0))
+    if (ANGLE_APPLE_AVAILABLE_XCI(10.15, 13.1, 13.0))
     {
         [encoder useResource:resource usage:usage stages:stages];
     }
     else
 #endif
     {
+        ANGLE_APPLE_ALLOW_DEPRECATED_BEGIN
         [encoder useResource:resource usage:usage];
+        ANGLE_APPLE_ALLOW_DEPRECATED_END
     }
     [resource ANGLE_MTL_RELEASE];
+}
+
+inline void MemoryBarrierCmd(id<MTLRenderCommandEncoder> encoder, IntermediateCommandStream *stream)
+{
+    mtl::RenderStages scope  = stream->fetch<mtl::BarrierScope>();
+    mtl::RenderStages after  = stream->fetch<mtl::RenderStages>();
+    mtl::RenderStages before = stream->fetch<mtl::RenderStages>();
+    ANGLE_UNUSED_VARIABLE(scope);
+    ANGLE_UNUSED_VARIABLE(after);
+    ANGLE_UNUSED_VARIABLE(before);
+#if defined(__MAC_10_14) && (TARGET_OS_OSX || TARGET_OS_MACCATALYST)
+    if (ANGLE_APPLE_AVAILABLE_XC(10.14, 13.1))
+    {
+        [encoder memoryBarrierWithScope:scope afterStages:after beforeStages:before];
+    }
+#endif
 }
 
 inline void MemoryBarrierWithResourceCmd(id<MTLRenderCommandEncoder> encoder,
@@ -389,7 +419,7 @@ inline void MemoryBarrierWithResourceCmd(id<MTLRenderCommandEncoder> encoder,
     ANGLE_UNUSED_VARIABLE(after);
     ANGLE_UNUSED_VARIABLE(before);
 #if defined(__MAC_10_14) && (TARGET_OS_OSX || TARGET_OS_MACCATALYST)
-    if (ANGLE_APPLE_AVAILABLE_XC(10.14, 13.0))
+    if (ANGLE_APPLE_AVAILABLE_XC(10.14, 13.1))
     {
         [encoder memoryBarrierWithResources:&resource
                                       count:1
@@ -431,7 +461,28 @@ NSString *cppLabelToObjC(const std::string &marker)
     }
     return label;
 }
+
+inline void CheckPrimitiveType(MTLPrimitiveType primitiveType)
+{
+    if (ANGLE_UNLIKELY(primitiveType == MTLPrimitiveTypeInvalid))
+    {
+        // Should have been caught by validation higher up.
+        FATAL() << "invalid primitive type was uncaught by validation";
+    }
+}
+
 }  // namespace
+
+// AtomicSerial implementation
+void AtomicSerial::storeMaxValue(uint64_t value)
+{
+    uint64_t prevValue = load();
+    while (prevValue < value &&
+           !mValue.compare_exchange_weak(prevValue, value, std::memory_order_release,
+                                         std::memory_order_consume))
+    {
+    }
+}
 
 // CommandQueue implementation
 void CommandQueue::reset()
@@ -500,8 +551,7 @@ bool CommandQueue::isResourceBeingUsedByGPU(const Resource *resource) const
         return false;
     }
 
-    return mCompletedBufferSerial.load(std::memory_order_relaxed) <
-           resource->getCommandBufferQueueSerial();
+    return !isSerialCompleted(resource->getCommandBufferQueueSerial());
 }
 
 bool CommandQueue::resourceHasPendingWorks(const Resource *resource) const
@@ -511,8 +561,30 @@ bool CommandQueue::resourceHasPendingWorks(const Resource *resource) const
         return false;
     }
 
-    return mCommittedBufferSerial.load(std::memory_order_relaxed) <
-           resource->getCommandBufferQueueSerial();
+    return mCommittedBufferSerial.load() < resource->getCommandBufferQueueSerial();
+}
+
+bool CommandQueue::isSerialCompleted(uint64_t serial) const
+{
+    return mCompletedBufferSerial.load() >= serial;
+}
+
+bool CommandQueue::waitUntilSerialCompleted(uint64_t serial, uint64_t timeoutNs) const
+{
+    std::unique_lock<std::mutex> lk(mLock);
+    if (isSerialCompleted(serial))
+    {
+        return true;
+    }
+
+    if (timeoutNs == 0 ||
+        !mCompletedBufferSerialCv.wait_for(lk, std::chrono::nanoseconds(timeoutNs),
+                                           [&]() { return isSerialCompleted(serial); }))
+    {
+        return false;
+    }
+
+    return true;
 }
 
 AutoObjCPtr<id<MTLCommandBuffer>> CommandQueue::makeMetalCommandBuffer(uint64_t *queueSerialOut)
@@ -523,14 +595,20 @@ AutoObjCPtr<id<MTLCommandBuffer>> CommandQueue::makeMetalCommandBuffer(uint64_t 
 
         std::lock_guard<std::mutex> lg(mLock);
 
-        uint64_t serial = mQueueSerialCounter++;
+        uint64_t serial           = mQueueSerialCounter++;
+        uint64_t timeElapsedEntry = mActiveTimeElapsedId;
 
         mMetalCmdBuffers.push_back({metalCmdBuffer, serial});
 
         ANGLE_MTL_LOG("Created MTLCommandBuffer %llu:%p", serial, metalCmdBuffer.get());
 
+        if (timeElapsedEntry)
+        {
+            addCommandBufferToTimeElapsedEntry(lg, timeElapsedEntry);
+        }
+
         [metalCmdBuffer addCompletedHandler:^(id<MTLCommandBuffer> buf) {
-          onCommandBufferCompleted(buf, serial);
+          onCommandBufferCompleted(buf, serial, timeElapsedEntry);
         }];
 
         ASSERT(metalCmdBuffer);
@@ -543,22 +621,26 @@ AutoObjCPtr<id<MTLCommandBuffer>> CommandQueue::makeMetalCommandBuffer(uint64_t 
 
 void CommandQueue::onCommandBufferCommitted(id<MTLCommandBuffer> buf, uint64_t serial)
 {
-    std::lock_guard<std::mutex> lg(mLock);
-
     ANGLE_MTL_LOG("Committed MTLCommandBuffer %llu:%p", serial, buf);
 
-    mCommittedBufferSerial.store(
-        std::max(mCommittedBufferSerial.load(std::memory_order_relaxed), serial),
-        std::memory_order_relaxed);
+    mCommittedBufferSerial.storeMaxValue(serial);
 }
 
-void CommandQueue::onCommandBufferCompleted(id<MTLCommandBuffer> buf, uint64_t serial)
+void CommandQueue::onCommandBufferCompleted(id<MTLCommandBuffer> buf,
+                                            uint64_t serial,
+                                            uint64_t timeElapsedEntry)
 {
     std::lock_guard<std::mutex> lg(mLock);
 
     ANGLE_MTL_LOG("Completed MTLCommandBuffer %llu:%p", serial, buf);
 
-    if (mCompletedBufferSerial >= serial)
+    if (timeElapsedEntry != 0)
+    {
+        // Record this command buffer's elapsed time.
+        recordCommandBufferTimeElapsed(lg, timeElapsedEntry, [buf GPUEndTime] - [buf GPUStartTime]);
+    }
+
+    if (mCompletedBufferSerial.load() >= serial)
     {
         // Already handled.
         return;
@@ -574,9 +656,115 @@ void CommandQueue::onCommandBufferCompleted(id<MTLCommandBuffer> buf, uint64_t s
         mMetalCmdBuffers.pop_front();
     }
 
-    mCompletedBufferSerial.store(
-        std::max(mCompletedBufferSerial.load(std::memory_order_relaxed), serial),
-        std::memory_order_relaxed);
+    mCompletedBufferSerial.storeMaxValue(serial);
+    mCompletedBufferSerialCv.notify_all();
+}
+
+uint64_t CommandQueue::getNextRenderEncoderSerial()
+{
+    return ++mRenderEncoderCounter;
+}
+
+uint64_t CommandQueue::allocateTimeElapsedEntry()
+{
+    std::lock_guard<std::mutex> lg(mLock);
+
+    uint64_t id = mTimeElapsedNextId++;
+    if (mTimeElapsedNextId == 0)
+    {
+        mTimeElapsedNextId = 1;
+    }
+    TimeElapsedEntry entry;
+    entry.id = id;
+    mTimeElapsedEntries.insert({id, entry});
+    return id;
+}
+
+bool CommandQueue::deleteTimeElapsedEntry(uint64_t id)
+{
+    std::lock_guard<std::mutex> lg(mLock);
+
+    auto result = mTimeElapsedEntries.find(id);
+    if (result == mTimeElapsedEntries.end())
+    {
+        return false;
+    }
+    mTimeElapsedEntries.erase(result);
+    return true;
+}
+
+void CommandQueue::setActiveTimeElapsedEntry(uint64_t id)
+{
+    std::lock_guard<std::mutex> lg(mLock);
+
+    // If multithreading support is added to the Metal backend and
+    // involves accessing the same CommandQueue from multiple threads,
+    // the time elapsed query implementation will need to be rethought.
+    mActiveTimeElapsedId = id;
+}
+
+bool CommandQueue::isTimeElapsedEntryComplete(uint64_t id)
+{
+    std::lock_guard<std::mutex> lg(mLock);
+
+    auto result = mTimeElapsedEntries.find(id);
+    if (result == mTimeElapsedEntries.end())
+    {
+        return false;
+    }
+
+    TimeElapsedEntry &entry = result->second;
+    ASSERT(entry.pending_command_buffers >= 0);
+    if (entry.pending_command_buffers > 0)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+double CommandQueue::getTimeElapsedEntryInSeconds(uint64_t id)
+{
+    std::lock_guard<std::mutex> lg(mLock);
+
+    auto result = mTimeElapsedEntries.find(id);
+    if (result == mTimeElapsedEntries.end())
+    {
+        return 0.0;
+    }
+
+    return result->second.elapsed_seconds;
+}
+
+// Private.
+void CommandQueue::addCommandBufferToTimeElapsedEntry(std::lock_guard<std::mutex> &lg, uint64_t id)
+{
+    // This must be called under the cover of mLock.
+    auto result = mTimeElapsedEntries.find(id);
+    if (result == mTimeElapsedEntries.end())
+    {
+        return;
+    }
+
+    TimeElapsedEntry &entry = result->second;
+    ++entry.pending_command_buffers;
+}
+
+void CommandQueue::recordCommandBufferTimeElapsed(std::lock_guard<std::mutex> &lg,
+                                                  uint64_t id,
+                                                  double seconds)
+{
+    // This must be called under the cover of mLock.
+    auto result = mTimeElapsedEntries.find(id);
+    if (result == mTimeElapsedEntries.end())
+    {
+        return;
+    }
+
+    TimeElapsedEntry &entry = result->second;
+    ASSERT(entry.pending_command_buffers > 0);
+    --entry.pending_command_buffers;
+    entry.elapsed_seconds += seconds;
 }
 
 // CommandBuffer implementation
@@ -600,14 +788,44 @@ void CommandBuffer::commit(CommandBufferFinishOperation operation)
     std::lock_guard<std::mutex> lg(mLock);
     if (commitImpl())
     {
-        if (operation == WaitUntilScheduled)
-        {
-            [get() waitUntilScheduled];
-        }
-        else if (operation == WaitUntilFinished)
-        {
-            [get() waitUntilCompleted];
-        }
+        wait(operation);
+    }
+}
+
+void CommandBuffer::wait(CommandBufferFinishOperation operation)
+{
+    // NOTE: A CommandBuffer is valid forever under current conditions (2022-12-22)
+    // except before the first call to restart.
+    if (!valid())
+    {
+        return;
+    }
+
+    // You can't wait on an uncommitted command buffer.
+    ASSERT(mCommitted);
+
+    switch (operation)
+    {
+        case NoWait:
+            break;
+
+        case WaitUntilScheduled:
+            // Only wait if we haven't already waited
+            if (mLastWaitOp == NoWait)
+            {
+                [get() waitUntilScheduled];
+                mLastWaitOp = WaitUntilScheduled;
+            }
+            break;
+
+        case WaitUntilFinished:
+            // Only wait if we haven't already waited until finished.
+            if (mLastWaitOp != WaitUntilFinished)
+            {
+                [get() waitUntilCompleted];
+                mLastWaitOp = WaitUntilFinished;
+            }
+            break;
     }
 }
 
@@ -692,6 +910,12 @@ bool CommandBuffer::needsFlushForDrawCallLimits() const
     return mWorkingResourceSize > kMaximumResidentMemorySizeInBytes;
 }
 
+uint64_t CommandBuffer::getQueueSerial() const
+{
+    std::lock_guard<std::mutex> lg(mLock);
+    return mQueueSerial;
+}
+
 void CommandBuffer::restart()
 {
     uint64_t serial                                  = 0;
@@ -702,6 +926,7 @@ void CommandBuffer::restart()
     set(metalCmdBuffer);
     mQueueSerial = serial;
     mCommitted   = false;
+    mLastWaitOp  = mtl::NoWait;
 
     for (std::string &marker : mDebugGroups)
     {
@@ -755,7 +980,8 @@ void CommandBuffer::popDebugGroup()
     }
 }
 
-void CommandBuffer::queueEventSignal(const mtl::SharedEventRef &event, uint64_t value)
+#if ANGLE_MTL_EVENT_AVAILABLE
+void CommandBuffer::queueEventSignal(id<MTLEvent> event, uint64_t value)
 {
     std::lock_guard<std::mutex> lg(mLock);
 
@@ -763,9 +989,12 @@ void CommandBuffer::queueEventSignal(const mtl::SharedEventRef &event, uint64_t 
 
     if (mActiveCommandEncoder && mActiveCommandEncoder->getType() == CommandEncoder::RENDER)
     {
-        // We cannot set event when there is an active render pass, defer the setting until the
-        // pass end.
-        mPendingSignalEvents.push_back({event, value});
+        // We cannot set event when there is an active render pass, defer the setting until the pass
+        // end.
+        PendingEvent pending;
+        pending.event.retainAssign(event);
+        pending.signalValue = value;
+        mPendingSignalEvents.push_back(std::move(pending));
     }
     else
     {
@@ -773,13 +1002,14 @@ void CommandBuffer::queueEventSignal(const mtl::SharedEventRef &event, uint64_t 
     }
 }
 
-void CommandBuffer::serverWaitEvent(const mtl::SharedEventRef &event, uint64_t value)
+void CommandBuffer::serverWaitEvent(id<MTLEvent> event, uint64_t value)
 {
     std::lock_guard<std::mutex> lg(mLock);
     ASSERT(readyImpl());
 
     waitEventImpl(event, value);
 }
+#endif  // ANGLE_MTL_EVENT_AVAILABLE
 
 /** private use only */
 void CommandBuffer::set(id<MTLCommandBuffer> metalBuffer)
@@ -866,32 +1096,27 @@ void CommandBuffer::forceEndingCurrentEncoder()
 void CommandBuffer::setPendingEvents()
 {
 #if ANGLE_MTL_EVENT_AVAILABLE
-    for (const std::pair<mtl::SharedEventRef, uint64_t> &eventEntry : mPendingSignalEvents)
+    for (const PendingEvent &eventEntry : mPendingSignalEvents)
     {
-        setEventImpl(eventEntry.first, eventEntry.second);
+        setEventImpl(eventEntry.event, eventEntry.signalValue);
     }
     mPendingSignalEvents.clear();
 #endif
 }
 
-void CommandBuffer::setEventImpl(const mtl::SharedEventRef &event, uint64_t value)
-{
 #if ANGLE_MTL_EVENT_AVAILABLE
+void CommandBuffer::setEventImpl(id<MTLEvent> event, uint64_t value)
+{
     ASSERT(!mActiveCommandEncoder || mActiveCommandEncoder->getType() != CommandEncoder::RENDER);
     // For non-render command encoder, we can safely end it, so that we can encode a signal
     // event.
     forceEndingCurrentEncoder();
 
     [get() encodeSignalEvent:event value:value];
-#else
-    UNIMPLEMENTED();
-    UNREACHABLE();
-#endif  // #if ANGLE_MTL_EVENT_AVAILABLE
 }
 
-void CommandBuffer::waitEventImpl(const mtl::SharedEventRef &event, uint64_t value)
+void CommandBuffer::waitEventImpl(id<MTLEvent> event, uint64_t value)
 {
-#if ANGLE_MTL_EVENT_AVAILABLE
     ASSERT(!mActiveCommandEncoder || mActiveCommandEncoder->getType() != CommandEncoder::RENDER);
 
     forceEndingCurrentEncoder();
@@ -900,11 +1125,8 @@ void CommandBuffer::waitEventImpl(const mtl::SharedEventRef &event, uint64_t val
     setPendingEvents();
 
     [get() encodeWaitForEvent:event value:value];
-#else
-    UNIMPLEMENTED();
-    UNREACHABLE();
-#endif  // #if ANGLE_MTL_EVENT_AVAILABLE
 }
+#endif  // #if ANGLE_MTL_EVENT_AVAILABLE
 
 void CommandBuffer::pushDebugGroupImpl(const std::string &marker)
 {
@@ -1046,6 +1268,8 @@ void RenderCommandEncoderStates::reset()
     depthStencilState = nil;
     depthBias = depthSlopeScale = depthClamp = 0;
 
+    depthClipMode = MTLDepthClipModeClip;
+
     stencilFrontRef = stencilBackRef = 0;
 
     viewport.reset();
@@ -1065,7 +1289,9 @@ void RenderCommandEncoderStates::reset()
 // RenderCommandEncoder implemtation
 RenderCommandEncoder::RenderCommandEncoder(CommandBuffer *cmdBuffer,
                                            const OcclusionQueryPool &queryPool)
-    : CommandEncoder(cmdBuffer, RENDER), mOcclusionQueryPool(queryPool)
+    : CommandEncoder(cmdBuffer, RENDER),
+      mOcclusionQueryPool(queryPool),
+      mSerial(cmdBuffer->cmdQueue().getNextRenderEncoderSerial())
 {
     ANGLE_MTL_OBJC_SCOPE
     {
@@ -1109,7 +1335,7 @@ void RenderCommandEncoder::reset()
     mCommands.clear();
 }
 
-void RenderCommandEncoder::finalizeLoadStoreAction(
+bool RenderCommandEncoder::finalizeLoadStoreAction(
     MTLRenderPassAttachmentDescriptor *objCRenderPassAttachment)
 {
     if (!objCRenderPassAttachment.texture)
@@ -1117,7 +1343,7 @@ void RenderCommandEncoder::finalizeLoadStoreAction(
         objCRenderPassAttachment.loadAction     = MTLLoadActionDontCare;
         objCRenderPassAttachment.storeAction    = MTLStoreActionDontCare;
         objCRenderPassAttachment.resolveTexture = nil;
-        return;
+        return false;
     }
 
     if (objCRenderPassAttachment.resolveTexture)
@@ -1144,6 +1370,8 @@ void RenderCommandEncoder::finalizeLoadStoreAction(
         // If storeAction hasn't been set for this attachment, we set to dontcare.
         objCRenderPassAttachment.storeAction = MTLStoreActionDontCare;
     }
+
+    return true;
 }
 
 void RenderCommandEncoder::endEncoding()
@@ -1156,6 +1384,8 @@ void RenderCommandEncoder::endEncodingImpl(bool considerDiscardSimulation)
     if (!valid())
         return;
 
+    bool hasAttachment = false;
+
     // Last minute correcting the store options.
     MTLRenderPassDescriptor *objCRenderPassDesc = mCachedRenderPassDescObjC.get();
     for (uint32_t i = 0; i < mRenderPassDesc.numColorAttachments; ++i)
@@ -1163,17 +1393,20 @@ void RenderCommandEncoder::endEncodingImpl(bool considerDiscardSimulation)
         // Update store action set between restart() and endEncoding()
         objCRenderPassDesc.colorAttachments[i].storeAction =
             mRenderPassDesc.colorAttachments[i].storeAction;
-        finalizeLoadStoreAction(objCRenderPassDesc.colorAttachments[i]);
+        if (finalizeLoadStoreAction(objCRenderPassDesc.colorAttachments[i]))
+            hasAttachment = true;
     }
 
     // Update store action set between restart() and endEncoding()
     objCRenderPassDesc.depthAttachment.storeAction = mRenderPassDesc.depthAttachment.storeAction;
-    finalizeLoadStoreAction(objCRenderPassDesc.depthAttachment);
+    if (finalizeLoadStoreAction(objCRenderPassDesc.depthAttachment))
+        hasAttachment = true;
 
     // Update store action set between restart() and endEncoding()
     objCRenderPassDesc.stencilAttachment.storeAction =
         mRenderPassDesc.stencilAttachment.storeAction;
-    finalizeLoadStoreAction(objCRenderPassDesc.stencilAttachment);
+    if (finalizeLoadStoreAction(objCRenderPassDesc.stencilAttachment))
+        hasAttachment = true;
 
     // Set visibility result buffer
     if (mOcclusionQueryPool.getNumRenderPassAllocatedQueries())
@@ -1186,8 +1419,32 @@ void RenderCommandEncoder::endEncodingImpl(bool considerDiscardSimulation)
         objCRenderPassDesc.visibilityResultBuffer = nil;
     }
 
-    // Encode the actual encoder
-    encodeMetalEncoder();
+    // If a render pass has intended side effects but no attachments, the app must set a default
+    // width/height.
+    bool hasSideEffects =
+        hasAttachment || (mRenderPassDesc.defaultWidth != 0 && mRenderPassDesc.defaultHeight != 0);
+
+    // Encode the actual encoder. It will not be created when there are no side effects.
+    if (hasSideEffects)
+    {
+        // Metal validation messages say: Either set rendertargets in RenderPassDescriptor or set
+        // defaultRasterSampleCount.
+        ASSERT(hasAttachment || objCRenderPassDesc.defaultRasterSampleCount != 0);
+        encodeMetalEncoder();
+    }
+    else if (!hasSideEffects && hasDrawCalls())
+    {
+        // Command encoder should not have been created if no side effects occur, but draw calls do.
+        UNREACHABLE();
+        // Fallback to clearing commands if on release.
+        mCommands.clear();
+    }
+    // If no side effects, and no drawing is encoded, there's no point in encoding. Skip the
+    // commands.
+    else
+    {
+        mCommands.clear();
+    }
 
     CommandEncoder::endEncoding();
 
@@ -1454,6 +1711,18 @@ RenderCommandEncoder &RenderCommandEncoder::setDepthBias(float depthBias,
 
     return *this;
 }
+RenderCommandEncoder &RenderCommandEncoder::setDepthClipMode(MTLDepthClipMode depthClipMode)
+{
+    if (mStateCache.depthClipMode == depthClipMode)
+    {
+        return *this;
+    }
+    mStateCache.depthClipMode = depthClipMode;
+
+    mCommands.push(CmdType::SetDepthClipMode).push(depthClipMode);
+
+    return *this;
+}
 RenderCommandEncoder &RenderCommandEncoder::setStencilRefVals(uint32_t frontRef, uint32_t backRef)
 {
     // Metal has some bugs when reference values are larger than 0xff
@@ -1556,6 +1825,7 @@ RenderCommandEncoder &RenderCommandEncoder::setBufferForWrite(gl::ShaderType sha
         return *this;
     }
 
+    buffer->setLastWritingRenderEncoderSerial(mSerial);
     cmdBuffer().setWriteDependency(buffer);
 
     id<MTLBuffer> mtlBuffer = (buffer ? buffer->get() : nil);
@@ -1652,6 +1922,7 @@ RenderCommandEncoder &RenderCommandEncoder::setSamplerState(gl::ShaderType shade
 
     return *this;
 }
+
 RenderCommandEncoder &RenderCommandEncoder::setTexture(gl::ShaderType shaderType,
                                                        const TextureRef &texture,
                                                        uint32_t index)
@@ -1679,12 +1950,26 @@ RenderCommandEncoder &RenderCommandEncoder::setTexture(gl::ShaderType shaderType
     return *this;
 }
 
+RenderCommandEncoder &RenderCommandEncoder::setRWTexture(gl::ShaderType shaderType,
+                                                         const TextureRef &texture,
+                                                         uint32_t index)
+{
+    if (index >= kMaxShaderSamplers)
+    {
+        return *this;
+    }
+
+    cmdBuffer().setWriteDependency(texture);
+    return setTexture(shaderType, texture, index);
+}
+
 RenderCommandEncoder &RenderCommandEncoder::draw(MTLPrimitiveType primitiveType,
                                                  uint32_t vertexStart,
                                                  uint32_t vertexCount)
 {
     ASSERT(mPipelineStateSet &&
            "Render Pipeline State was never set and we've issued a draw command.");
+    CheckPrimitiveType(primitiveType);
     mHasDrawCalls = true;
     mCommands.push(CmdType::Draw).push(primitiveType).push(vertexStart).push(vertexCount);
 
@@ -1698,6 +1983,7 @@ RenderCommandEncoder &RenderCommandEncoder::drawInstanced(MTLPrimitiveType primi
 {
     ASSERT(mPipelineStateSet &&
            "Render Pipeline State was never set and we've issued a draw command.");
+    CheckPrimitiveType(primitiveType);
     mHasDrawCalls = true;
     mCommands.push(CmdType::DrawInstanced)
         .push(primitiveType)
@@ -1717,6 +2003,7 @@ RenderCommandEncoder &RenderCommandEncoder::drawInstancedBaseInstance(
 {
     ASSERT(mPipelineStateSet &&
            "Render Pipeline State was never set and we've issued a draw command.");
+    CheckPrimitiveType(primitiveType);
     mHasDrawCalls = true;
     mCommands.push(CmdType::DrawInstancedBaseInstance)
         .push(primitiveType)
@@ -1736,6 +2023,7 @@ RenderCommandEncoder &RenderCommandEncoder::drawIndexed(MTLPrimitiveType primiti
 {
     ASSERT(mPipelineStateSet &&
            "Render Pipeline State was never set and we've issued a draw command.");
+    CheckPrimitiveType(primitiveType);
     if (!indexBuffer)
     {
         return *this;
@@ -1763,6 +2051,7 @@ RenderCommandEncoder &RenderCommandEncoder::drawIndexedInstanced(MTLPrimitiveTyp
 {
     ASSERT(mPipelineStateSet &&
            "Render Pipeline State was never set and we've issued a draw command.");
+    CheckPrimitiveType(primitiveType);
     if (!indexBuffer)
     {
         return *this;
@@ -1794,6 +2083,7 @@ RenderCommandEncoder &RenderCommandEncoder::drawIndexedInstancedBaseVertexBaseIn
 {
     ASSERT(mPipelineStateSet &&
            "Render Pipeline State was never set and we've issued a draw command.");
+    CheckPrimitiveType(primitiveType);
     if (!indexBuffer)
     {
         return *this;
@@ -1846,6 +2136,14 @@ RenderCommandEncoder &RenderCommandEncoder::useResource(const BufferRef &resourc
         .push(usage)
         .push(states);
 
+    return *this;
+}
+
+RenderCommandEncoder &RenderCommandEncoder::memoryBarrier(mtl::BarrierScope scope,
+                                                          mtl::RenderStages after,
+                                                          mtl::RenderStages before)
+{
+    mCommands.push(CmdType::MemoryBarrier).push(scope).push(after).push(before);
     return *this;
 }
 
@@ -2183,10 +2481,14 @@ BlitCommandEncoder &BlitCommandEncoder::synchronizeResource(Buffer *buffer)
     }
 
 #if TARGET_OS_OSX || TARGET_OS_MACCATALYST
-    // Only MacOS has separated storage for resource on CPU and GPU and needs explicit
-    // synchronization
-    cmdBuffer().setReadDependency(buffer);
-    [get() synchronizeResource:buffer->get()];
+    if (buffer->get().storageMode == MTLStorageModeManaged)
+    {
+        // Only MacOS has separated storage for resource on CPU and GPU and needs explicit
+        // synchronization
+        cmdBuffer().setReadDependency(buffer);
+
+        [get() synchronizeResource:buffer->get()];
+    }
 #endif
     return *this;
 }

@@ -12,35 +12,33 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
 #include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer.h"
+#include "base/functional/bind.h"
 #include "base/hash/md5.h"
 #include "base/observer_list.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
 #include "chrome/common/chrome_constants.h"
 #endif
 #include "components/spellcheck/browser/spellcheck_host_metrics.h"
 #include "components/spellcheck/common/spellcheck_common.h"
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
 #include "components/sync/model/sync_change.h"
 #include "components/sync/model/sync_change_processor.h"
-#include "components/sync/model/sync_error_factory.h"
 #include "components/sync/protocol/dictionary_specifics.pb.h"
 #include "components/sync/protocol/entity_specifics.pb.h"
 #endif
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
-#ifdef TOOLKIT_QT
+#if BUILDFLAG(IS_QTWEBENGINE)
 namespace chrome {
     const base::FilePath::CharType kCustomDictionaryFileName[] = FILE_PATH_LITERAL("Custom Dictionary.txt");
 }
@@ -268,7 +266,7 @@ bool SpellcheckCustomDictionary::AddWord(const std::string& word) {
   int result = dictionary_change->Sanitize(GetWords());
   Apply(*dictionary_change);
   Notify(*dictionary_change);
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
   Sync(*dictionary_change);
 #endif
   Save(std::move(dictionary_change));
@@ -282,7 +280,7 @@ bool SpellcheckCustomDictionary::RemoveWord(const std::string& word) {
   int result = dictionary_change->Sanitize(GetWords());
   Apply(*dictionary_change);
   Notify(*dictionary_change);
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
   Sync(*dictionary_change);
 #endif
   Save(std::move(dictionary_change));
@@ -318,7 +316,7 @@ bool SpellcheckCustomDictionary::IsLoaded() {
   return is_loaded_;
 }
 
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
 bool SpellcheckCustomDictionary::IsSyncing() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return !!sync_processor_.get();
@@ -327,15 +325,15 @@ bool SpellcheckCustomDictionary::IsSyncing() {
 
 void SpellcheckCustomDictionary::Load() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskAndReplyWithResult(
-      task_runner_.get(), FROM_HERE,
+  task_runner_->PostTaskAndReplyWithResult(
+      FROM_HERE,
       base::BindOnce(&SpellcheckCustomDictionary::LoadDictionaryFile,
                      custom_dictionary_path_),
       base::BindOnce(&SpellcheckCustomDictionary::OnLoaded,
                      weak_ptr_factory_.GetWeakPtr()));
 }
 
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
 void SpellcheckCustomDictionary::WaitUntilReadyToSync(base::OnceClosure done) {
   DCHECK(!wait_until_ready_to_sync_cb_);
   if (is_loaded_)
@@ -344,20 +342,16 @@ void SpellcheckCustomDictionary::WaitUntilReadyToSync(base::OnceClosure done) {
     wait_until_ready_to_sync_cb_ = std::move(done);
 }
 
-absl::optional<syncer::ModelError>
+std::optional<syncer::ModelError>
 SpellcheckCustomDictionary::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
-    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
-    std::unique_ptr<syncer::SyncErrorFactory> sync_error_handler) {
+    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!sync_processor_.get());
-  DCHECK(!sync_error_handler_.get());
   DCHECK(sync_processor.get());
-  DCHECK(sync_error_handler.get());
   DCHECK_EQ(syncer::DICTIONARY, type);
   sync_processor_ = std::move(sync_processor);
-  sync_error_handler_ = std::move(sync_error_handler);
 
   // Build a list of words to add locally.
   std::unique_ptr<Change> to_change_locally(new Change);
@@ -384,7 +378,6 @@ void SpellcheckCustomDictionary::StopSyncing(syncer::ModelType type) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(syncer::DICTIONARY, type);
   sync_processor_.reset();
-  sync_error_handler_.reset();
 }
 
 syncer::SyncDataList SpellcheckCustomDictionary::GetAllSyncDataForTesting(
@@ -403,7 +396,7 @@ syncer::SyncDataList SpellcheckCustomDictionary::GetAllSyncDataForTesting(
   return data;
 }
 
-absl::optional<syncer::ModelError>
+std::optional<syncer::ModelError>
 SpellcheckCustomDictionary::ProcessSyncChanges(
     const base::Location& from_here,
     const syncer::SyncChangeList& change_list) {
@@ -420,11 +413,10 @@ SpellcheckCustomDictionary::ProcessSyncChanges(
         dictionary_change->RemoveWord(word);
         break;
       case syncer::SyncChange::ACTION_UPDATE:
-        return syncer::ConvertToModelError(
-            sync_error_handler_->CreateAndUploadError(
-                FROM_HERE, "Processing sync changes failed on change type " +
-                               syncer::SyncChange::ChangeTypeToString(
-                                   change.change_type())));
+        return syncer::ModelError(
+            FROM_HERE,
+            "Processing sync changes failed on change type " +
+                syncer::SyncChange::ChangeTypeToString(change.change_type()));
     }
   }
 
@@ -433,9 +425,13 @@ SpellcheckCustomDictionary::ProcessSyncChanges(
   Notify(*dictionary_change);
   Save(std::move(dictionary_change));
 
-  return absl::nullopt;
+  return std::nullopt;
 }
-#endif
+
+base::WeakPtr<syncer::SyncableService> SpellcheckCustomDictionary::AsWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+#endif  // BUILDFLAG(IS_QTWEBENGINE)
 
 SpellcheckCustomDictionary::LoadFileResult::LoadFileResult()
     : is_valid_file(false) {}
@@ -446,7 +442,6 @@ SpellcheckCustomDictionary::LoadFileResult::~LoadFileResult() {}
 std::unique_ptr<SpellcheckCustomDictionary::LoadFileResult>
 SpellcheckCustomDictionary::LoadDictionaryFile(const base::FilePath& path) {
   std::unique_ptr<LoadFileResult> result = LoadDictionaryFileReliably(path);
-  SpellCheckHostMetrics::RecordCustomWordCountStats(result->words.size());
   return result;
 }
 
@@ -483,7 +478,7 @@ void SpellcheckCustomDictionary::OnLoaded(
   dictionary_change.AddWords(result->words);
   dictionary_change.Sanitize(GetWords());
   Apply(dictionary_change);
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
   Sync(dictionary_change);
 #endif
   is_loaded_ = true;
@@ -532,12 +527,12 @@ void SpellcheckCustomDictionary::Save(
                      std::move(dictionary_change), custom_dictionary_path_));
 }
 
-#ifndef TOOLKIT_QT
-absl::optional<syncer::ModelError> SpellcheckCustomDictionary::Sync(
+#if !BUILDFLAG(IS_QTWEBENGINE)
+std::optional<syncer::ModelError> SpellcheckCustomDictionary::Sync(
     const Change& dictionary_change) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!IsSyncing() || dictionary_change.empty())
-    return absl::nullopt;
+    return std::nullopt;
 
   // The number of words on the sync server should not exceed the limits.
   int server_size = static_cast<int>(words_.size()) -
@@ -572,7 +567,7 @@ absl::optional<syncer::ModelError> SpellcheckCustomDictionary::Sync(
   }
 
   // Send the changes to the sync processor.
-  absl::optional<syncer::ModelError> error =
+  std::optional<syncer::ModelError> error =
       sync_processor_->ProcessSyncChanges(FROM_HERE, sync_change_list);
   if (error.has_value())
     return error;
@@ -582,9 +577,9 @@ absl::optional<syncer::ModelError> SpellcheckCustomDictionary::Sync(
   if (words_.size() > spellcheck::kMaxSyncableDictionaryWords)
     StopSyncing(syncer::DICTIONARY);
 
-  return absl::nullopt;
+  return std::nullopt;
 }
-#endif
+#endif  // !BUILDFLAG(IS_QTWEBENGINE)
 
 void SpellcheckCustomDictionary::Notify(const Change& dictionary_change) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);

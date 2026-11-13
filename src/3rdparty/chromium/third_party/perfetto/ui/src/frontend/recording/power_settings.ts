@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {globals} from '../globals';
 import {Probe, ProbeAttrs, Slider, SliderAttrs} from '../record_widgets';
@@ -36,7 +36,7 @@ export class PowerSettings implements m.ClassComponent<RecordingSectionAttrs> {
             {href: 'http://go/power-rails-internal-doc', target: '_blank'},
             'this doc'),
           m('span',
-            ` for instructions on how to change the refault rail selection
+            ` for instructions on how to change the default rail selection
                   on internal devices.`),
           ));
     }

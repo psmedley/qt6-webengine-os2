@@ -10,40 +10,24 @@
 #include "file_system_access/file_system_access_permission_context_factory_qt.h"
 #include "net/ssl_host_state_delegate_qt.h"
 #include "permission_manager_qt.h"
+#include "profile_io_data_qt.h"
 #include "platform_notification_service_qt.h"
 #include "qtwebenginecoreglobal_p.h"
 #include "type_conversion.h"
 #include "web_engine_library_info.h"
-#include "web_engine_context.h"
-
-#include "base/barrier_closure.h"
-#include "base/time/time.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/browser/cors_origin_pattern_setter.h"
-#include "content/public/browser/shared_cors_origin_access_list.h"
-#include "content/public/browser/storage_partition.h"
 
 #include "base/base_paths.h"
+#include "base/path_service.h"
 #include "base/files/file_util.h"
+#include "base/task/thread_pool.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
-#include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
-#include "components/prefs/in_memory_pref_store.h"
-#include "components/prefs/json_pref_store.h"
-#include "components/prefs/pref_service.h"
-#include "components/prefs/pref_service_factory.h"
-#include "components/prefs/pref_registry_simple.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/profile_metrics/browser_profile_type.h"
-#include "components/proxy_config/pref_proxy_config_tracker_impl.h"
+#include "content/public/browser/browser_thread.h"
 #include "chrome/browser/push_messaging/push_messaging_app_identifier.h"
 #include "chrome/browser/push_messaging/push_messaging_service_factory.h"
 #include "chrome/browser/push_messaging/push_messaging_service_impl.h"
-#include "chrome/common/pref_names.h"
-#if QT_CONFIG(webengine_spellchecker)
-#include "chrome/browser/spellchecker/spellcheck_service.h"
-#include "components/spellcheck/browser/pref_names.h"
-#endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "base/command_line.h"
@@ -52,22 +36,21 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_prefs_factory.h"
 #include "extensions/browser/extensions_browser_client.h"
-#include "extensions/browser/pref_names.h"
-#include "extensions/browser/process_manager.h"
-#include "extensions/common/constants.h"
 
 #include "extensions/extension_system_qt.h"
 #endif
 
-#if defined(Q_OS_WIN)
-#include "components/os_crypt/os_crypt.h"
-#endif
-
 namespace QtWebEngineCore {
+
+enum {
+    PATH_QT_START = 1000, // Same as PATH_START in chrome_paths.h; no chance of collision
+    PATH_QT_END = 1999
+};
 
 ProfileQt::ProfileQt(ProfileAdapter *profileAdapter)
     : m_profileIOData(new ProfileIODataQt(this))
     , m_profileAdapter(profileAdapter)
+    , m_userAgentMetadata(embedder_support::GetUserAgentMetadata())
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     , m_extensionSystem(nullptr)
 #endif // BUILDFLAG(ENABLE_EXTENSIONS)
@@ -77,6 +60,7 @@ ProfileQt::ProfileQt(ProfileAdapter *profileAdapter)
         : profile_metrics::BrowserProfileType::kRegular);
 
     setupPrefService();
+    setupStoragePath();
 
     // Mark the context as live. This prevents the use-after-free DCHECK in
     // AssertBrowserContextWasntDestroyed from being triggered when a new
@@ -139,11 +123,6 @@ bool ProfileQt::IsOffTheRecord()
     return m_profileAdapter->isOffTheRecord();
 }
 
-content::ResourceContext *ProfileQt::GetResourceContext()
-{
-    return m_profileIOData->resourceContext();
-}
-
 content::DownloadManagerDelegate *ProfileQt::GetDownloadManagerDelegate()
 {
     return m_profileAdapter->downloadManagerDelegate();
@@ -204,7 +183,7 @@ content::BrowsingDataRemoverDelegate *ProfileQt::GetBrowsingDataRemoverDelegate(
 content::PermissionControllerDelegate *ProfileQt::GetPermissionControllerDelegate()
 {
     if (!m_permissionManager)
-        m_permissionManager.reset(new PermissionManagerQt());
+        setupPermissionsManager();
     return m_permissionManager.get();
 }
 
@@ -272,15 +251,54 @@ void ProfileQt::setupPrefService()
         extensions::ExtensionsBrowserClient *client = extensions::ExtensionsBrowserClient::Get();
         std::vector<extensions::EarlyExtensionPrefsObserver *> prefsObservers;
         client->GetEarlyExtensionPrefsObservers(this, &prefsObservers);
-        extensions::ExtensionPrefs *extensionPrefs = extensions::ExtensionPrefs::Create(
+        auto extensionPrefs = extensions::ExtensionPrefs::Create(
             this, client->GetPrefServiceForContext(this),
             this->GetPath().AppendASCII(extensions::kInstallDirectoryName),
             ExtensionPrefValueMapFactory::GetForBrowserContext(this),
             client->AreExtensionsDisabled(*base::CommandLine::ForCurrentProcess(), this),
             prefsObservers);
-        extensions::ExtensionPrefsFactory::GetInstance()->SetInstanceForTesting(this, base::WrapUnique(extensionPrefs));
+        extensions::ExtensionPrefsFactory::GetInstance()->SetInstanceForTesting(this, std::move(extensionPrefs));
     }
 #endif
+}
+
+void ProfileQt::setupStoragePath()
+{
+#if defined(Q_OS_WIN)
+    if (IsOffTheRecord())
+        return;
+
+    // Mark the storage path as a "safe" path, allowing the path service on Windows to
+    // block file execution and prevent assertions when saving blobs to disk.
+    // We keep a static list of all profile paths
+
+    base::FilePath thisStoragePath = GetPath();
+
+    static std::vector<base::FilePath> storagePaths;
+    auto it = std::find(storagePaths.begin(), storagePaths.end(), thisStoragePath);
+    if (it == storagePaths.end()) {
+        if (storagePaths.size() >= (PATH_QT_END - PATH_QT_START)) {
+            qWarning("Number of profile paths exceeded %ull, storage may break",
+                     static_cast<qulonglong>(PATH_QT_END - PATH_QT_START));
+            return;
+        }
+
+        storagePaths.push_back(thisStoragePath);
+        it = storagePaths.end() - 1;
+    }
+
+    int pathID = PATH_QT_START + (it - storagePaths.begin());
+    base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, { base::MayBlock() },
+        base::BindOnce(base::PathService::Override, PATH_QT_START + (it - storagePaths.begin()), thisStoragePath),
+        base::BindOnce([](int pathID_, bool succeeded) {
+            if (succeeded) base::SetExtraNoExecuteAllowedPath(pathID_);
+        }, pathID));
+#endif // defined(Q_OS_WIN)
+}
+
+void ProfileQt::setupPermissionsManager()
+{
+    m_permissionManager.reset(new PermissionManagerQt(profileAdapter()));
 }
 
 PrefServiceAdapter &ProfileQt::prefServiceAdapter()
@@ -291,6 +309,11 @@ PrefServiceAdapter &ProfileQt::prefServiceAdapter()
 const PrefServiceAdapter &ProfileQt::prefServiceAdapter() const
 {
     return m_prefServiceAdapter;
+}
+
+const blink::UserAgentMetadata &ProfileQt::userAgentMetadata()
+{
+    return m_userAgentMetadata;
 }
 
 content::PlatformNotificationService *ProfileQt::GetPlatformNotificationService()

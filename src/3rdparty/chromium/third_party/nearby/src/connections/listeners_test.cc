@@ -15,13 +15,14 @@
 #include "connections/listeners.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
+#include "internal/platform/byte_array.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace {
@@ -54,7 +55,24 @@ TEST(ListenersTest, EnsurePartiallyInitializedIsCallable) {
   EXPECT_TRUE(initiated_cb_called);
 }
 
+TEST(ListenersTest, PayloadListener_PayloadCb_Works) {
+  bool payload_content_match = false;
+  const std::string input_bytes = "input";
+  Payload payload = Payload(ByteArray(input_bytes));
+
+  PayloadListener listener{
+      .payload_cb =
+          [&](absl::string_view endpoint_id, Payload payload) {
+            if (payload.AsBytes().data() == input_bytes) {
+              payload_content_match = true;
+            }
+          },
+  };
+  listener.payload_cb("endpoint_id", std::move(payload));
+
+  EXPECT_TRUE(payload_content_match);
+}
+
 }  // namespace
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

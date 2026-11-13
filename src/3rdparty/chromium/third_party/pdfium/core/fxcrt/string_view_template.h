@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,10 @@
 #include <iterator>
 #include <type_traits>
 
+#include "core/fxcrt/fx_memcpy_wrappers.h"
 #include "core/fxcrt/fx_system.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 namespace fxcrt {
 
@@ -58,7 +59,7 @@ class StringViewTemplate {
 
   explicit constexpr StringViewTemplate(
       const pdfium::span<const CharType>& other) noexcept
-      : m_Span(other.size()
+      : m_Span(!other.empty()
                    ? reinterpret_cast<const UnsignedType*>(other.data())
                    : nullptr,
                other.size()) {}
@@ -67,13 +68,13 @@ class StringViewTemplate {
                 !std::is_same<UnsignedType, CharType>::value>::type>
   constexpr StringViewTemplate(
       const pdfium::span<const UnsignedType>& other) noexcept
-      : m_Span(other.size() ? other.data() : nullptr, other.size()) {}
+      : m_Span(!other.empty() ? other.data() : nullptr, other.size()) {}
 
   // Deliberately implicit to avoid calling on every char literal.
   // |ch| must be an lvalue that outlives the StringViewTemplate.
   // NOLINTNEXTLINE(runtime/explicit)
   constexpr StringViewTemplate(const CharType& ch) noexcept
-      : m_Span(reinterpret_cast<const UnsignedType*>(&ch), 1) {}
+      : m_Span(reinterpret_cast<const UnsignedType*>(&ch), 1u) {}
 
   StringViewTemplate& operator=(const CharType* src) {
     m_Span = pdfium::span<const UnsignedType>(
@@ -100,7 +101,8 @@ class StringViewTemplate {
   }
 
   bool operator==(const StringViewTemplate& other) const {
-    return m_Span == other.m_Span;
+    return std::equal(m_Span.begin(), m_Span.end(), other.m_Span.begin(),
+                      other.m_Span.end());
   }
   bool operator==(const CharType* ptr) const {
     StringViewTemplate other(ptr);
@@ -181,7 +183,7 @@ class StringViewTemplate {
     return !m_Span.empty() ? m_Span[m_Span.size() - 1] : 0;
   }
 
-  const CharType CharAt(const size_t index) const {
+  CharType CharAt(const size_t index) const {
     return static_cast<CharType>(m_Span[index]);
   }
 
@@ -214,7 +216,7 @@ class StringViewTemplate {
     if (!IsValidIndex(first + count - 1))
       return StringViewTemplate();
 
-    return StringViewTemplate(m_Span.data() + first, count);
+    return StringViewTemplate(m_Span.subspan(first, count));
   }
 
   StringViewTemplate First(size_t count) const {

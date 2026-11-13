@@ -35,6 +35,7 @@ import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
+import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 import * as Bindings from '../../models/bindings/bindings.js';
@@ -47,14 +48,14 @@ import * as IssueCounter from '../../ui/components/issue_counter/issue_counter.j
 import objectValueStyles from '../../ui/legacy/components/object_ui/objectValue.css.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import {ConsoleContextSelector} from './ConsoleContextSelector.js';
-import consoleViewStyles from './consoleView.css.js';
-
 import {ConsoleFilter, FilterType, type LevelsMask} from './ConsoleFilter.js';
 import {ConsolePinPane} from './ConsolePinPane.js';
 import {ConsolePrompt, Events as ConsolePromptEvents} from './ConsolePrompt.js';
 import {ConsoleSidebar, Events} from './ConsoleSidebar.js';
+import consoleViewStyles from './consoleView.css.js';
 import {
   ConsoleCommand,
   ConsoleCommandResult,
@@ -64,54 +65,53 @@ import {
   getMessageForElement,
   MaxLengthForLinks,
 } from './ConsoleViewMessage.js';
-
 import {ConsoleViewport, type ConsoleViewportElement, type ConsoleViewportProvider} from './ConsoleViewport.js';
 
 const UIStrings = {
   /**
-  *@description Label for button which links to Issues tab, specifying how many issues there are.
-  */
+   *@description Label for button which links to Issues tab, specifying how many issues there are.
+   */
   issuesWithColon: '{n, plural, =0 {No Issues} =1 {# Issue:} other {# Issues:}}',
   /**
-  *@description Text for the tooltip of the issue counter toolbar item
-  */
+   *@description Text for the tooltip of the issue counter toolbar item
+   */
   issueToolbarTooltipGeneral: 'Some problems no longer generate console messages, but are surfaced in the issues tab.',
   /**
-  * @description Text for the tooltip of the issue counter toolbar item. The placeholder indicates how many issues
-  * there are in the Issues tab broken down by kind.
-  * @example {1 page error, 2 breaking changes} issueEnumeration
-  */
+   * @description Text for the tooltip of the issue counter toolbar item. The placeholder indicates how many issues
+   * there are in the Issues tab broken down by kind.
+   * @example {1 page error, 2 breaking changes} issueEnumeration
+   */
   issueToolbarClickToView: 'Click to view {issueEnumeration}',
   /**
-  * @description Text for the tooltip of the issue counter toolbar item. The placeholder indicates how many issues
-  * there are in the Issues tab broken down by kind.
-  */
+   * @description Text for the tooltip of the issue counter toolbar item. The placeholder indicates how many issues
+   * there are in the Issues tab broken down by kind.
+   */
   issueToolbarClickToGoToTheIssuesTab: 'Click to go to the issues tab',
   /**
-  *@description Text in Console View of the Console panel
-  */
+   *@description Text in Console View of the Console panel
+   */
   findStringInLogs: 'Find string in logs',
   /**
-  *@description Tooltip text that appears when hovering over the largeicon settings gear in show settings pane setting in console view of the console panel
-  */
+   *@description Tooltip text that appears when hovering over the largeicon settings gear in show settings pane setting in console view of the console panel
+   */
   consoleSettings: 'Console settings',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   groupSimilarMessagesInConsole: 'Group similar messages in console',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   showCorsErrorsInConsole: 'Show `CORS` errors in console',
   /**
-  * @description Tooltip for the the console sidebar toggle in the Console panel. Command to
-  * open/show the sidebar.
-  */
+   * @description Tooltip for the the console sidebar toggle in the Console panel. Command to
+   * open/show the sidebar.
+   */
   showConsoleSidebar: 'Show console sidebar',
   /**
-  * @description Tooltip for the the console sidebar toggle in the Console panel. Command to
-  * open/show the sidebar.
-  */
+   * @description Tooltip for the the console sidebar toggle in the Console panel. Command to
+   * open/show the sidebar.
+   */
   hideConsoleSidebar: 'Hide console sidebar',
   /**
    * @description Screen reader announcement when the sidebar is shown in the Console panel.
@@ -122,33 +122,33 @@ const UIStrings = {
    */
   consoleSidebarHidden: 'Console sidebar hidden',
   /**
-  *@description Tooltip text that appears on the setting to preserve log when hovering over the item
-  */
+   *@description Tooltip text that appears on the setting to preserve log when hovering over the item
+   */
   doNotClearLogOnPageReload: 'Do not clear log on page reload / navigation',
   /**
-  *@description Text to preserve the log after refreshing
-  */
+   *@description Text to preserve the log after refreshing
+   */
   preserveLog: 'Preserve log',
   /**
-  *@description Text in Console View of the Console panel
-  */
+   *@description Text in Console View of the Console panel
+   */
   hideNetwork: 'Hide network',
   /**
-  *@description Tooltip text that appears on the setting when hovering over it in Console View of the Console panel
-  */
+   *@description Tooltip text that appears on the setting when hovering over it in Console View of the Console panel
+   */
   onlyShowMessagesFromTheCurrentContext:
       'Only show messages from the current context (`top`, `iframe`, `worker`, extension)',
   /**
-  *@description Alternative title text of a setting in Console View of the Console panel
-  */
+   *@description Alternative title text of a setting in Console View of the Console panel
+   */
   selectedContextOnly: 'Selected context only',
   /**
    *@description Description of a setting that controls whether XMLHttpRequests are logged in the console.
    */
   logXMLHttpRequests: 'Log XMLHttpRequests',
   /**
-  *@description Tooltip text that appears on the setting when hovering over it in Console View of the Console panel
-  */
+   *@description Tooltip text that appears on the setting when hovering over it in Console View of the Console panel
+   */
   eagerlyEvaluateTextInThePrompt: 'Eagerly evaluate text in the prompt',
   /**
    *@description Description of a setting that controls whether text typed in the console should be autocompleted from commands executed in the local console history.
@@ -156,115 +156,120 @@ const UIStrings = {
   autocompleteFromHistory: 'Autocomplete from history',
   /**
    *@description Description of a setting that controls whether user activation is triggered by evaluation'.
-  */
+   */
   treatEvaluationAsUserActivation: 'Treat evaluation as user activation',
   /**
-  * @description Text in Console View of the Console panel, indicating that a number of console
-  * messages have been hidden.
-  */
+   * @description Text in Console View of the Console panel, indicating that a number of console
+   * messages have been hidden.
+   */
   sHidden: '{n, plural, =1 {# hidden} other {# hidden}}',
   /**
-  *@description Alert message for screen readers when the console is cleared
-  */
+   *@description Alert message for screen readers when the console is cleared
+   */
   consoleCleared: 'Console cleared',
   /**
-  *@description Text in Console View of the Console panel
-  *@example {index.js} PH1
-  */
+   *@description Text in Console View of the Console panel
+   *@example {index.js} PH1
+   */
   hideMessagesFromS: 'Hide messages from {PH1}',
   /**
-  *@description Text to save content as a specific file type
-  */
+   *@description Text to save content as a specific file type
+   */
   saveAs: 'Save as...',
   /**
-  *@description A context menu item in the Console View of the Console panel
-  */
+   *@description A context menu item in the Console View of the Console panel
+   */
   copyVisibleStyledSelection: 'Copy visible styled selection',
   /**
-  *@description Text to replay an XHR request
-  */
+   *@description Text to replay an XHR request
+   */
   replayXhr: 'Replay XHR',
   /**
-  *@description Text to indicate DevTools is writing to a file
-  */
+   *@description Text to indicate DevTools is writing to a file
+   */
   writingFile: 'Writing file…',
   /**
-  *@description Text to indicate the searching is in progress
-  */
+   *@description Text to indicate the searching is in progress
+   */
   searching: 'Searching…',
   /**
-  *@description Text to filter result items
-  */
+   *@description Text to filter result items
+   */
   filter: 'Filter',
   /**
-  *@description Text in Console View of the Console panel
-  */
+   *@description Text in Console View of the Console panel
+   */
   egEventdCdnUrlacom: 'e.g. `/event\d/ -cdn url:a.com`',
   /**
-  *@description Sdk console message message level verbose of level Labels in Console View of the Console panel
-  */
+   *@description Sdk console message message level verbose of level Labels in Console View of the Console panel
+   */
   verbose: 'Verbose',
   /**
-  *@description Sdk console message message level info of level Labels in Console View of the Console panel
-  */
+   *@description Sdk console message message level info of level Labels in Console View of the Console panel
+   */
   info: 'Info',
   /**
-  *@description Sdk console message message level warning of level Labels in Console View of the Console panel
-  */
+   *@description Sdk console message message level warning of level Labels in Console View of the Console panel
+   */
   warnings: 'Warnings',
   /**
-  *@description Text for errors
-  */
+   *@description Text for errors
+   */
   errors: 'Errors',
   /**
-  *@description Text in Console View of the Console panel
-  */
+   *@description Text in Console View of the Console panel
+   */
   logLevels: 'Log levels',
   /**
-  *@description Title text of a setting in Console View of the Console panel
-  */
+   *@description Title text of a setting in Console View of the Console panel
+   */
   overriddenByFilterSidebar: 'Overridden by filter sidebar',
   /**
-  *@description Text in Console View of the Console panel
-  */
+   *@description Text in Console View of the Console panel
+   */
   customLevels: 'Custom levels',
   /**
-  *@description Text in Console View of the Console panel
-  *@example {Warnings} PH1
-  */
+   *@description Text in Console View of the Console panel
+   *@example {Warnings} PH1
+   */
   sOnly: '{PH1} only',
   /**
-  *@description Text in Console View of the Console panel
-  */
+   *@description Text in Console View of the Console panel
+   */
   allLevels: 'All levels',
   /**
-  *@description Text in Console View of the Console panel
-  */
+   *@description Text in Console View of the Console panel
+   */
   defaultLevels: 'Default levels',
   /**
-  *@description Text in Console View of the Console panel
-  */
+   *@description Text in Console View of the Console panel
+   */
   hideAll: 'Hide all',
   /**
-  *@description Title of level menu button in console view of the console panel
-  *@example {All levels} PH1
-  */
+   *@description Title of level menu button in console view of the console panel
+   *@example {All levels} PH1
+   */
   logLevelS: 'Log level: {PH1}',
   /**
-  *@description A context menu item in the Console View of the Console panel
-  */
+   *@description A context menu item in the Console View of the Console panel
+   */
   default: 'Default',
   /**
-  *@description Text summary to indicate total number of messages in console for accessibility/screen readers.
-  *@example {5} PH1
-  */
+   *@description Text summary to indicate total number of messages in console for accessibility/screen readers.
+   *@example {5} PH1
+   */
   filteredMessagesInConsole: '{PH1} messages in console',
+
 };
 const str_ = i18n.i18n.registerUIStrings('panels/console/ConsoleView.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 let consoleViewInstance: ConsoleView;
 
-export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Searchable, ConsoleViewportProvider {
+const MIN_HISTORY_LENGTH_FOR_DISABLING_SELF_XSS_WARNING = 5;
+
+export class ConsoleView extends UI.Widget.VBox implements
+    UI.SearchableView.Searchable, ConsoleViewportProvider,
+    SDK.TargetManager.SDKModelObserver<SDK.ConsoleModel.ConsoleModel> {
   private readonly searchableViewInternal: UI.SearchableView.SearchableView;
   private readonly sidebar: ConsoleSidebar;
   private isSidebarOpen: boolean;
@@ -291,6 +296,7 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
   private readonly showCorsErrorsSetting: Common.Settings.Setting<boolean>;
   private readonly timestampsSetting: Common.Settings.Setting<unknown>;
   private readonly consoleHistoryAutocompleteSetting: Common.Settings.Setting<boolean>;
+  private selfXssWarningDisabledSetting: Common.Settings.Setting<boolean>;
   readonly pinPane: ConsolePinPane;
   private viewport: ConsoleViewport;
   private messagesElement: HTMLElement;
@@ -302,7 +308,6 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
   private readonly linkifier: Components.Linkifier.Linkifier;
   private consoleMessages: ConsoleViewMessage[];
   private consoleGroupStarts: ConsoleGroupViewMessage[];
-  private readonly consoleHistorySetting: Common.Settings.Setting<string[]>;
   private prompt: ConsolePrompt;
   private immediatelyFilterMessagesForTest?: boolean;
   private maybeDirtyWhileMuted?: boolean;
@@ -320,8 +325,10 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
   private issueToolbarThrottle: Common.Throttler.Throttler;
   private requestResolver = new Logs.RequestResolver.RequestResolver();
   private issueResolver = new IssuesManager.IssueResolver.IssueResolver();
+  #isDetached: boolean = false;
+  #onIssuesCountUpdateBound = this.#onIssuesCountUpdate.bind(this);
 
-  constructor() {
+  constructor(viewportThrottlerTimeout: number) {
     super();
     this.setMinimumSize(0, 35);
 
@@ -388,30 +395,26 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     this.showSettingsPaneSetting =
         Common.Settings.Settings.instance().createSetting('consoleShowSettingsToolbar', false);
     this.showSettingsPaneButton = new UI.Toolbar.ToolbarSettingToggle(
-        this.showSettingsPaneSetting, 'largeicon-settings-gear', i18nString(UIStrings.consoleSettings));
+        this.showSettingsPaneSetting, 'gear', i18nString(UIStrings.consoleSettings), 'gear-filled');
+    this.showSettingsPaneButton.element.setAttribute(
+        'jslog', `${VisualLogging.toggleSubpane().track({click: true}).context('console-settings')}`);
     this.progressToolbarItem = new UI.Toolbar.ToolbarItem(document.createElement('div'));
     this.groupSimilarSetting = Common.Settings.Settings.instance().moduleSetting('consoleGroupSimilar');
     this.groupSimilarSetting.addChangeListener(() => this.updateMessageList());
 
     this.showCorsErrorsSetting = Common.Settings.Settings.instance().moduleSetting('consoleShowsCorsErrors');
-    this.showCorsErrorsSetting.addChangeListener(() => {
-      Host.userMetrics.showCorsErrorsSettingChanged(this.showCorsErrorsSetting.get());
-      this.updateMessageList();
-    });
+    this.showCorsErrorsSetting.addChangeListener(() => this.updateMessageList());
 
     const toolbar = new UI.Toolbar.Toolbar('console-main-toolbar', this.consoleToolbarContainer);
     toolbar.makeWrappable(true);
-    const rightToolbar = new UI.Toolbar.Toolbar('', this.consoleToolbarContainer);
     toolbar.appendToolbarItem(this.splitWidget.createShowHideSidebarButton(
         i18nString(UIStrings.showConsoleSidebar), i18nString(UIStrings.hideConsoleSidebar),
-        i18nString(UIStrings.consoleSidebarShown), i18nString(UIStrings.consoleSidebarHidden)));
-    toolbar.appendToolbarItem(UI.Toolbar.Toolbar.createActionButton(
-        (UI.ActionRegistry.ActionRegistry.instance().action('console.clear') as UI.ActionRegistration.Action)));
+        i18nString(UIStrings.consoleSidebarShown), i18nString(UIStrings.consoleSidebarHidden), 'console-sidebar'));
+    toolbar.appendToolbarItem(UI.Toolbar.Toolbar.createActionButtonForId('console.clear'));
     toolbar.appendSeparator();
     toolbar.appendToolbarItem(this.consoleContextSelector.toolbarItem());
     toolbar.appendSeparator();
-    const liveExpressionButton = UI.Toolbar.Toolbar.createActionButton(
-        (UI.ActionRegistry.ActionRegistry.instance().action('console.create-pin') as UI.ActionRegistration.Action));
+    const liveExpressionButton = UI.Toolbar.Toolbar.createActionButtonForId('console.create-pin');
     toolbar.appendToolbarItem(liveExpressionButton);
     toolbar.appendSeparator();
     toolbar.appendToolbarItem(this.filter.textFilterUI);
@@ -420,6 +423,8 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     toolbar.appendSeparator();
     this.issueCounter = new IssueCounter.IssueCounter.IssueCounter();
     this.issueCounter.id = 'console-issues-counter';
+    this.issueCounter.setAttribute(
+        'jslog', `${VisualLogging.action().track({click: true}).context(this.issueCounter.id)}`);
     const issuesToolbarItem = new UI.Toolbar.ToolbarItem(this.issueCounter);
     this.issueCounter.data = {
       clickHandler: (): void => {
@@ -431,20 +436,22 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
       displayMode: IssueCounter.IssueCounter.DisplayMode.OmitEmpty,
     };
     toolbar.appendToolbarItem(issuesToolbarItem);
-    rightToolbar.appendSeparator();
-    rightToolbar.appendToolbarItem(this.filterStatusText);
-    rightToolbar.appendToolbarItem(this.showSettingsPaneButton);
+    toolbar.appendSeparator();
+    toolbar.appendToolbarItem(this.filterStatusText);
+    toolbar.appendToolbarItem(this.showSettingsPaneButton);
 
     const monitoringXHREnabledSetting = Common.Settings.Settings.instance().moduleSetting('monitoringXHREnabled');
     this.timestampsSetting = Common.Settings.Settings.instance().moduleSetting('consoleTimestampsEnabled');
     this.consoleHistoryAutocompleteSetting =
         Common.Settings.Settings.instance().moduleSetting('consoleHistoryAutocomplete');
+    this.selfXssWarningDisabledSetting = Common.Settings.Settings.instance().createSetting(
+        'disableSelfXssWarning', false, Common.Settings.SettingStorageType.Synced);
 
     const settingsPane = new UI.Widget.HBox();
     settingsPane.show(this.contentsElement);
     settingsPane.element.classList.add('console-settings-pane');
 
-    UI.ARIAUtils.setAccessibleName(settingsPane.element, i18nString(UIStrings.consoleSettings));
+    UI.ARIAUtils.setLabel(settingsPane.element, i18nString(UIStrings.consoleSettings));
     UI.ARIAUtils.markAsGroup(settingsPane.element);
 
     const settingsToolbarLeft = new UI.Toolbar.Toolbar('', settingsPane.element);
@@ -494,13 +501,14 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     this.messagesElement.id = 'console-messages';
     this.messagesElement.classList.add('monospace');
     this.messagesElement.addEventListener('click', this.messagesClicked.bind(this), false);
-    this.messagesElement.addEventListener('paste', this.messagesPasted.bind(this), true);
-    this.messagesElement.addEventListener('clipboard-paste', this.messagesPasted.bind(this), true);
+    ['paste', 'clipboard-paste', 'drop'].forEach(type => {
+      this.messagesElement.addEventListener(type, this.messagesPasted.bind(this), true);
+    });
 
     this.messagesCountElement = this.consoleToolbarContainer.createChild('div', 'message-count');
     UI.ARIAUtils.markAsPoliteLiveRegion(this.messagesCountElement, false);
 
-    this.viewportThrottler = new Common.Throttler.Throttler(50);
+    this.viewportThrottler = new Common.Throttler.Throttler(viewportThrottlerTimeout);
     this.pendingBatchResize = false;
     this.onMessageResizedBound = (e: Common.EventTarget.EventTargetEvent<UI.TreeOutline.TreeElement>): void => {
       void this.onMessageResized(e);
@@ -523,13 +531,11 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     // the linkifiers live location change event.
     const throttler = new Common.Throttler.Throttler(100);
     const refilterMessages = (): Promise<void> => throttler.schedule(async () => this.onFilterChanged());
-    this.linkifier =
-        new Components.Linkifier.Linkifier(MaxLengthForLinks, /* useLinkDecorator */ undefined, refilterMessages);
+    this.linkifier = new Components.Linkifier.Linkifier(MaxLengthForLinks);
+    this.linkifier.addEventListener(Components.Linkifier.Events.LiveLocationUpdated, refilterMessages);
 
     this.consoleMessages = [];
     this.consoleGroupStarts = [];
-
-    this.consoleHistorySetting = Common.Settings.Settings.instance().createLocalSetting('consoleHistory', []);
 
     this.prompt = new ConsolePrompt();
     this.prompt.show(this.promptElement);
@@ -545,8 +551,6 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
 
     this.consoleHistoryAutocompleteSetting.addChangeListener(this.consoleHistoryAutocompleteChanged, this);
 
-    const historyData = this.consoleHistorySetting.get();
-    this.prompt.history().setHistoryData(historyData);
     this.consoleHistoryAutocompleteChanged();
 
     this.updateFilterStatus();
@@ -567,21 +571,24 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     this.messagesElement.addEventListener('touchend', this.updateStickToBottomOnPointerUp.bind(this), false);
     this.messagesElement.addEventListener('touchcancel', this.updateStickToBottomOnPointerUp.bind(this), false);
 
-    SDK.ConsoleModel.ConsoleModel.instance().addEventListener(
-        SDK.ConsoleModel.Events.ConsoleCleared, this.consoleCleared, this);
-    SDK.ConsoleModel.ConsoleModel.instance().addEventListener(
-        SDK.ConsoleModel.Events.MessageAdded, this.onConsoleMessageAdded, this);
-    SDK.ConsoleModel.ConsoleModel.instance().addEventListener(
-        SDK.ConsoleModel.Events.MessageUpdated, this.onConsoleMessageUpdated, this);
-    SDK.ConsoleModel.ConsoleModel.instance().addEventListener(
-        SDK.ConsoleModel.Events.CommandEvaluated, this.commandEvaluated, this);
-    SDK.ConsoleModel.ConsoleModel.instance().messages().forEach(this.addConsoleMessage, this);
+    SDK.TargetManager.TargetManager.instance().addModelListener(
+        SDK.ConsoleModel.ConsoleModel, SDK.ConsoleModel.Events.ConsoleCleared, this.consoleCleared, this,
+        {scoped: true});
+    SDK.TargetManager.TargetManager.instance().addModelListener(
+        SDK.ConsoleModel.ConsoleModel, SDK.ConsoleModel.Events.MessageAdded, this.onConsoleMessageAdded, this,
+        {scoped: true});
+    SDK.TargetManager.TargetManager.instance().addModelListener(
+        SDK.ConsoleModel.ConsoleModel, SDK.ConsoleModel.Events.MessageUpdated, this.onConsoleMessageUpdated, this,
+        {scoped: true});
+    SDK.TargetManager.TargetManager.instance().addModelListener(
+        SDK.ConsoleModel.ConsoleModel, SDK.ConsoleModel.Events.CommandEvaluated, this.commandEvaluated, this,
+        {scoped: true});
+    SDK.TargetManager.TargetManager.instance().observeModels(SDK.ConsoleModel.ConsoleModel, this, {scoped: true});
 
     const issuesManager = IssuesManager.IssuesManager.IssuesManager.instance();
     this.issueToolbarThrottle = new Common.Throttler.Throttler(100);
     issuesManager.addEventListener(
-        IssuesManager.IssuesManager.Events.IssuesCountUpdated,
-        () => this.issueToolbarThrottle.schedule(async () => this.updateIssuesToolbarItem()), this);
+        IssuesManager.IssuesManager.Events.IssuesCountUpdated, this.#onIssuesCountUpdateBound);
   }
   static appendSettingsCheckboxToToolbar(
       toolbar: UI.Toolbar.Toolbar, settingOrSetingName: Common.Settings.Setting<boolean>|string, title: string,
@@ -598,15 +605,30 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     return checkbox;
   }
 
-  static instance(): ConsoleView {
-    if (!consoleViewInstance) {
-      consoleViewInstance = new ConsoleView();
+  static instance(opts?: {forceNew: boolean, viewportThrottlerTimeout?: number}): ConsoleView {
+    if (!consoleViewInstance || opts?.forceNew) {
+      consoleViewInstance = new ConsoleView(opts?.viewportThrottlerTimeout ?? 50);
     }
     return consoleViewInstance;
   }
 
   static clearConsole(): void {
-    SDK.ConsoleModel.ConsoleModel.instance().requestClearMessages();
+    SDK.ConsoleModel.ConsoleModel.requestClearMessages();
+  }
+
+  #onIssuesCountUpdate(): void {
+    void this.issueToolbarThrottle.schedule(async () => this.updateIssuesToolbarItem());
+  }
+
+  modelAdded(model: SDK.ConsoleModel.ConsoleModel): void {
+    model.messages().forEach(this.addConsoleMessage, this);
+  }
+
+  modelRemoved(model: SDK.ConsoleModel.ConsoleModel): void {
+    if (!Common.Settings.Settings.instance().moduleSetting('preserveConsoleLog').get() &&
+        model.target().outermostTarget() === model.target()) {
+      this.consoleCleared();
+    }
   }
 
   private onFilterChanged(): void {
@@ -632,8 +654,7 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
   }
 
   clearHistory(): void {
-    this.consoleHistorySetting.set([]);
-    this.prompt.history().setHistoryData([]);
+    this.prompt.history().clear();
   }
 
   private consoleHistoryAutocompleteChanged(): void {
@@ -693,18 +714,18 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     this.prompt.clearAutocomplete();
   }
 
-  willHide(): void {
+  override willHide(): void {
     this.hidePromptSuggestBox();
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.updateIssuesToolbarItem();
     this.viewport.refresh();
     this.registerCSSFiles([consoleViewStyles, objectValueStyles, CodeHighlighter.Style.default]);
   }
 
-  focus(): void {
+  override focus(): void {
     if (this.viewport.hasVirtualSelection()) {
       (this.viewport.contentElement() as HTMLElement).focus();
     } else {
@@ -722,7 +743,7 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     }
   }
 
-  restoreScrollPositions(): void {
+  override restoreScrollPositions(): void {
     if (this.viewport.stickToBottom()) {
       this.immediatelyScrollToBottom();
     } else {
@@ -730,7 +751,7 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     }
   }
 
-  onResize(): void {
+  override onResize(): void {
     this.scheduleViewportRefresh();
     this.hidePromptSuggestBox();
     if (this.viewport.stickToBottom()) {
@@ -760,7 +781,17 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     return;
   }
 
+  override onDetach(): void {
+    this.#isDetached = true;
+    const issuesManager = IssuesManager.IssuesManager.IssuesManager.instance();
+    issuesManager.removeEventListener(
+        IssuesManager.IssuesManager.Events.IssuesCountUpdated, this.#onIssuesCountUpdateBound);
+  }
+
   private updateIssuesToolbarItem(): void {
+    if (this.#isDetached) {
+      return;
+    }
     const manager = IssuesManager.IssuesManager.IssuesManager.instance();
     const issueEnumeration = IssueCounter.IssueCounter.getIssueCountsEnumeration(manager);
     const issuesTitleGotoIssues = manager.numberOfIssues() === 0 ?
@@ -779,20 +810,14 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
   private scheduleViewportRefresh(): void {
     if (this.muteViewportUpdates) {
       this.maybeDirtyWhileMuted = true;
-      this.scheduleViewportRefreshForTest(true);
       return;
     }
-    this.scheduleViewportRefreshForTest(false);
 
     this.scheduledRefreshPromiseForTest = this.viewportThrottler.schedule(this.invalidateViewport.bind(this));
   }
 
   getScheduledRefreshPromiseForTest(): Promise<void>|undefined {
     return this.scheduledRefreshPromiseForTest;
-  }
-
-  private scheduleViewportRefreshForTest(_muted: boolean): void {
-    // This functions is sniffed in tests.
   }
 
   private immediatelyScrollToBottom(): void {
@@ -837,8 +862,13 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     const insertedInMiddle = insertAt < this.consoleMessages.length;
     this.consoleMessages.splice(insertAt, 0, viewMessage);
 
-    if (message.type !== SDK.ConsoleModel.FrontendMessageType.Command &&
-        message.type !== SDK.ConsoleModel.FrontendMessageType.Result) {
+    if (message.type === SDK.ConsoleModel.FrontendMessageType.Command) {
+      this.prompt.history().pushHistoryItem(message.messageText);
+      if (this.prompt.history().length() >= MIN_HISTORY_LENGTH_FOR_DISABLING_SELF_XSS_WARNING &&
+          !this.selfXssWarningDisabledSetting.get()) {
+        this.selfXssWarningDisabledSetting.set(true);
+      }
+    } else if (message.type !== SDK.ConsoleModel.FrontendMessageType.Result) {
       // Maintain group tree.
       // Find parent group.
       const consoleGroupStartIndex =
@@ -974,9 +1004,8 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
 
     if (!currentGroup || !currentGroup.messagesHidden()) {
       const originatingMessage = viewMessage.consoleMessage().originatingMessage();
-      if (lastMessage && originatingMessage && lastMessage.consoleMessage() === originatingMessage) {
-        viewMessage.toMessageElement().classList.add('console-adjacent-user-command-result');
-      }
+      const adjacent = Boolean(originatingMessage && lastMessage?.consoleMessage() === originatingMessage);
+      viewMessage.setAdjacentUserCommandResult(adjacent);
       showGroup(currentGroup, this.visibleViewMessages);
       this.visibleViewMessages.push(viewMessage);
       this.searchMessage(this.visibleViewMessages.length - 1);
@@ -1080,6 +1109,16 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     const consoleViewMessage = sourceElement && getMessageForElement(sourceElement);
     const consoleMessage = consoleViewMessage ? consoleViewMessage.consoleMessage() : null;
 
+    if (consoleViewMessage) {
+      UI.Context.Context.instance().setFlavor(ConsoleViewMessage, consoleViewMessage);
+    }
+
+    if (consoleMessage && !consoleViewMessage?.element()?.matches('.has-insight') &&
+        consoleViewMessage?.shouldShowInsights()) {
+      contextMenu.headerSection().appendAction(
+          consoleViewMessage?.getExplainActionId(), undefined, /* optional=*/ true);
+    }
+
     if (consoleMessage && consoleMessage.url) {
       const menuTitle = i18nString(
           UIStrings.hideMessagesFromS, {PH1: new Common.ParsedURL.ParsedURL(consoleMessage.url).displayName});
@@ -1107,7 +1146,7 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
   }
 
   private async saveConsole(): Promise<void> {
-    const url = (SDK.TargetManager.TargetManager.instance().mainTarget() as SDK.Target.Target).inspectedURL();
+    const url = (SDK.TargetManager.TargetManager.instance().scopeTarget() as SDK.Target.Target).inspectedURL();
     const parsedURL = Common.ParsedURL.ParsedURL.fromString(url);
     const filename =
         Platform.StringUtilities.sprintf('%s-%d.log', parsedURL ? parsedURL.host : 'console', Date.now()) as
@@ -1302,7 +1341,12 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     this.focusPrompt();
   }
 
-  private messagesPasted(_event: Event): void {
+  private messagesPasted(event: Event): void {
+    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.SELF_XSS_WARNING) &&
+        !Root.Runtime.Runtime.queryParam('isChromeForTesting') && !this.selfXssWarningDisabledSetting.get()) {
+      event.preventDefault();
+      this.prompt.showSelfXssWarning();
+    }
     if (UI.UIUtils.isEditing()) {
       return;
     }
@@ -1352,21 +1396,19 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
           result.runtimeModel(), exceptionDetails, SDK.ConsoleModel.FrontendMessageType.Result, undefined, undefined);
     }
     message.setOriginatingMessage(originatingConsoleMessage);
-    SDK.ConsoleModel.ConsoleModel.instance().addMessage(message);
+    result.runtimeModel().target().model(SDK.ConsoleModel.ConsoleModel)?.addMessage(message);
   }
 
   private commandEvaluated(event: Common.EventTarget.EventTargetEvent<SDK.ConsoleModel.CommandEvaluatedEvent>): void {
     const {data} = event;
-    this.prompt.history().pushHistoryItem(data.commandMessage.messageText);
-    this.consoleHistorySetting.set(this.prompt.history().historyData().slice(-persistedHistorySize));
     this.printResult(data.result, data.commandMessage, data.exceptionDetails);
   }
 
-  elementsToRestoreScrollPositionsFor(): Element[] {
+  override elementsToRestoreScrollPositionsFor(): Element[] {
     return [this.messagesElement];
   }
 
-  searchCanceled(): void {
+  onSearchCanceled(): void {
     this.cleanupAfterSearch();
     for (const message of this.visibleViewMessages) {
       message.setSearchRegex(null);
@@ -1378,7 +1420,7 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
   }
 
   performSearch(searchConfig: UI.SearchableView.SearchConfig, shouldJump: boolean, jumpBackwards?: boolean): void {
-    this.searchCanceled();
+    this.onSearchCanceled();
     this.searchableViewInternal.updateSearchMatchesCount(0);
 
     this.searchRegex = searchConfig.toSearchRegex(true).regex;
@@ -1560,8 +1602,6 @@ globalThis.Console = globalThis.Console || {};
 // @ts-ignore exported for Tests.js
 globalThis.Console.ConsoleView = ConsoleView;
 
-const persistedHistorySize = 300;
-
 export class ConsoleViewFilter {
   private readonly filterChanged: () => void;
   messageLevelFiltersSetting: Common.Settings.Setting<LevelsMask>;
@@ -1616,6 +1656,8 @@ export class ConsoleViewFilter {
     this.levelMenuButton.turnIntoSelect();
     this.levelMenuButton.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, this.showLevelContextMenu.bind(this));
     UI.ARIAUtils.markAsMenuButton(this.levelMenuButton.element);
+    this.levelMenuButton.element.setAttribute(
+        'jslog', `${VisualLogging.dropDown().track({click: true}).context('log-level')}`);
 
     this.updateLevelMenuButtonText();
     this.messageLevelFiltersSetting.addChangeListener(this.updateLevelMenuButtonText.bind(this));
@@ -1711,8 +1753,9 @@ export class ConsoleViewFilter {
 
     const contextMenu = new UI.ContextMenu.ContextMenu(mouseEvent, {
       useSoftMenu: true,
-      x: this.levelMenuButton.element.totalOffsetLeft(),
-      y: this.levelMenuButton.element.totalOffsetTop() + (this.levelMenuButton.element as HTMLElement).offsetHeight,
+      x: this.levelMenuButton.element.getBoundingClientRect().left,
+      y: this.levelMenuButton.element.getBoundingClientRect().top +
+          (this.levelMenuButton.element as HTMLElement).offsetHeight,
     });
     contextMenu.headerSection().appendItem(
         i18nString(UIStrings.default), () => setting.set(ConsoleFilter.defaultLevelsFilterValue()));
@@ -1754,12 +1797,14 @@ export class ConsoleViewFilter {
   }
 }
 
-let actionDelegateInstance: ActionDelegate;
-
 export class ActionDelegate implements UI.ActionRegistration.ActionDelegate {
   handleAction(_context: UI.Context.Context, actionId: string): boolean {
     switch (actionId) {
-      case 'console.show':
+      case 'console.toggle':
+        if (ConsoleView.instance().isShowing() && UI.InspectorView.InspectorView.instance().drawerVisible()) {
+          UI.InspectorView.InspectorView.instance().closeDrawer();
+          return true;
+        }
         Host.InspectorFrontendHost.InspectorFrontendHostInstance.bringToFront();
         Common.Console.Console.instance().show();
         ConsoleView.instance().focusPrompt();
@@ -1775,17 +1820,6 @@ export class ActionDelegate implements UI.ActionRegistration.ActionDelegate {
         return true;
     }
     return false;
-  }
-
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): ActionDelegate {
-    const {forceNew} = opts;
-    if (!actionDelegateInstance || forceNew) {
-      actionDelegateInstance = new ActionDelegate();
-    }
-
-    return actionDelegateInstance;
   }
 }
 

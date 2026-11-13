@@ -5,12 +5,14 @@
 #include "quiche/spdy/core/spdy_frame_builder.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include <limits>
-#include <new>
+#include <cstring>
 
+#include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_bug_tracker.h"
 #include "quiche/common/platform/api/quiche_logging.h"
+#include "quiche/spdy/core/spdy_bitmasks.h"
 #include "quiche/spdy/core/spdy_protocol.h"
 #include "quiche/spdy/core/zero_copy_output_buffer.h"
 
@@ -88,8 +90,8 @@ bool SpdyFrameBuilder::BeginNewFrame(SpdyFrameType type, uint8_t flags,
   uint8_t raw_frame_type = SerializeFrameType(type);
   QUICHE_DCHECK(IsDefinedFrameType(raw_frame_type));
   QUICHE_DCHECK_EQ(0u, stream_id & ~kStreamIdMask);
-  QUICHE_BUG_IF(spdy_bug_73_2, length > kHttp2DefaultFramePayloadLimit)
-      << "Frame length  " << length_ << " is longer than frame size limit.";
+  QUICHE_BUG_IF(spdy_bug_73_2, length > kSpdyMaxFrameSizeLimit)
+      << "Frame length  " << length << " is longer than frame size limit.";
   return BeginNewFrameInternal(raw_frame_type, flags, stream_id, length);
 }
 

@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
-import {assertExists} from '../../base/logging';
 import {
   RecordingTargetV2,
   TargetFactory,
@@ -22,10 +21,13 @@ import {
 import {
   RecordingPageController,
 } from '../../common/recordingV2/recording_page_controller';
-import {fullscreenModalContainer} from '../modal';
+import {
+  RECORDING_MODAL_DIALOG_KEY,
+} from '../../common/recordingV2/recording_utils';
+import {closeModal} from '../../widgets/modal';
 
 interface RecordingMultipleChoiceAttrs {
-  targetFactory: TargetFactory;
+  targetFactories: TargetFactory[];
   // Reference to the controller which maintains the state of the recording
   // page.
   controller: RecordingPageController;
@@ -38,13 +40,13 @@ export class RecordingMultipleChoice implements
   targetSelection(
       targets: RecordingTargetV2[],
       controller: RecordingPageController): m.Vnode|undefined {
+    const targetInfo = controller.getTargetInfo();
     const targetNames = [];
     this.selectedIndex = -1;
     for (let i = 0; i < targets.length; i++) {
       const targetName = targets[i].getInfo().name;
       targetNames.push(m('option', targetName));
-      // We know that we have targetInfo because we checked the state.
-      if (targetName === assertExists(controller.getTargetInfo()).name) {
+      if (targetInfo && targetName === targetInfo.name) {
         this.selectedIndex = i;
       }
     }
@@ -83,7 +85,12 @@ export class RecordingMultipleChoice implements
     if (!controller.shouldShowTargetSelection()) {
       return undefined;
     }
-    const targets = attrs.targetFactory.listTargets();
+    const targets: RecordingTargetV2[] = [];
+    for (const targetFactory of attrs.targetFactories) {
+      for (const target of targetFactory.listTargets()) {
+        targets.push(target);
+      }
+    }
     if (targets.length === 0) {
       return undefined;
     }
@@ -96,7 +103,7 @@ export class RecordingMultipleChoice implements
           {
             disabled: this.selectedIndex === -1,
             onclick: () => {
-              fullscreenModalContainer.close();
+              closeModal(RECORDING_MODAL_DIALOG_KEY);
               controller.onStartRecordingPressed();
             },
           },

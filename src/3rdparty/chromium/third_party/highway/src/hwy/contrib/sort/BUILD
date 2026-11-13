@@ -1,4 +1,7 @@
-package(default_visibility = ["//visibility:public"])
+package(
+    default_applicable_licenses = ["//:license"],
+    default_visibility = ["//visibility:public"],
+)
 
 licenses(["notice"])
 
@@ -79,6 +82,8 @@ cc_library(
         "vqsort_i32d.cc",
         "vqsort_i64a.cc",
         "vqsort_i64d.cc",
+        "vqsort_kv64a.cc",
+        "vqsort_kv64d.cc",
         "vqsort_kv128a.cc",
         "vqsort_kv128d.cc",
         "vqsort_u16a.cc",
@@ -157,12 +162,14 @@ cc_test(
     ],
 )
 
-cc_binary(
+cc_test(
     name = "bench_sort",
-    testonly = 1,
+    size = "medium",
     srcs = ["bench_sort.cc"],
     # Do not enable fully_static_link (pthread crash on bazel)
     local_defines = ["HWY_IS_TEST"],
+    # for test_suite.
+    tags = ["hwy_ops_test"],
     deps = [
         ":helpers",
         ":vqsort",

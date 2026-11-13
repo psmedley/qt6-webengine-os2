@@ -13,35 +13,38 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #include "src/trace_processor/db/column.h"
 
+#include "perfetto/base/logging.h"
+#include "src/trace_processor/db/column/utils.h"
 #include "src/trace_processor/db/compare.h"
 #include "src/trace_processor/db/table.h"
+#include "src/trace_processor/util/glob.h"
+#include "src/trace_processor/util/regex.h"
 
 namespace perfetto {
 namespace trace_processor {
 
-Column::Column(const Column& column,
-               Table* table,
-               uint32_t col_idx,
-               uint32_t overlay_idx,
-               const char* name)
-    : Column(name ? name : column.name_,
-             column.type_,
-             column.flags_ & ~kNoCrossTableInheritFlags,
-             table,
-             col_idx,
-             overlay_idx,
-             column.storage_) {}
+ColumnLegacy::ColumnLegacy(const ColumnLegacy& column,
+                           Table* table,
+                           uint32_t col_idx,
+                           uint32_t overlay_idx,
+                           const char* name)
+    : ColumnLegacy(name ? name : column.name_,
+                   column.type_,
+                   column.flags_ & ~kNoCrossTableInheritFlags,
+                   table,
+                   col_idx,
+                   overlay_idx,
+                   column.storage_) {}
 
-Column::Column(const char* name,
-               ColumnType type,
-               uint32_t flags,
-               Table* table,
-               uint32_t index_in_table,
-               uint32_t overlay_index,
-               ColumnStorageBase* st)
+ColumnLegacy::ColumnLegacy(const char* name,
+                           ColumnType type,
+                           uint32_t flags,
+                           Table* table,
+                           uint32_t index_in_table,
+                           uint32_t overlay_index,
+                           ColumnStorageBase* st)
     : type_(type),
       storage_(st),
       name_(name),
@@ -55,16 +58,16 @@ Column::Column(const char* name,
     bool is_storage_dense;
     switch (type_) {
       case ColumnType::kInt32:
-        is_storage_dense = storage<base::Optional<int32_t>>().IsDense();
+        is_storage_dense = storage<std::optional<int32_t>>().IsDense();
         break;
       case ColumnType::kUint32:
-        is_storage_dense = storage<base::Optional<uint32_t>>().IsDense();
+        is_storage_dense = storage<std::optional<uint32_t>>().IsDense();
         break;
       case ColumnType::kInt64:
-        is_storage_dense = storage<base::Optional<int64_t>>().IsDense();
+        is_storage_dense = storage<std::optional<int64_t>>().IsDense();
         break;
       case ColumnType::kDouble:
-        is_storage_dense = storage<base::Optional<double>>().IsDense();
+        is_storage_dense = storage<std::optional<double>>().IsDense();
         break;
       case ColumnType::kString:
         PERFETTO_FATAL("String column should not be nullable");
@@ -78,20 +81,24 @@ Column::Column(const char* name,
   PERFETTO_DCHECK(IsFlagsAndTypeValid(flags_, type_));
 }
 
-Column Column::DummyColumn(const char* name,
-                           Table* table,
-                           uint32_t col_idx_in_table) {
-  return Column(name, ColumnType::kDummy, Flag::kNoFlag, table,
-                col_idx_in_table, std::numeric_limits<uint32_t>::max(),
-                nullptr);
+ColumnLegacy ColumnLegacy::DummyColumn(const char* name,
+                                       Table* table,
+                                       uint32_t col_idx_in_table) {
+  return ColumnLegacy(name, ColumnType::kDummy, Flag::kNoFlag, table,
+                      col_idx_in_table, std::numeric_limits<uint32_t>::max(),
+                      nullptr);
 }
 
-Column Column::IdColumn(Table* table, uint32_t col_idx, uint32_t overlay_idx) {
-  return Column("id", ColumnType::kId, kIdFlags, table, col_idx, overlay_idx,
-                nullptr);
+ColumnLegacy ColumnLegacy::IdColumn(Table* table,
+                                    uint32_t col_idx,
+                                    uint32_t overlay_idx,
+                                    const char* name,
+                                    uint32_t flags) {
+  return ColumnLegacy(name, ColumnType::kId, flags, table, col_idx, overlay_idx,
+                      nullptr);
 }
 
-void Column::StableSort(bool desc, std::vector<uint32_t>* idx) const {
+void ColumnLegacy::StableSort(bool desc, std::vector<uint32_t>* idx) const {
   if (desc) {
     StableSort<true /* desc */>(idx);
   } else {
@@ -99,7 +106,9 @@ void Column::StableSort(bool desc, std::vector<uint32_t>* idx) const {
   }
 }
 
-void Column::FilterIntoSlow(FilterOp op, SqlValue value, RowMap* rm) const {
+void ColumnLegacy::FilterIntoSlow(FilterOp op,
+                                  SqlValue value,
+                                  RowMap* rm) const {
   switch (type_) {
     case ColumnType::kInt32: {
       if (IsNullable()) {
@@ -147,9 +156,9 @@ void Column::FilterIntoSlow(FilterOp op, SqlValue value, RowMap* rm) const {
 }
 
 template <typename T, bool is_nullable>
-void Column::FilterIntoNumericSlow(FilterOp op,
-                                   SqlValue value,
-                                   RowMap* rm) const {
+void ColumnLegacy::FilterIntoNumericSlow(FilterOp op,
+                                         SqlValue value,
+                                         RowMap* rm) const {
   PERFETTO_DCHECK(IsNullable() == is_nullable);
   PERFETTO_DCHECK(type_ == ColumnTypeHelper<T>::ToColumnType());
   PERFETTO_DCHECK(std::is_arithmetic<T>::value);
@@ -158,7 +167,7 @@ void Column::FilterIntoNumericSlow(FilterOp op,
     PERFETTO_DCHECK(value.is_null());
     if (is_nullable) {
       overlay().FilterInto(rm, [this](uint32_t row) {
-        return !storage<base::Optional<T>>().Get(row).has_value();
+        return !storage<std::optional<T>>().Get(row).has_value();
       });
     } else {
       rm->Clear();
@@ -168,7 +177,7 @@ void Column::FilterIntoNumericSlow(FilterOp op,
     PERFETTO_DCHECK(value.is_null());
     if (is_nullable) {
       overlay().FilterInto(rm, [this](uint32_t row) {
-        return storage<base::Optional<T>>().Get(row).has_value();
+        return storage<std::optional<T>>().Get(row).has_value();
       });
     }
     return;
@@ -187,8 +196,8 @@ void Column::FilterIntoNumericSlow(FilterOp op,
     } else {
       auto fn = [double_value](T v) {
         // We static cast here as this code will be compiled even when T ==
-        // double as we don't have if constexpr in C++11. In reality the cast is
-        // a noop but we cannot statically verify that for the compiler.
+        // double as we don't have if constexpr in C++11. In reality the cast
+        // is a noop but we cannot statically verify that for the compiler.
         return compare::LongToDouble(static_cast<int64_t>(v), double_value);
       };
       FilterIntoNumericWithComparatorSlow<T, is_nullable>(op, rm, fn);
@@ -197,18 +206,18 @@ void Column::FilterIntoNumericSlow(FilterOp op,
     int64_t long_value = value.long_value;
     if (std::is_same<T, double>::value) {
       auto fn = [long_value](T v) {
-        // We negate the return value as the long is always the first parameter
-        // for this function even though the LHS of the comparator should
-        // actually be |v|. This saves us having a duplicate implementation of
-        // the comparision function.
+        // We negate the return value as the long is always the first
+        // parameter for this function even though the LHS of the comparator
+        // should actually be |v|. This saves us having a duplicate
+        // implementation of the comparision function.
         return -compare::LongToDouble(long_value, static_cast<double>(v));
       };
       FilterIntoNumericWithComparatorSlow<T, is_nullable>(op, rm, fn);
     } else {
       auto fn = [long_value](T v) {
         // We static cast here as this code will be compiled even when T ==
-        // double as we don't have if constexpr in C++11. In reality the cast is
-        // a noop but we cannot statically verify that for the compiler.
+        // double as we don't have if constexpr in C++11. In reality the cast
+        // is a noop but we cannot statically verify that for the compiler.
         return compare::Numeric(static_cast<int64_t>(v), long_value);
       };
       FilterIntoNumericWithComparatorSlow<T, is_nullable>(op, rm, fn);
@@ -219,14 +228,14 @@ void Column::FilterIntoNumericSlow(FilterOp op,
 }
 
 template <typename T, bool is_nullable, typename Comparator>
-void Column::FilterIntoNumericWithComparatorSlow(FilterOp op,
-                                                 RowMap* rm,
-                                                 Comparator cmp) const {
+void ColumnLegacy::FilterIntoNumericWithComparatorSlow(FilterOp op,
+                                                       RowMap* rm,
+                                                       Comparator cmp) const {
   switch (op) {
     case FilterOp::kLt:
       overlay().FilterInto(rm, [this, &cmp](uint32_t idx) {
         if (is_nullable) {
-          auto opt_value = storage<base::Optional<T>>().Get(idx);
+          auto opt_value = storage<std::optional<T>>().Get(idx);
           return opt_value && cmp(*opt_value) < 0;
         }
         return cmp(storage<T>().Get(idx)) < 0;
@@ -235,7 +244,7 @@ void Column::FilterIntoNumericWithComparatorSlow(FilterOp op,
     case FilterOp::kEq:
       overlay().FilterInto(rm, [this, &cmp](uint32_t idx) {
         if (is_nullable) {
-          auto opt_value = storage<base::Optional<T>>().Get(idx);
+          auto opt_value = storage<std::optional<T>>().Get(idx);
           return opt_value && cmp(*opt_value) == 0;
         }
         return cmp(storage<T>().Get(idx)) == 0;
@@ -244,7 +253,7 @@ void Column::FilterIntoNumericWithComparatorSlow(FilterOp op,
     case FilterOp::kGt:
       overlay().FilterInto(rm, [this, &cmp](uint32_t idx) {
         if (is_nullable) {
-          auto opt_value = storage<base::Optional<T>>().Get(idx);
+          auto opt_value = storage<std::optional<T>>().Get(idx);
           return opt_value && cmp(*opt_value) > 0;
         }
         return cmp(storage<T>().Get(idx)) > 0;
@@ -253,7 +262,7 @@ void Column::FilterIntoNumericWithComparatorSlow(FilterOp op,
     case FilterOp::kNe:
       overlay().FilterInto(rm, [this, &cmp](uint32_t idx) {
         if (is_nullable) {
-          auto opt_value = storage<base::Optional<T>>().Get(idx);
+          auto opt_value = storage<std::optional<T>>().Get(idx);
           return opt_value && cmp(*opt_value) != 0;
         }
         return cmp(storage<T>().Get(idx)) != 0;
@@ -262,7 +271,7 @@ void Column::FilterIntoNumericWithComparatorSlow(FilterOp op,
     case FilterOp::kLe:
       overlay().FilterInto(rm, [this, &cmp](uint32_t idx) {
         if (is_nullable) {
-          auto opt_value = storage<base::Optional<T>>().Get(idx);
+          auto opt_value = storage<std::optional<T>>().Get(idx);
           return opt_value && cmp(*opt_value) <= 0;
         }
         return cmp(storage<T>().Get(idx)) <= 0;
@@ -271,21 +280,25 @@ void Column::FilterIntoNumericWithComparatorSlow(FilterOp op,
     case FilterOp::kGe:
       overlay().FilterInto(rm, [this, &cmp](uint32_t idx) {
         if (is_nullable) {
-          auto opt_value = storage<base::Optional<T>>().Get(idx);
+          auto opt_value = storage<std::optional<T>>().Get(idx);
           return opt_value && cmp(*opt_value) >= 0;
         }
         return cmp(storage<T>().Get(idx)) >= 0;
       });
       break;
+    case FilterOp::kGlob:
+      rm->Clear();
+      break;
+    case FilterOp::kRegex:
     case FilterOp::kIsNull:
     case FilterOp::kIsNotNull:
       PERFETTO_FATAL("Should be handled above");
   }
 }
 
-void Column::FilterIntoStringSlow(FilterOp op,
-                                  SqlValue value,
-                                  RowMap* rm) const {
+void ColumnLegacy::FilterIntoStringSlow(FilterOp op,
+                                        SqlValue value,
+                                        RowMap* rm) const {
   PERFETTO_DCHECK(type_ == ColumnType::kString);
 
   if (op == FilterOp::kIsNull) {
@@ -347,13 +360,39 @@ void Column::FilterIntoStringSlow(FilterOp op,
         return v.data() != nullptr && compare::String(v, str_value) >= 0;
       });
       break;
+    case FilterOp::kGlob: {
+      util::GlobMatcher matcher = util::GlobMatcher::FromPattern(str_value);
+      overlay().FilterInto(rm, [this, &matcher](uint32_t idx) {
+        auto v = GetStringPoolStringAtIdx(idx);
+        return v.data() != nullptr && matcher.Matches(v);
+      });
+      break;
+    }
+    case FilterOp::kRegex: {
+      if constexpr (regex::IsRegexSupported()) {
+        auto regex = regex::Regex::Create(str_value.c_str());
+        if (!regex.status().ok()) {
+          rm->Clear();
+          break;
+        }
+        overlay().FilterInto(rm, [this, &regex](uint32_t idx) {
+          auto v = GetStringPoolStringAtIdx(idx);
+          return v.data() != nullptr && regex->Search(v.c_str());
+        });
+      } else {
+        PERFETTO_FATAL("Regex not supported");
+      }
+      break;
+    }
     case FilterOp::kIsNull:
     case FilterOp::kIsNotNull:
       PERFETTO_FATAL("Should be handled above");
   }
 }
 
-void Column::FilterIntoIdSlow(FilterOp op, SqlValue value, RowMap* rm) const {
+void ColumnLegacy::FilterIntoIdSlow(FilterOp op,
+                                    SqlValue value,
+                                    RowMap* rm) const {
   PERFETTO_DCHECK(type_ == ColumnType::kId);
 
   if (op == FilterOp::kIsNull) {
@@ -402,6 +441,10 @@ void Column::FilterIntoIdSlow(FilterOp op, SqlValue value, RowMap* rm) const {
         return compare::Numeric(idx, id_value) >= 0;
       });
       break;
+    case FilterOp::kGlob:
+    case FilterOp::kRegex:
+      rm->Clear();
+      break;
     case FilterOp::kIsNull:
     case FilterOp::kIsNotNull:
       PERFETTO_FATAL("Should be handled above");
@@ -409,7 +452,7 @@ void Column::FilterIntoIdSlow(FilterOp op, SqlValue value, RowMap* rm) const {
 }
 
 template <bool desc>
-void Column::StableSort(std::vector<uint32_t>* out) const {
+void ColumnLegacy::StableSort(std::vector<uint32_t>* out) const {
   switch (type_) {
     case ColumnType::kInt32: {
       if (IsNullable()) {
@@ -465,14 +508,14 @@ void Column::StableSort(std::vector<uint32_t>* out) const {
 }
 
 template <bool desc, typename T, bool is_nullable>
-void Column::StableSortNumeric(std::vector<uint32_t>* out) const {
+void ColumnLegacy::StableSortNumeric(std::vector<uint32_t>* out) const {
   PERFETTO_DCHECK(IsNullable() == is_nullable);
   PERFETTO_DCHECK(ColumnTypeHelper<T>::ToColumnType() == type_);
 
   overlay().StableSort(out, [this](uint32_t a_idx, uint32_t b_idx) {
     if (is_nullable) {
-      auto a_val = storage<base::Optional<T>>().Get(a_idx);
-      auto b_val = storage<base::Optional<T>>().Get(b_idx);
+      auto a_val = storage<std::optional<T>>().Get(a_idx);
+      auto b_val = storage<std::optional<T>>().Get(b_idx);
 
       int res = compare::NullableNumeric(a_val, b_val);
       return desc ? res > 0 : res < 0;
@@ -485,7 +528,7 @@ void Column::StableSortNumeric(std::vector<uint32_t>* out) const {
   });
 }
 
-const ColumnStorageOverlay& Column::overlay() const {
+const ColumnStorageOverlay& ColumnLegacy::overlay() const {
   PERFETTO_DCHECK(type_ != ColumnType::kDummy);
   return table_->overlays_[overlay_index()];
 }

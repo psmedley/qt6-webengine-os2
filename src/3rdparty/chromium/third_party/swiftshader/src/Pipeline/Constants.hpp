@@ -103,15 +103,10 @@ struct Constants
 	word4 maskr5g5b5a1Q[16];  // 4 bit writemask -> R5G5B5A1 bit patterns, replicated 4x
 	word4 maskb5g5r5a1Q[16];  // 4 bit writemask -> B5G5R5A1 bit patterns, replicated 4x
 	word4 mask4rgbaQ[16];     // 4 bit writemask -> R4G4B4A4 bit patterns, replicated 4x
-	word4 mask4bgraQ[16];     // 4 bit writemask -> B4G4R4A4 bit patterns, replicated 4x
-	word4 mask4abgrQ[16];     // 4 bit writemask -> A4B4G4R4 bit patterns, replicated 4x
 	word4 mask4argbQ[16];     // 4 bit writemask -> A4R4G4B4 bit patterns, replicated 4x
 	dword4 mask11X[8];        // 3 bit writemask -> B10G11R11 bit patterns, replicated 4x
 
 	unsigned short sRGBtoLinearFF_FF00[256];
-
-	unsigned short linearToSRGB12_16[4096];
-	unsigned short sRGBtoLinear12_16[4096];
 
 	// Centroid parameters
 	float4 sampleX[4][16];

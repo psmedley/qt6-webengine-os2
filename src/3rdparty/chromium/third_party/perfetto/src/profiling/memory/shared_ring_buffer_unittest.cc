@@ -18,11 +18,11 @@
 
 #include <array>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <thread>
 #include <unordered_map>
 
-#include "perfetto/ext/base/optional.h"
 #include "test/gtest_and_gmock.h"
 
 namespace perfetto {
@@ -101,7 +101,7 @@ void StructuredTest(SharedRingBuffer* wr, SharedRingBuffer* rd) {
     ASSERT_EQ(ToString(buf_and_size), data);
     rd->EndRead(std::move(buf_and_size));
   }
-  data = std::string(base::kPageSize - sizeof(uint64_t), '#');
+  data = std::string(base::GetSysPageSize() - sizeof(uint64_t), '#');
   for (int i = 0; i < 4; i++)
     ASSERT_TRUE(TryWrite(wr, data.data(), data.size()));
 
@@ -146,19 +146,19 @@ void StructuredTest(SharedRingBuffer* wr, SharedRingBuffer* rd) {
 }
 
 TEST(SharedRingBufferTest, ReadShutdown) {
-  constexpr auto kBufSize = base::kPageSize * 4;
-  base::Optional<SharedRingBuffer> wr = SharedRingBuffer::Create(kBufSize);
+  const size_t kBufSize = base::GetSysPageSize() * 4;
+  std::optional<SharedRingBuffer> wr = SharedRingBuffer::Create(kBufSize);
   ASSERT_TRUE(wr);
   SharedRingBuffer rd =
       *SharedRingBuffer::Attach(base::ScopedFile(dup(wr->fd())));
   auto buf = rd.BeginRead();
-  wr = base::nullopt;
+  wr = std::nullopt;
   rd.EndRead(std::move(buf));
 }
 
 TEST(SharedRingBufferTest, WriteShutdown) {
-  constexpr auto kBufSize = base::kPageSize * 4;
-  base::Optional<SharedRingBuffer> rd = SharedRingBuffer::Create(kBufSize);
+  const size_t kBufSize = base::GetSysPageSize() * 4;
+  std::optional<SharedRingBuffer> rd = SharedRingBuffer::Create(kBufSize);
   ASSERT_TRUE(rd);
   SharedRingBuffer wr =
       *SharedRingBuffer::Attach(base::ScopedFile(dup(rd->fd())));
@@ -167,27 +167,27 @@ TEST(SharedRingBufferTest, WriteShutdown) {
     auto lock = wr.AcquireLock(ScopedSpinlock::Mode::Blocking);
     buf = wr.BeginWrite(lock, 10);
   }
-  rd = base::nullopt;
+  rd = std::nullopt;
   memset(buf.data, 0, buf.size);
   wr.EndWrite(std::move(buf));
 }
 
 TEST(SharedRingBufferTest, SingleThreadSameInstance) {
-  constexpr auto kBufSize = base::kPageSize * 4;
-  base::Optional<SharedRingBuffer> buf = SharedRingBuffer::Create(kBufSize);
+  const size_t kBufSize = base::GetSysPageSize() * 4;
+  std::optional<SharedRingBuffer> buf = SharedRingBuffer::Create(kBufSize);
   StructuredTest(&*buf, &*buf);
 }
 
 TEST(SharedRingBufferTest, SingleThreadAttach) {
-  constexpr auto kBufSize = base::kPageSize * 4;
-  base::Optional<SharedRingBuffer> buf1 = SharedRingBuffer::Create(kBufSize);
-  base::Optional<SharedRingBuffer> buf2 =
+  const size_t kBufSize = base::GetSysPageSize() * 4;
+  std::optional<SharedRingBuffer> buf1 = SharedRingBuffer::Create(kBufSize);
+  std::optional<SharedRingBuffer> buf2 =
       SharedRingBuffer::Attach(base::ScopedFile(dup(buf1->fd())));
   StructuredTest(&*buf1, &*buf2);
 }
 
 TEST(SharedRingBufferTest, MultiThreadingTest) {
-  constexpr auto kBufSize = base::kPageSize * 1024;  // 4 MB
+  const size_t kBufSize = base::GetSysPageSize() * 1024;  // 4 MB
   SharedRingBuffer rd = *SharedRingBuffer::Create(kBufSize);
   SharedRingBuffer wr =
       *SharedRingBuffer::Attach(base::ScopedFile(dup(rd.fd())));
@@ -201,7 +201,7 @@ TEST(SharedRingBufferTest, MultiThreadingTest) {
     while (!writers_enabled.load()) {
     }
     std::minstd_rand0 rnd_engine(static_cast<uint32_t>(thread_id));
-    std::uniform_int_distribution<size_t> dist(1, base::kPageSize * 8);
+    std::uniform_int_distribution<size_t> dist(1, base::GetSysPageSize() * 8);
     for (int i = 0; i < 1000; i++) {
       size_t size = dist(rnd_engine);
       ASSERT_GT(size, 0u);
@@ -255,14 +255,14 @@ TEST(SharedRingBufferTest, MultiThreadingTest) {
 }
 
 TEST(SharedRingBufferTest, InvalidSize) {
-  constexpr auto kBufSize = base::kPageSize * 4 + 1;
-  base::Optional<SharedRingBuffer> wr = SharedRingBuffer::Create(kBufSize);
-  EXPECT_EQ(wr, base::nullopt);
+  const size_t kBufSize = base::GetSysPageSize() * 4 + 1;
+  std::optional<SharedRingBuffer> wr = SharedRingBuffer::Create(kBufSize);
+  EXPECT_EQ(wr, std::nullopt);
 }
 
 TEST(SharedRingBufferTest, EmptyWrite) {
-  constexpr auto kBufSize = base::kPageSize * 4;
-  base::Optional<SharedRingBuffer> wr = SharedRingBuffer::Create(kBufSize);
+  const size_t kBufSize = base::GetSysPageSize() * 4;
+  std::optional<SharedRingBuffer> wr = SharedRingBuffer::Create(kBufSize);
   ASSERT_TRUE(wr);
   SharedRingBuffer::Buffer buf;
   {

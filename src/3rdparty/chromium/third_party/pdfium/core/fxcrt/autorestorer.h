@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CORE_FXCRT_AUTORESTORER_H_
 
 #include "core/fxcrt/fx_memory.h"
+#include "core/fxcrt/unowned_ptr.h"
 
 namespace fxcrt {
 
@@ -23,7 +24,7 @@ class AutoRestorer {
   void AbandonRestoration() { m_Location = nullptr; }
 
  private:
-  T* m_Location;
+  UnownedPtr<T> m_Location;
   const T m_OldValue;
 };
 

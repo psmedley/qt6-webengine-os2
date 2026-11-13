@@ -7,7 +7,7 @@
 
 #include "bench/Benchmark.h"
 #include "include/core/SkColor.h"
-#include "include/private/SkVx.h"
+#include "src/base/SkVx.h"
 
 // Writing into this array prevents the loops from being compiled away.
 static volatile float blackhole[4];
@@ -33,7 +33,7 @@ struct Sk4fRoundtripBench : public Benchmark {
         while (loops --> 0) {
             fs = skvx::cast<float>(skvx::cast<T>(fs));
         }
-        fs.store((float*)blackhole);
+        fs.store(const_cast<float*>(blackhole));
     }
 };
 DEF_BENCH(return new Sk4fRoundtripBench<uint8_t>;)
@@ -51,7 +51,7 @@ struct Sk4fFloorBench : public Benchmark {
         while (loops --> 0) {
             fs = floor(fs);
         }
-        fs.store((float*)blackhole);
+        fs.store(const_cast<float*>(blackhole));
     }
 };
 DEF_BENCH(return new Sk4fFloorBench;)

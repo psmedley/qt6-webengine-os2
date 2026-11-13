@@ -73,6 +73,103 @@ TEST(ProcessedStudyTest, InitValidStudy) {
   histogram_tester.ExpectTotalCount(kInvalidStudyReasonHistogram, 0);
 }
 
+TEST(ProcessedStudyTest, InitInvalidStudyName) {
+  base::HistogramTester histogram_tester;
+
+  Study study = CreateValidStudy();
+  study.set_name("Not,Valid");
+
+  ProcessedStudy processed_study;
+  EXPECT_FALSE(processed_study.Init(&study));
+  histogram_tester.ExpectUniqueSample(kInvalidStudyReasonHistogram,
+                                      InvalidStudyReason::kInvalidStudyName, 1);
+}
+
+TEST(ProcessedStudyTest, InitInvalidExperimentName) {
+  base::HistogramTester histogram_tester;
+
+  Study study = CreateValidStudy();
+  study.mutable_experiment(0)->set_name("Not<Valid");
+
+  ProcessedStudy processed_study;
+  EXPECT_FALSE(processed_study.Init(&study));
+  histogram_tester.ExpectUniqueSample(
+      kInvalidStudyReasonHistogram, InvalidStudyReason::kInvalidExperimentName,
+      1);
+}
+
+TEST(ProcessedStudyTest, InitInvalidEnableFeatureName) {
+  base::HistogramTester histogram_tester;
+
+  Study study = CreateValidStudy();
+  study.mutable_experiment(0)
+      ->mutable_feature_association()
+      ->add_enable_feature("Not,Valid");
+
+  ProcessedStudy processed_study;
+  EXPECT_FALSE(processed_study.Init(&study));
+  histogram_tester.ExpectUniqueSample(
+      kInvalidStudyReasonHistogram, InvalidStudyReason::kInvalidFeatureName, 1);
+}
+
+TEST(ProcessedStudyTest, InitInvalidDisableFeatureName) {
+  base::HistogramTester histogram_tester;
+
+  Study study = CreateValidStudy();
+  study.mutable_experiment(0)
+      ->mutable_feature_association()
+      ->add_disable_feature("Not\252Valid");
+
+  ProcessedStudy processed_study;
+  EXPECT_FALSE(processed_study.Init(&study));
+  histogram_tester.ExpectUniqueSample(
+      kInvalidStudyReasonHistogram, InvalidStudyReason::kInvalidFeatureName, 1);
+}
+
+TEST(ProcessedStudyTest, InitInvalidForcingFeatureOnName) {
+  base::HistogramTester histogram_tester;
+
+  Study study = CreateValidStudy();
+  auto* experiment = study.add_experiment();
+  experiment->set_name("Forced");
+  experiment->mutable_feature_association()->set_forcing_feature_on(
+      "Not*Valid");
+
+  ProcessedStudy processed_study;
+  EXPECT_FALSE(processed_study.Init(&study));
+  histogram_tester.ExpectUniqueSample(
+      kInvalidStudyReasonHistogram, InvalidStudyReason::kInvalidFeatureName, 1);
+}
+
+TEST(ProcessedStudyTest, InitInvalidForcingFeatureOffName) {
+  base::HistogramTester histogram_tester;
+
+  Study study = CreateValidStudy();
+  auto* experiment = study.add_experiment();
+  experiment->set_name("Forced");
+  experiment->mutable_feature_association()->set_forcing_feature_off(
+      "Not,Valid");
+
+  ProcessedStudy processed_study;
+  EXPECT_FALSE(processed_study.Init(&study));
+  histogram_tester.ExpectUniqueSample(
+      kInvalidStudyReasonHistogram, InvalidStudyReason::kInvalidFeatureName, 1);
+}
+
+TEST(ProcessedStudyTest, InitInvalidForcingFlag) {
+  base::HistogramTester histogram_tester;
+
+  Study study = CreateValidStudy();
+  auto* experiment = study.add_experiment();
+  experiment->set_name("Forced");
+  experiment->set_forcing_flag("Not,Valid");
+
+  ProcessedStudy processed_study;
+  EXPECT_FALSE(processed_study.Init(&study));
+  histogram_tester.ExpectUniqueSample(
+      kInvalidStudyReasonHistogram, InvalidStudyReason::kInvalidForcingFlag, 1);
+}
+
 // Verifies that a study with an invalid min version filter is invalid.
 TEST(ProcessedStudyTest, InitInvalidMinVersion) {
   base::HistogramTester histogram_tester;
@@ -287,7 +384,9 @@ TEST(ProcessedStudyTest, ValidateStudy) {
 }
 
 TEST(ProcessedStudyTest, ProcessedStudyAllAssignmentsToOneGroup) {
-  Study study;
+  Study study;   // Must outlive `processed_study`
+  Study study2;  // Must outlive `processed_study`
+
   study.set_name("study1");
   study.set_default_experiment_name("def");
   AddExperiment("def", 100, &study);
@@ -297,7 +396,6 @@ TEST(ProcessedStudyTest, ProcessedStudyAllAssignmentsToOneGroup) {
   EXPECT_TRUE(processed_study.all_assignments_to_one_group());
 
   AddExperiment("abc", 0, &study);
-
   AddExperiment("flag", 0, &study)->set_forcing_flag("flag_test1");
   EXPECT_TRUE(processed_study.Init(&study));
   EXPECT_TRUE(processed_study.all_assignments_to_one_group());
@@ -307,7 +405,6 @@ TEST(ProcessedStudyTest, ProcessedStudyAllAssignmentsToOneGroup) {
   EXPECT_FALSE(processed_study.all_assignments_to_one_group());
 
   // Try with default group and first group being at 0.
-  Study study2;
   study2.set_name("study2");
   study2.set_default_experiment_name("def");
   AddExperiment("def", 0, &study2);

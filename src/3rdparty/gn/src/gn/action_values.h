@@ -44,6 +44,10 @@ class ActionValues {
   bool has_depfile() const { return !depfile_.ranges().empty(); }
   void set_depfile(const SubstitutionPattern& depfile) { depfile_ = depfile; }
 
+  // prefix to the ninja output description for this action.
+  std::string& mnemonic() { return mnemonic_; }
+  const std::string& mnemonic() const { return mnemonic_; }
+
   // Response file contents. Empty means no response file.
   SubstitutionList& rsp_file_contents() { return rsp_file_contents_; }
   const SubstitutionList& rsp_file_contents() const {
@@ -51,17 +55,13 @@ class ActionValues {
   }
   bool uses_rsp_file() const { return !rsp_file_contents_.list().empty(); }
 
-  // Pool option
-  const LabelPtrPair<Pool>& pool() const { return pool_; }
-  void set_pool(LabelPtrPair<Pool> pool) { pool_ = std::move(pool); }
-
  private:
   SourceFile script_;
   SubstitutionList args_;
   SubstitutionList outputs_;
   SubstitutionPattern depfile_;
   SubstitutionList rsp_file_contents_;
-  LabelPtrPair<Pool> pool_;
+  std::string mnemonic_;
 
   ActionValues(const ActionValues&) = delete;
   ActionValues& operator=(const ActionValues&) = delete;

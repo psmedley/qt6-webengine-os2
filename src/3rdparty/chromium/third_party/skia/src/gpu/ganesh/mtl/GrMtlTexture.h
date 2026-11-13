@@ -8,16 +8,17 @@
 #ifndef GrMtlTexture_DEFINED
 #define GrMtlTexture_DEFINED
 
+#import <Metal/Metal.h>
+#include "include/gpu/ganesh/SkImageGanesh.h"
 #include "src/gpu/ganesh/GrTexture.h"
 #include "src/gpu/ganesh/mtl/GrMtlAttachment.h"
-#import <Metal/Metal.h>
 
 class GrMtlGpu;
 
 class GrMtlTexture : public GrTexture {
 public:
     static sk_sp<GrMtlTexture> MakeNewTexture(GrMtlGpu*,
-                                              SkBudgeted budgeted,
+                                              skgpu::Budgeted budgeted,
                                               SkISize dimensions,
                                               MTLPixelFormat format,
                                               uint32_t mipLevels,
@@ -61,9 +62,9 @@ protected:
         INHERITED::onRelease();
     }
 
-     bool onStealBackendTexture(GrBackendTexture*, SkImage::BackendTextureReleaseProc*) override {
-         return false;
-     }
+    bool onStealBackendTexture(GrBackendTexture*, SkImages::BackendTextureReleaseProc*) override {
+        return false;
+    }
 
     void onSetLabel() override;
 
@@ -71,7 +72,7 @@ private:
     enum Wrapped { kWrapped };
 
     GrMtlTexture(GrMtlGpu*,
-                 SkBudgeted,
+                 skgpu::Budgeted,
                  SkISize,
                  sk_sp<GrMtlAttachment>,
                  GrMipmapStatus,

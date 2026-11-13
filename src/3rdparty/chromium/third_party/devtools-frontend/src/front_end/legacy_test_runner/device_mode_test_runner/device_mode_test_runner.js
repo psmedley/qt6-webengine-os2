@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import '../test_runner/test_runner.js';
-import '../../panels/emulation/emulation-legacy.js';
+import * as EmulationModel from '../../models/emulation/emulation.js';
 
 /**
  * @fileoverview using private properties isn't a Closure violation in tests.
  */
-self.DeviceModeTestRunner = self.DeviceModeTestRunner || {};
+export const DeviceModeTestRunner = {};
 
 DeviceModeTestRunner.buildFakePhone = function(overrides) {
   const StandardPhoneJSON = {
@@ -44,5 +43,5 @@ DeviceModeTestRunner.buildFakePhone = function(overrides) {
   };
 
   const json = Object.assign(StandardPhoneJSON, overrides || {});
-  return Emulation.EmulatedDevice.fromJSONV1(json);
+  return EmulationModel.EmulatedDevices.EmulatedDevice.fromJSONV1(json);
 };

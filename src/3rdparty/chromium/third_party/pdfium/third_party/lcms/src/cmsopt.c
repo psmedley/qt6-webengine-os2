@@ -1,7 +1,7 @@
 //---------------------------------------------------------------------------------
 //
 //  Little Color Management System
-//  Copyright (c) 1998-2022 Marti Maria Saguer
+//  Copyright (c) 1998-2023 Marti Maria Saguer
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the "Software"),
@@ -100,6 +100,15 @@ typedef struct {
 
 } Curves16Data;
 
+// A simple adapter to prevent _cmsPipelineEval16Fn vs. _cmsInterpFn16
+// confusion, which trips up UBSAN.
+static
+void Lerp16Adapter(CMSREGISTER const cmsUInt16Number in[],
+                   CMSREGISTER cmsUInt16Number out[],
+                   const void* data) {
+    cmsInterpParams* params = (cmsInterpParams*)data;
+    params->Interpolation.Lerp16(in, out, params);
+}
 
 // Simple optimizations ----------------------------------------------------------------------------------------------------------
 
@@ -805,7 +814,7 @@ Error:
 
     if (DataSetIn == NULL && DataSetOut == NULL) {
 
-        _cmsPipelineSetOptimizationParameters(Dest, (_cmsPipelineEval16Fn) DataCLUT->Params->Interpolation.Lerp16, DataCLUT->Params, NULL, NULL);
+        _cmsPipelineSetOptimizationParameters(Dest, Lerp16Adapter, DataCLUT->Params, NULL, NULL);
     }
     else {
 
@@ -1550,10 +1559,10 @@ void* DupMatShaper(cmsContext ContextID, const void* Data)
 }
 
 
-// A fast matrix-shaper evaluator for 8 bits. This is a bit ticky since I'm using 1.14 signed fixed point
+// A fast matrix-shaper evaluator for 8 bits. This is a bit tricky since I'm using 1.14 signed fixed point
 // to accomplish some performance. Actually it takes 256x3 16 bits tables and 16385 x 3 tables of 8 bits,
 // in total about 50K, and the performance boost is huge!
-static
+static CMS_NO_SANITIZE
 void MatShaperEval16(CMSREGISTER const cmsUInt16Number In[],
                      CMSREGISTER cmsUInt16Number Out[],
                      CMSREGISTER const void* D)
@@ -1728,6 +1737,10 @@ cmsBool OptimizeMatrixShaper(cmsPipeline** Lut, cmsUInt32Number Intent, cmsUInt3
               // Get both matrices
               _cmsStageMatrixData* Data1 = (_cmsStageMatrixData*)cmsStageData(Matrix1);
               _cmsStageMatrixData* Data2 = (_cmsStageMatrixData*)cmsStageData(Matrix2);
+
+              // Only RGB to RGB
+              if (Matrix1->InputChannels != 3 || Matrix1->OutputChannels != 3 ||
+                  Matrix2->InputChannels != 3 || Matrix2->OutputChannels != 3) return FALSE;
 
               // Input offset should be zero
               if (Data1->Offset != NULL) return FALSE;

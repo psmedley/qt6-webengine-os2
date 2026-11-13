@@ -35,6 +35,10 @@ export namespace ProtocolMapping {
     'Animation.animationStarted': [Protocol.Animation.AnimationStartedEvent];
     'Audits.issueAdded': [Protocol.Audits.IssueAddedEvent];
     /**
+     * Emitted when an address form is filled.
+     */
+    'Autofill.addressFormFilled': [Protocol.Autofill.AddressFormFilledEvent];
+    /**
      * Called when the recording state for the service has been updated.
      */
     'BackgroundService.recordingStateChanged': [Protocol.BackgroundService.RecordingStateChangedEvent];
@@ -53,7 +57,7 @@ export namespace ProtocolMapping {
     'Browser.downloadProgress': [Protocol.Browser.DownloadProgressEvent];
     /**
      * Fires whenever a web font is updated.  A non-empty font parameter indicates a successfully loaded
-     * web font
+     * web font.
      */
     'CSS.fontsUpdated': [Protocol.CSS.FontsUpdatedEvent];
     /**
@@ -153,12 +157,6 @@ export namespace ProtocolMapping {
      * Notification sent after the virtual time budget for the current VirtualTimePolicy has run out.
      */
     'Emulation.virtualTimeBudgetExpired': [];
-    /**
-     * Issued when the target starts or stops needing BeginFrames.
-     * Deprecated. Issue beginFrame unconditionally instead and use result from
-     * beginFrame to detect whether the frames were suppressed.
-     */
-    'HeadlessExperimental.needsBeginFramesChanged': [Protocol.HeadlessExperimental.NeedsBeginFramesChangedEvent];
     /**
      * Emitted only when `Input.setInterceptDrags` is enabled. Use this data with `Input.dispatchDragEvent` to
      * restore normal drag and drop behavior.
@@ -408,10 +406,6 @@ export namespace ProtocolMapping {
      * when bfcache navigation fails.
      */
     'Page.backForwardCacheNotUsed': [Protocol.Page.BackForwardCacheNotUsedEvent];
-    /**
-     * Fired when a prerender attempt is completed.
-     */
-    'Page.prerenderAttemptCompleted': [Protocol.Page.PrerenderAttemptCompletedEvent];
     'Page.loadEventFired': [Protocol.Page.LoadEventFiredEvent];
     /**
      * Fired when same-document navigation happens, e.g. due to history API usage or anchor navigation.
@@ -478,9 +472,24 @@ export namespace ProtocolMapping {
      */
     'Storage.indexedDBListUpdated': [Protocol.Storage.IndexedDBListUpdatedEvent];
     /**
-     * One of the interest groups was accessed by the associated page.
+     * One of the interest groups was accessed. Note that these events are global
+     * to all targets sharing an interest group store.
      */
     'Storage.interestGroupAccessed': [Protocol.Storage.InterestGroupAccessedEvent];
+    /**
+     * An auction involving interest groups is taking place. These events are
+     * target-specific.
+     */
+    'Storage.interestGroupAuctionEventOccurred': [Protocol.Storage.InterestGroupAuctionEventOccurredEvent];
+    /**
+     * Shared storage was accessed by the associated page.
+     * The following parameters are included in all events.
+     */
+    'Storage.sharedStorageAccessed': [Protocol.Storage.SharedStorageAccessedEvent];
+    'Storage.storageBucketCreatedOrUpdated': [Protocol.Storage.StorageBucketCreatedOrUpdatedEvent];
+    'Storage.storageBucketDeleted': [Protocol.Storage.StorageBucketDeletedEvent];
+    'Storage.attributionReportingSourceRegistered': [Protocol.Storage.AttributionReportingSourceRegisteredEvent];
+    'Storage.attributionReportingTriggerRegistered': [Protocol.Storage.AttributionReportingTriggerRegisteredEvent];
     /**
      * Issued when attached to target because of auto-attach or `attachToTarget` command.
      */
@@ -518,8 +527,8 @@ export namespace ProtocolMapping {
     'Tethering.accepted': [Protocol.Tethering.AcceptedEvent];
     'Tracing.bufferUsage': [Protocol.Tracing.BufferUsageEvent];
     /**
-     * Contains an bucket of collected trace events. When tracing is stopped collected events will be
-     * send as a sequence of dataCollected events followed by tracingComplete event.
+     * Contains a bucket of collected trace events. When tracing is stopped collected events will be
+     * sent as a sequence of dataCollected events followed by tracingComplete event.
      */
     'Tracing.dataCollected': [Protocol.Tracing.DataCollectedEvent];
     /**
@@ -534,6 +543,11 @@ export namespace ProtocolMapping {
      * The stage of the request can be determined by presence of responseErrorReason
      * and responseStatusCode -- the request is at the response stage if either
      * of these fields is present and in the request stage otherwise.
+     * Redirect responses and subsequent requests are reported similarly to regular
+     * responses and requests. Redirect responses may be distinguished by the value
+     * of `responseStatusCode` (which is one of 301, 302, 303, 307, 308) along with
+     * presence of the `location` header. Requests resulting from a redirect will
+     * have `redirectedRequestId` field set.
      */
     'Fetch.requestPaused': [Protocol.Fetch.RequestPausedEvent];
     /**
@@ -594,6 +608,14 @@ export namespace ProtocolMapping {
      */
     'WebAudio.nodeParamDisconnected': [Protocol.WebAudio.NodeParamDisconnectedEvent];
     /**
+     * Triggered when a credential is added to an authenticator.
+     */
+    'WebAuthn.credentialAdded': [Protocol.WebAuthn.CredentialAddedEvent];
+    /**
+     * Triggered when a credential is used in a webauthn assertion.
+     */
+    'WebAuthn.credentialAsserted': [Protocol.WebAuthn.CredentialAssertedEvent];
+    /**
      * This can be called multiple times, and can be used to set / override /
      * remove player properties. A null propValue indicates removal.
      */
@@ -617,6 +639,38 @@ export namespace ProtocolMapping {
      * list of player ids and all events again.
      */
     'Media.playersCreated': [Protocol.Media.PlayersCreatedEvent];
+    /**
+     * A device request opened a user prompt to select a device. Respond with the
+     * selectPrompt or cancelPrompt command.
+     */
+    'DeviceAccess.deviceRequestPrompted': [Protocol.DeviceAccess.DeviceRequestPromptedEvent];
+    /**
+     * Upsert. Currently, it is only emitted when a rule set added.
+     */
+    'Preload.ruleSetUpdated': [Protocol.Preload.RuleSetUpdatedEvent];
+    'Preload.ruleSetRemoved': [Protocol.Preload.RuleSetRemovedEvent];
+    /**
+     * Fired when a preload enabled state is updated.
+     */
+    'Preload.preloadEnabledStateUpdated': [Protocol.Preload.PreloadEnabledStateUpdatedEvent];
+    /**
+     * Fired when a prefetch attempt is updated.
+     */
+    'Preload.prefetchStatusUpdated': [Protocol.Preload.PrefetchStatusUpdatedEvent];
+    /**
+     * Fired when a prerender attempt is updated.
+     */
+    'Preload.prerenderStatusUpdated': [Protocol.Preload.PrerenderStatusUpdatedEvent];
+    /**
+     * Send a list of sources for all preloading attempts in a document.
+     */
+    'Preload.preloadingAttemptSourcesUpdated': [Protocol.Preload.PreloadingAttemptSourcesUpdatedEvent];
+    'FedCm.dialogShown': [Protocol.FedCm.DialogShownEvent];
+    /**
+     * Triggered when a dialog is closed, either by user action, JS abort,
+     * or a command below.
+     */
+    'FedCm.dialogClosed': [Protocol.FedCm.DialogClosedEvent];
     /**
      * Fired when breakpoint is resolved to an actual script and location.
      */
@@ -865,6 +919,43 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
+     * Runs the form issues check for the target page. Found issues are reported
+     * using Audits.issueAdded event.
+     */
+    'Audits.checkFormsIssues': {
+      paramsType: [];
+      returnType: Protocol.Audits.CheckFormsIssuesResponse;
+    };
+    /**
+     * Trigger autofill on a form identified by the fieldId.
+     * If the field and related form cannot be autofilled, returns an error.
+     */
+    'Autofill.trigger': {
+      paramsType: [Protocol.Autofill.TriggerRequest];
+      returnType: void;
+    };
+    /**
+     * Set addresses so that developers can verify their forms implementation.
+     */
+    'Autofill.setAddresses': {
+      paramsType: [Protocol.Autofill.SetAddressesRequest];
+      returnType: void;
+    };
+    /**
+     * Disables autofill domain notifications.
+     */
+    'Autofill.disable': {
+      paramsType: [];
+      returnType: void;
+    };
+    /**
+     * Enables autofill domain notifications.
+     */
+    'Autofill.enable': {
+      paramsType: [];
+      returnType: void;
+    };
+    /**
      * Enables event updates for the service.
      */
     'BackgroundService.startObserving': {
@@ -1013,6 +1104,14 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
+     * Allows a site to use privacy sandbox features that require enrollment
+     * without the site actually being enrolled. Only supported on page targets.
+     */
+    'Browser.addPrivacySandboxEnrollmentOverride': {
+      paramsType: [Protocol.Browser.AddPrivacySandboxEnrollmentOverrideRequest];
+      returnType: void;
+    };
+    /**
      * Inserts a new rule with the given `ruleText` in a stylesheet with given `styleSheetId`, at the
      * position specified by `location`.
      */
@@ -1143,6 +1242,13 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
+     * Modifies the property rule property name.
+     */
+    'CSS.setPropertyRulePropertyName': {
+      paramsType: [Protocol.CSS.SetPropertyRulePropertyNameRequest];
+      returnType: Protocol.CSS.SetPropertyRulePropertyNameResponse;
+    };
+    /**
      * Modifies the keyframe rule key text.
      */
     'CSS.setKeyframeKey': {
@@ -1207,7 +1313,7 @@ export namespace ProtocolMapping {
     };
     /**
      * Stop tracking rule usage and return the list of rules that were used since last call to
-     * `takeCoverageDelta` (or since start of coverage instrumentation)
+     * `takeCoverageDelta` (or since start of coverage instrumentation).
      */
     'CSS.stopRuleUsageTracking': {
       paramsType: [];
@@ -1215,7 +1321,7 @@ export namespace ProtocolMapping {
     };
     /**
      * Obtain list of rules that became used since last call to this method (or since start of coverage
-     * instrumentation)
+     * instrumentation).
      */
     'CSS.takeCoverageDelta': {
       paramsType: [];
@@ -1246,7 +1352,7 @@ export namespace ProtocolMapping {
      * Requests cache names.
      */
     'CacheStorage.requestCacheNames': {
-      paramsType: [Protocol.CacheStorage.RequestCacheNamesRequest];
+      paramsType: [Protocol.CacheStorage.RequestCacheNamesRequest?];
       returnType: Protocol.CacheStorage.RequestCacheNamesResponse;
     };
     /**
@@ -1395,6 +1501,7 @@ export namespace ProtocolMapping {
     };
     /**
      * Returns the root DOM node (and optionally the subtree) to the caller.
+     * Implicitly enables the DOM domain events for the current target.
      */
     'DOM.getDocument': {
       paramsType: [Protocol.DOM.GetDocumentRequest?];
@@ -1660,9 +1767,10 @@ export namespace ProtocolMapping {
       returnType: Protocol.DOM.GetFrameOwnerResponse;
     };
     /**
-     * Returns the container of the given node based on container query conditions.
-     * If containerName is given, it will find the nearest container with a matching name;
-     * otherwise it will find the nearest container regardless of its container name.
+     * Returns the query container of the given node based on container query
+     * conditions: containerName, physical, and logical axes. If no axes are
+     * provided, the style container is returned, which is the direct parent or the
+     * closest element with a matching container-name.
      */
     'DOM.getContainerForNode': {
       paramsType: [Protocol.DOM.GetContainerForNodeRequest];
@@ -1758,6 +1866,13 @@ export namespace ProtocolMapping {
      */
     'EventBreakpoints.removeInstrumentationBreakpoint': {
       paramsType: [Protocol.EventBreakpoints.RemoveInstrumentationBreakpointRequest];
+      returnType: void;
+    };
+    /**
+     * Removes all breakpoints
+     */
+    'EventBreakpoints.disable': {
+      paramsType: [];
       returnType: void;
     };
     /**
@@ -1960,6 +2075,29 @@ export namespace ProtocolMapping {
       paramsType: [Protocol.Emulation.SetGeolocationOverrideRequest?];
       returnType: void;
     };
+    'Emulation.getOverriddenSensorInformation': {
+      paramsType: [Protocol.Emulation.GetOverriddenSensorInformationRequest];
+      returnType: Protocol.Emulation.GetOverriddenSensorInformationResponse;
+    };
+    /**
+     * Overrides a platform sensor of a given type. If |enabled| is true, calls to
+     * Sensor.start() will use a virtual sensor as backend rather than fetching
+     * data from a real hardware sensor. Otherwise, existing virtual
+     * sensor-backend Sensor objects will fire an error event and new calls to
+     * Sensor.start() will attempt to use a real sensor instead.
+     */
+    'Emulation.setSensorOverrideEnabled': {
+      paramsType: [Protocol.Emulation.SetSensorOverrideEnabledRequest];
+      returnType: void;
+    };
+    /**
+     * Updates the sensor readings reported by a sensor type previously overriden
+     * by setSensorOverrideEnabled.
+     */
+    'Emulation.setSensorOverrideReadings': {
+      paramsType: [Protocol.Emulation.SetSensorOverrideReadingsRequest];
+      returnType: void;
+    };
     /**
      * Overrides the Idle state.
      */
@@ -2143,7 +2281,7 @@ export namespace ProtocolMapping {
       returnType: Protocol.IndexedDB.RequestDataResponse;
     };
     /**
-     * Gets metadata of an object store
+     * Gets metadata of an object store.
      */
     'IndexedDB.getMetadata': {
       paramsType: [Protocol.IndexedDB.GetMetadataRequest];
@@ -2206,6 +2344,13 @@ export namespace ProtocolMapping {
      */
     'Input.dispatchTouchEvent': {
       paramsType: [Protocol.Input.DispatchTouchEventRequest];
+      returnType: void;
+    };
+    /**
+     * Cancels any active dragging in the page.
+     */
+    'Input.cancelDragging': {
+      paramsType: [];
       returnType: void;
     };
     /**
@@ -2519,6 +2664,7 @@ export namespace ProtocolMapping {
     /**
      * Returns all browser cookies. Depending on the backend support, will return detailed cookie
      * information in the `cookies` field.
+     * Deprecated. Use Storage.getCookies instead.
      */
     'Network.getAllCookies': {
       paramsType: [];
@@ -2649,6 +2795,14 @@ export namespace ProtocolMapping {
     'Network.setUserAgentOverride': {
       paramsType: [Protocol.Network.SetUserAgentOverrideRequest];
       returnType: void;
+    };
+    /**
+     * Enables streaming of the response for the given requestId.
+     * If enabled, the dataReceived event contains the data that was received during streaming.
+     */
+    'Network.streamResourceContent': {
+      paramsType: [Protocol.Network.StreamResourceContentRequest];
+      returnType: Protocol.Network.StreamResourceContentResponse;
     };
     /**
      * Returns information about the COEP/COOP isolation status.
@@ -2863,6 +3017,13 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
+     * Show Window Controls Overlay for PWA
+     */
+    'Overlay.setShowWindowControlsOverlay': {
+      paramsType: [Protocol.Overlay.SetShowWindowControlsOverlayRequest?];
+      returnType: void;
+    };
+    /**
      * Deprecated, please use addScriptToEvaluateOnNewDocument instead.
      */
     'Page.addScriptToEvaluateOnLoad': {
@@ -2955,6 +3116,9 @@ export namespace ProtocolMapping {
       paramsType: [];
       returnType: Protocol.Page.GetInstallabilityErrorsResponse;
     };
+    /**
+     * Deprecated because it's not guaranteed that the returned icon is in fact the one used for PWA installation.
+     */
     'Page.getManifestIcons': {
       paramsType: [];
       returnType: Protocol.Page.GetManifestIconsResponse;
@@ -2967,13 +3131,9 @@ export namespace ProtocolMapping {
       paramsType: [];
       returnType: Protocol.Page.GetAppIdResponse;
     };
-    /**
-     * Returns all browser cookies. Depending on the backend support, will return detailed cookie
-     * information in the `cookies` field.
-     */
-    'Page.getCookies': {
-      paramsType: [];
-      returnType: Protocol.Page.GetCookiesResponse;
+    'Page.getAdScriptId': {
+      paramsType: [Protocol.Page.GetAdScriptIdRequest];
+      returnType: Protocol.Page.GetAdScriptIdResponse;
     };
     /**
      * Returns present frame tree structure.
@@ -3254,6 +3414,14 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
+     * Extensions for Custom Handlers API:
+     * https://html.spec.whatwg.org/multipage/system-state.html#rph-automation
+     */
+    'Page.setRPHRegistrationMode': {
+      paramsType: [Protocol.Page.SetRPHRegistrationModeRequest];
+      returnType: void;
+    };
+    /**
      * Generates a report for testing.
      */
     'Page.generateTestReport': {
@@ -3274,6 +3442,19 @@ export namespace ProtocolMapping {
      */
     'Page.setInterceptFileChooserDialog': {
       paramsType: [Protocol.Page.SetInterceptFileChooserDialogRequest];
+      returnType: void;
+    };
+    /**
+     * Enable/disable prerendering manually.
+     *
+     * This command is a short-term solution for https://crbug.com/1440085.
+     * See https://docs.google.com/document/d/12HVmFxYj5Jc-eJr5OmWsa2bqTJsbgGLKI6ZIyx0_wpA
+     * for more details.
+     *
+     * TODO(https://crbug.com/1440085): Remove this once Puppeteer supports tab targets.
+     */
+    'Page.setPrerenderingAllowed': {
+      paramsType: [Protocol.Page.SetPrerenderingAllowedRequest];
       returnType: void;
     };
     /**
@@ -3466,6 +3647,13 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
+     * Registers storage key to be notified when an update occurs to its cache storage list.
+     */
+    'Storage.trackCacheStorageForStorageKey': {
+      paramsType: [Protocol.Storage.TrackCacheStorageForStorageKeyRequest];
+      returnType: void;
+    };
+    /**
      * Registers origin to be notified when an update occurs to its IndexedDB.
      */
     'Storage.trackIndexedDBForOrigin': {
@@ -3484,6 +3672,13 @@ export namespace ProtocolMapping {
      */
     'Storage.untrackCacheStorageForOrigin': {
       paramsType: [Protocol.Storage.UntrackCacheStorageForOriginRequest];
+      returnType: void;
+    };
+    /**
+     * Unregisters storage key from receiving notifications for cache storage.
+     */
+    'Storage.untrackCacheStorageForStorageKey': {
+      paramsType: [Protocol.Storage.UntrackCacheStorageForStorageKeyRequest];
       returnType: void;
     };
     /**
@@ -3531,11 +3726,109 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
+     * Enables/Disables issuing of interestGroupAuctionEvent events.
+     */
+    'Storage.setInterestGroupAuctionTracking': {
+      paramsType: [Protocol.Storage.SetInterestGroupAuctionTrackingRequest];
+      returnType: void;
+    };
+    /**
+     * Gets metadata for an origin's shared storage.
+     */
+    'Storage.getSharedStorageMetadata': {
+      paramsType: [Protocol.Storage.GetSharedStorageMetadataRequest];
+      returnType: Protocol.Storage.GetSharedStorageMetadataResponse;
+    };
+    /**
+     * Gets the entries in an given origin's shared storage.
+     */
+    'Storage.getSharedStorageEntries': {
+      paramsType: [Protocol.Storage.GetSharedStorageEntriesRequest];
+      returnType: Protocol.Storage.GetSharedStorageEntriesResponse;
+    };
+    /**
+     * Sets entry with `key` and `value` for a given origin's shared storage.
+     */
+    'Storage.setSharedStorageEntry': {
+      paramsType: [Protocol.Storage.SetSharedStorageEntryRequest];
+      returnType: void;
+    };
+    /**
+     * Deletes entry for `key` (if it exists) for a given origin's shared storage.
+     */
+    'Storage.deleteSharedStorageEntry': {
+      paramsType: [Protocol.Storage.DeleteSharedStorageEntryRequest];
+      returnType: void;
+    };
+    /**
+     * Clears all entries for a given origin's shared storage.
+     */
+    'Storage.clearSharedStorageEntries': {
+      paramsType: [Protocol.Storage.ClearSharedStorageEntriesRequest];
+      returnType: void;
+    };
+    /**
+     * Resets the budget for `ownerOrigin` by clearing all budget withdrawals.
+     */
+    'Storage.resetSharedStorageBudget': {
+      paramsType: [Protocol.Storage.ResetSharedStorageBudgetRequest];
+      returnType: void;
+    };
+    /**
+     * Enables/disables issuing of sharedStorageAccessed events.
+     */
+    'Storage.setSharedStorageTracking': {
+      paramsType: [Protocol.Storage.SetSharedStorageTrackingRequest];
+      returnType: void;
+    };
+    /**
+     * Set tracking for a storage key's buckets.
+     */
+    'Storage.setStorageBucketTracking': {
+      paramsType: [Protocol.Storage.SetStorageBucketTrackingRequest];
+      returnType: void;
+    };
+    /**
+     * Deletes the Storage Bucket with the given storage key and bucket name.
+     */
+    'Storage.deleteStorageBucket': {
+      paramsType: [Protocol.Storage.DeleteStorageBucketRequest];
+      returnType: void;
+    };
+    /**
+     * Deletes state for sites identified as potential bounce trackers, immediately.
+     */
+    'Storage.runBounceTrackingMitigations': {
+      paramsType: [];
+      returnType: Protocol.Storage.RunBounceTrackingMitigationsResponse;
+    };
+    /**
+     * https://wicg.github.io/attribution-reporting-api/
+     */
+    'Storage.setAttributionReportingLocalTestingMode': {
+      paramsType: [Protocol.Storage.SetAttributionReportingLocalTestingModeRequest];
+      returnType: void;
+    };
+    /**
+     * Enables/disables issuing of Attribution Reporting events.
+     */
+    'Storage.setAttributionReportingTracking': {
+      paramsType: [Protocol.Storage.SetAttributionReportingTrackingRequest];
+      returnType: void;
+    };
+    /**
      * Returns information about the system.
      */
     'SystemInfo.getInfo': {
       paramsType: [];
       returnType: Protocol.SystemInfo.GetInfoResponse;
+    };
+    /**
+     * Returns information about the feature state.
+     */
+    'SystemInfo.getFeatureState': {
+      paramsType: [Protocol.SystemInfo.GetFeatureStateRequest];
+      returnType: Protocol.SystemInfo.GetFeatureStateResponse;
     };
     /**
      * Returns information about all running processes.
@@ -3792,6 +4085,10 @@ export namespace ProtocolMapping {
      * takeResponseBodyForInterceptionAsStream. Calling other methods that
      * affect the request or disabling fetch domain before body is received
      * results in an undefined behavior.
+     * Note that the response body is not available for redirects. Requests
+     * paused in the _redirect received_ state may be differentiated by
+     * `responseCode` and presence of `location` response header, see
+     * comments to `requestPaused` for details.
      */
     'Fetch.getResponseBody': {
       paramsType: [Protocol.Fetch.GetResponseBodyRequest];
@@ -3855,6 +4152,13 @@ export namespace ProtocolMapping {
     'WebAuthn.addVirtualAuthenticator': {
       paramsType: [Protocol.WebAuthn.AddVirtualAuthenticatorRequest];
       returnType: Protocol.WebAuthn.AddVirtualAuthenticatorResponse;
+    };
+    /**
+     * Resets parameters isBogusSignature, isBadUV, isBadUP to false if they are not present.
+     */
+    'WebAuthn.setResponseOverrideBits': {
+      paramsType: [Protocol.WebAuthn.SetResponseOverrideBitsRequest];
+      returnType: void;
     };
     /**
      * Removes the given authenticator.
@@ -3926,6 +4230,70 @@ export namespace ProtocolMapping {
      * Disables the Media domain.
      */
     'Media.disable': {
+      paramsType: [];
+      returnType: void;
+    };
+    /**
+     * Enable events in this domain.
+     */
+    'DeviceAccess.enable': {
+      paramsType: [];
+      returnType: void;
+    };
+    /**
+     * Disable events in this domain.
+     */
+    'DeviceAccess.disable': {
+      paramsType: [];
+      returnType: void;
+    };
+    /**
+     * Select a device in response to a DeviceAccess.deviceRequestPrompted event.
+     */
+    'DeviceAccess.selectPrompt': {
+      paramsType: [Protocol.DeviceAccess.SelectPromptRequest];
+      returnType: void;
+    };
+    /**
+     * Cancel a prompt in response to a DeviceAccess.deviceRequestPrompted event.
+     */
+    'DeviceAccess.cancelPrompt': {
+      paramsType: [Protocol.DeviceAccess.CancelPromptRequest];
+      returnType: void;
+    };
+    'Preload.enable': {
+      paramsType: [];
+      returnType: void;
+    };
+    'Preload.disable': {
+      paramsType: [];
+      returnType: void;
+    };
+    'FedCm.enable': {
+      paramsType: [Protocol.FedCm.EnableRequest?];
+      returnType: void;
+    };
+    'FedCm.disable': {
+      paramsType: [];
+      returnType: void;
+    };
+    'FedCm.selectAccount': {
+      paramsType: [Protocol.FedCm.SelectAccountRequest];
+      returnType: void;
+    };
+    'FedCm.clickDialogButton': {
+      paramsType: [Protocol.FedCm.ClickDialogButtonRequest];
+      returnType: void;
+    };
+    'FedCm.dismissDialog': {
+      paramsType: [Protocol.FedCm.DismissDialogRequest];
+      returnType: void;
+    };
+    /**
+     * Resets the cooldown time, if any, to allow the next FedCM call to show
+     * a dialog even if one was recently dismissed by the user.
+     */
+    'FedCm.resetCooldown': {
       paramsType: [];
       returnType: void;
     };
@@ -4119,8 +4487,8 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
-     * Defines pause on exceptions state. Can be set to stop on all exceptions, uncaught exceptions or
-     * no exceptions. Initial pause on exceptions state is `none`.
+     * Defines pause on exceptions state. Can be set to stop on all exceptions, uncaught exceptions,
+     * or caught exceptions, no exceptions. Initial pause on exceptions state is `none`.
      */
     'Debugger.setPauseOnExceptions': {
       paramsType: [Protocol.Debugger.SetPauseOnExceptionsRequest];
@@ -4270,13 +4638,6 @@ export namespace ProtocolMapping {
       paramsType: [Protocol.Profiler.StartPreciseCoverageRequest?];
       returnType: Protocol.Profiler.StartPreciseCoverageResponse;
     };
-    /**
-     * Enable type profile.
-     */
-    'Profiler.startTypeProfile': {
-      paramsType: [];
-      returnType: void;
-    };
     'Profiler.stop': {
       paramsType: [];
       returnType: Protocol.Profiler.StopResponse;
@@ -4290,26 +4651,12 @@ export namespace ProtocolMapping {
       returnType: void;
     };
     /**
-     * Disable type profile. Disabling releases type profile data collected so far.
-     */
-    'Profiler.stopTypeProfile': {
-      paramsType: [];
-      returnType: void;
-    };
-    /**
      * Collect coverage data for the current isolate, and resets execution counters. Precise code
      * coverage needs to have started.
      */
     'Profiler.takePreciseCoverage': {
       paramsType: [];
       returnType: Protocol.Profiler.TakePreciseCoverageResponse;
-    };
-    /**
-     * Collect type profile.
-     */
-    'Profiler.takeTypeProfile': {
-      paramsType: [];
-      returnType: Protocol.Profiler.TakeTypeProfileResponse;
     };
     /**
      * Add handler to promise with given promise object id.

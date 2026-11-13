@@ -8,9 +8,9 @@
 #ifndef GrManagedResource_DEFINED
 #define GrManagedResource_DEFINED
 
-#include "include/private/SkMutex.h"
-#include "include/private/SkTHash.h"
-#include "include/utils/SkRandom.h"
+#include "include/private/base/SkMutex.h"
+#include "src/base/SkRandom.h"
+#include "src/core/SkTHash.h"
 #include "src/gpu/ganesh/GrSurface.h"
 #include <atomic>
 
@@ -68,7 +68,8 @@ public:
 
     private:
         SkMutex fLock;
-        SkTHashSet<const GrManagedResource*, GrManagedResource::Hash> fHashSet SK_GUARDED_BY(fLock);
+        skia_private::THashSet<const GrManagedResource*, GrManagedResource::Hash> fHashSet
+                SK_GUARDED_BY(fLock);
     };
 
     static std::atomic<uint32_t> fKeyCounter;

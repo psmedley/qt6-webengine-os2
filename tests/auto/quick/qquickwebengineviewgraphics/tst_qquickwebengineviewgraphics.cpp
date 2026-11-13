@@ -1,5 +1,5 @@
 // Copyright (C) 2016 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <quickutil.h>
 #include <QtTest/QtTest>
@@ -124,6 +124,7 @@ void tst_QQuickWebEngineViewGraphics::reparentToOtherWindow()
 
     m_view->rootObject()->setParentItem(window.contentItem());
     window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
     verifyGreenSquare(&window);
 }
 

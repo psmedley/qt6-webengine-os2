@@ -7,7 +7,6 @@
 
 #include <set>
 
-#include "base/memory/weak_ptr.h"
 #include "chrome/browser/devtools/protocol/target.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list_observer.h"
@@ -17,7 +16,9 @@ using RemoteLocations = std::set<net::HostPortPair>;
 
 class TargetHandler : public protocol::Target::Backend {
  public:
-  TargetHandler(protocol::UberDispatcher* dispatcher, bool is_trusted);
+  TargetHandler(protocol::UberDispatcher* dispatcher,
+                bool is_trusted,
+                bool may_read_local_files);
 
   TargetHandler(const TargetHandler&) = delete;
   TargetHandler& operator=(const TargetHandler&) = delete;
@@ -38,11 +39,13 @@ class TargetHandler : public protocol::Target::Backend {
       protocol::Maybe<bool> enable_begin_frame_control,
       protocol::Maybe<bool> new_window,
       protocol::Maybe<bool> background,
+      protocol::Maybe<bool> for_tab,
       std::string* out_target_id) override;
 
  private:
   RemoteLocations remote_locations_;
   const bool is_trusted_;
+  const bool may_read_local_files_;
 };
 
 #endif  // CHROME_BROWSER_DEVTOOLS_PROTOCOL_TARGET_HANDLER_H_

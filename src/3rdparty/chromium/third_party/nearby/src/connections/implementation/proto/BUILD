@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:defs.bzl", "cc_proto_library")
+
 licenses(["notice"])
 
 proto_library(
@@ -20,23 +22,14 @@ proto_library(
         "offline_wire_formats.proto",
     ],
     visibility = [
-        "//internal/platform/implementation/ios:__subpackages__",
+        "//visibility:private",  # Only private by automation, not intent. Owner may accept CLs adding visibility. See go/scheuklappen#explicit-private.
     ],
-)
-
-java_lite_proto_library(
-    name = "offline_wire_formats_java_proto_lite",
-    visibility = [
-        "//java/com/google/android/gmscore/integ/modules/nearby:__subpackages__",
-        "//javatests/com/google/android/gmscore/integ/modules/nearby:__subpackages__",
-    ],
-    deps = [":offline_wire_formats_proto"],
 )
 
 cc_proto_library(
     name = "offline_wire_formats_cc_proto",
     visibility = [
-        "//third_party/nearby:__subpackages__",
+        "//:__subpackages__",
     ],
     deps = [
         ":offline_wire_formats_proto",

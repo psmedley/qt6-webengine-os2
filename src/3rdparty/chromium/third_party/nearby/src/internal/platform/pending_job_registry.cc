@@ -18,7 +18,6 @@
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/system_clock.h"
 
-namespace location {
 namespace nearby {
 
 namespace {
@@ -82,10 +81,25 @@ void PendingJobRegistry::ListJobs() {
   list_jobs_time_ = current_time;
 }
 
+void PendingJobRegistry::ListAllJobs() {
+  MutexLock lock(&mutex_);
+  auto current_time = SystemClock::ElapsedRealtime();
+  for (auto& job : pending_jobs_) {
+    auto age = current_time - job.second;
+    NEARBY_LOGS(INFO) << "Task \"" << job.first << "\" is waiting for "
+                      << absl::ToInt64Seconds(age) << " s";
+  }
+  for (auto& job : running_jobs_) {
+    auto age = current_time - job.second;
+    NEARBY_LOGS(INFO) << "Task \"" << job.first << "\" is running for "
+                      << absl::ToInt64Seconds(age) << " s";
+  }
+  list_jobs_time_ = current_time;
+}
+
 std::string PendingJobRegistry::CreateKey(const std::string& name,
                                           absl::Time post_time) {
   return name + "." + std::to_string(absl::ToUnixNanos(post_time));
 }
 
 }  // namespace nearby
-}  // namespace location

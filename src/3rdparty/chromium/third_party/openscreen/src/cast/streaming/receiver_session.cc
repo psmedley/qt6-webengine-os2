@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <string>
 #include <utility>
 
-#include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "cast/common/channel/message_util.h"
 #include "cast/common/public/message_port.h"
@@ -23,8 +22,7 @@
 #include "util/osp_logging.h"
 #include "util/std_util.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 namespace {
 
 template <typename Stream, typename Codec>
@@ -446,7 +444,7 @@ Answer ReceiverSession::ConstructAnswer(const PendingOffer& properties) {
       if (limit.codec == properties.selected_video->codec ||
           limit.applies_to_all_codecs) {
         constraints.video = VideoConstraints{
-            limit.max_pixels_per_second, absl::nullopt, /* min dimensions */
+            limit.max_pixels_per_second, std::nullopt, /* min dimensions */
             limit.max_dimensions,        limit.min_bit_rate,
             limit.max_bit_rate,          limit.max_delay,
         };
@@ -455,10 +453,10 @@ Answer ReceiverSession::ConstructAnswer(const PendingOffer& properties) {
     }
   }
 
-  absl::optional<DisplayDescription> display;
+  std::optional<DisplayDescription> display;
   if (constraints_.display_description) {
     const auto* d = constraints_.display_description.get();
-    display = DisplayDescription{d->dimensions, absl::nullopt,
+    display = DisplayDescription{d->dimensions, std::nullopt,
                                  d->can_scale_content
                                      ? AspectRatioConstraint::kVariable
                                      : AspectRatioConstraint::kFixed};
@@ -466,7 +464,7 @@ Answer ReceiverSession::ConstructAnswer(const PendingOffer& properties) {
 
   // Only set the constraints in the answer if they are valid (meaning we
   // successfully found limits above).
-  absl::optional<Constraints> answer_constraints;
+  std::optional<Constraints> answer_constraints;
   if (constraints.IsValid()) {
     answer_constraints = std::move(constraints);
   }
@@ -511,5 +509,4 @@ void ReceiverSession::SendErrorAnswerReply(const std::string& sender_id,
   }
 }
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef QWEBENGINEHISTORY_P_H
 #define QWEBENGINEHISTORY_P_H
@@ -72,7 +73,7 @@ public:
     int offsetForIndex(int) const override;
 };
 
-class Q_WEBENGINECORE_PRIVATE_EXPORT QWebEngineHistoryPrivate
+class Q_WEBENGINECORE_EXPORT QWebEngineHistoryPrivate
 {
 public:
     typedef std::function<QUrl (const QUrl &)> ImageProviderUrl;

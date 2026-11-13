@@ -181,6 +181,7 @@ TType::TType(const TPublicType &p)
       qualifier(p.qualifier),
       invariant(p.invariant),
       precise(p.precise),
+      interpolant(false),
       memoryQualifier(p.memoryQualifier),
       layoutQualifier(p.layoutQualifier),
       primarySize(p.getPrimarySize()),
@@ -233,6 +234,7 @@ TType &TType::operator=(const TType &t)
     qualifier                 = t.qualifier;
     invariant                 = t.invariant;
     precise                   = t.precise;
+    interpolant               = t.interpolant;
     memoryQualifier           = t.memoryQualifier;
     layoutQualifier           = t.layoutQualifier;
     primarySize               = t.primarySize;
@@ -418,6 +420,11 @@ bool TType::isStructureContainingType(TBasicType t) const
 bool TType::isStructureContainingSamplers() const
 {
     return mStructure ? mStructure->containsSamplers() : false;
+}
+
+bool TType::isStructureContainingOnlySamplers() const
+{
+    return mStructure ? mStructure->containsOnlySamplers() : false;
 }
 
 bool TType::isInterfaceBlockContainingType(TBasicType t) const
@@ -841,6 +848,20 @@ bool TFieldListCollection::containsSamplers() const
             return true;
     }
     return false;
+}
+
+bool TFieldListCollection::containsOnlySamplers() const
+{
+    for (const auto *field : *mFields)
+    {
+        const TType *fieldType = field->type();
+        if (!IsSampler(fieldType->getBasicType()) &&
+            !fieldType->isStructureContainingOnlySamplers())
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 TString TFieldListCollection::buildMangledFieldList() const

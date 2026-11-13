@@ -31,7 +31,6 @@
 
 #include "third_party/blink/renderer/modules/accessibility/ax_node_object.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 
 namespace gfx {
 class Point;
@@ -83,13 +82,20 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   bool IsNotUserSelectable() const override;
 
   // Whether objects are ignored, i.e. not included in the tree.
-  AXObjectInclusion DefaultObjectInclusion(
-      IgnoredReasons* = nullptr) const override;
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 
   // Properties of static elements.
   ax::mojom::blink::ListStyle GetListStyle() const final;
+
   // Inline text boxes.
+  //
+  // Get either the first inline block descendant or deepest descendant that
+  // is included in the tree. |start_object| does not have to be included in the
+  // tree. If |first| is true, returns the deepest first descendant. Otherwise,
+  // returns the deepest last descendant.
+  AXObject* GetFirstInlineBlockOrDeepestInlineAXChildInLayoutTree(
+      AXObject* start_object,
+      bool first) const;
   AXObject* NextOnLine() const override;
   AXObject* PreviousOnLine() const override;
 
@@ -104,11 +110,12 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   // Hit testing.
   AXObject* AccessibilityHitTest(const gfx::Point&) const override;
 
-  // Called when autofill/autocomplete state changes on a form control.
-  void HandleAutofillStateChanged(WebAXAutofillState state) override;
+  // Called when autofill/autocomplete suggestion availability changes on a form
+  // control.
+  void HandleAutofillSuggestionAvailabilityChanged(
+      WebAXAutofillSuggestionAvailability suggestion_availability) override;
 
   // For a table.
-  bool IsDataTable() const override;
   unsigned ColumnCount() const override;
   unsigned RowCount() const override;
   void ColumnHeaders(AXObjectVector&) const override;
@@ -144,7 +151,6 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
                                          const gfx::Point&) const;
   bool FindAllTableCellsWithRole(ax::mojom::blink::Role, AXObjectVector&) const;
 
-  LayoutRect ComputeElementRect() const;
   bool IsPlaceholder() const;
 };
 

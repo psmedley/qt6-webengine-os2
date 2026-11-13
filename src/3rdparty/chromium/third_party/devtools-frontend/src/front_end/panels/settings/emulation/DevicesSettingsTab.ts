@@ -5,64 +5,62 @@
 import * as i18n from '../../../core/i18n/i18n.js';
 import * as EmulationModel from '../../../models/emulation/emulation.js';
 import * as UI from '../../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../../ui/visual_logging/visual_logging.js';
 
 import * as EmulationComponents from './components/components.js';
-
 import devicesSettingsTabStyles from './devicesSettingsTab.css.js';
-
-let devicesSettingsTabInstance: DevicesSettingsTab;
 
 const UIStrings = {
   /**
-  *@description Title for a section of the UI that shows all of the devices the user can emulate, in the Device Toolbar.
-  */
+   *@description Title for a section of the UI that shows all of the devices the user can emulate, in the Device Toolbar.
+   */
   emulatedDevices: 'Emulated Devices',
   /**
-  *@description Button to add a custom device (e.g. phone, tablet) the Device Toolbar.
-  */
+   *@description Button to add a custom device (e.g. phone, tablet) the Device Toolbar.
+   */
   addCustomDevice: 'Add custom device...',
   /**
-  *@description Label/title for UI to add a new custom device type. Device means mobile/tablet etc.
-  */
+   *@description Label/title for UI to add a new custom device type. Device means mobile/tablet etc.
+   */
   device: 'Device',
   /**
-  *@description Placeholder for text input for the name of a custom device.
-  */
+   *@description Placeholder for text input for the name of a custom device.
+   */
   deviceName: 'Device Name',
   /**
-  *@description Placeholder text for text input for the width of a custom device in pixels.
-  */
+   *@description Placeholder text for text input for the width of a custom device in pixels.
+   */
   width: 'Width',
   /**
-  *@description Placeholder text for text input for the height of a custom device in pixels.
-  */
+   *@description Placeholder text for text input for the height of a custom device in pixels.
+   */
   height: 'Height',
   /**
-  *@description Placeholder text for text input for the height/width ratio of a custom device in pixels.
-  */
+   *@description Placeholder text for text input for the height/width ratio of a custom device in pixels.
+   */
   devicePixelRatio: 'Device pixel ratio',
   /**
-  *@description Label in the Devices settings pane for the user agent string input of a custom device
-  */
+   *@description Label in the Devices settings pane for the user agent string input of a custom device
+   */
   userAgentString: 'User agent string',
   /**
-  *@description Tooltip text for a drop-down in the Devices settings pane, for the 'user agent type' input of a custom device.
-  * 'Type' refers to different options e.g. mobile or desktop.
-  */
+   *@description Tooltip text for a drop-down in the Devices settings pane, for the 'user agent type' input of a custom device.
+   * 'Type' refers to different options e.g. mobile or desktop.
+   */
   userAgentType: 'User agent type',
   /**
-  *@description Error message in the Devices settings pane that declares the maximum length of the device name input
-  *@example {50} PH1
-  */
+   *@description Error message in the Devices settings pane that declares the maximum length of the device name input
+   *@example {50} PH1
+   */
   deviceNameMustBeLessThanS: 'Device name must be less than {PH1} characters.',
   /**
-  *@description Error message in the Devices settings pane that declares that the device name input must not be empty
-  */
+   *@description Error message in the Devices settings pane that declares that the device name input must not be empty
+   */
   deviceNameCannotBeEmpty: 'Device name cannot be empty.',
   /**
-  *@description Success message for screen readers when device is added.
-  *@example {TestDevice} PH1
-  */
+   *@description Success message for screen readers when device is added.
+   *@example {TestDevice} PH1
+   */
   deviceAddedOrUpdated: 'Device {PH1} successfully added/updated.',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/settings/emulation/DevicesSettingsTab.ts', UIStrings);
@@ -78,8 +76,11 @@ export class DevicesSettingsTab extends UI.Widget.VBox implements
   private emulatedDevicesList: EmulationModel.EmulatedDevices.EmulatedDevicesList;
   private editor?: UI.ListWidget.Editor<EmulationModel.EmulatedDevices.EmulatedDevice>;
 
-  private constructor() {
+  constructor() {
     super();
+
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('devices')}`);
+
     this.element.classList.add('settings-tab-container');
     this.element.classList.add('devices-settings-tab');
 
@@ -89,8 +90,9 @@ export class DevicesSettingsTab extends UI.Widget.VBox implements
                                 .createChild('div', 'settings-tab settings-content settings-container');
 
     const buttonsRow = this.containerElement.createChild('div', 'devices-button-row');
-    this.addCustomButton =
-        UI.UIUtils.createTextButton(i18nString(UIStrings.addCustomDevice), this.addCustomDevice.bind(this));
+    this.addCustomButton = UI.UIUtils.createTextButton(
+        i18nString(UIStrings.addCustomDevice), this.addCustomDevice.bind(this),
+        {jslogContext: 'custom-device-add-button'});
     this.addCustomButton.id = 'custom-device-add-button';
     buttonsRow.appendChild(this.addCustomButton);
     this.ariaSuccessMessageElement = this.containerElement.createChild('div', 'device-success-message');
@@ -110,14 +112,7 @@ export class DevicesSettingsTab extends UI.Widget.VBox implements
     this.setDefaultFocusedElement(this.addCustomButton);
   }
 
-  static instance(): DevicesSettingsTab {
-    if (!devicesSettingsTabInstance) {
-      devicesSettingsTabInstance = new DevicesSettingsTab();
-    }
-    return devicesSettingsTabInstance;
-  }
-
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.devicesUpdated();
     this.registerCSSFiles([devicesSettingsTabStyles]);
@@ -176,6 +171,7 @@ export class DevicesSettingsTab extends UI.Widget.VBox implements
     checkbox.type = 'checkbox';
     checkbox.checked = device.show();
     checkbox.addEventListener('click', onItemClicked.bind(this), false);
+    checkbox.setAttribute('jslog', `${VisualLogging.toggle().track({click: true})}`);
     const span = document.createElement('span');
     span.classList.add('device-name');
     span.appendChild(document.createTextNode(device.title));

@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,12 @@
 #ifndef CORE_FXGE_APPLE_FX_QUARTZ_DEVICE_H_
 #define CORE_FXGE_APPLE_FX_QUARTZ_DEVICE_H_
 
+#include <CoreGraphics/CoreGraphics.h>
 #include <stdint.h>
 
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/dib/fx_dib.h"
-#include "third_party/base/span.h"
-
-#if !defined(OS_IOS)
-#include <Carbon/Carbon.h>
-#else
-class CGPoint;
-#endif
+#include "third_party/base/containers/span.h"
 
 class CFX_DIBitmap;
 class CFX_Matrix;

@@ -8,10 +8,15 @@
 #include <iterator>
 
 #include "base/check_op.h"
+#include "base/ranges/algorithm.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
+
+TEST(CheckedContiguousIterator, SatisfiesContiguousIteratorConcept) {
+  static_assert(std::contiguous_iterator<CheckedContiguousIterator<int>>);
+}
 
 // Checks that constexpr CheckedContiguousConstIterators can be compared at
 // compile time.
@@ -84,16 +89,10 @@ TEST(CheckedContiguousIterator, ConvertingComparisonOperators) {
 
 }  // namespace base
 
-#if defined(_LIBCPP_VERSION)
-
 namespace {
 
 // Helper template that wraps an iterator and disables its dereference and
 // increment operations.
-// Note: We don't simply delete these operations, because code using these
-// operations still needs to compile, even though the codepath will never be
-// taken at runtime. This will crash at runtime in case code does try to use
-// these operations.
 template <typename Iterator>
 struct DisableDerefAndIncr : Iterator {
   using Iterator::Iterator;
@@ -101,53 +100,29 @@ struct DisableDerefAndIncr : Iterator {
   // NOLINTNEXTLINE(google-explicit-constructor)
   constexpr DisableDerefAndIncr(const Iterator& iter) : Iterator(iter) {}
 
-  constexpr typename Iterator::reference operator*() {
-    CHECK(false);
-    return Iterator::operator*();
-  }
-
-  constexpr Iterator& operator++() {
-    CHECK(false);
-    return Iterator::operator++();
-  }
-
-  constexpr Iterator operator++(int i) {
-    CHECK(false);
-    return Iterator::operator++(i);
-  }
+  void operator*() = delete;
+  void operator++() = delete;
+  void operator++(int) = delete;
 };
 
 }  // namespace
 
-// Inherit `__libcpp_is_contiguous_iterator` and `pointer_traits`
-// specializations from the base class.
-
-// TODO(crbug.com/1284275): Remove when C++20 is on by default, as the use
-// of `iterator_concept` should suffice.
-_LIBCPP_BEGIN_NAMESPACE_STD
-
-// TODO(crbug.com/1449299): https://reviews.llvm.org/D150801 renamed this from
-// `__is_cpp17_contiguous_iterator` to `__libcpp_is_contiguous_iterator`. Clean
-// up the old spelling after libc++ rolls.
+// Inherit `pointer_traits` specialization from the base class.
 template <typename Iter>
-struct __is_cpp17_contiguous_iterator<DisableDerefAndIncr<Iter>>
-    : __is_cpp17_contiguous_iterator<Iter> {};
-
-template <typename Iter>
-struct __libcpp_is_contiguous_iterator<DisableDerefAndIncr<Iter>>
-    : __libcpp_is_contiguous_iterator<Iter> {};
-
-template <typename Iter>
-struct pointer_traits<DisableDerefAndIncr<Iter>> : pointer_traits<Iter> {};
-
-_LIBCPP_END_NAMESPACE_STD
+struct std::pointer_traits<DisableDerefAndIncr<Iter>>
+    : ::std::pointer_traits<Iter> {};
 
 namespace base {
 
 // Tests that using std::copy with CheckedContiguousIterator<int> results in an
 // optimized code-path that does not invoke the iterator's dereference and
-// increment operations. This would fail at runtime if std::copy was not
-// optimized.
+// increment operations, as expected in libc++. This fails to compile if
+// std::copy is not optimized.
+// NOTE: This test relies on implementation details of the STL and thus might
+// break in the future during a libc++ roll. If this does happen, please reach
+// out to memory-safety-dev@chromium.org to reevaluate whether this test will
+// still be needed.
+#if defined(_LIBCPP_VERSION)
 TEST(CheckedContiguousIterator, OptimizedCopy) {
   using Iter = DisableDerefAndIncr<CheckedContiguousIterator<int>>;
 
@@ -160,10 +135,8 @@ TEST(CheckedContiguousIterator, OptimizedCopy) {
   Iter out_end = std::copy(in_begin, in_end, out_begin);
   EXPECT_EQ(out_end, out_begin + (in_end - in_begin));
 
-  EXPECT_TRUE(std::equal(std::begin(arr_in), std::end(arr_in),
-                         std::begin(arr_out), std::end(arr_out)));
+  EXPECT_TRUE(ranges::equal(arr_in, arr_out));
 }
+#endif  // defined(_LIBCPP_VERSION)
 
 }  // namespace base
-
-#endif

@@ -2,78 +2,82 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as i18n from '../../core/i18n/i18n.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import type * as Sources from '../../panels/sources/sources.js';
 import * as UI from '../../ui/legacy/legacy.js';
-import type * as Sources from '../sources/sources.js';
 
 import type * as BrowserDebugger from './browser_debugger.js';
 
-import * as i18n from '../../core/i18n/i18n.js';
 const UIStrings = {
   /**
-  *@description Command for showing the 'Event Listener Breakpoints' tool
-  */
+   *@description Command for showing the 'Event Listener Breakpoints' tool
+   */
   showEventListenerBreakpoints: 'Show Event Listener Breakpoints',
   /**
-  *@description Title of the 'Event Listener Breakpoints' tool in the bottom sidebar of the Sources tool
-  */
+   *@description Title of the 'Event Listener Breakpoints' tool in the bottom sidebar of the Sources tool
+   */
   eventListenerBreakpoints: 'Event Listener Breakpoints',
   /**
-  *@description Title for showing the 'CSP Violation Breakpoints' tool in the Sources panel
-  */
+   *@description Title for showing the 'CSP Violation Breakpoints' tool in the Sources panel
+   */
   showCspViolationBreakpoints: 'Show CSP Violation Breakpoints',
   /**
-  *@description Title of the 'CSP Violation Breakpoints' tool in the bottom sidebar of the Sources tool
-  */
+   *@description Title of the 'CSP Violation Breakpoints' tool in the bottom sidebar of the Sources tool
+   */
   cspViolationBreakpoints: 'CSP Violation Breakpoints',
   /**
-  *@description Command for showing the 'XHR/fetch Breakpoints' in the sources panel
-  */
+   *@description Command for showing the 'XHR/fetch Breakpoints' in the sources panel
+   */
   showXhrfetchBreakpoints: 'Show XHR/fetch Breakpoints',
   /**
-  *@description Title of the 'XHR/fetch Breakpoints' tool in the bottom sidebar of the Sources tool
-  */
+   *@description Title of the 'XHR/fetch Breakpoints' tool in the bottom sidebar of the Sources tool
+   */
   xhrfetchBreakpoints: 'XHR/fetch Breakpoints',
   /**
-  *@description Command for showing the 'DOM Breakpoints' tool in the Elements panel
-  */
+   *@description Command for showing the 'DOM Breakpoints' tool in the Elements panel
+   */
   showDomBreakpoints: 'Show DOM Breakpoints',
   /**
-  *@description Title of the 'DOM Breakpoints' tool in the bottom sidebar of the Sources tool
-  */
+   *@description Title of the 'DOM Breakpoints' tool in the bottom sidebar of the Sources tool
+   */
   domBreakpoints: 'DOM Breakpoints',
   /**
-  *@description Command for showing the 'Gobal Listeners' tool in the sources panel
-  */
+   *@description Command for showing the 'Gobal Listeners' tool in the sources panel
+   */
   showGlobalListeners: 'Show Global Listeners',
   /**
-  *@description Title of the 'Global Listeners' tool in the bottom sidebar of the Sources tool
-  */
+   *@description Title of the 'Global Listeners' tool in the bottom sidebar of the Sources tool
+   */
   globalListeners: 'Global Listeners',
   /**
-  *@description Text that refers to one or a group of webpages
-  */
+   *@description Text that refers to one or a group of webpages
+   */
   page: 'Page',
   /**
-  *@description Command for showing the 'Page' tab in the Sources panel
-  */
+   *@description Command for showing the 'Page' tab in the Sources panel
+   */
   showPage: 'Show Page',
   /**
-  *@description Title as part of a tool to override existing configurations
-  */
+   *@description Title as part of a tool to override existing configurations
+   */
   overrides: 'Overrides',
   /**
-  *@description Command for showing the 'Overrides' tool in the Sources panel
-  */
+   *@description Command for showing the 'Overrides' tool in the Sources panel
+   */
   showOverrides: 'Show Overrides',
   /**
-  *@description Title for a type of source files
-  */
+   *@description Title for a type of source files
+   */
   contentScripts: 'Content scripts',
   /**
-  *@description Command for showing the 'Content scripts' tool in the sources panel
-  */
+   *@description Command for showing the 'Content scripts' tool in the sources panel
+   */
   showContentScripts: 'Show Content scripts',
+  /**
+   *@description Label for a button in the sources panel that refreshes the list of global event listeners.
+   */
+  refreshGlobalListeners: 'Refresh global listeners',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/browser_debugger/browser_debugger-meta.ts', UIStrings);
 const i18nLazyString = i18n.i18n.getLazilyComputedLocalizedString.bind(undefined, str_);
@@ -84,6 +88,14 @@ async function loadBrowserDebuggerModule(): Promise<typeof BrowserDebugger> {
     loadedBrowserDebuggerModule = await import('./browser_debugger.js');
   }
   return loadedBrowserDebuggerModule;
+}
+
+function maybeRetrieveContextTypes<T = unknown>(
+    getClassCallBack: (loadedBrowserDebuggerModule: typeof BrowserDebugger) => T[]): T[] {
+  if (loadedBrowserDebuggerModule === undefined) {
+    return [];
+  }
+  return getClassCallBack(loadedBrowserDebuggerModule);
 }
 
 let loadedSourcesModule: (typeof Sources|undefined);
@@ -116,7 +128,7 @@ UI.ViewManager.registerViewExtension({
 UI.ViewManager.registerViewExtension({
   async loadView() {
     const BrowserDebugger = await loadBrowserDebuggerModule();
-    return BrowserDebugger.CSPViolationBreakpointsSidebarPane.CSPViolationBreakpointsSidebarPane.instance();
+    return new BrowserDebugger.CSPViolationBreakpointsSidebarPane.CSPViolationBreakpointsSidebarPane();
   },
   id: 'sources.cspViolationBreakpoints',
   location: UI.ViewManager.ViewLocationValues.SOURCES_SIDEBAR_BOTTOM,
@@ -156,7 +168,7 @@ UI.ViewManager.registerViewExtension({
 UI.ViewManager.registerViewExtension({
   async loadView() {
     const BrowserDebugger = await loadBrowserDebuggerModule();
-    return BrowserDebugger.ObjectEventListenersSidebarPane.ObjectEventListenersSidebarPane.instance();
+    return new BrowserDebugger.ObjectEventListenersSidebarPane.ObjectEventListenersSidebarPane();
   },
   id: 'sources.globalListeners',
   location: UI.ViewManager.ViewLocationValues.SOURCES_SIDEBAR_BOTTOM,
@@ -215,7 +227,24 @@ UI.ViewManager.registerViewExtension({
   persistence: UI.ViewManager.ViewPersistence.PERMANENT,
   async loadView() {
     const Sources = await loadSourcesModule();
-    return Sources.SourcesNavigator.ContentScriptsNavigatorView.instance();
+    return new Sources.SourcesNavigator.ContentScriptsNavigatorView();
+  },
+});
+
+UI.ActionRegistration.registerActionExtension({
+  category: UI.ActionRegistration.ActionCategory.DEBUGGER,
+  actionId: 'browser-debugger.refresh-global-event-listeners',
+  async loadActionDelegate() {
+    const BrowserDebugger = await loadBrowserDebuggerModule();
+    return new BrowserDebugger.ObjectEventListenersSidebarPane.ActionDelegate();
+  },
+  title: i18nLazyString(UIStrings.refreshGlobalListeners),
+  iconClass: UI.ActionRegistration.IconClass.REFRESH,
+  contextTypes() {
+    return maybeRetrieveContextTypes(
+        BrowserDebugger =>
+            [BrowserDebugger.ObjectEventListenersSidebarPane.ObjectEventListenersSidebarPane,
+    ]);
   },
 });
 
@@ -227,7 +256,7 @@ UI.ContextMenu.registerProvider({
   },
   async loadProvider() {
     const BrowserDebugger = await loadBrowserDebuggerModule();
-    return BrowserDebugger.DOMBreakpointsSidebarPane.ContextMenuProvider.instance();
+    return new BrowserDebugger.DOMBreakpointsSidebarPane.ContextMenuProvider();
   },
   experiment: undefined,
 });

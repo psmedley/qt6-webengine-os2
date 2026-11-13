@@ -6,17 +6,19 @@
 
 #include <utility>
 
+#include "base/task/sequenced_task_runner.h"
 #include "base/trace_event/memory_dump_manager.h"
 
 namespace media {
 
 MemoryDumpProviderProxy::MemoryDumpProviderProxy(
     const char* name,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
     MemoryDumpCB dump_cb)
     : dump_cb_(std::move(dump_cb)) {
-  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-      this, name, std::move(task_runner));
+  base::trace_event::MemoryDumpManager::GetInstance()
+      ->RegisterDumpProviderWithSequencedTaskRunner(
+          this, name, std::move(task_runner), MemoryDumpProvider::Options());
 }
 
 MemoryDumpProviderProxy::~MemoryDumpProviderProxy() {

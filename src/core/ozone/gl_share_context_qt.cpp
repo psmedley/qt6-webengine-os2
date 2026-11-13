@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "gl_share_context_qt.h"
 #include <QtGui/qtgui-config.h>
@@ -12,10 +13,6 @@
 #include <QtGui/qopenglcontext_platform.h>
 #include <QOpenGLContext>
 #include <QOpenGLExtraFunctions>
-
-#if defined(Q_OS_MACOS)
-#include "macos_context_type_helper.h"
-#endif // defined(Q_OS_MACOS)
 #endif // QT_CONFIG(opengl)
 
 namespace QtWebEngineCore {
@@ -24,11 +21,6 @@ QtShareGLContext::QtShareGLContext(QOpenGLContext *context)
     : gl::GLContext(nullptr), m_handle(nullptr)
 {
 #if QT_CONFIG(opengl)
-#if defined(Q_OS_MACOS)
-    auto *mac_ctx = context->nativeInterface<QNativeInterface::QCocoaGLContext>();
-    if (mac_ctx)
-        m_handle = cglContext(mac_ctx->nativeContext());
-#endif
 #if defined(Q_OS_WIN)
     auto *win_ctx = context->nativeInterface<QNativeInterface::QWGLContext>();
     if (win_ctx && !m_handle)
@@ -47,6 +39,11 @@ QtShareGLContext::QtShareGLContext(QOpenGLContext *context)
     if (!m_handle)
         qFatal("Could not get handle for shared context.");
 #endif // QT_CONFIG(opengl)
+}
+
+QtShareGLContext::~QtShareGLContext()
+{
+    OnContextWillDestroy();
 }
 
 unsigned int QtShareGLContext::CheckStickyGraphicsResetStatusImpl()

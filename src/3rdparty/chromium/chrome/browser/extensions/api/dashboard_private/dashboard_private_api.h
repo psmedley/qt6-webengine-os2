@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_API_DASHBOARD_PRIVATE_DASHBOARD_PRIVATE_API_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_delegate.h"
@@ -48,10 +49,9 @@ class DashboardPrivateShowPermissionPromptForDelegatedInstallFunction
   ExtensionFunction::ResponseAction Run() override;
 
   // WebstoreInstallHelper::Delegate:
-  void OnWebstoreParseSuccess(
-      const std::string& id,
-      const SkBitmap& icon,
-      std::unique_ptr<base::DictionaryValue> parsed_manifest) override;
+  void OnWebstoreParseSuccess(const std::string& id,
+                              const SkBitmap& icon,
+                              base::Value::Dict parsed_manifest) override;
   void OnWebstoreParseFailure(const std::string& id,
                               InstallHelperResultCode result,
                               const std::string& error_message) override;
@@ -64,7 +64,7 @@ class DashboardPrivateShowPermissionPromptForDelegatedInstallFunction
 
   const Params::Details& details() const { return params_->details; }
 
-  std::unique_ptr<Params> params_;
+  std::optional<Params> params_;
 
   // A dummy Extension object we create for the purposes of using
   // ExtensionInstallPrompt to prompt for confirmation of the install.

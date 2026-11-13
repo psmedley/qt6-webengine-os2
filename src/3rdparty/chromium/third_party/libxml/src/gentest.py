@@ -205,6 +205,10 @@ extra_pre_call = {
 """,
    "xmlParserInputBufferCreateFd":
        "if (fd >= 0) fd = -1;",
+   "xmlSAXDefaultVersion": """
+        {
+            int original_version = xmlSAXDefaultVersion(2);
+""",
 }
 extra_post_call = {
    "xmlAddChild": 
@@ -261,6 +265,10 @@ extra_post_call = {
    "xmlParseChunk": "if (ctxt != NULL) {xmlFreeDoc(ctxt->myDoc); ctxt->myDoc = NULL;}",
    "xmlParseExtParsedEnt": "if (ctxt != NULL) {xmlFreeDoc(ctxt->myDoc); ctxt->myDoc = NULL;}",
    "xmlDOMWrapAdoptNode": "if ((node != NULL) && (node->parent == NULL)) {xmlUnlinkNode(node);xmlFreeNode(node);node = NULL;}",
+   "xmlSAXDefaultVersion": """
+            (void)xmlSAXDefaultVersion(original_version);
+        }
+""",
 }
 
 modules = []
@@ -415,11 +423,6 @@ def generate_param_type(name, rtype):
             return
 
     if name[-3:] == 'Ptr' or name[-4:] == '_ptr':
-        if rtype[0:6] == 'const ':
-            crtype = rtype[6:]
-        else:
-            crtype = rtype
-
         define = 0
         if module in modules_defines:
             test.write("#ifdef %s\n" % (modules_defines[module]))
@@ -692,12 +695,7 @@ def generate_test(module, node):
         if is_known_param_type(type) == 0:
             add_missing_type(type, name);
             no_gen = 1
-        if (type[-3:] == 'Ptr' or type[-4:] == '_ptr') and \
-            rtype[0:6] == 'const ':
-            crtype = rtype[6:]
-        else:
-            crtype = rtype
-        t_args.append((nam, type, rtype, crtype, info))
+        t_args.append((nam, type, rtype, info))
     
     try:
         rets = node.xpathEval("return")
@@ -718,7 +716,7 @@ def generate_test(module, node):
 
     if no_gen == 0:
         for t_arg in t_args:
-            (nam, type, rtype, crtype, info) = t_arg
+            (nam, type, rtype, info) = t_arg
             generate_param_type(type, rtype)
 
     test.write("""
@@ -762,15 +760,15 @@ test_%s(void) {
 
     # Declare the arguments
     for arg in t_args:
-        (nam, type, rtype, crtype, info) = arg;
+        (nam, type, rtype, info) = arg;
         # add declaration
-        test.write("    %s %s; /* %s */\n" % (crtype, nam, info))
+        test.write("    %s %s; /* %s */\n" % (rtype, nam, info))
         test.write("    int n_%s;\n" % (nam))
     test.write("\n")
 
     # Cascade loop on of each argument list of values
     for arg in t_args:
-        (nam, type, rtype, crtype, info) = arg;
+        (nam, type, rtype, info) = arg;
         #
         test.write("    for (n_%s = 0;n_%s < gen_nb_%s;n_%s++) {\n" % (
                    nam, nam, type, nam))
@@ -782,7 +780,7 @@ test_%s(void) {
     # prepare the call
     i = 0;
     for arg in t_args:
-        (nam, type, rtype, crtype, info) = arg;
+        (nam, type, rtype, info) = arg;
         #
         test.write("        %s = gen_%s(n_%s, %d);\n" % (nam, type, nam, i))
         i = i + 1;
@@ -790,7 +788,7 @@ test_%s(void) {
     # add checks to avoid out-of-bounds array access
     i = 0;
     for arg in t_args:
-        (nam, type, rtype, crtype, info) = arg;
+        (nam, type, rtype, info) = arg;
         # assume that "size", "len", and "start" parameters apply to either
         # the nearest preceding or following char pointer
         if type == "int" and (nam == "size" or nam == "len" or nam == "start"):
@@ -812,13 +810,11 @@ test_%s(void) {
         test.write("\n        ret_val = %s(" % (name))
         need = 0
         for arg in t_args:
-            (nam, type, rtype, crtype, info) = arg
+            (nam, type, rtype, info) = arg
             if need:
                 test.write(", ")
             else:
                 need = 1
-            if rtype != crtype:
-                test.write("(%s)" % rtype)
             test.write("%s" % nam);
         test.write(");\n")
         if name in extra_post_call:
@@ -828,13 +824,11 @@ test_%s(void) {
         test.write("\n        %s(" % (name));
         need = 0;
         for arg in t_args:
-            (nam, type, rtype, crtype, info) = arg;
+            (nam, type, rtype, info) = arg;
             if need:
                 test.write(", ")
             else:
                 need = 1
-            if rtype != crtype:
-                test.write("(%s)" % rtype)
             test.write("%s" % nam)
         test.write(");\n")
         if name in extra_post_call:
@@ -845,14 +839,12 @@ test_%s(void) {
     # Free the arguments
     i = 0;
     for arg in t_args:
-        (nam, type, rtype, crtype, info) = arg;
+        (nam, type, rtype, info) = arg;
         # This is a hack to prevent generating a destructor for the
         # 'input' argument in xmlTextReaderSetup.  There should be
         # a better, more generic way to do this!
         if info.find('destroy') == -1:
             test.write("        des_%s(n_%s, " % (type, nam))
-            if rtype != crtype:
-                test.write("(%s)" % rtype)
             test.write("%s, %d);\n" % (nam, i))
         i = i + 1;
 
@@ -865,7 +857,7 @@ test_%s(void) {
 \t    test_ret++;
 """ % (name));
         for arg in t_args:
-            (nam, type, rtype, crtype, info) = arg;
+            (nam, type, rtype, info) = arg;
             test.write("""            printf(" %%d", n_%s);\n""" % (nam))
         test.write("""            printf("\\n");\n""")
         test.write("        }\n")

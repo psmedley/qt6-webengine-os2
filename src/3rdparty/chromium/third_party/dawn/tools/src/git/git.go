@@ -1,16 +1,29 @@
-// Copyright 2022 The Tint Authors.
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // Package git provides helpers for interfacing with the git tool
 package git
@@ -24,6 +37,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -63,6 +77,13 @@ type Git struct {
 
 // New returns a new Git instance
 func New(exe string) (*Git, error) {
+	if exe == "" {
+		g, err := exec.LookPath("git")
+		if err != nil {
+			return nil, fmt.Errorf("failed to find git: %v", err)
+		}
+		exe = g
+	}
 	if _, err := os.Stat(exe); err != nil {
 		return nil, err
 	}
@@ -272,6 +293,23 @@ func (r Repository) Commit(msg string, opt *CommitOptions) (Hash, error) {
 	return ParseHash(out)
 }
 
+// Optional settings for Repository.Clean
+type CleanOptions struct {
+	// Timeout for the operation
+	Timeout time.Duration
+}
+
+// Clean deletes all the untracked files in the repo
+func (r Repository) Clean(opt *CleanOptions) error {
+	if opt == nil {
+		opt = &CleanOptions{}
+	}
+	if _, err := r.run(nil, opt.Timeout, "clean", "-fd"); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Optional settings for Repository.Checkout
 type CheckoutOptions struct {
 	// Timeout for the operation
@@ -299,14 +337,7 @@ type LogOptions struct {
 	Timeout time.Duration
 }
 
-// CommitInfo describes a single git commit
-type CommitInfo struct {
-	Hash        Hash
-	Date        time.Time
-	Author      string
-	Subject     string
-	Description string
-}
+const logPrettyFormatArg = "--pretty=format:ǁ%Hǀ%cIǀ%an <%ae>ǀ%sǀ%b"
 
 // Log returns the list of commits between two references (inclusive).
 // The first returned commit is the most recent.
@@ -322,12 +353,100 @@ func (r Repository) Log(opt *LogOptions) ([]CommitInfo, error) {
 	if opt.From != "" {
 		rng = opt.From + "^.." + rng
 	}
-	args = append(args, rng, "--pretty=format:ǁ%Hǀ%cIǀ%an <%ae>ǀ%sǀ%b")
+	args = append(args, rng, logPrettyFormatArg)
 	out, err := r.run(nil, opt.Timeout, args...)
 	if err != nil {
 		return nil, err
 	}
 	return parseLog(out)
+}
+
+// Optional settings for Repository.LogBetween
+type LogBetweenOptions struct {
+	// Timeout for the operation
+	Timeout time.Duration
+}
+
+// LogBetween returns the list of commits between two timestamps
+// The first returned commit is the most recent.
+func (r Repository) LogBetween(since, until time.Time, opt *LogBetweenOptions) ([]CommitInfo, error) {
+	if opt == nil {
+		opt = &LogBetweenOptions{}
+	}
+	args := []string{"log",
+		"--since", since.Format(time.RFC3339),
+		"--until", until.Format(time.RFC3339),
+		logPrettyFormatArg,
+	}
+	out, err := r.run(nil, opt.Timeout, args...)
+	if err != nil {
+		return nil, err
+	}
+	return parseLog(out)
+}
+
+// FileStats describes the changes to a given file in a commit
+type FileStats struct {
+	Insertions int
+	Deletions  int
+}
+
+// CommitStats is a map of file to FileStats
+type CommitStats map[string]FileStats
+
+// Optional settings for Repository.Stats
+type StatsOptions struct {
+	// Timeout for the operation
+	Timeout time.Duration
+}
+
+// StatsOptions returns the statistics for a given change
+func (r Repository) Stats(commit CommitInfo, opt *StatsOptions) (CommitStats, error) {
+	if opt == nil {
+		opt = &StatsOptions{}
+	}
+
+	hash := commit.Hash.String()
+	args := []string{"diff", "--numstat", hash, hash + "^"}
+	out, err := r.run(nil, opt.Timeout, args...)
+	if err != nil {
+		return nil, err
+	}
+	stats := CommitStats{}
+	for _, line := range strings.Split(out, "\n") {
+		if out == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("failed to parse stat line: '%v'", line)
+		}
+		insertions, deletions := 0, 0
+		if parts[0] != "-" {
+			insertions, err = strconv.Atoi(parts[0])
+			if err != nil {
+				return nil, fmt.Errorf("failed to stat insertions '%v': %w", parts[0], err)
+			}
+		}
+		if parts[1] != "-" {
+			deletions, err = strconv.Atoi(parts[1])
+			if err != nil {
+				return nil, fmt.Errorf("failed to stat deletions '%v': %w", parts[1], err)
+			}
+		}
+		file := parts[2]
+		stats[file] = FileStats{Insertions: insertions, Deletions: deletions}
+	}
+	return stats, nil
+}
+
+// CommitInfo describes a single git commit
+type CommitInfo struct {
+	Hash        Hash
+	Date        time.Time
+	Author      string
+	Subject     string
+	Description string
 }
 
 // Optional settings for Repository.ConfigOptions
@@ -383,8 +502,11 @@ func (g Git) run(dir string, env []string, timeout time.Duration, args ...string
 		fmt.Println(string(out))
 	}
 	if err != nil {
-		return string(out), fmt.Errorf("%v> %v %v failed:\n  %w\n%v",
-			dir, g.exe, strings.Join(args, " "), err, string(out))
+		msg := fmt.Sprintf("%v> %v %v failed:", dir, g.exe, strings.Join(args, " "))
+		if err := ctx.Err(); err != nil {
+			msg += "\n" + err.Error()
+		}
+		return string(out), fmt.Errorf("%s\n  %w\n%v", msg, err, string(out))
 	}
 	return strings.TrimSpace(string(out)), nil
 }

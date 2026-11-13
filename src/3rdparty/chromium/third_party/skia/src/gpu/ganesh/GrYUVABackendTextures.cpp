@@ -24,7 +24,7 @@ static int num_channels(const GrBackendFormat& format) {
 
 GrYUVABackendTextureInfo::GrYUVABackendTextureInfo(const SkYUVAInfo& yuvaInfo,
                                                    const GrBackendFormat formats[kMaxPlanes],
-                                                   GrMipmapped mipmapped,
+                                                   skgpu::Mipmapped mipmapped,
                                                    GrSurfaceOrigin origin)
         : fYUVAInfo(yuvaInfo), fMipmapped(mipmapped), fTextureOrigin(origin) {
     if (!yuvaInfo.isValid()) {
@@ -45,6 +45,7 @@ GrYUVABackendTextureInfo::GrYUVABackendTextureInfo(const SkYUVAInfo& yuvaInfo,
         if (numActualChannels < numRequiredChannels) {
             *this = {};
             SkASSERT(!this->isValid());
+            return;
         }
         fPlaneFormats[i] = formats[i];
     }

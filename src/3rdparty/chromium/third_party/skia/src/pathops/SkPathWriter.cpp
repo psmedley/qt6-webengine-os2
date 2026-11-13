@@ -7,11 +7,14 @@
 #include "src/pathops/SkPathWriter.h"
 
 #include "include/core/SkTypes.h"
-#include "src/core/SkTSort.h"
+#include "include/private/base/SkMath.h"
+#include "src/base/SkTSort.h"
 #include "src/pathops/SkOpSegment.h"
 #include "src/pathops/SkOpSpan.h"
 #include "src/pathops/SkPathOpsDebug.h"
 #include "src/pathops/SkPathOpsTypes.h"
+
+using namespace skia_private;
 
 // wrap path to keep track of whether the contour is initialized and non-empty
 SkPathWriter::SkPathWriter(SkPath& path)
@@ -211,7 +214,7 @@ void SkPathWriter::assemble() {
     SkOpPtT const* const* runs = fEndPtTs.begin();  // starts, ends of partial contours
     int endCount = fEndPtTs.size(); // all starts and ends
     SkASSERT(endCount > 0);
-    SkASSERT(endCount == fPartials.count() * 2);
+    SkASSERT(endCount == fPartials.size() * 2);
 #if DEBUG_ASSEMBLE
     for (int index = 0; index < endCount; index += 2) {
         const SkOpPtT* eStart = runs[index];
@@ -249,8 +252,8 @@ void SkPathWriter::assemble() {
             *runsPtr = opPtT;
         } while (true);
         partWriter.finishContour();
-        const SkTArray<SkPath>& partPartials = partWriter.partials();
-        if (!partPartials.count()) {
+        const TArray<SkPath>& partPartials = partWriter.partials();
+        if (partPartials.empty()) {
             continue;
         }
         // if pIndex is even, reverse and prepend to fPartials; otherwise, append
@@ -274,9 +277,9 @@ void SkPathWriter::assemble() {
         sLink[rIndex] = eLink[rIndex] = SK_MaxS32;
     }
     const int entries = endCount * (endCount - 1) / 2;  // folded triangle
-    SkSTArray<8, double, true> distances(entries);
-    SkSTArray<8, int, true> sortedDist(entries);
-    SkSTArray<8, int, true> distLookup(entries);
+    STArray<8, double, true> distances(entries);
+    STArray<8, int, true> sortedDist(entries);
+    STArray<8, int, true> distLookup(entries);
     int rRow = 0;
     int dIndex = 0;
     for (rIndex = 0; rIndex < endCount - 1; ++rIndex) {

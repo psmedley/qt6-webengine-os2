@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef CORE_INTERNAL_WEBRTC_BWU_HANDLER_H_
-#define CORE_INTERNAL_WEBRTC_BWU_HANDLER_H_
+#ifndef CORE_INTERNAL_WEBRTC_BWU_HANDLER_STUB_H_
+#define CORE_INTERNAL_WEBRTC_BWU_HANDLER_STUB_H_
+
+#ifdef NO_WEBRTC
 
 #include <string>
 
@@ -27,7 +29,6 @@
 #include "connections/implementation/mediums/webrtc_socket.h"
 #endif
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -35,7 +36,9 @@ namespace connections {
 // per-Medium-specific operations needed to upgrade an EndpointChannel.
 class WebrtcBwuHandler : public BaseBwuHandler {
  public:
-  explicit WebrtcBwuHandler(Mediums& mediums, BwuNotifications notifications);
+  explicit WebrtcBwuHandler(
+      Mediums& mediums,
+      IncomingConnectionCallback incoming_connection_callback);
 
  private:
   class WebrtcIncomingSocket : public BwuHandler::IncomingSocket {
@@ -77,6 +80,7 @@ class WebrtcBwuHandler : public BaseBwuHandler {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
-#endif  // CORE_INTERNAL_WEBRTC_BWU_HANDLER_H_
+#endif
+
+#endif  // CORE_INTERNAL_WEBRTC_BWU_HANDLER_STUB_H_

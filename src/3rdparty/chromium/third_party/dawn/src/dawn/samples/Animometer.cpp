@@ -1,16 +1,29 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <cstdio>
 #include <cstdlib>
@@ -19,8 +32,8 @@
 #include "dawn/samples/SampleUtils.h"
 
 #include "dawn/utils/ComboRenderPipelineDescriptor.h"
-#include "dawn/utils/ScopedAutoreleasePool.h"
 #include "dawn/utils/SystemUtils.h"
+#include "dawn/utils/Timer.h"
 #include "dawn/utils/WGPUHelpers.h"
 
 wgpu::Device device;
@@ -56,7 +69,7 @@ void init() {
     queue = device.GetQueue();
     swapchain = GetSwapChain();
 
-    wgpu::ShaderModule vsModule = utils::CreateShaderModule(device, R"(
+    wgpu::ShaderModule vsModule = dawn::utils::CreateShaderModule(device, R"(
         struct Constants {
             scale : f32,
             time : f32,
@@ -68,25 +81,25 @@ void init() {
         @group(0) @binding(0) var<uniform> c : Constants;
 
         struct VertexOut {
-            @location(0) v_color : vec4<f32>,
-            @builtin(position) Position : vec4<f32>,
+            @location(0) v_color : vec4f,
+            @builtin(position) Position : vec4f,
         };
 
         @vertex fn main(@builtin(vertex_index) VertexIndex : u32) -> VertexOut {
-            var positions : array<vec4<f32>, 3> = array<vec4<f32>, 3>(
-                vec4<f32>( 0.0,  0.1, 0.0, 1.0),
-                vec4<f32>(-0.1, -0.1, 0.0, 1.0),
-                vec4<f32>( 0.1, -0.1, 0.0, 1.0)
+            var positions : array<vec4f, 3> = array(
+                vec4f( 0.0,  0.1, 0.0, 1.0),
+                vec4f(-0.1, -0.1, 0.0, 1.0),
+                vec4f( 0.1, -0.1, 0.0, 1.0)
             );
 
-            var colors : array<vec4<f32>, 3> = array<vec4<f32>, 3>(
-                vec4<f32>(1.0, 0.0, 0.0, 1.0),
-                vec4<f32>(0.0, 1.0, 0.0, 1.0),
-                vec4<f32>(0.0, 0.0, 1.0, 1.0)
+            var colors : array<vec4f, 3> = array(
+                vec4f(1.0, 0.0, 0.0, 1.0),
+                vec4f(0.0, 1.0, 0.0, 1.0),
+                vec4f(0.0, 0.0, 1.0, 1.0)
             );
 
-            var position : vec4<f32> = positions[VertexIndex];
-            var color : vec4<f32> = colors[VertexIndex];
+            var position : vec4f = positions[VertexIndex];
+            var color : vec4f = colors[VertexIndex];
 
             // TODO(dawn:572): Revisit once modf has been reworked in WGSL.
             var fade : f32 = c.scalarOffset + c.time * c.scalar / 10.0;
@@ -106,21 +119,21 @@ void init() {
             ypos = yrot + c.offsetY;
 
             var output : VertexOut;
-            output.v_color = vec4<f32>(fade, 1.0 - fade, 0.0, 1.0) + color;
-            output.Position = vec4<f32>(xpos, ypos, 0.0, 1.0);
+            output.v_color = vec4f(fade, 1.0 - fade, 0.0, 1.0) + color;
+            output.Position = vec4f(xpos, ypos, 0.0, 1.0);
             return output;
         })");
 
-    wgpu::ShaderModule fsModule = utils::CreateShaderModule(device, R"(
-        @fragment fn main(@location(0) v_color : vec4<f32>) -> @location(0) vec4<f32> {
+    wgpu::ShaderModule fsModule = dawn::utils::CreateShaderModule(device, R"(
+        @fragment fn main(@location(0) v_color : vec4f) -> @location(0) vec4f {
             return v_color;
         })");
 
-    wgpu::BindGroupLayout bgl = utils::MakeBindGroupLayout(
+    wgpu::BindGroupLayout bgl = dawn::utils::MakeBindGroupLayout(
         device, {{0, wgpu::ShaderStage::Vertex, wgpu::BufferBindingType::Uniform, true}});
 
-    utils::ComboRenderPipelineDescriptor descriptor;
-    descriptor.layout = utils::MakeBasicPipelineLayout(device, &bgl);
+    dawn::utils::ComboRenderPipelineDescriptor descriptor;
+    descriptor.layout = dawn::utils::MakeBasicPipelineLayout(device, &bgl);
     descriptor.vertex.module = vsModule;
     descriptor.cFragment.module = fsModule;
     descriptor.cTargets[0].format = GetPreferredSwapChainTextureFormat();
@@ -142,20 +155,19 @@ void init() {
     bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
     ubo = device.CreateBuffer(&bufferDesc);
 
-    bindGroup = utils::MakeBindGroup(device, bgl, {{0, ubo, 0, sizeof(ShaderData)}});
+    bindGroup = dawn::utils::MakeBindGroup(device, bgl, {{0, ubo, 0, sizeof(ShaderData)}});
 }
 
+int frameCount = 0;
 void frame() {
     wgpu::TextureView backbufferView = swapchain.GetCurrentTextureView();
 
-    static int f = 0;
-    f++;
     for (auto& data : shaderData) {
-        data.time = f / 60.0f;
+        data.time = frameCount / 60.0f;
     }
     queue.WriteBuffer(ubo, 0, shaderData.data(), kNumTriangles * sizeof(ShaderData));
 
-    utils::ComboRenderPassDescriptor renderPass({backbufferView});
+    dawn::utils::ComboRenderPassDescriptor renderPass({backbufferView});
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
     {
         wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&renderPass);
@@ -174,7 +186,6 @@ void frame() {
     queue.Submit(1, &commands);
     swapchain.Present();
     DoFlush();
-    fprintf(stderr, "frame %i\n", f);
 }
 
 int main(int argc, const char* argv[]) {
@@ -183,9 +194,15 @@ int main(int argc, const char* argv[]) {
     }
     init();
 
+    dawn::utils::Timer* timer = dawn::utils::CreateTimer();
+    timer->Start();
     while (!ShouldQuit()) {
-        utils::ScopedAutoreleasePool pool;
+        ProcessEvents();
+        frameCount++;
         frame();
-        utils::USleep(16000);
+        if (frameCount % 60 == 0) {
+            printf("FPS: %lf\n", 60.0 / timer->GetElapsedTime());
+            timer->Start();
+        }
     }
 }

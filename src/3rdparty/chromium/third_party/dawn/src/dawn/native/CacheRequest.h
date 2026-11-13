@@ -1,21 +1,35 @@
-// Copyright 2022 The Dawn Authors
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_CACHEREQUEST_H_
 #define SRC_DAWN_NATIVE_CACHEREQUEST_H_
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "dawn/common/Assert.h"
@@ -27,30 +41,11 @@
 #include "dawn/native/Device.h"
 #include "dawn/native/Error.h"
 #include "dawn/native/VisitableMembers.h"
+#include "dawn/platform/metrics/HistogramMacros.h"
 
 namespace dawn::native {
 
 namespace detail {
-
-template <typename T>
-struct UnwrapResultOrError {
-    using type = T;
-};
-
-template <typename T>
-struct UnwrapResultOrError<ResultOrError<T>> {
-    using type = T;
-};
-
-template <typename T>
-struct IsResultOrError {
-    static constexpr bool value = false;
-};
-
-template <typename T>
-struct IsResultOrError<ResultOrError<T>> {
-    static constexpr bool value = true;
-};
 
 void LogCacheHitError(std::unique_ptr<ErrorData> error);
 
@@ -108,7 +103,8 @@ class CacheRequestImpl {
     friend auto LoadOrRun(DeviceBase* device,
                           Request&& r,
                           CacheHitFn cacheHitFn,
-                          CacheMissFn cacheMissFn) {
+                          CacheMissFn cacheMissFn,
+                          const std::string& cacheMetricName = "") {
         // Get return types and check that CacheMissReturnType can be cast to a raw function
         // pointer. This means it's not a std::function or lambda that captures additional data.
         using CacheHitReturnType = decltype(cacheHitFn(std::declval<Blob>()));
@@ -129,22 +125,23 @@ class CacheRequestImpl {
         using ReturnType = ResultOrError<CacheResultType>;
 
         CacheKey key = r.CreateCacheKey(device);
-        BlobCache* cache = device->GetBlobCache();
-        Blob blob;
-        if (cache != nullptr) {
-            blob = cache->Load(key);
-        }
+        platform::metrics::DawnHistogramTimer cacheTimer(
+            cacheMetricName.empty() ? nullptr : device->GetPlatform());
+        Blob blob = device->GetBlobCache()->Load(key);
 
         if (!blob.Empty()) {
             // Cache hit. Handle the cached blob.
             auto result = cacheHitFn(std::move(blob));
+            std::string cacheHitMetricName = cacheMetricName + ".CacheHit";
 
             if constexpr (!detail::IsResultOrError<CacheHitReturnType>::value) {
                 // If the result type is not a ResultOrError, return it.
+                cacheTimer.RecordMicroseconds(cacheHitMetricName.c_str());
                 return ReturnType(CacheResultType::CacheHit(std::move(key), std::move(result)));
             } else {
                 // Otherwise, if the value is a success, also return it.
                 if (DAWN_LIKELY(result.IsSuccess())) {
+                    cacheTimer.RecordMicroseconds(cacheHitMetricName.c_str());
                     return ReturnType(
                         CacheResultType::CacheHit(std::move(key), result.AcquireSuccess()));
                 }
@@ -153,8 +150,11 @@ class CacheRequestImpl {
             }
         }
         // Cache miss, or the CacheHitFn failed.
+        cacheTimer.Reset();
         auto result = cacheMissFn(std::move(r));
+        std::string cacheMissMetricName = cacheMetricName + ".CacheMiss";
         if (DAWN_LIKELY(result.IsSuccess())) {
+            cacheTimer.RecordMicroseconds(cacheMissMetricName.c_str());
             return ReturnType(CacheResultType::CacheMiss(std::move(key), result.AcquireSuccess()));
         }
         return ReturnType(result.AcquireError());

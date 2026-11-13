@@ -8,16 +8,15 @@
 #ifndef skgpu_graphite_Renderer_DEFINED
 #define skgpu_graphite_Renderer_DEFINED
 
-#include "src/core/SkEnumBitMask.h"
-#include "src/gpu/graphite/Attribute.h"
-#include "src/gpu/graphite/DrawTypes.h"
-#include "src/gpu/graphite/ResourceTypes.h"
-
 #include "include/core/SkSpan.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
-#include "include/core/SkVertices.h"
-#include "src/core/SkUniform.h"
+#include "src/base/SkEnumBitMask.h"
+#include "src/base/SkVx.h"
+#include "src/gpu/graphite/Attribute.h"
+#include "src/gpu/graphite/DrawTypes.h"
+#include "src/gpu/graphite/ResourceTypes.h"
+#include "src/gpu/graphite/Uniform.h"
 
 #include <array>
 #include <initializer_list>
@@ -26,8 +25,6 @@
 #include <vector>
 
 enum class SkPathFillType;
-class SkPipelineDataGatherer;
-class SkTextureDataBlock;
 
 namespace skgpu { enum class MaskFormat; }
 
@@ -35,7 +32,15 @@ namespace skgpu::graphite {
 
 class DrawWriter;
 class DrawParams;
+class PipelineDataGatherer;
+class Rect;
 class ResourceProvider;
+class TextureDataBlock;
+class Transform;
+
+struct ResourceBindingRequirements;
+
+enum class Coverage { kNone, kSingleChannel, kLCD };
 
 struct Varying {
     const char* fName;
@@ -67,13 +72,13 @@ public:
     // The DrawWriter is configured with the vertex and instance strides of the RenderStep, and its
     // primitive type. The recorded draws will be executed with a graphics pipeline compatible with
     // this RenderStep.
-    virtual void writeVertices(DrawWriter*, const DrawParams&, int ssboIndex) const = 0;
+    virtual void writeVertices(DrawWriter*, const DrawParams&, skvx::ushort2 ssboIndices) const = 0;
 
     // Write out the uniform values (aligned for the layout), textures, and samplers. The uniform
     // values will be de-duplicated across all draws using the RenderStep before uploading to the
     // GPU, but it can be assumed the uniforms will be bound before the draws recorded in
     // 'writeVertices' are executed.
-    virtual void writeUniformsAndTextures(const DrawParams&, SkPipelineDataGatherer*) const = 0;
+    virtual void writeUniformsAndTextures(const DrawParams&, PipelineDataGatherer*) const = 0;
 
     // Returns the body of a vertex function, which must define a float4 devPosition variable and
     // must write to an already-defined float2 stepLocalCoords variable. This will be automatically
@@ -85,10 +90,13 @@ public:
     // NOTE: The above contract is mainly so that the entire SkSL program can be created by just str
     // concatenating struct definitions generated from the RenderStep and paint Combination
     // and then including the function bodies returned here.
-    virtual const char* vertexSkSL() const = 0;
+    virtual std::string vertexSkSL() const = 0;
 
     // Emits code to set up textures and samplers. Should only be defined if hasTextures is true.
-    virtual std::string texturesAndSamplersSkSL(int startBinding) const { return R"()"; }
+    virtual std::string texturesAndSamplersSkSL(const ResourceBindingRequirements&,
+                                                int* nextBindingIndex) const {
+        return R"()";
+    }
 
     // Emits code to set up coverage value. Should only be defined if overridesCoverage is true.
     // When implemented the returned SkSL fragment should write its coverage into a
@@ -107,11 +115,13 @@ public:
     // and variant is a unique term describing instance's specific configuration.
     const char* name() const { return fName.c_str(); }
 
-    bool requiresMSAA()        const { return fFlags & Flags::kRequiresMSAA;        }
-    bool performsShading()     const { return fFlags & Flags::kPerformsShading;     }
-    bool hasTextures()         const { return fFlags & Flags::kHasTextures;         }
-    bool emitsCoverage()       const { return fFlags & Flags::kEmitsCoverage;       }
-    bool emitsPrimitiveColor() const { return fFlags & Flags::kEmitsPrimitiveColor; }
+    bool requiresMSAA()        const { return SkToBool(fFlags & Flags::kRequiresMSAA);        }
+    bool performsShading()     const { return SkToBool(fFlags & Flags::kPerformsShading);     }
+    bool hasTextures()         const { return SkToBool(fFlags & Flags::kHasTextures);         }
+    bool emitsPrimitiveColor() const { return SkToBool(fFlags & Flags::kEmitsPrimitiveColor); }
+    bool outsetBoundsForAA()   const { return SkToBool(fFlags & Flags::kOutsetBoundsForAA);   }
+
+    Coverage coverage() const { return RenderStep::GetCoverage(fFlags); }
 
     PrimitiveType primitiveType()  const { return fPrimitiveType;  }
     size_t        vertexStride()   const { return fVertexStride;   }
@@ -121,11 +131,16 @@ public:
     size_t numVertexAttributes()   const { return fVertexAttrs.size();   }
     size_t numInstanceAttributes() const { return fInstanceAttrs.size(); }
 
-    static const char* ssboIndex() { return "ssboIndex"; }
+    // Name of an attribute containing both render step and shading SSBO indices, if used.
+    static const char* ssboIndicesAttribute() { return "ssboIndices"; }
+
+    // Name of a varying to pass SSBO indices to fragment shader. Both render step and shading
+    // indices are passed, because render step uniforms are sometimes used for coverage.
+    static const char* ssboIndicesVarying() { return "ssboIndicesVar"; }
 
     // The uniforms of a RenderStep are bound to the kRenderStep slot, the rest of the pipeline
     // may still use uniforms bound to other slots.
-    SkSpan<const SkUniform> uniforms()           const { return SkSpan(fUniforms);      }
+    SkSpan<const Uniform> uniforms()             const { return SkSpan(fUniforms);      }
     SkSpan<const Attribute> vertexAttributes()   const { return SkSpan(fVertexAttrs);   }
     SkSpan<const Attribute> instanceAttributes() const { return SkSpan(fInstanceAttrs); }
     SkSpan<const Varying>   varyings()           const { return SkSpan(fVaryings);      }
@@ -148,12 +163,14 @@ public:
     //    - Does each DrawList::Draw have extra space (e.g. 8 bytes) that steps can cache data in?
 protected:
     enum class Flags : unsigned {
-        kNone                  = 0b00000,
-        kRequiresMSAA          = 0b00001,
-        kPerformsShading       = 0b00010,
-        kHasTextures           = 0b00100,
-        kEmitsCoverage         = 0b01000,
-        kEmitsPrimitiveColor   = 0b10000,
+        kNone                  = 0b0000000,
+        kRequiresMSAA          = 0b0000001,
+        kPerformsShading       = 0b0000010,
+        kHasTextures           = 0b0000100,
+        kEmitsCoverage         = 0b0001000,
+        kLCDCoverage           = 0b0010000,
+        kEmitsPrimitiveColor   = 0b0100000,
+        kOutsetBoundsForAA     = 0b1000000,
     };
     SK_DECL_BITMASK_OPS_FRIENDS(Flags);
 
@@ -163,7 +180,7 @@ protected:
     RenderStep(std::string_view className,
                std::string_view variantName,
                SkEnumBitMask<Flags> flags,
-               std::initializer_list<SkUniform> uniforms,
+               std::initializer_list<Uniform> uniforms,
                PrimitiveType primitiveType,
                DepthStencilSettings depthStencilSettings,
                SkSpan<const Attribute> vertexAttrs,
@@ -177,6 +194,8 @@ private:
     RenderStep(const RenderStep&) = delete;
     RenderStep(RenderStep&&)      = delete;
 
+    static Coverage GetCoverage(SkEnumBitMask<Flags>);
+
     uint32_t fUniqueID;
     SkEnumBitMask<Flags> fFlags;
     PrimitiveType        fPrimitiveType;
@@ -189,7 +208,7 @@ private:
     // could just have this be std::array and keep all attributes inline with the RenderStep memory.
     // On the other hand, the attributes are only needed when creating a new pipeline so it's not
     // that performance sensitive.
-    std::vector<SkUniform> fUniforms;
+    std::vector<Uniform>   fUniforms;
     std::vector<Attribute> fVertexAttrs;
     std::vector<Attribute> fInstanceAttrs;
     std::vector<Varying>   fVaryings;
@@ -199,7 +218,7 @@ private:
 
     std::string fName;
 };
-SK_MAKE_BITMASK_OPS(RenderStep::Flags);
+SK_MAKE_BITMASK_OPS(RenderStep::Flags)
 
 class Renderer {
     using StepFlags = RenderStep::Flags;
@@ -216,36 +235,47 @@ public:
         return {fSteps.data(), static_cast<size_t>(fStepCount) };
     }
 
-    const char* name()           const { return fName.c_str(); }
-    int         numRenderSteps() const { return fStepCount;    }
+    const char*   name()           const { return fName.c_str(); }
+    DrawTypeFlags drawTypes()      const { return fDrawTypes; }
+    int           numRenderSteps() const { return fStepCount;    }
 
-    bool requiresMSAA()        const { return fStepFlags & StepFlags::kRequiresMSAA;        }
-    bool emitsCoverage()       const { return fStepFlags & StepFlags::kEmitsCoverage;       }
-    bool emitsPrimitiveColor() const { return fStepFlags & StepFlags::kEmitsPrimitiveColor; }
+    bool requiresMSAA() const {
+        return SkToBool(fStepFlags & StepFlags::kRequiresMSAA);
+    }
+    bool emitsPrimitiveColor() const {
+        return SkToBool(fStepFlags & StepFlags::kEmitsPrimitiveColor);
+    }
+    bool outsetBoundsForAA() const {
+        return SkToBool(fStepFlags & StepFlags::kOutsetBoundsForAA);
+    }
 
     SkEnumBitMask<DepthStencilFlags> depthStencilFlags() const { return fDepthStencilFlags; }
+
+    Coverage coverage() const { return RenderStep::GetCoverage(fStepFlags); }
 
 private:
     friend class RendererProvider; // for ctors
 
     // Max render steps is 4, so just spell the options out for now...
-    Renderer(std::string_view name, const RenderStep* s1)
-            : Renderer(name, std::array<const RenderStep*, 1>{s1}) {}
+    Renderer(std::string_view name, DrawTypeFlags drawTypes, const RenderStep* s1)
+            : Renderer(name, drawTypes, std::array<const RenderStep*, 1>{s1}) {}
 
-    Renderer(std::string_view name, const RenderStep* s1, const RenderStep* s2)
-            : Renderer(name, std::array<const RenderStep*, 2>{s1, s2}) {}
+    Renderer(std::string_view name, DrawTypeFlags drawTypes,
+             const RenderStep* s1, const RenderStep* s2)
+            : Renderer(name, drawTypes, std::array<const RenderStep*, 2>{s1, s2}) {}
 
-    Renderer(std::string_view name, const RenderStep* s1, const RenderStep* s2,
-             const RenderStep* s3)
-            : Renderer(name, std::array<const RenderStep*, 3>{s1, s2, s3}) {}
+    Renderer(std::string_view name, DrawTypeFlags drawTypes,
+             const RenderStep* s1, const RenderStep* s2, const RenderStep* s3)
+            : Renderer(name, drawTypes, std::array<const RenderStep*, 3>{s1, s2, s3}) {}
 
-    Renderer(std::string_view name, const RenderStep* s1, const RenderStep* s2,
-             const RenderStep* s3, const RenderStep* s4)
-            : Renderer(name, std::array<const RenderStep*, 4>{s1, s2, s3, s4}) {}
+    Renderer(std::string_view name, DrawTypeFlags drawTypes,
+             const RenderStep* s1, const RenderStep* s2, const RenderStep* s3, const RenderStep* s4)
+            : Renderer(name, drawTypes, std::array<const RenderStep*, 4>{s1, s2, s3, s4}) {}
 
     template<size_t N>
-    Renderer(std::string_view name, std::array<const RenderStep*, N> steps)
+    Renderer(std::string_view name, DrawTypeFlags drawTypes, std::array<const RenderStep*, N> steps)
             : fName(name)
+            , fDrawTypes(drawTypes)
             , fStepCount(SkTo<int>(N)) {
         static_assert(N <= kMaxRenderSteps);
         for (int i = 0 ; i < fStepCount; ++i) {
@@ -264,6 +294,7 @@ private:
 
     std::array<const RenderStep*, kMaxRenderSteps> fSteps;
     std::string fName;
+    DrawTypeFlags fDrawTypes = DrawTypeFlags::kAll;
     int fStepCount;
 
     SkEnumBitMask<StepFlags> fStepFlags = StepFlags::kNone;

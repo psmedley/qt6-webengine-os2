@@ -2,51 +2,60 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as Host from '../../../core/host/host.js';
 import * as i18n from '../../../core/i18n/i18n.js';
+import type * as Protocol from '../../../generated/protocol.js';
 import * as Persistence from '../../../models/persistence/persistence.js';
 import * as Workspace from '../../../models/workspace/workspace.js';
 import * as Buttons from '../../../ui/components/buttons/buttons.js';
 import * as ComponentHelpers from '../../../ui/components/helpers/helpers.js';
 import * as UI from '../../../ui/legacy/legacy.js';
 import * as LitHtml from '../../../ui/lit-html/lit-html.js';
-import type * as Protocol from '../../../generated/protocol.js';
+import * as VisualLogging from '../../../ui/visual_logging/visual_logging.js';
 
 import HeadersViewStyles from './HeadersView.css.js';
 
 const UIStrings = {
   /**
-  *@description The title of a button that adds a field to input a header in the editor form.
-  */
+   *@description The title of a button that adds a field to input a header in the editor form.
+   */
   addHeader: 'Add a header',
   /**
-  *@description The title of a button that removes a field to input a header in the editor form.
-  */
+   *@description The title of a button that removes a field to input a header in the editor form.
+   */
   removeHeader: 'Remove this header',
   /**
-  *@description The title of a button that removes a section for defining header overrides in the editor form.
-  */
+   *@description The title of a button that removes a section for defining header overrides in the editor form.
+   */
   removeBlock: 'Remove this \'`ApplyTo`\'-section',
   /**
-  *@description Error message for files which cannot not be parsed.
-  *@example {.headers} PH1
-  */
+   *@description Error message for files which cannot not be parsed.
+   *@example {.headers} PH1
+   */
   errorWhenParsing: 'Error when parsing \'\'{PH1}\'\'.',
   /**
-  *@description Explainer for files which cannot be parsed.
-  *@example {.headers} PH1
-  */
+   *@description Explainer for files which cannot be parsed.
+   *@example {.headers} PH1
+   */
   parsingErrorExplainer:
       'This is most likely due to a syntax error in \'\'{PH1}\'\'. Try opening this file in an external editor to fix the error or delete the file and re-create the override.',
   /**
-  *@description Button text for a button which adds an additional header override.
-  */
-  addHeaderOverride: 'Add header override',
+   *@description Button text for a button which adds an additional header override rule.
+   */
+  addOverrideRule: 'Add override rule',
+  /**
+   *@description Text which is a hyperlink to more documentation
+   */
+  learnMore: 'Learn more',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/sources/components/HeadersView.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
-const plusIconUrl = new URL('../../../Images/plus_icon.svg', import.meta.url).toString();
-const minusIconUrl = new URL('../../../Images/minus_icon.svg', import.meta.url).toString();
+const plusIconUrl = new URL('../../../Images/plus.svg', import.meta.url).toString();
+const trashIconUrl = new URL('../../../Images/bin.svg', import.meta.url).toString();
+
+const DEFAULT_HEADER_VALUE = 'header value';
+const getDefaultHeaderName = (i: number): string => `header-name-${i}`;
 
 export class HeadersView extends UI.View.SimpleView {
   readonly #headersViewComponent = new HeadersViewComponent();
@@ -54,6 +63,7 @@ export class HeadersView extends UI.View.SimpleView {
 
   constructor(uiSourceCode: Workspace.UISourceCode.UISourceCode) {
     super(i18n.i18n.lockedString('HeadersView'));
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('headers-view')}`);
     this.#uiSourceCode = uiSourceCode;
     this.#uiSourceCode.addEventListener(
         Workspace.UISourceCode.Events.WorkingCopyChanged, this.#onWorkingCopyChanged, this);
@@ -87,11 +97,6 @@ export class HeadersView extends UI.View.SimpleView {
       uiSourceCode: this.#uiSourceCode,
       parsingError,
     };
-  }
-
-  commitEditing(): void {
-    this.#uiSourceCode.commitWorkingCopy();
-    Persistence.NetworkPersistenceManager.NetworkPersistenceManager.instance().updateInterceptionPatterns();
   }
 
   #onWorkingCopyChanged(): void {
@@ -128,6 +133,7 @@ export class HeadersViewComponent extends HTMLElement {
   #uiSourceCode: Workspace.UISourceCode.UISourceCode|null = null;
   #parsingError = false;
   #focusElement: {blockIndex: number, headerIndex?: number}|null = null;
+  #textOnFocusIn = '';
 
   constructor() {
     super();
@@ -136,6 +142,8 @@ export class HeadersViewComponent extends HTMLElement {
     this.#shadow.addEventListener('click', this.#onClick.bind(this));
     this.#shadow.addEventListener('input', this.#onInput.bind(this));
     this.#shadow.addEventListener('keydown', this.#onKeyDown.bind(this));
+    this.#shadow.addEventListener('paste', this.#onPaste.bind(this));
+    this.addEventListener('contextmenu', this.#onContextMenu.bind(this));
   }
 
   connectedCallback(): void {
@@ -152,12 +160,25 @@ export class HeadersViewComponent extends HTMLElement {
   // 'Enter' key should not create a new line in the contenteditable. Focus
   // on the next contenteditable instead.
   #onKeyDown(event: Event): void {
-    const keyboardEvent = event as KeyboardEvent;
     const target = event.target as HTMLElement;
-    if (target.matches('.editable') && keyboardEvent.key === 'Enter') {
+    if (!target.matches('.editable')) {
+      return;
+    }
+    const keyboardEvent = event as KeyboardEvent;
+    if (target.matches('.header-name') && target.innerText === '' &&
+        (keyboardEvent.key === 'Enter' || keyboardEvent.key === 'Tab')) {
+      // onFocusOut will remove the header -> blur instead of focusing on next editable
+      event.preventDefault();
+      target.blur();
+    } else if (keyboardEvent.key === 'Enter') {
       event.preventDefault();
       target.blur();
       this.#focusNext(target);
+    } else if (keyboardEvent.key === 'Escape') {
+      event.consume();
+      target.innerText = this.#textOnFocusIn;
+      target.blur();
+      this.#onChange(target);
     }
   }
 
@@ -177,48 +198,70 @@ export class HeadersViewComponent extends HTMLElement {
     selection?.addRange(range);
   }
 
-  #onFocusIn(e: Event): void {
-    const target = e.target as HTMLElement;
+  #onFocusIn(event: Event): void {
+    const target = event.target as HTMLElement;
     if (target.matches('.editable')) {
       this.#selectAllText(target);
+      this.#textOnFocusIn = target.innerText;
     }
   }
 
-  #onFocusOut(): void {
+  #onFocusOut(event: Event): void {
+    const target = event.target as HTMLElement;
+    if (target.innerText === '') {
+      const rowElement = target.closest('.row') as HTMLElement;
+      const blockIndex = Number(rowElement.dataset.blockIndex);
+      const headerIndex = Number(rowElement.dataset.headerIndex);
+      if (target.matches('.apply-to')) {
+        target.innerText = '*';
+        this.#headerOverrides[blockIndex].applyTo = '*';
+        this.#onHeadersChanged();
+      } else if (target.matches('.header-name')) {
+        this.#removeHeader(blockIndex, headerIndex);
+      }
+    }
+
     // clear selection
     const selection = window.getSelection();
     selection?.removeAllRanges();
+
+    this.#uiSourceCode?.commitWorkingCopy();
+  }
+
+  #onContextMenu(event: Event): void {
+    if (!this.#uiSourceCode) {
+      return;
+    }
+    const contextMenu = new UI.ContextMenu.ContextMenu(event);
+    contextMenu.appendApplicableItems(this.#uiSourceCode);
+    void contextMenu.show();
   }
 
   #generateNextHeaderName(headers: Protocol.Fetch.HeaderEntry[]): string {
     const takenNames = new Set<string>(headers.map(header => header.name));
     let idx = 1;
-    while (takenNames.has('headerName' + idx)) {
+    while (takenNames.has(getDefaultHeaderName(idx))) {
       idx++;
     }
-    return 'headerName' + idx;
+    return getDefaultHeaderName(idx);
   }
 
-  #onClick(e: Event): void {
-    const target = e.target as HTMLButtonElement;
+  #onClick(event: Event): void {
+    const target = event.target as HTMLButtonElement;
     const rowElement = target.closest('.row') as HTMLElement | null;
     const blockIndex = Number(rowElement?.dataset.blockIndex || 0);
     const headerIndex = Number(rowElement?.dataset.headerIndex || 0);
     if (target.matches('.add-header')) {
       this.#headerOverrides[blockIndex].headers.splice(
           headerIndex + 1, 0,
-          {name: this.#generateNextHeaderName(this.#headerOverrides[blockIndex].headers), value: 'headerValue'});
+          {name: this.#generateNextHeaderName(this.#headerOverrides[blockIndex].headers), value: DEFAULT_HEADER_VALUE});
       this.#focusElement = {blockIndex, headerIndex: headerIndex + 1};
       this.#onHeadersChanged();
     } else if (target.matches('.remove-header')) {
-      this.#headerOverrides[blockIndex].headers.splice(headerIndex, 1);
-      if (this.#headerOverrides[blockIndex].headers.length === 0) {
-        this.#headerOverrides[blockIndex].headers.push(
-            {name: this.#generateNextHeaderName(this.#headerOverrides[blockIndex].headers), value: 'headerValue'});
-      }
-      this.#onHeadersChanged();
+      this.#removeHeader(blockIndex, headerIndex);
     } else if (target.matches('.add-block')) {
-      this.#headerOverrides.push({applyTo: '*', headers: [{name: 'headerName', value: 'headerValue'}]});
+      this.#headerOverrides.push(
+          {applyTo: '*', headers: [{name: getDefaultHeaderName(1), value: DEFAULT_HEADER_VALUE}]});
       this.#focusElement = {blockIndex: this.#headerOverrides.length - 1};
       this.#onHeadersChanged();
     } else if (target.matches('.remove-block')) {
@@ -227,8 +270,27 @@ export class HeadersViewComponent extends HTMLElement {
     }
   }
 
-  #onInput(e: Event): void {
-    const target = e.target as HTMLButtonElement;
+  #isDeletable(blockIndex: number, headerIndex: number): boolean {
+    const isOnlyDefaultHeader = headerIndex === 0 && this.#headerOverrides[blockIndex].headers.length === 1 &&
+        this.#headerOverrides[blockIndex].headers[headerIndex].name === getDefaultHeaderName(1) &&
+        this.#headerOverrides[blockIndex].headers[headerIndex].value === DEFAULT_HEADER_VALUE;
+    return !isOnlyDefaultHeader;
+  }
+
+  #removeHeader(blockIndex: number, headerIndex: number): void {
+    this.#headerOverrides[blockIndex].headers.splice(headerIndex, 1);
+    if (this.#headerOverrides[blockIndex].headers.length === 0) {
+      this.#headerOverrides[blockIndex].headers.push(
+          {name: this.#generateNextHeaderName(this.#headerOverrides[blockIndex].headers), value: DEFAULT_HEADER_VALUE});
+    }
+    this.#onHeadersChanged();
+  }
+
+  #onInput(event: Event): void {
+    this.#onChange(event.target as HTMLElement);
+  }
+
+  #onChange(target: HTMLElement): void {
     const rowElement = target.closest('.row') as HTMLElement;
     const blockIndex = Number(rowElement.dataset.blockIndex);
     const headerIndex = Number(rowElement.dataset.headerIndex);
@@ -248,6 +310,31 @@ export class HeadersViewComponent extends HTMLElement {
 
   #onHeadersChanged(): void {
     this.#uiSourceCode?.setWorkingCopy(JSON.stringify(this.#headerOverrides, null, 2));
+    Host.userMetrics.actionTaken(Host.UserMetrics.Action.HeaderOverrideHeadersFileEdited);
+  }
+
+  #onPaste(event: Event): void {
+    const clipboardEvent = event as ClipboardEvent;
+    event.preventDefault();
+    if (clipboardEvent.clipboardData) {
+      const text = clipboardEvent.clipboardData.getData('text/plain');
+      const range = this.#shadow.getSelection()?.getRangeAt(0);
+      if (!range) {
+        return;
+      }
+      range.deleteContents();
+
+      const textNode = document.createTextNode(text);
+      range.insertNode(textNode);
+      range.selectNodeContents(textNode);
+      range.collapse(false);
+
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+
+      this.#onChange(event.target as HTMLElement);
+    }
   }
 
   #render(): void {
@@ -282,9 +369,18 @@ export class HeadersViewComponent extends HTMLElement {
           )}
         `,
       )}
-      <${Buttons.Button.Button.litTagName} .variant=${Buttons.Button.Variant.SECONDARY} class="add-block">
-        ${i18nString(UIStrings.addHeaderOverride)}
+      <${Buttons.Button.Button.litTagName}
+          .variant=${Buttons.Button.Variant.SECONDARY}
+          .jslog=${VisualLogging.action().track({click: true}).context('headers-view.add-override-rule')}
+          class="add-block">
+        ${i18nString(UIStrings.addOverrideRule)}
       </${Buttons.Button.Button.litTagName}>
+      <div class="learn-more-row">
+        <x-link
+            href="https://goo.gle/devtools-override"
+            class="link"
+            jslog=${VisualLogging.link().track({click: true}).context('learn-more')}>${i18nString(UIStrings.learnMore)}</x-link>
+      </div>
     `, this.#shadow, {host: this});
     // clang-format on
 
@@ -313,8 +409,11 @@ export class HeadersViewComponent extends HTMLElement {
         <${Buttons.Button.Button.litTagName}
         title=${i18nString(UIStrings.removeBlock)}
         .size=${Buttons.Button.Size.SMALL}
-        .iconUrl=${minusIconUrl}
+        .iconUrl=${trashIconUrl}
+        .iconWidth=${'14px'}
+        .iconHeight=${'14px'}
         .variant=${Buttons.Button.Variant.ROUND}
+        .jslog=${VisualLogging.action().track({click: true}).context('headers-view.remove-apply-to-section')}
         class="remove-block inline-button"
       ></${Buttons.Button.Button.litTagName}>
       </div>
@@ -335,13 +434,16 @@ export class HeadersViewComponent extends HTMLElement {
           .size=${Buttons.Button.Size.SMALL}
           .iconUrl=${plusIconUrl}
           .variant=${Buttons.Button.Variant.ROUND}
+          .jslog=${VisualLogging.action().track({click: true}).context('headers-view.add-header')}
           class="add-header inline-button"
         ></${Buttons.Button.Button.litTagName}>
         <${Buttons.Button.Button.litTagName}
           title=${i18nString(UIStrings.removeHeader)}
           .size=${Buttons.Button.Size.SMALL}
-          .iconUrl=${minusIconUrl}
+          .iconUrl=${trashIconUrl}
           .variant=${Buttons.Button.Variant.ROUND}
+          ?hidden=${!this.#isDeletable(blockIndex, headerIndex)}
+          .jslog=${VisualLogging.action().track({click: true}).context('headers-view.remove-header')}
           class="remove-header inline-button"
         ></${Buttons.Button.Button.litTagName}>
       </div>

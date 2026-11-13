@@ -7,13 +7,12 @@
 
 import argparse
 import contextlib
+import json
 import logging
 import os
 import signal
 import subprocess
 import sys
-
-import six
 
 _SRC_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', '..'))
@@ -25,7 +24,6 @@ from devil.utils import signal_handler
 from devil.utils import timeout_retry
 from py_utils import tempfile_ext
 
-PROJECT = 'chromium'
 OUTPUT = 'logdog'
 COORDINATOR_HOST = 'luci-logdog.appspot.com'
 LOGDOG_TERMINATION_TIMEOUT = 30
@@ -33,10 +31,7 @@ LOGDOG_TERMINATION_TIMEOUT = 30
 
 def CommandParser():
   # Parses the command line arguments being passed in
-  if six.PY3:
-    parser = argparse.ArgumentParser(allow_abbrev=False)
-  else:
-    parser = argparse.ArgumentParser()
+  parser = argparse.ArgumentParser(allow_abbrev=False)
   wrapped = parser.add_mutually_exclusive_group()
   wrapped.add_argument(
       '--target',
@@ -74,6 +69,28 @@ def NoLeakingProcesses(popen):
                         str(popen.pid))
 
 
+def GetProjectFromLuciContext():
+  """Return the "project" from LUCI_CONTEXT.
+
+  LUCI_CONTEXT contains a section "realm.name" whose value follows the format
+  "<project>:<realm>". This method parses and return the "project" part.
+
+  Fallback to "chromium" if realm name is None
+  """
+  project = 'chromium'
+  ctx_path = os.environ.get('LUCI_CONTEXT')
+  if ctx_path:
+    try:
+      with open(ctx_path) as f:
+        luci_ctx = json.load(f)
+        realm_name = luci_ctx.get('realm', {}).get('name')
+        if realm_name:
+          project = realm_name.split(':')[0]
+    except (OSError, IOError, ValueError):
+      pass
+  return project
+
+
 def main():
   parser = CommandParser()
   args, extra_cmd_args = parser.parse_known_args(sys.argv[1:])
@@ -102,17 +119,18 @@ def main():
                                                   'butler.sock')
       prefix = os.path.join('android', 'swarming', 'logcats',
                             os.environ.get('SWARMING_TASK_ID'))
+      project = GetProjectFromLuciContext()
 
       logdog_cmd = [
           args.logdog_bin_cmd,
-          '-project', PROJECT,
+          '-project', project,
           '-output', OUTPUT,
           '-prefix', prefix,
           '-coordinator-host', COORDINATOR_HOST,
           'serve',
           '-streamserver-uri', streamserver_uri]
       test_env.update({
-          'LOGDOG_STREAM_PROJECT': PROJECT,
+          'LOGDOG_STREAM_PROJECT': project,
           'LOGDOG_STREAM_PREFIX': prefix,
           'LOGDOG_STREAM_SERVER_PATH': streamserver_uri,
           'LOGDOG_COORDINATOR_HOST': COORDINATOR_HOST,

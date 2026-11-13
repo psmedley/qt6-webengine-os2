@@ -13,6 +13,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "build/build_config.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/payments/content/initialization_task.h"
 #include "components/payments/core/currency_formatter.h"
@@ -95,10 +96,10 @@ class PaymentRequestSpec : public PaymentOptionsProvider,
 
   // Gets the display string for the shipping address error for the given
   // |type|.
-  std::u16string GetShippingAddressError(autofill::ServerFieldType type);
+  std::u16string GetShippingAddressError(autofill::FieldType type);
 
   // Gets the display string for the payer error for the given |type|.
-  std::u16string GetPayerError(autofill::ServerFieldType type);
+  std::u16string GetPayerError(autofill::FieldType type);
 
   // Returns whether there is a shipping address error message set by merchant.
   bool has_shipping_address_error() const;
@@ -194,6 +195,11 @@ class PaymentRequestSpec : public PaymentOptionsProvider,
   // billing method, such as "https://play.google.com/billing".
   bool IsAppStoreBillingAlsoRequested() const;
 
+#if !BUILDFLAG(IS_ANDROID)
+  // Returns true if the PaymentHandlerMinimalHeaderUX feature is enabled.
+  bool IsPaymentHandlerMinimalHeaderUXEnabled() const;
+#endif
+
   base::WeakPtr<PaymentRequestSpec> AsWeakPtr();
 
  private:
@@ -227,7 +233,8 @@ class PaymentRequestSpec : public PaymentOptionsProvider,
   std::vector<mojom::PaymentMethodDataPtr> method_data_;
   const std::string app_locale_;
   // The currently shipping option as specified by the merchant.
-  raw_ptr<mojom::PaymentShippingOption> selected_shipping_option_;
+  raw_ptr<mojom::PaymentShippingOption, DanglingUntriaged>
+      selected_shipping_option_;
   std::u16string selected_shipping_option_error_;
 
   // One currency formatter is instantiated and cached per currency code.

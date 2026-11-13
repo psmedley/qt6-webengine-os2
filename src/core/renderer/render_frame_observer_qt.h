@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef RENDER_FRAME_OBSERVER_QT_H
 #define RENDER_FRAME_OBSERVER_QT_H
@@ -34,7 +35,7 @@ public:
         const std::string &interface_name,
         mojo::ScopedInterfaceEndpointHandle *handle) override;
     void OnDestruct() override;
-    void WillDetach() override;
+    void WillDetach(blink::DetachReason detach_reason) override;
 
     bool isFrameDetached() const;
 

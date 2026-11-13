@@ -25,13 +25,13 @@
 // Manages the Bluetooth-specific methods needed to upgrade an {@link
 // EndpointChannel}.
 
-namespace location {
 namespace nearby {
 namespace connections {
 
-BluetoothBwuHandler::BluetoothBwuHandler(Mediums& mediums,
-                                         BwuNotifications notifications)
-    : BaseBwuHandler(std::move(notifications)), mediums_(mediums) {}
+BluetoothBwuHandler::BluetoothBwuHandler(
+    Mediums& mediums, IncomingConnectionCallback incoming_connection_callback)
+    : BaseBwuHandler(std::move(incoming_connection_callback)),
+      mediums_(mediums) {}
 
 // Called by BWU target. Retrieves a new medium info from incoming message,
 // and establishes connection over BT using this info.
@@ -93,6 +93,7 @@ BluetoothBwuHandler::CreateUpgradedEndpointChannel(
     return nullptr;
   }
 
+  client->SetBluetoothMacAddress(endpoint_id, mac_address);
   return channel;
 }
 
@@ -111,11 +112,9 @@ ByteArray BluetoothBwuHandler::HandleInitializeUpgradedMediumForEndpoint(
   if (!bluetooth_medium_.IsAcceptingConnections(upgrade_service_id)) {
     if (!bluetooth_medium_.StartAcceptingConnections(
             upgrade_service_id,
-            {
-                .accepted_cb = absl::bind_front(
-                    &BluetoothBwuHandler::OnIncomingBluetoothConnection, this,
-                    client),
-            })) {
+            absl::bind_front(
+                &BluetoothBwuHandler::OnIncomingBluetoothConnection, this,
+                client))) {
       NEARBY_LOGS(ERROR) << "BluetoothBwuHandler couldn't initiate the "
                             "BLUETOOTH upgrade for endpoint "
                          << endpoint_id
@@ -154,9 +153,8 @@ void BluetoothBwuHandler::OnIncomingBluetoothConnection(
               upgrade_service_id, socket),
           .channel = std::move(channel),
       }};
-  bwu_notifications_.incoming_connection_cb(client, std::move(connection));
+  NotifyOnIncomingConnection(client, std::move(connection));
 }
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

@@ -37,7 +37,6 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/animation/animation_clock.h"
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
-#include "third_party/blink/renderer/core/animation/css/css_scroll_timeline.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect.h"
 #include "third_party/blink/renderer/core/animation/pending_animations.h"
 #include "third_party/blink/renderer/core/animation/worklet_animation_controller.h"
@@ -82,7 +81,6 @@ DocumentAnimations::DocumentAnimations(Document* document)
 
 void DocumentAnimations::AddTimeline(AnimationTimeline& timeline) {
   timelines_.insert(&timeline);
-  unvalidated_timelines_.insert(&timeline);
 }
 
 void DocumentAnimations::UpdateAnimationTimingForAnimationFrame() {
@@ -102,7 +100,7 @@ void DocumentAnimations::UpdateAnimationTimingForAnimationFrame() {
   // This is to ensure that any microtasks queued up as a result of resolving or
   // rejecting Promise objects as part of updating timelines run their callbacks
   // prior to dispatching animation events and generating the next main frame.
-  document_->GetAgent()->event_loop()->PerformMicrotaskCheckpoint();
+  document_->GetAgent().event_loop()->PerformMicrotaskCheckpoint();
 }
 
 bool DocumentAnimations::NeedsAnimationTimingUpdate() {
@@ -134,8 +132,14 @@ void DocumentAnimations::UpdateAnimations(
   }
 
   document_->GetWorkletAnimationController().UpdateAnimationStates();
-  for (auto& timeline : timelines_)
-    timeline->ScheduleNextService();
+  document_->GetFrame()->ScheduleNextServiceForScrollSnapshotClients();
+  for (auto& timeline : timelines_) {
+    // ScrollSnapshotTimelines are already handled as ScrollSnapshotClients
+    // above.
+    if (!timeline->IsScrollSnapshotTimeline()) {
+      timeline->ScheduleNextService();
+    }
+  }
 }
 
 void DocumentAnimations::MarkPendingIfCompositorPropertyAnimationChanges(
@@ -149,8 +153,7 @@ void DocumentAnimations::MarkPendingIfCompositorPropertyAnimationChanges(
 size_t DocumentAnimations::GetAnimationsCount() {
   wtf_size_t total_animations_count = 0;
   if (document_->View()) {
-    if (cc::AnimationHost* host =
-            document_->View()->GetCompositorAnimationHost()) {
+    if (document_->View()->GetCompositorAnimationHost()) {
       for (auto& timeline : timelines_) {
         if (timeline->HasAnimations())
           total_animations_count += timeline->AnimationsNeedingUpdateCount();
@@ -181,19 +184,6 @@ HeapVector<Member<Animation>> DocumentAnimations::getAnimations(
   return animations;
 }
 
-bool DocumentAnimations::ValidateTimelines() {
-  bool all_timelines_valid = true;
-  for (auto& timeline : unvalidated_timelines_) {
-    if (auto* scroll_timeline = DynamicTo<ScrollTimeline>(timeline.Get())) {
-      bool timeline_valid = scroll_timeline->ValidateState();
-      all_timelines_valid &= timeline_valid;
-    }
-  }
-
-  unvalidated_timelines_.clear();
-  return all_timelines_valid;
-}
-
 void DocumentAnimations::DetachCompositorTimelines() {
   if (!Platform::Current()->IsThreadedAnimationEnabled() ||
       !document_->GetSettings()->GetAcceleratedCompositingEnabled() ||
@@ -216,7 +206,6 @@ void DocumentAnimations::DetachCompositorTimelines() {
 void DocumentAnimations::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
   visitor->Trace(timelines_);
-  visitor->Trace(unvalidated_timelines_);
 }
 
 void DocumentAnimations::GetAnimationsTargetingTreeScope(
@@ -285,7 +274,7 @@ void DocumentAnimations::RemoveReplacedAnimations(
     }
   }
   scoped_refptr<scheduler::EventLoop> event_loop =
-      document_->GetAgent()->event_loop();
+      document_->GetAgent().event_loop();
 
   // The list of animations for removal is constructed in reverse composite
   // ordering for efficiency. Flip the ordering to ensure that events are

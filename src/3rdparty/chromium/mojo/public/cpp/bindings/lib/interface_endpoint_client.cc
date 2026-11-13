@@ -6,19 +6,25 @@
 
 #include <stdint.h>
 
+#include <optional>
+#include <string_view>
 #include <tuple>
 
-#include "base/bind.h"
 #include "base/check.h"
 #include "base/containers/contains.h"
 #include "base/containers/cxx20_erase.h"
+#include "base/debug/alias.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/bind_post_task.h"
+#include "base/task/common/task_annotator.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread_local.h"
 #include "base/trace_event/interned_args_helper.h"
 #include "base/trace_event/typed_macros.h"
@@ -31,7 +37,6 @@
 #include "mojo/public/cpp/bindings/sync_call_restrictions.h"
 #include "mojo/public/cpp/bindings/sync_event_watcher.h"
 #include "mojo/public/cpp/bindings/thread_safe_proxy.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_mojo_event_info.pbzero.h"
 
 namespace mojo {
@@ -79,8 +84,10 @@ class ThreadSafeInterfaceEndpointClientProxy : public ThreadSafeProxy {
   ~ThreadSafeInterfaceEndpointClientProxy() override {
     // If there are ongoing sync calls signal their completion now.
     base::AutoLock l(sync_calls_->lock);
-    for (auto* pending_response : sync_calls_->pending_responses)
+    for (ThreadSafeInterfaceEndpointClientProxy::SyncResponseInfo*
+             pending_response : sync_calls_->pending_responses) {
       pending_response->event.Signal();
+    }
   }
 
   // Data that we need to share between the sequences involved in a sync call.
@@ -133,7 +140,8 @@ class ThreadSafeInterfaceEndpointClientProxy : public ThreadSafeProxy {
 
     // |lock| protects access to |pending_responses|.
     base::Lock lock;
-    std::vector<SyncResponseInfo*> pending_responses GUARDED_BY(lock);
+    std::vector<raw_ptr<SyncResponseInfo, VectorExperimental>> pending_responses
+        GUARDED_BY(lock);
 
    private:
     friend class base::RefCountedThreadSafe<InProgressSyncCalls>;
@@ -145,7 +153,7 @@ class ThreadSafeInterfaceEndpointClientProxy : public ThreadSafeProxy {
    public:
     explicit ForwardToCallingThread(std::unique_ptr<MessageReceiver> responder)
         : responder_(std::move(responder)),
-          caller_task_runner_(base::SequencedTaskRunnerHandle::Get()) {}
+          caller_task_runner_(base::SequencedTaskRunner::GetCurrentDefault()) {}
 
     ~ForwardToCallingThread() override {
       caller_task_runner_->DeleteSoon(FROM_HERE, std::move(responder_));
@@ -260,6 +268,10 @@ class ResponderThunk : public MessageReceiverWithStatus {
           endpoint_client_->RaiseError();
         }
       } else {
+        // Instantiate a ScopedFizzleBlockShutdownTasks to allow this PostTask
+        // to fizzle if it happens after shutdown and the endpoint is bound to a
+        // BLOCK_SHUTDOWN sequence. ref. crbug.com/1442134
+        base::ThreadPoolInstance::ScopedFizzleBlockShutdownTasks fizzler;
         task_runner_->PostTask(
             FROM_HERE, base::BindOnce(&InterfaceEndpointClient::RaiseError,
                                       endpoint_client_));
@@ -457,6 +469,7 @@ InterfaceEndpointClient::InterfaceEndpointClient(
       interface_name_(interface_name),
       method_info_callback_(method_info_callback),
       method_name_callback_(method_name_callback) {
+  DCHECK(interface_name_);
   DCHECK(handle_.is_valid());
   sequence_checker_.DetachFromSequence();
 
@@ -530,7 +543,7 @@ void InterfaceEndpointClient::RaiseError() {
 }
 
 void InterfaceEndpointClient::CloseWithReason(uint32_t custom_reason,
-                                              base::StringPiece description) {
+                                              std::string_view description) {
   CHECK(sequence_checker_.CalledOnValidSequence());
 
   auto handle = PassHandle();
@@ -700,7 +713,7 @@ bool InterfaceEndpointClient::HandleIncomingMessage(Message* message) {
 }
 
 void InterfaceEndpointClient::NotifyError(
-    const absl::optional<DisconnectReason>& reason) {
+    const std::optional<DisconnectReason>& reason) {
   TRACE_EVENT("toplevel", "Closed mojo endpoint",
               [&](perfetto::EventContext& ctx) {
                 auto* info = ctx.event()->set_chrome_mojo_event_info();
@@ -712,6 +725,8 @@ void InterfaceEndpointClient::NotifyError(
   if (encountered_error_)
     return;
   encountered_error_ = true;
+
+  DEBUG_ALIAS_FOR_CSTR(interface_name, interface_name_, 256);
 
   // Response callbacks may hold on to resource, and there's no need to keep
   // them alive any longer. Note that it's allowed that a pending response
@@ -841,7 +856,7 @@ void InterfaceEndpointClient::ResetFromAnotherSequenceUnsafe() {
 }
 
 void InterfaceEndpointClient::ForgetAsyncRequest(uint64_t request_id) {
-  absl::optional<PendingAsyncResponse> response;
+  std::optional<PendingAsyncResponse> response;
   {
     base::AutoLock lock(async_responders_lock_);
     auto it = async_responders_.find(request_id);
@@ -877,19 +892,27 @@ void InterfaceEndpointClient::OnAssociationEvent(
 }
 
 bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
+#if BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_ARM64)
+  // ARM64 Android - set the interface tag unconditionally.
+  // TODO(kraskevich): Remove this special case once we're
+  // fully confident in crrev.com/c/3763052.
+  const bool unconditionally = true;
+#else
+  // Generate mojo interface tag only for local traces.
+  //
+  // This saves trace buffer space for field traces. The
+  // interface tag can be extracted from the interface method
+  // after symbolization.
+  //
+  // For local traces, this produces a raw string so that the
+  // trace doesn't require symbolization to be useful.
+  const bool unconditionally = false;
+#endif
   TRACE_EVENT("toplevel",
               perfetto::StaticString{method_name_callback_(*message)},
               [&](perfetto::EventContext& ctx) {
                 auto* info = ctx.event()->set_chrome_mojo_event_info();
-                // Generate mojo interface tag only for local traces.
-                //
-                // This saves trace buffer space for field traces. The
-                // interface tag can be extracted from the interface method
-                // after symbolization.
-                //
-                // For local traces, this produces a raw string so that the
-                // trace doesn't require symbolization to be useful.
-                if (!ctx.ShouldFilterDebugAnnotations()) {
+                if (unconditionally || !ctx.ShouldFilterDebugAnnotations()) {
                   info->set_mojo_interface_tag(interface_name_);
                 }
                 const auto method_info = method_info_callback_(*message);
@@ -897,13 +920,16 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
                   info->set_ipc_hash((*method_info)());
                   const auto method_address =
                       reinterpret_cast<uintptr_t>(method_info);
-                  const absl::optional<size_t> location_iid =
+                  const std::optional<size_t> location_iid =
                       base::trace_event::InternedUnsymbolizedSourceLocation::
                           Get(&ctx, method_address);
                   if (location_iid) {
                     info->set_mojo_interface_method_iid(*location_iid);
                   }
                 }
+
+                info->set_payload_size(message->payload_num_bytes());
+                info->set_data_num_bytes(message->data_num_bytes());
 
                 static const uint8_t* flow_enabled =
                     TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED("toplevel.flow");
@@ -914,6 +940,15 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
               });
 
   DCHECK_EQ(handle_.id(), message->interface_id());
+
+  // Sync messages can be sent and received at arbitrary points in time and we
+  // should not associate them with the top-level scheduler task.
+  if (!message->has_flag(Message::kFlagIsSync)) {
+    const auto method_info = method_info_callback_(*message);
+    base::TaskAnnotator::OnIPCReceived(
+        interface_name_, method_info,
+        message->has_flag(Message::kFlagIsResponse));
+  }
 
   if (encountered_error_) {
     // This message is received after error has been encountered. For associated
@@ -964,7 +999,7 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
       sync_responses_.erase(it);
     }
 
-    absl::optional<PendingAsyncResponse> pending_response;
+    std::optional<PendingAsyncResponse> pending_response;
     {
       base::AutoLock lock(async_responders_lock_);
       auto it = async_responders_.find(request_id);

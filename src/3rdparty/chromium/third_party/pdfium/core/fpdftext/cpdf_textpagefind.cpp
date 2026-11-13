@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 #include "core/fxcrt/fx_unicode.h"
 #include "core/fxcrt/stl_util.h"
 #include "third_party/base/check.h"
-#include "third_party/base/ptr_util.h"
+#include "third_party/base/memory/ptr_util.h"
 
 namespace {
 
@@ -214,18 +214,22 @@ bool CPDF_TextPageFind::FindNext() {
   if (m_strText.IsEmpty() || !m_findNextStart.has_value())
     return false;
 
-  size_t strLen = m_strText.GetLength();
-  if (m_findNextStart.value() > strLen - 1)
+  const size_t strLen = m_strText.GetLength();
+  size_t nStartPos = m_findNextStart.value();
+  if (nStartPos >= strLen) {
     return false;
+  }
 
   int nCount = fxcrt::CollectionSize<int>(m_csFindWhatArray);
   absl::optional<size_t> nResultPos = 0;
-  size_t nStartPos = m_findNextStart.value();
   bool bSpaceStart = false;
   for (int iWord = 0; iWord < nCount; iWord++) {
     WideString csWord = m_csFindWhatArray[iWord];
     if (csWord.IsEmpty()) {
       if (iWord == nCount - 1) {
+        if (nStartPos >= strLen) {
+          return false;
+        }
         wchar_t strInsert = m_strText[nStartPos];
         if (strInsert == L'\n' || strInsert == L' ' || strInsert == L'\r' ||
             strInsert == kNonBreakingSpace) {
@@ -279,8 +283,9 @@ bool CPDF_TextPageFind::FindNext() {
     if (m_options.bMatchWholeWord && bMatch)
       bMatch = IsMatchWholeWord(m_strText, nResultPos.value(), endIndex);
 
-    nStartPos = endIndex + 1;
-    if (!bMatch) {
+    if (bMatch) {
+      nStartPos = endIndex + 1;
+    } else {
       iWord = -1;
       size_t index = bSpaceStart ? 1 : 0;
       nStartPos = m_resStart + m_csFindWhatArray[index].GetLength();
@@ -301,8 +306,7 @@ bool CPDF_TextPageFind::FindPrev() {
   if (m_strText.IsEmpty() || !m_findPreStart.has_value())
     return false;
 
-  CPDF_TextPageFind find_engine(m_pTextPage.Get(), m_csFindWhatArray, m_options,
-                                0);
+  CPDF_TextPageFind find_engine(m_pTextPage, m_csFindWhatArray, m_options, 0);
   if (!find_engine.FindFirst())
     return false;
 

@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,12 +24,7 @@ unsigned long WideStringToBuffer(const WideString& str,
   if (str.IsEmpty())
     return 0;
 
-  ByteString encodedStr = str.ToUTF16LE();
-  const unsigned long len =
-      pdfium::base::checked_cast<unsigned long>(encodedStr.GetLength());
-  if (buffer && len <= buflen)
-    memcpy(buffer, encodedStr.c_str(), len);
-  return len;
+  return Utf16EncodeMaybeCopyAndReturnLength(str, buffer, buflen);
 }
 
 int GetMcidFromDict(const CPDF_Dictionary* dict) {
@@ -135,6 +130,10 @@ FPDF_StructElement_GetAttributeCount(FPDF_STRUCTELEMENT struct_element) {
   if (!elem)
     return -1;
   RetainPtr<const CPDF_Object> attr_obj = elem->GetA();
+  if (!attr_obj) {
+    return -1;
+  }
+  attr_obj = attr_obj->GetDirect();
   if (!attr_obj)
     return -1;
   if (attr_obj->IsArray())
@@ -154,6 +153,10 @@ FPDF_StructElement_GetAttributeAtIndex(FPDF_STRUCTELEMENT struct_element,
   if (!attr_obj)
     return nullptr;
 
+  attr_obj = attr_obj->GetDirect();
+  if (!attr_obj) {
+    return nullptr;
+  }
   if (attr_obj->IsDictionary()) {
     return index == 0 ? FPDFStructElementAttrFromCPDFDictionary(
                             attr_obj->AsDictionary())
@@ -163,9 +166,10 @@ FPDF_StructElement_GetAttributeAtIndex(FPDF_STRUCTELEMENT struct_element,
     const CPDF_Array* array = attr_obj->AsArray();
     if (index < 0 || static_cast<size_t>(index) >= array->size())
       return nullptr;
+
     // TODO(tsepez): should embedder take a reference here?
-    return FPDFStructElementAttrFromCPDFDictionary(
-        array->GetDictAt(index).Get());
+    // Unretained reference in public API. NOLINTNEXTLINE
+    return FPDFStructElementAttrFromCPDFDictionary(array->GetDictAt(index));
   }
   return nullptr;
 }
@@ -261,6 +265,18 @@ FPDF_StructElement_GetChildAtIndex(FPDF_STRUCTELEMENT struct_element,
   return FPDFStructElementFromCPDFStructElement(elem->GetKidIfElement(index));
 }
 
+FPDF_EXPORT int FPDF_CALLCONV
+FPDF_StructElement_GetChildMarkedContentID(FPDF_STRUCTELEMENT struct_element,
+                                           int index) {
+  CPDF_StructElement* elem =
+      CPDFStructElementFromFPDFStructElement(struct_element);
+  if (!elem || index < 0 || static_cast<size_t>(index) >= elem->CountKids()) {
+    return -1;
+  }
+
+  return elem->GetKidContentId(index);
+}
+
 FPDF_EXPORT FPDF_STRUCTELEMENT FPDF_CALLCONV
 FPDF_StructElement_GetParent(FPDF_STRUCTELEMENT struct_element) {
   CPDF_StructElement* elem =
@@ -287,8 +303,9 @@ FPDF_StructElement_Attr_GetName(FPDF_STRUCTELEMENT_ATTR struct_attribute,
                                 void* buffer,
                                 unsigned long buflen,
                                 unsigned long* out_buflen) {
-  if (!out_buflen || !buffer)
+  if (!out_buflen) {
     return false;
+  }
 
   const CPDF_Dictionary* dict =
       CPDFDictionaryFromFPDFStructElementAttr(struct_attribute);
@@ -351,7 +368,7 @@ FPDF_StructElement_Attr_GetNumberValue(FPDF_STRUCTELEMENT_ATTR struct_attribute,
   if (!dict)
     return false;
 
-  RetainPtr<const CPDF_Object> obj = dict->GetObjectFor(name);
+  RetainPtr<const CPDF_Object> obj = dict->GetDirectObjectFor(name);
   if (!obj || !obj->IsNumber())
     return false;
 

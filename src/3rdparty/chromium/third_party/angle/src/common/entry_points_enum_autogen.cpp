@@ -18,6 +18,8 @@ const char *GetEntryPointName(EntryPoint ep)
 {
     switch (ep)
     {
+        case EntryPoint::Invalid:
+            return "Invalid";
         case EntryPoint::CLBuildProgram:
             return "clBuildProgram";
         case EntryPoint::CLCloneKernel:
@@ -248,6 +250,8 @@ const char *GetEntryPointName(EntryPoint ep)
             return "clUnloadPlatformCompiler";
         case EntryPoint::CLWaitForEvents:
             return "clWaitForEvents";
+        case EntryPoint::EGLAcquireExternalContextANGLE:
+            return "eglAcquireExternalContextANGLE";
         case EntryPoint::EGLBindAPI:
             return "eglBindAPI";
         case EntryPoint::EGLBindTexImage:
@@ -418,6 +422,8 @@ const char *GetEntryPointName(EntryPoint ep)
             return "eglReacquireHighPowerGPUANGLE";
         case EntryPoint::EGLReleaseDeviceANGLE:
             return "eglReleaseDeviceANGLE";
+        case EntryPoint::EGLReleaseExternalContextANGLE:
+            return "eglReleaseExternalContextANGLE";
         case EntryPoint::EGLReleaseHighPowerGPUANGLE:
             return "eglReleaseHighPowerGPUANGLE";
         case EntryPoint::EGLReleaseTexImage:
@@ -466,6 +472,8 @@ const char *GetEntryPointName(EntryPoint ep)
             return "eglWaitSync";
         case EntryPoint::EGLWaitSyncKHR:
             return "eglWaitSyncKHR";
+        case EntryPoint::EGLWaitUntilWorkScheduledANGLE:
+            return "eglWaitUntilWorkScheduledANGLE";
         case EntryPoint::GLAccum:
             return "glAccum";
         case EntryPoint::GLAcquireTexturesANGLE:
@@ -1176,12 +1184,26 @@ const char *GetEntryPointName(EntryPoint ep)
             return "glFogxv";
         case EntryPoint::GLFramebufferFetchBarrierEXT:
             return "glFramebufferFetchBarrierEXT";
+        case EntryPoint::GLFramebufferFoveationConfigQCOM:
+            return "glFramebufferFoveationConfigQCOM";
+        case EntryPoint::GLFramebufferFoveationParametersQCOM:
+            return "glFramebufferFoveationParametersQCOM";
         case EntryPoint::GLFramebufferMemorylessPixelLocalStorageANGLE:
             return "glFramebufferMemorylessPixelLocalStorageANGLE";
         case EntryPoint::GLFramebufferParameteri:
             return "glFramebufferParameteri";
         case EntryPoint::GLFramebufferParameteriMESA:
             return "glFramebufferParameteriMESA";
+        case EntryPoint::GLFramebufferPixelLocalClearValuefvANGLE:
+            return "glFramebufferPixelLocalClearValuefvANGLE";
+        case EntryPoint::GLFramebufferPixelLocalClearValueivANGLE:
+            return "glFramebufferPixelLocalClearValueivANGLE";
+        case EntryPoint::GLFramebufferPixelLocalClearValueuivANGLE:
+            return "glFramebufferPixelLocalClearValueuivANGLE";
+        case EntryPoint::GLFramebufferPixelLocalStorageInterruptANGLE:
+            return "glFramebufferPixelLocalStorageInterruptANGLE";
+        case EntryPoint::GLFramebufferPixelLocalStorageRestoreANGLE:
+            return "glFramebufferPixelLocalStorageRestoreANGLE";
         case EntryPoint::GLFramebufferRenderbuffer:
             return "glFramebufferRenderbuffer";
         case EntryPoint::GLFramebufferRenderbufferOES:
@@ -1362,6 +1384,14 @@ const char *GetEntryPointName(EntryPoint ep)
             return "glGetFramebufferParameterivMESA";
         case EntryPoint::GLGetFramebufferParameterivRobustANGLE:
             return "glGetFramebufferParameterivRobustANGLE";
+        case EntryPoint::GLGetFramebufferPixelLocalStorageParameterfvANGLE:
+            return "glGetFramebufferPixelLocalStorageParameterfvANGLE";
+        case EntryPoint::GLGetFramebufferPixelLocalStorageParameterfvRobustANGLE:
+            return "glGetFramebufferPixelLocalStorageParameterfvRobustANGLE";
+        case EntryPoint::GLGetFramebufferPixelLocalStorageParameterivANGLE:
+            return "glGetFramebufferPixelLocalStorageParameterivANGLE";
+        case EntryPoint::GLGetFramebufferPixelLocalStorageParameterivRobustANGLE:
+            return "glGetFramebufferPixelLocalStorageParameterivRobustANGLE";
         case EntryPoint::GLGetGraphicsResetStatus:
             return "glGetGraphicsResetStatus";
         case EntryPoint::GLGetGraphicsResetStatusEXT:
@@ -1824,8 +1854,6 @@ const char *GetEntryPointName(EntryPoint ep)
             return "glInsertEventMarkerEXT";
         case EntryPoint::GLInterleavedArrays:
             return "glInterleavedArrays";
-        case EntryPoint::GLInvalid:
-            return "glInvalid";
         case EntryPoint::GLInvalidateBufferData:
             return "glInvalidateBufferData";
         case EntryPoint::GLInvalidateBufferSubData:
@@ -2250,10 +2278,16 @@ const char *GetEntryPointName(EntryPoint ep)
             return "glPointSizex";
         case EntryPoint::GLPolygonMode:
             return "glPolygonMode";
+        case EntryPoint::GLPolygonModeANGLE:
+            return "glPolygonModeANGLE";
+        case EntryPoint::GLPolygonModeNV:
+            return "glPolygonModeNV";
         case EntryPoint::GLPolygonOffset:
             return "glPolygonOffset";
         case EntryPoint::GLPolygonOffsetClamp:
             return "glPolygonOffsetClamp";
+        case EntryPoint::GLPolygonOffsetClampEXT:
+            return "glPolygonOffsetClampEXT";
         case EntryPoint::GLPolygonOffsetx:
             return "glPolygonOffsetx";
         case EntryPoint::GLPolygonStipple:
@@ -2940,6 +2974,8 @@ const char *GetEntryPointName(EntryPoint ep)
             return "glTextureBuffer";
         case EntryPoint::GLTextureBufferRange:
             return "glTextureBufferRange";
+        case EntryPoint::GLTextureFoveationParametersQCOM:
+            return "glTextureFoveationParametersQCOM";
         case EntryPoint::GLTextureParameterIiv:
             return "glTextureParameterIiv";
         case EntryPoint::GLTextureParameterIuiv:

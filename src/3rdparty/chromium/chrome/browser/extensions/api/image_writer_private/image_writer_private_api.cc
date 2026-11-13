@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/image_writer_private/error_constants.h"
 #include "chrome/browser/extensions/api/image_writer_private/operation_manager.h"
@@ -50,7 +50,7 @@ ImageWriterPrivateBaseFunction::~ImageWriterPrivateBaseFunction() = default;
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 void ImageWriterPrivateBaseFunction::OnComplete(
-    const absl::optional<std::string>& error) {
+    const std::optional<std::string>& error) {
   if (error)
     Respond(Error(error.value()));
   else
@@ -81,9 +81,9 @@ ImageWriterPrivateWriteFromUrlFunction::Run() {
     return RespondNow(Error(image_writer::error::kDeviceWriteError));
   }
 #endif
-  std::unique_ptr<image_writer_api::WriteFromUrl::Params> params(
-      image_writer_api::WriteFromUrl::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  std::optional<image_writer_api::WriteFromUrl::Params> params =
+      image_writer_api::WriteFromUrl::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
   GURL url(params->image_url);
   if (!url.is_valid())
@@ -98,7 +98,7 @@ ImageWriterPrivateWriteFromUrlFunction::Run() {
   image_writer::ImageWriterControllerLacros::Get(browser_context())
       ->WriteFromUrl(
           extension_id(), params->storage_unit_id, url,
-          hash.empty() ? absl::nullopt : absl::make_optional(hash),
+          hash.empty() ? std::nullopt : std::make_optional(hash),
           base::BindOnce(&ImageWriterPrivateWriteFromUrlFunction::OnComplete,
                          this));
 #else
@@ -199,9 +199,9 @@ ImageWriterPrivateDestroyPartitionsFunction::Run() {
   }
 #endif
 
-  std::unique_ptr<image_writer_api::DestroyPartitions::Params> params(
-      image_writer_api::DestroyPartitions::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  std::optional<image_writer_api::DestroyPartitions::Params> params =
+      image_writer_api::DestroyPartitions::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   image_writer::ImageWriterControllerLacros::Get(browser_context())
@@ -265,7 +265,7 @@ void ImageWriterPrivateListRemovableStorageDevicesFunction::OnDeviceListReady(
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 void ImageWriterPrivateListRemovableStorageDevicesFunction::
     OnCrosapiDeviceListReady(
-        absl::optional<std::vector<crosapi::mojom::RemovableStorageDevicePtr>>
+        std::optional<std::vector<crosapi::mojom::RemovableStorageDevicePtr>>
             mojo_devices) {
   if (!mojo_devices) {
     Respond(Error(image_writer::error::kDeviceListError));

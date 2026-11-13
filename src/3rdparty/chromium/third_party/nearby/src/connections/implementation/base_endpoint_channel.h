@@ -21,14 +21,14 @@
 
 #include "absl/base/thread_annotations.h"
 #include "connections/implementation/analytics/analytics_recorder.h"
+#include "connections/implementation/analytics/packet_meta_data.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/condition_variable.h"
+#include "internal/platform/exception.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/output_stream.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -39,12 +39,12 @@ class BaseEndpointChannel : public EndpointChannel {
   BaseEndpointChannel(const std::string& service_id,
                       const std::string& channel_name, InputStream* reader,
                       OutputStream* writer);
-  BaseEndpointChannel(const std::string& service_id,
-                      const std::string& channel_name, InputStream* reader,
-                      OutputStream* writer,
-                      proto::connections::ConnectionTechnology,
-                      proto::connections::ConnectionBand band, int frequency,
-                      int try_count);
+  BaseEndpointChannel(
+      const std::string& service_id, const std::string& channel_name,
+      InputStream* reader, OutputStream* writer,
+      location::nearby::proto::connections::ConnectionTechnology,
+      location::nearby::proto::connections::ConnectionBand band, int frequency,
+      int try_count);
   ~BaseEndpointChannel() override = default;
 
   // EndpointChannel:
@@ -56,17 +56,21 @@ class BaseEndpointChannel : public EndpointChannel {
   Exception Write(const ByteArray& data, PacketMetaData& packet_meta_data)
       ABSL_LOCKS_EXCLUDED(writer_mutex_, crypto_mutex_) override;
   void Close() ABSL_LOCKS_EXCLUDED(is_paused_mutex_) override;
-  void Close(proto::connections::DisconnectionReason reason) override;
+  void Close(location::nearby::proto::connections::DisconnectionReason reason)
+      override;
   std::string GetType() const override;
   std::string GetServiceId() const override;
   std::string GetName() const override;
-  proto::connections::ConnectionTechnology GetTechnology() const override;
-  proto::connections::ConnectionBand GetBand() const override;
+  location::nearby::proto::connections::ConnectionTechnology GetTechnology()
+      const override;
+  location::nearby::proto::connections::ConnectionBand GetBand() const override;
   int GetFrequency() const override;
   int GetTryCount() const override;
   int GetMaxTransmitPacketSize() const override;
   void EnableEncryption(std::shared_ptr<EncryptionContext> context) override;
   void DisableEncryption() override;
+  bool IsEncrypted() override;
+  ExceptionOr<ByteArray> TryDecrypt(const ByteArray& data) override;
   bool IsPaused() const ABSL_LOCKS_EXCLUDED(is_paused_mutex_) override;
   void Pause() ABSL_LOCKS_EXCLUDED(is_paused_mutex_) override;
   void Resume() ABSL_LOCKS_EXCLUDED(is_paused_mutex_) override;
@@ -79,6 +83,8 @@ class BaseEndpointChannel : public EndpointChannel {
 
  protected:
   virtual void CloseImpl() = 0;
+  // For tests only.
+  std::unique_ptr<std::string> EncodeMessageForTests(absl::string_view data);
 
  private:
   // Used to sanity check that our frame sizes are reasonable.
@@ -125,10 +131,11 @@ class BaseEndpointChannel : public EndpointChannel {
   ConditionVariable is_paused_cond_{&is_paused_mutex_};
   // If true, writes should block until this has been set to false.
   bool is_paused_ ABSL_GUARDED_BY(is_paused_mutex_) = false;
+  bool is_closed_ ABSL_GUARDED_BY(is_paused_mutex_) = false;
 
   // The medium technology information of this endpoint channel.
-  proto::connections::ConnectionTechnology technology_;
-  proto::connections::ConnectionBand band_;
+  location::nearby::proto::connections::ConnectionTechnology technology_;
+  location::nearby::proto::connections::ConnectionBand band_;
   int frequency_;
   int try_count_;
 
@@ -138,6 +145,5 @@ class BaseEndpointChannel : public EndpointChannel {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_BASE_ENDPOINT_CHANNEL_H_

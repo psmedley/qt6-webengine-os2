@@ -30,7 +30,8 @@ MessageStatus QuicDatagramQueue::SendOrQueueDatagram(
   // the datagrams are sent in the same order that they were sent by the
   // application.
   if (queue_.empty()) {
-    MessageResult result = session_->SendMessage(absl::MakeSpan(&datagram, 1));
+    MessageResult result = session_->SendMessage(absl::MakeSpan(&datagram, 1),
+                                                 /*flush=*/force_flush_);
     if (result.status != MESSAGE_STATUS_BLOCKED) {
       if (observer_) {
         observer_->OnDatagramProcessed(result.status);
@@ -44,10 +45,10 @@ MessageStatus QuicDatagramQueue::SendOrQueueDatagram(
   return MESSAGE_STATUS_BLOCKED;
 }
 
-absl::optional<MessageStatus> QuicDatagramQueue::TrySendingNextDatagram() {
+std::optional<MessageStatus> QuicDatagramQueue::TrySendingNextDatagram() {
   RemoveExpiredDatagrams();
   if (queue_.empty()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   MessageResult result =
@@ -64,7 +65,7 @@ absl::optional<MessageStatus> QuicDatagramQueue::TrySendingNextDatagram() {
 size_t QuicDatagramQueue::SendDatagrams() {
   size_t num_datagrams = 0;
   for (;;) {
-    absl::optional<MessageStatus> status = TrySendingNextDatagram();
+    std::optional<MessageStatus> status = TrySendingNextDatagram();
     if (!status.has_value()) {
       break;
     }
@@ -90,9 +91,10 @@ QuicTime::Delta QuicDatagramQueue::GetMaxTimeInQueue() const {
 void QuicDatagramQueue::RemoveExpiredDatagrams() {
   QuicTime now = clock_->ApproximateNow();
   while (!queue_.empty() && queue_.front().expiry <= now) {
+    ++expired_datagram_count_;
     queue_.pop_front();
     if (observer_) {
-      observer_->OnDatagramProcessed(absl::nullopt);
+      observer_->OnDatagramProcessed(std::nullopt);
     }
   }
 }

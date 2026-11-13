@@ -1,11 +1,14 @@
 // Copyright (C) 2017 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "url_request_custom_job_proxy.h"
 #include "url_request_custom_job_delegate.h"
 
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_util.h"
+#include "services/network/public/cpp/resource_request_body.h"
 
 #include "api/qwebengineurlrequestjob.h"
 #include "profile_adapter.h"
@@ -40,24 +43,16 @@ void URLRequestCustomJobProxy::release()
     }
 }
 
-void URLRequestCustomJobProxy::reply(std::string contentType, QIODevice *device)
+void URLRequestCustomJobProxy::reply(std::string contentType, QIODevice *device,
+                                     QMultiMap<QByteArray, QByteArray> additionalResponseHeaders)
 {
     if (!m_client)
         return;
     DCHECK (!m_ioTaskRunner || m_ioTaskRunner->RunsTasksInCurrentSequence());
-    QByteArray qcontentType = QByteArray::fromStdString(contentType).toLower();
-    const int sidx = qcontentType.indexOf(';');
-    if (sidx > 0) {
-        const int cidx = qcontentType.indexOf("charset=", sidx);
-        if (cidx > 0) {
-            m_client->m_charset = qcontentType.mid(cidx + 8).toStdString();
-            qcontentType = qcontentType.first(sidx);
-        } else {
-            qWarning() << "QWebEngineUrlRequestJob::reply(): Unrecognized content-type format with ';'" << qcontentType;
-        }
-    }
-    m_client->m_mimeType = qcontentType.toStdString();
+    bool hadCharset = false;
+    net::HttpUtil::ParseContentType(contentType, &m_client->m_mimeType, &m_client->m_charset, &hadCharset, nullptr);
     m_client->m_device = device;
+    m_client->m_additionalResponseHeaders = std::move(additionalResponseHeaders);
     if (m_client->m_device && !m_client->m_device->isReadable())
         m_client->m_device->open(QIODevice::ReadOnly);
 
@@ -115,6 +110,11 @@ void URLRequestCustomJobProxy::fail(int error)
     // else we fail on the next read, or the read that might already be in progress
 }
 
+void URLRequestCustomJobProxy::succeed()
+{
+    m_client->notifySuccess();
+}
+
 void URLRequestCustomJobProxy::readyRead()
 {
     DCHECK (m_ioTaskRunner->RunsTasksInCurrentSequence());
@@ -124,7 +124,8 @@ void URLRequestCustomJobProxy::readyRead()
 
 void URLRequestCustomJobProxy::initialize(GURL url, std::string method,
                                           absl::optional<url::Origin> initiator,
-                                          std::map<std::string, std::string> headers)
+                                          std::map<std::string, std::string> headers,
+                                          scoped_refptr<network::ResourceRequestBody> requestBody)
 {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     Q_ASSERT(!m_delegate);
@@ -142,10 +143,9 @@ void URLRequestCustomJobProxy::initialize(GURL url, std::string method,
         qHeaders.insert(toQByteArray(it->first), toQByteArray(it->second));
 
     if (schemeHandler) {
-        m_delegate = new URLRequestCustomJobDelegate(this, toQt(url),
-                                                     QByteArray::fromStdString(method),
-                                                     initiatorOrigin,
-                                                     qHeaders);
+        m_delegate =
+                new URLRequestCustomJobDelegate(this, toQt(url), QByteArray::fromStdString(method),
+                                                initiatorOrigin, qHeaders, requestBody.get());
         QWebEngineUrlRequestJob *requestJob = new QWebEngineUrlRequestJob(m_delegate);
         schemeHandler->requestStarted(requestJob);
     }

@@ -374,12 +374,6 @@ sk_sp<const GrGLInterface> GrGLMakeAssembledGLESInterface(void *ctx, GrGLGetProc
         GET_PROC_SUFFIX(CopyBufferSubData, NV);
     }
 
-    if (extensions.has("GL_CHROMIUM_framebuffer_mixed_samples")) {
-        GET_PROC_SUFFIX(CoverageModulation, CHROMIUM);
-    } else if (extensions.has("GL_NV_framebuffer_mixed_samples")) {
-        GET_PROC_SUFFIX(CoverageModulation, NV);
-    }
-
     if (extensions.has("GL_KHR_debug")) {
         GET_PROC_SUFFIX(DebugMessageCallback, KHR);
         GET_PROC_SUFFIX(DebugMessageControl, KHR);
@@ -438,7 +432,7 @@ sk_sp<const GrGLInterface> GrGLMakeAssembledGLESInterface(void *ctx, GrGLGetProc
     }
 
     if (glVer >= GR_GL_VER(3,0)) {
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
         GET_PROC(BeginQuery);
         GET_PROC(DeleteQueries);
         GET_PROC(EndQuery);
@@ -447,7 +441,7 @@ sk_sp<const GrGLInterface> GrGLMakeAssembledGLESInterface(void *ctx, GrGLGetProc
         GET_PROC(GetQueryiv);
 #endif
     } else if (extensions.has("GL_EXT_occlusion_query_boolean")) {
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
         GET_PROC_SUFFIX(BeginQuery, EXT);
         GET_PROC_SUFFIX(DeleteQueries, EXT);
         GET_PROC_SUFFIX(EndQuery, EXT);
@@ -490,6 +484,6 @@ sk_sp<const GrGLInterface> GrGLMakeAssembledGLESInterface(void *ctx, GrGLGetProc
     interface->fStandard = kGLES_GrGLStandard;
     interface->fExtensions.swap(&extensions);
 
-    return std::move(interface);
+    return interface;
 }
 #endif

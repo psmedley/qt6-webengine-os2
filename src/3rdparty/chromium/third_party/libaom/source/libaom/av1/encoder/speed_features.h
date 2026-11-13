@@ -35,6 +35,11 @@ enum {
   GM_FULL_SEARCH,
   GM_REDUCED_REF_SEARCH_SKIP_L2_L3,
   GM_REDUCED_REF_SEARCH_SKIP_L2_L3_ARF2,
+
+  // Same as GM_REDUCED_REF_SEARCH_SKIP_L2_L3_ARF2 but with extra filtering
+  // to keep at most two ref frames
+  GM_SEARCH_CLOSEST_REFS_ONLY,
+
   GM_DISABLE_SEARCH
 } UENUM1BYTE(GM_SEARCH_TYPE);
 
@@ -87,6 +92,8 @@ enum {
                             (1 << NEAREST_NEWMV) | (1 << NEW_NEARESTMV) |
                             (1 << NEW_NEARMV) | (1 << NEAR_NEWMV) |
                             (1 << NEAR_NEARMV),
+  INTER_SINGLE_ALL =
+      (1 << NEARESTMV) | (1 << NEARMV) | (1 << GLOBALMV) | (1 << NEWMV),
 };
 
 enum {
@@ -134,7 +141,8 @@ enum {
   SUBPEL_TREE = 0,
   SUBPEL_TREE_PRUNED = 1,       // Prunes 1/2-pel searches
   SUBPEL_TREE_PRUNED_MORE = 2,  // Prunes 1/2-pel searches more aggressively
-} UENUM1BYTE(SUBPEL_SEARCH_METHODS);
+  SUBPEL_SEARCH_METHODS
+} UENUM1BYTE(SUBPEL_SEARCH_METHOD);
 
 enum {
   // Try the full image with different values.
@@ -232,6 +240,19 @@ enum {
   PRUNE_NEARMV_LEVEL3 = 3,  // Prune nearmv more aggressively for qindex (0-170)
   PRUNE_NEARMV_MAX = PRUNE_NEARMV_LEVEL3,
 } UENUM1BYTE(PRUNE_NEARMV_LEVEL);
+
+enum {
+  // Default transform search used in evaluation of best inter candidates
+  // (MODE_EVAL stage) and motion mode winner processing (WINNER_MODE_EVAL
+  // stage).
+  TX_SEARCH_DEFAULT = 0,
+  // Transform search in motion mode rd during MODE_EVAL stage.
+  TX_SEARCH_MOTION_MODE,
+  // Transform search in compound type mode rd during MODE_EVAL stage.
+  TX_SEARCH_COMP_TYPE_MODE,
+  // All transform search cases
+  TX_SEARCH_CASES
+} UENUM1BYTE(TX_SEARCH_CASE);
 
 typedef struct {
   TX_TYPE_PRUNE_MODE prune_2d_txfm_mode;
@@ -431,10 +452,36 @@ typedef struct HIGH_LEVEL_SPEED_FEATURES {
   int second_alt_ref_filtering;
 
   /*!
-   * Number of frames to be used in temporal filtering controlled based on noise
-   * levels and arf-q.
+   * The number of frames to be used during temporal filtering of an ARF frame
+   * is adjusted based on noise level of the current frame. The sf has three
+   * levels to decide number of frames to be considered for filtering:
+   * 0       : Use default number of frames
+   * 1 and 2 : Reduce the number of frames based on noise level with varied
+   * aggressiveness
    */
-  int num_frames_used_in_tf;
+  int adjust_num_frames_for_arf_filtering;
+
+  /*!
+   * Decide the bit estimation approach used in qindex decision.
+   * 0: estimate bits based on a constant value;
+   * 1: estimate bits more accurately based on the frame complexity.
+   */
+  int accurate_bit_estimate;
+
+  /*!
+   * Decide the approach for weight calculation during temporal filtering.
+   * 0: Calculate weight using exp()
+   * 1: Calculate weight using a lookup table that approximates exp().
+   */
+  int weight_calc_level_in_tf;
+
+  /*!
+   * Decide whether to perform motion estimation at split block (i.e. 16x16)
+   * level or not.
+   * 0: Always allow motion estimation.
+   * 1: Conditionally allow motion estimation based on 4x4 sub-blocks variance.
+   */
+  int allow_sub_blk_me_in_tf;
 } HIGH_LEVEL_SPEED_FEATURES;
 
 /*!
@@ -498,9 +545,6 @@ typedef struct TPL_SPEED_FEATURES {
   // Prune starting mvs in TPL based on sad scores.
   int prune_starting_mv;
 
-  // Not run TPL for filtered Key frame.
-  int disable_filtered_key_tpl;
-
   // Prune reference frames in TPL.
   int prune_ref_frames_in_tpl;
 
@@ -509,6 +553,19 @@ typedef struct TPL_SPEED_FEATURES {
 
   // Calculate rate and distortion based on Y plane only.
   int use_y_only_rate_distortion;
+
+  // Use SAD instead of SATD during intra/inter mode search.
+  // If set to 0, use SATD always.
+  // If set to 1, use SAD during intra/inter mode search for frames in the
+  // higher temporal layers of the hierarchical prediction structure.
+  // If set to 2, use SAD during intra/inter mode search for all frames.
+  // This sf is disabled for the first GF group of the key-frame interval,
+  // i.e., SATD is used during intra/inter mode search of the first GF group.
+  int use_sad_for_mode_decision;
+
+  // Skip tpl processing for frames of type LF_UPDATE.
+  // This sf is disabled for the first GF group of the key-frame interval.
+  int reduce_num_frames;
 } TPL_SPEED_FEATURES;
 
 typedef struct GLOBAL_MOTION_SPEED_FEATURES {
@@ -529,6 +586,9 @@ typedef struct GLOBAL_MOTION_SPEED_FEATURES {
   // Disable global motion estimation based on stats of previous frames in the
   // GF group
   int disable_gm_search_based_on_stats;
+
+  // Number of refinement steps to apply after initial model generation
+  int num_refinement_steps;
 } GLOBAL_MOTION_SPEED_FEATURES;
 
 typedef struct PARTITION_SPEED_FEATURES {
@@ -537,9 +597,10 @@ typedef struct PARTITION_SPEED_FEATURES {
   // Used if partition_search_type = FIXED_PARTITION
   BLOCK_SIZE fixed_partition_size;
 
-  // Prune extended partition types search
-  // Can take values 0 - 2, 0 referring to no pruning, and 1 - 2 increasing
-  // aggressiveness of pruning in order.
+  // Prune extended partition types search based on the current best partition
+  // and the combined rdcost of the subblocks estimated from previous
+  // partitions. Can take values 0 - 2, 0 referring to no pruning, and 1 - 2
+  // increasing aggressiveness of pruning in order.
   int prune_ext_partition_types_search_level;
 
   // Prune part4 based on block size
@@ -624,13 +685,18 @@ typedef struct PARTITION_SPEED_FEATURES {
   // 2: Prune none, split and rectangular partitions
   int intra_cnn_based_part_prune_level;
 
-  // Disable extended partition search for lower block sizes.
-  int ext_partition_eval_thresh;
+  // Disable extended partition search if the current bsize is greater than the
+  // threshold. Must be a square block size BLOCK_8X8 or higher.
+  BLOCK_SIZE ext_partition_eval_thresh;
+
+  // Use best partition decision so far to tune 'ext_partition_eval_thresh'
+  int ext_part_eval_based_on_cur_best;
 
   // Disable rectangular partitions for larger block sizes.
   int rect_partition_eval_thresh;
 
-  // prune extended partition search
+  // Prune extended partition search based on whether the split/rect partitions
+  // provided an improvement in the previous search.
   // 0 : no pruning
   // 1 : prune 1:4 partition search using winner info from split partitions
   // 2 : prune 1:4 and AB partition search using split and HORZ/VERT info
@@ -641,6 +707,40 @@ typedef struct PARTITION_SPEED_FEATURES {
   // 1 : prune sub_8x8 at very low quantizers
   // 2 : prune all block size based on qindex
   int prune_rectangular_split_based_on_qidx;
+
+  // Prune rectangular partitions based on 4x4 sub-block variance
+  // false : no pruning
+  // true : prune rectangular partitions based on 4x4 sub-block variance
+  // deviation
+  //
+  // For allintra encode, this speed feature reduces instruction count by 6.4%
+  // for speed=6 with coding performance change less than 0.24%. For AVIF image
+  // encode, this speed feature reduces encode time by 8.14% for speed 6 on a
+  // typical image dataset with coding performance change less than 0.16%. This
+  // speed feature is not applicable to speed >= 7.
+  bool prune_rect_part_using_4x4_var_deviation;
+
+  // Prune rectangular partitions based on prediction mode chosen by NONE
+  // partition.
+  // false : no pruning
+  // true : prunes rectangular partition as described below
+  // If prediction mode chosen by NONE partition is
+  // DC_PRED or SMOOTH_PRED: Prunes both horizontal and vertical partitions if
+  // at least one of the left and top neighbor blocks is larger than the
+  // current block.
+  // Directional Mode: Prunes either of the horizontal and vertical partition
+  // based on center angle of the prediction mode chosen by NONE partition. For
+  // example, vertical partition is pruned if center angle of the prediction
+  // mode chosen by NONE partition is close to 180 degrees (i.e. horizontal
+  // direction) and vice versa.
+  // For allintra encode, this speed feature reduces instruction count by 5.1%
+  // for speed=6 with coding performance change less than 0.22%. For AVIF image
+  // encode, this speed feature reduces encode time by 4.44% for speed 6 on a
+  // typical image dataset with coding performance change less than 0.15%.
+  // For speed >= 7, variance-based logic is used to determine the partition
+  // structure instead of recursive partition search. Therefore, this speed
+  // feature is not applicable in such cases.
+  bool prune_rect_part_using_none_pred_mode;
 
   // Terminate partition search for child partition,
   // when NONE and SPLIT partition rd_costs are INT64_MAX.
@@ -725,8 +825,8 @@ typedef struct MV_SPEED_FEATURES {
   // Motion search method (Diamond, NSTEP, Hex, Big Diamond, Square, etc).
   SEARCH_METHODS search_method;
 
-  // Enable the use of faster, less accurate mv search method on bsize >=
-  // BLOCK_32X32.
+  // Enable the use of faster, less accurate mv search method
+  // 0: disable, 1: if bsize >= BLOCK_32X32, 2: based on bsize, SAD and qp
   // TODO(chiyotsai@google.com): Take the clip's resolution and mv activity into
   // account.
   int use_bsize_dependent_search_method;
@@ -739,7 +839,7 @@ typedef struct MV_SPEED_FEATURES {
   // logarithmic search that keeps stepping at 1/2 pixel units until
   // you stop getting a gain, and then goes on to 1/4 and repeats
   // the same process. Along the way it skips many diagonals.
-  SUBPEL_SEARCH_METHODS subpel_search_method;
+  SUBPEL_SEARCH_METHOD subpel_search_method;
 
   // Maximum number of steps in logarithmic subpel search before giving up.
   int subpel_iters_per_step;
@@ -780,8 +880,20 @@ typedef struct MV_SPEED_FEATURES {
   // Accurate full pixel motion search based on TPL stats.
   int full_pixel_search_level;
 
+  // Allow intrabc motion search
+  int use_intrabc;
+
   // Whether to downsample the rows in sad calculation during motion search.
-  // This is only active when there are at least 16 rows.
+  // This is only active when there are at least 16 rows. When this sf is
+  // active, if there is a large discrepancy in the SAD values for the final
+  // motion vector between skipping vs not skipping, motion search is redone
+  // with skip row features off.
+  // 0: Disabled (do not downsample rows)
+  // 1: Skip SAD calculation of odd rows if the SAD deviation of the even and
+  //    odd rows for the starting MV is small. Redo motion search with sf off
+  //    when SAD deviation is high for the final motion vector.
+  // 2: Skip SAD calculation of odd rows. SAD deviation is not tested for the
+  //    start MV and tested only for the final MV.
   int use_downsampled_sad;
 
   // Enable/disable extensive joint motion search.
@@ -794,7 +906,17 @@ typedef struct MV_SPEED_FEATURES {
   int disable_second_mv;
 
   // Skips full pixel search based on start mv of prior ref_mv_idx.
+  // 0: Disabled
+  // 1: Skips the full pixel search upto 4 neighbor full-pel MV positions.
+  // 2: Skips the full pixel search upto 8 neighbor full-pel MV positions.
   int skip_fullpel_search_using_startmv;
+
+  // Method to use for refining WARPED_CAUSAL motion vectors
+  // TODO(rachelbarker): Can this be unified with OBMC in some way?
+  WARP_SEARCH_METHOD warp_search_method;
+
+  // Maximum number of iterations in WARPED_CAUSAL refinement search
+  int warp_search_iters;
 } MV_SPEED_FEATURES;
 
 typedef struct INTER_MODE_SPEED_FEATURES {
@@ -806,8 +928,11 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // 2: used with static rd model
   int inter_mode_rd_model_estimation;
 
-  // Bypass transform search based on skip rd
-  int txfm_rd_gate_level;
+  // Bypass transform search based on skip rd at following stages
+  //   i. Compound type mode search
+  //  ii. Motion mode search (mode evaluation and winner motion mode stage)
+  // iii. Transform search for best inter candidates
+  int txfm_rd_gate_level[TX_SEARCH_CASES];
 
   // Limit the inter mode tested in the RD loop
   int reduce_inter_modes;
@@ -835,6 +960,12 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // 1 prune inter modes w.r.t ALTREF2 and ALTREF reference frames
   // 2 prune inter modes w.r.t BWDREF, ALTREF2 and ALTREF reference frames
   int alt_ref_search_fp;
+
+  // Prune reference frames for single prediction modes based on temporal
+  // distance and pred MV SAD. Feasible values are 0, 1, 2. The feature is
+  // disabled for 0. An increasing value indicates more aggressive pruning
+  // threshold.
+  int prune_single_ref;
 
   // Prune compound reference frames
   // 0 no pruning
@@ -920,14 +1051,9 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   int prune_comp_using_best_single_mode_ref;
 
   // Skip NEARESTMV and NEARMV using weight computed in ref mv list population
-  // This speed feature sometimes leads to severe visual artifacts for
-  // the overlay frame. It makes inter RD mode search skip NEARESTMV
-  // and NEARMV, and no valid inter mode is evaluated when the NEWMV mode
-  // is also early terminated due to the constraint that it does not handle
-  // zero mv difference. In this cases, intra modes will be chosen, leading
-  // to bad prediction and flickering artifacts.
-  // Turn off this feature for now. Be careful to check visual quality if
-  // anyone is going to turn it on.
+  //
+  // Pruning is enabled only when both the top and left neighbor blocks are
+  // available and when the current block already has a valid inter prediction.
   int prune_nearest_near_mv_using_refmv_weight;
 
   // Based on previous ref_mv_idx search result, prune the following search.
@@ -992,7 +1118,20 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // Enable/disable masked compound.
   int disable_masked_comp;
 
-  // Enable/disable the fast compound mode search.
+  // Enable/disable MV refinement for compound modes corresponds to compound
+  // types COMPOUND_AVERAGE, COMPOUND_DISTWTD (currently, this compound type
+  // is disabled for speeds >= 2 using the sf 'use_dist_wtd_comp_flag') and
+  // COMPOUND_DIFFWTD based on the availability. Levels 0 to 3 indicate
+  // increasing order of aggressiveness to disable MV refinement.
+  // 0: MV Refinement is enabled and for NEW_NEWMV mode used two iterations of
+  // refinement in av1_joint_motion_search().
+  // 1: MV Refinement is disabled for COMPOUND_DIFFWTD and enabled for
+  // COMPOUND_AVERAGE & COMPOUND_DISTWTD.
+  // 2: MV Refinement is enabled for COMPOUND_AVERAGE & COMPOUND_DISTWTD for
+  // NEW_NEWMV mode with one iteration of refinement in
+  // av1_joint_motion_search() and MV Refinement is disabled for other compound
+  // type modes.
+  // 3: MV Refinement is disabled.
   int enable_fast_compound_mode_search;
 
   // Reuse masked compound type search results
@@ -1046,10 +1185,15 @@ typedef struct INTERP_FILTER_SPEED_FEATURES {
   // dual_filter=0 case
   int skip_sharp_interp_filter_search;
 
+  // skip interpolation filter search for a block in chessboard pattern
   int cb_pred_filter_search;
 
   // adaptive interp_filter search to allow skip of certain filter types.
   int adaptive_interp_filter_search;
+
+  // Forces interpolation filter to EIGHTTAP_REGULAR and skips interpolation
+  // filter search.
+  int skip_interp_filter_search;
 } INTERP_FILTER_SPEED_FEATURES;
 
 typedef struct INTRA_MODE_SPEED_FEATURES {
@@ -1228,6 +1372,21 @@ typedef struct TX_SPEED_FEATURES {
   // encode time by 4.65%, 9.16% and 10.45% for speed 6, 7 and 8 on a typical
   // image dataset with coding performance change less than 0.19%.
   bool prune_intra_tx_depths_using_nn;
+
+  // Enable/disable early breakout during transform search of intra modes, by
+  // using the minimum rd cost possible. By using this approach, the rd
+  // evaluation of applicable transform blocks (in the current block) can be
+  // avoided as
+  // 1) best_rd evolves during the search in choose_tx_size_type_from_rd()
+  // 2) appropriate ref_best_rd is passed in intra_block_yrd()
+  //
+  // For allintra encode, this speed feature reduces instruction count
+  // by 1.11%, 1.08%, 1.02% and 0.93% for speed 3, 6, 7 and 8 with coding
+  // performance change less than 0.02%. For AVIF image encode, this speed
+  // feature reduces encode time by 0.93%, 1.46%, 1.07%, 0.84%, 0.99% and 0.73%
+  // for speed 3, 4, 5, 6, 7 and 8 on a typical image dataset with coding
+  // performance change less than 0.004%.
+  bool use_rd_based_breakout_for_intra_tx_search;
 } TX_SPEED_FEATURES;
 
 typedef struct RD_CALC_SPEED_FEATURES {
@@ -1353,6 +1512,13 @@ typedef struct LOOP_FILTER_SPEED_FEATURES {
   // Disable loop restoration for luma plane
   int disable_loop_restoration_luma;
 
+  // Range of loop restoration unit sizes to search
+  // The minimum size is clamped against the superblock size in
+  // av1_pick_filter_restoration, so that the code which sets this value does
+  // not need to know the superblock size ahead of time.
+  int min_lr_unit_size;
+  int max_lr_unit_size;
+
   // Prune RESTORE_WIENER evaluation based on source variance
   // 0 : no pruning
   // 1 : conservative pruning
@@ -1369,8 +1535,14 @@ typedef struct LOOP_FILTER_SPEED_FEATURES {
   // Reduce the wiener filter win size for luma
   int reduce_wiener_window_size;
 
-  // Disable loop restoration filter
-  int disable_lr_filter;
+  // Flag to disable Wiener Loop restoration filter.
+  bool disable_wiener_filter;
+
+  // Flag to disable Self-guided Loop restoration filter.
+  bool disable_sgr_filter;
+
+  // Disable the refinement search around the wiener filter coefficients.
+  bool disable_wiener_coeff_refine_search;
 
   // Whether to downsample the rows in computation of wiener stats.
   int use_downsampled_wiener_stats;
@@ -1387,7 +1559,11 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // Skipping aggressiveness increases from level 1 to 2.
   int skip_intra_pred;
 
-  // Perform coarse ME before calculating variance in variance-based partition
+  // Estimate motion before calculating variance in variance-based partition
+  // 0 - Only use zero MV
+  // 1 - perform coarse ME
+  // 2 - perform coarse ME, and also use neighbours' MVs
+  // 3 - use neighbours' MVs without performing coarse ME
   int estimate_motion_for_var_based_partition;
 
   // For nonrd_use_partition: mode of extra check of leaf partition
@@ -1443,9 +1619,6 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // Use simplified RD model for interpolation search and Intra
   int use_simple_rd_model;
 
-  // If set forces interpolation filter to EIGHTTAP_REGULAR
-  int skip_interp_filter_search;
-
   // For nonrd mode: use hybrid intra mode search for intra only frames based on
   // block properties.
   // 0 : use nonrd pick intra for all blocks
@@ -1477,20 +1650,49 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   int fullpel_search_step_param;
 
   // Bit mask to enable or disable intra modes for each prediction block size
-  // separately, for nonrd pickmode.
+  // separately, for nonrd_pickmode.  Currently, the sf is not respected when
+  // 'force_intra_check' is true in 'av1_estimate_intra_mode()' function. Also,
+  // H and V pred modes allowed through this sf can be further pruned when
+  //'prune_hv_pred_modes_using_src_sad' sf is true.
   int intra_y_mode_bsize_mask_nrd[BLOCK_SIZES];
+
+  // Prune H and V intra predition modes evalution in inter frame.
+  // The sf does not have any impact.
+  // i. when frame_source_sad is 1.1 times greater than avg_source_sad
+  // ii. when cyclic_refresh_segment_id_boosted is enabled
+  // iii. when SB level source sad is greater than kMedSad
+  // iv. when color sensitivity is non zero for both the chroma channels
+  bool prune_hv_pred_modes_using_src_sad;
 
   // Skips mode checks more aggressively in nonRD mode
   int nonrd_aggressive_skip;
 
-  // Skip cdef on 64x64 blocks when NEWMV or INTRA is not picked or color
-  // sensitivity is off. When color sensitivity is on for a superblock, all
-  // 64x64 blocks within will not skip.
+  // Skip cdef on 64x64 blocks/
+  // 0: disabled
+  // 1: skip when NEWMV or INTRA is not picked or color sensitivity is off.
+  // When color sensitivity is on for a superblock, all 64x64 blocks within
+  // will not skip.
+  // 2: more aggressive mode where skip is done for all frames where
+  // rc->high_source_sad = 0 (non slide-changes), and color sensitivity off.
   int skip_cdef_sb;
+
+  // Force selective cdf update.
+  int selective_cdf_update;
+
+  // Force only single reference (LAST) for prediction.
+  int force_only_last_ref;
 
   // Forces larger partition blocks in variance based partitioning for intra
   // frames
   int force_large_partition_blocks_intra;
+
+  // Use fixed partition for superblocks based on source_sad.
+  // 0: disabled
+  // 1: enabled
+  int use_fast_fixed_part;
+
+  // Increase source_sad thresholds in nonrd pickmode.
+  int increase_source_sad_thresh;
 
   // Skip evaluation of no split in tx size selection for merge partition
   int skip_tx_no_split_var_based_partition;
@@ -1546,6 +1748,7 @@ typedef struct REAL_TIME_SPEED_FEATURES {
 
   // Temporal filtering
   // The value can be 1 or 2, which indicates the threshold to use.
+  // Must be off for lossless mode.
   int use_rtc_tf;
 
   // Prune the use of the identity transform in nonrd_pickmode,
@@ -1554,8 +1757,18 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // already set.
   int prune_idtx_nonrd;
 
+  // Prune the use of paletter mode in nonrd pickmode.
+  int prune_palette_nonrd;
+
+  // Force to only use dct for palette search in nonrd pickmode.
+  int dct_only_palette_nonrd;
+
   // Skip loopfilter, for static content after slide change
   // or key frame, once quality has ramped up.
+  // 0: disabled
+  // 1: skip only after quality is ramped up.
+  // 2: aggrssive mode, where skip is done for all frames that
+  // where rc->high_source_sad = 0 (no slide-changes).
   int skip_lf_screen;
 
   // For nonrd: early exit out of variance partition that sets the
@@ -1621,6 +1834,26 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // 0.08%.
   bool prune_h_pred_using_best_mode_so_far;
 
+  // Enable pruning of intra mode evaluations in nonrd path based on source
+  // variance and best mode so far. The pruning logic is enabled only if the
+  // mode is not a winner mode of both the neighboring blocks (left/top).
+  //
+  // For allintra encode, this speed feature reduces instruction count by 3.96%
+  // for speed 9 with coding performance change less than 0.38%.
+  // For AVIF image encode, this speed feature reduces encode time by 3.46% for
+  // speed 9 on a typical image dataset with coding performance change less than
+  // -0.06%.
+  bool enable_intra_mode_pruning_using_neighbors;
+
+  // Prune intra mode evaluations in nonrd path based on best sad so far.
+  //
+  // For allintra encode, this speed feature reduces instruction count by 3.05%
+  // for speed 9 with coding performance change less than 0.24%.
+  // For AVIF image encode, this speed feature reduces encode time by 1.87% for
+  // speed 9 on a typical image dataset with coding performance change less than
+  // 0.16%.
+  bool prune_intra_mode_using_best_sad_so_far;
+
   // If compound is enabled, and the current block size is \geq BLOCK_16X16,
   // limit the compound modes to GLOBAL_GLOBALMV. This does not apply to the
   // base layer of svc.
@@ -1643,8 +1876,9 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // 2: If source sad <= kVeryLowSad
   int set_zeromv_skip_based_on_source_sad;
 
-  // Downgrades the subpel search to av1_find_best_sub_pixel_tree_pruned_more
-  // when either the fullpel search performed well, or when zeromv has low sad.
+  // Downgrades the block-level subpel motion search to
+  // av1_find_best_sub_pixel_tree_pruned_more for higher QP and when fullpel
+  // search performed well, zeromv has low sad or low source_var
   bool use_adaptive_subpel_search;
 
   // A flag used in RTC case to control frame_refs_short_signaling. Note that
@@ -1656,6 +1890,11 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // A flag that controls if we check or bypass GLOBALMV in rtc single ref frame
   // case.
   bool check_globalmv_on_single_ref;
+
+  // Allows for increasing the color_threshold for palette prediction.
+  // This generally leads to better coding efficiency but with some speed loss.
+  // Only used for screen content and for nonrd_pickmode.
+  bool increase_color_thresh_palette;
 } REAL_TIME_SPEED_FEATURES;
 
 /*!\endcond */

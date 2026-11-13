@@ -12,7 +12,7 @@ import 'chrome://resources/cr_elements/cr_tree/cr_tree_item.js';
 
 import {CrTreeElement} from 'chrome://resources/cr_elements/cr_tree/cr_tree.js';
 import {CrTreeItemElement} from 'chrome://resources/cr_elements/cr_tree/cr_tree_item.js';
-import {assert} from 'chrome://resources/js/assert_ts.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {String16} from 'chrome://resources/mojo/mojo/public/mojom/base/string16.mojom-webui.js';
 
 import {DescriptorPanel, renderClassCodeWithDescription} from './descriptor_panel.js';
@@ -42,7 +42,7 @@ export class DevicesPage {
 
     const tableBody = this.root_.querySelector<HTMLElement>('#device-list');
     assert(tableBody);
-    tableBody.innerHTML = window.trustedTypes!.emptyHTML as unknown as string;
+    tableBody.innerHTML = window.trustedTypes!.emptyHTML;
 
     const rowTemplate =
         this.root_.querySelector<HTMLTemplateElement>('#device-row');

@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,12 +130,11 @@ void DoBilinearLoop(const CFX_ImageTransformer::CalcData& calc_data,
 
 }  // namespace
 
-CFX_ImageTransformer::CFX_ImageTransformer(
-    const RetainPtr<const CFX_DIBBase>& pSrc,
-    const CFX_Matrix& matrix,
-    const FXDIB_ResampleOptions& options,
-    const FX_RECT* pClip)
-    : m_pSrc(pSrc), m_matrix(matrix), m_ResampleOptions(options) {
+CFX_ImageTransformer::CFX_ImageTransformer(RetainPtr<const CFX_DIBBase> source,
+                                           const CFX_Matrix& matrix,
+                                           const FXDIB_ResampleOptions& options,
+                                           const FX_RECT* pClip)
+    : m_pSrc(std::move(source)), m_matrix(matrix), m_ResampleOptions(options) {
   FX_RECT result_rect = m_matrix.GetUnitRect().GetClosestRect();
   FX_RECT result_clip = result_rect;
   if (pClip)
@@ -157,7 +156,7 @@ CFX_ImageTransformer::CFX_ImageTransformer(
         &m_Storer, m_pSrc, dest_height, dest_width, result_clip,
         m_ResampleOptions);
     m_Stretcher->Start();
-    m_type = kRotate;
+    m_type = StretchType::kRotate;
     return;
   }
   if (fabs(m_matrix.b) < kFix16 && fabs(m_matrix.c) < kFix16) {
@@ -170,7 +169,7 @@ CFX_ImageTransformer::CFX_ImageTransformer(
         &m_Storer, m_pSrc, dest_width, dest_height, result_clip,
         m_ResampleOptions);
     m_Stretcher->Start();
-    m_type = kNormal;
+    m_type = StretchType::kNormal;
     return;
   }
 
@@ -200,32 +199,32 @@ CFX_ImageTransformer::CFX_ImageTransformer(
       &m_Storer, m_pSrc, stretch_width, stretch_height, m_StretchClip,
       m_ResampleOptions);
   m_Stretcher->Start();
-  m_type = kOther;
+  m_type = StretchType::kOther;
 }
 
 CFX_ImageTransformer::~CFX_ImageTransformer() = default;
 
 bool CFX_ImageTransformer::Continue(PauseIndicatorIface* pPause) {
-  if (m_type == kNone)
+  if (m_type == StretchType::kNone) {
     return false;
+  }
 
   if (m_Stretcher->Continue(pPause))
     return true;
 
   switch (m_type) {
-    case kNormal:
-      break;
-    case kRotate:
+    case StretchType::kNone:
+      // Already handled separately at the beginning of this method.
+      NOTREACHED_NORETURN();
+    case StretchType::kNormal:
+      return false;
+    case StretchType::kRotate:
       ContinueRotate(pPause);
-      break;
-    case kOther:
+      return false;
+    case StretchType::kOther:
       ContinueOther(pPause);
-      break;
-    default:
-      NOTREACHED();
-      break;
+      return false;
   }
-  return false;
 }
 
 void CFX_ImageTransformer::ContinueRotate(PauseIndicatorIface* pPause) {
@@ -246,30 +245,13 @@ void CFX_ImageTransformer::ContinueOther(PauseIndicatorIface* pPause) {
   if (!pTransformed->Create(m_result.Width(), m_result.Height(), format))
     return;
 
-  const uint8_t* pSrcMaskBuf = m_Storer.GetBitmap()->GetAlphaMaskBuffer();
-  pTransformed->Clear(0);
-  RetainPtr<CFX_DIBitmap> pDestMask = pTransformed->GetAlphaMask();
-  if (pDestMask)
-    pDestMask->Clear(0);
-
   CFX_Matrix result2stretch(1.0f, 0.0f, 0.0f, 1.0f, m_result.left,
                             m_result.top);
   result2stretch.Concat(m_dest2stretch);
   result2stretch.Translate(-m_StretchClip.left, -m_StretchClip.top);
-  if (!pSrcMaskBuf && pDestMask) {
-    pDestMask->Clear(0xff000000);
-  } else if (pDestMask) {
-    CalcData calc_data = {
-        pDestMask.Get(),
-        result2stretch,
-        pSrcMaskBuf,
-        m_Storer.GetBitmap()->GetAlphaMaskPitch(),
-    };
-    CalcMask(calc_data);
-  }
 
   CalcData calc_data = {pTransformed.Get(), result2stretch,
-                        m_Storer.GetBitmap()->GetBuffer(),
+                        m_Storer.GetBitmap()->GetBuffer().data(),
                         m_Storer.GetBitmap()->GetPitch()};
   if (m_Storer.GetBitmap()->IsMaskFormat()) {
     CalcAlpha(calc_data);
@@ -285,13 +267,6 @@ void CFX_ImageTransformer::ContinueOther(PauseIndicatorIface* pPause) {
 
 RetainPtr<CFX_DIBitmap> CFX_ImageTransformer::DetachBitmap() {
   return m_Storer.Detach();
-}
-
-void CFX_ImageTransformer::CalcMask(const CalcData& calc_data) {
-  auto func = [&calc_data](const BilinearData& data, uint8_t* dest) {
-    *dest = BilinearInterpolate(calc_data.buf, data, 1, 0);
-  };
-  DoBilinearLoop(calc_data, m_result, m_StretchClip, 1, func);
 }
 
 void CFX_ImageTransformer::CalcAlpha(const CalcData& calc_data) {

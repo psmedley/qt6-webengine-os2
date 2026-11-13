@@ -1,16 +1,29 @@
-// Copyright 2020 The Dawn Authors
+// Copyright 2020 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/d3d12/SamplerHeapCacheD3D12.h"
 
@@ -18,6 +31,7 @@
 
 #include "dawn/common/Assert.h"
 #include "dawn/common/HashUtils.h"
+#include "dawn/native/Queue.h"
 #include "dawn/native/d3d12/BindGroupD3D12.h"
 #include "dawn/native/d3d12/BindGroupLayoutD3D12.h"
 #include "dawn/native/d3d12/DeviceD3D12.h"
@@ -28,20 +42,21 @@
 
 namespace dawn::native::d3d12 {
 
-SamplerHeapCacheEntry::SamplerHeapCacheEntry(std::vector<Sampler*> samplers)
-    : mSamplers(std::move(samplers)) {}
+SamplerHeapCacheEntry::SamplerHeapCacheEntry(MutexProtected<StagingDescriptorAllocator>& allocator,
+                                             std::vector<Sampler*> samplers)
+    : mSamplers(std::move(samplers)), mAllocator(allocator) {}
 
 SamplerHeapCacheEntry::SamplerHeapCacheEntry(SamplerHeapCache* cache,
-                                             StagingDescriptorAllocator* allocator,
+                                             MutexProtected<StagingDescriptorAllocator>& allocator,
                                              std::vector<Sampler*> samplers,
                                              CPUDescriptorHeapAllocation allocation)
     : mCPUAllocation(std::move(allocation)),
       mSamplers(std::move(samplers)),
       mAllocator(allocator),
       mCache(cache) {
-    ASSERT(mCache != nullptr);
-    ASSERT(mCPUAllocation.IsValid());
-    ASSERT(!mSamplers.empty());
+    DAWN_ASSERT(mCache != nullptr);
+    DAWN_ASSERT(mCPUAllocation.IsValid());
+    DAWN_ASSERT(!mSamplers.empty());
 }
 
 std::vector<Sampler*>&& SamplerHeapCacheEntry::AcquireSamplers() {
@@ -55,21 +70,23 @@ SamplerHeapCacheEntry::~SamplerHeapCacheEntry() {
         mAllocator->Deallocate(&mCPUAllocation);
     }
 
-    ASSERT(!mCPUAllocation.IsValid());
+    DAWN_ASSERT(!mCPUAllocation.IsValid());
 }
 
-bool SamplerHeapCacheEntry::Populate(Device* device, ShaderVisibleDescriptorAllocator* allocator) {
+bool SamplerHeapCacheEntry::Populate(Device* device,
+                                     MutexProtected<ShaderVisibleDescriptorAllocator>& allocator) {
     if (allocator->IsAllocationStillValid(mGPUAllocation)) {
         return true;
     }
 
-    ASSERT(!mSamplers.empty());
+    DAWN_ASSERT(!mSamplers.empty());
 
     // Attempt to allocate descriptors for the currently bound shader-visible heaps.
     // If either failed, return early to re-allocate and switch the heaps.
     const uint32_t descriptorCount = mSamplers.size();
     D3D12_CPU_DESCRIPTOR_HANDLE baseCPUDescriptor;
-    if (!allocator->AllocateGPUDescriptors(descriptorCount, device->GetPendingCommandSerial(),
+    if (!allocator->AllocateGPUDescriptors(descriptorCount,
+                                           device->GetQueue()->GetPendingCommandSerial(),
                                            &baseCPUDescriptor, &mGPUAllocation)) {
         return false;
     }
@@ -90,7 +107,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE SamplerHeapCacheEntry::GetBaseDescriptor() const {
 
 ResultOrError<Ref<SamplerHeapCacheEntry>> SamplerHeapCache::GetOrCreate(
     const BindGroup* group,
-    StagingDescriptorAllocator* samplerAllocator) {
+    MutexProtected<StagingDescriptorAllocator>& samplerAllocator) {
     const BindGroupLayout* bgl = ToBackend(group->GetLayout());
 
     // If a previously created bindgroup used the same samplers, the backing sampler heap
@@ -110,7 +127,7 @@ ResultOrError<Ref<SamplerHeapCacheEntry>> SamplerHeapCache::GetOrCreate(
 
     // Check the cache if there exists a sampler heap allocation that corresponds to the
     // samplers.
-    SamplerHeapCacheEntry blueprint(std::move(samplers));
+    SamplerHeapCacheEntry blueprint(samplerAllocator, std::move(samplers));
     auto iter = mCache.find(&blueprint);
     if (iter != mCache.end()) {
         return Ref<SamplerHeapCacheEntry>(*iter);
@@ -120,10 +137,14 @@ ResultOrError<Ref<SamplerHeapCacheEntry>> SamplerHeapCache::GetOrCreate(
     // real entry below.
     samplers = std::move(blueprint.AcquireSamplers());
 
+    uint32_t samplerSizeIncrement = 0;
     CPUDescriptorHeapAllocation allocation;
-    DAWN_TRY_ASSIGN(allocation, samplerAllocator->AllocateCPUDescriptors());
+    DAWN_TRY(samplerAllocator.Use([&](auto allocator) -> MaybeError {
+        DAWN_TRY_ASSIGN(allocation, allocator->AllocateCPUDescriptors());
+        samplerSizeIncrement = allocator->GetSizeIncrement();
+        return {};
+    }));
 
-    const uint32_t samplerSizeIncrement = samplerAllocator->GetSizeIncrement();
     ID3D12Device* d3d12Device = mDevice->GetD3D12Device();
 
     for (uint32_t i = 0; i < samplers.size(); ++i) {
@@ -140,13 +161,13 @@ ResultOrError<Ref<SamplerHeapCacheEntry>> SamplerHeapCache::GetOrCreate(
 SamplerHeapCache::SamplerHeapCache(Device* device) : mDevice(device) {}
 
 SamplerHeapCache::~SamplerHeapCache() {
-    ASSERT(mCache.empty());
+    DAWN_ASSERT(mCache.empty());
 }
 
 void SamplerHeapCache::RemoveCacheEntry(SamplerHeapCacheEntry* entry) {
-    ASSERT(entry->GetRefCountForTesting() == 0);
+    DAWN_ASSERT(entry->GetRefCountForTesting() == 0);
     size_t removedCount = mCache.erase(entry);
-    ASSERT(removedCount == 1);
+    DAWN_ASSERT(removedCount == 1);
 }
 
 size_t SamplerHeapCacheEntry::HashFunc::operator()(const SamplerHeapCacheEntry* entry) const {

@@ -35,8 +35,10 @@
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
 
+#include "native_web_keyboard_event_qt.h"
 #include "render_widget_host_view_qt_delegate.h"
 
+#include <QtCore/private/qstringiterator_p.h>
 #include <QtGui/private/qtgui-config_p.h>
 
 #include <QCoreApplication>
@@ -50,6 +52,8 @@
 #endif
 #include <QWheelEvent>
 
+using namespace Qt::StringLiterals;
+
 namespace QtWebEngineCore {
 
 using namespace blink;
@@ -58,26 +62,26 @@ enum class KeyboardDriver { Unknown, Windows, Cocoa, Xkb, Evdev };
 
 static KeyboardDriver keyboardDriverImpl()
 {
-    QString platformName = QGuiApplication::platformName();
+    const QString platformName = QGuiApplication::platformName();
 
-    if (platformName == QLatin1String("windows"))
+    if (platformName == "windows"_L1)
         return KeyboardDriver::Windows;
 
-    if (platformName == QLatin1String("cocoa"))
+    if (platformName == "cocoa"_L1)
         return KeyboardDriver::Cocoa;
 
-    if (platformName == QLatin1String("xcb") || platformName == QLatin1String("wayland"))
+    if (platformName == "xcb"_L1 || platformName == "wayland"_L1)
         return KeyboardDriver::Xkb;
 
 #if QT_CONFIG(libinput)
     // Based on QEglFSIntegration::createInputHandlers and QLibInputKeyboard::processKey.
-    if (platformName == QLatin1String("eglfs") && !qEnvironmentVariableIntValue("QT_QPA_EGLFS_NO_LIBINPUT"))
+    if (platformName == "eglfs"_L1 && !qEnvironmentVariableIntValue("QT_QPA_EGLFS_NO_LIBINPUT"))
         return KeyboardDriver::Xkb;
 #endif
 
 #if QT_CONFIG(evdev)
     // Based on QEglFSIntegration::createInputHandlers.
-    if (platformName == QLatin1String("eglfs"))
+    if (platformName == "eglfs"_L1)
         return KeyboardDriver::Evdev;
 #endif
 
@@ -1248,9 +1252,9 @@ static WebInputEvent::Modifiers lockKeyModifiers(const quint32 nativeModifiers)
 {
     unsigned result = 0;
     if (keyboardDriver() == KeyboardDriver::Xkb) {
-        if (nativeModifiers & 0x42) /* Caps_Lock */
+        if (nativeModifiers & 0x2) /* XCB_MOD_MASK_LOCK */
             result |= WebInputEvent::kCapsLockOn;
-        if (nativeModifiers & 0x4d) /* Num_Lock */
+        if (nativeModifiers & 0x10) /* XCB_MOD_MASK_2 */
             result |= WebInputEvent::kNumLockOn;
     } else if (keyboardDriver() == KeyboardDriver::Windows) {
         if (nativeModifiers & 0x100) /* CapsLock */
@@ -1444,6 +1448,7 @@ WebMouseEvent WebEventFactory::toWebMouseEvent(QHoverEvent *ev)
     webKitEvent.SetType(webEventTypeForEvent(ev));
 
     webKitEvent.SetPositionInWidget(ev->position().x(), ev->position().y());
+    webKitEvent.SetPositionInScreen(ev->globalPosition().x(), ev->globalPosition().y());
     webKitEvent.movement_x = ev->position().x() - ev->oldPos().x();
     webKitEvent.movement_y = ev->position().y() - ev->oldPos().y();
     webKitEvent.is_raw_movement_event = true;
@@ -1503,6 +1508,7 @@ WebGestureEvent WebEventFactory::toWebGestureEvent(QNativeGestureEvent *ev)
     case Qt::ZoomNativeGesture:
         webKitEvent.SetType(WebInputEvent::Type::kGesturePinchUpdate);
         webKitEvent.data.pinch_update.scale = static_cast<float>(ev->value() + 1.0);
+        webKitEvent.SetNeedsWheelEvent(true);
         break;
     case Qt::SmartZoomNativeGesture:
         webKitEvent.SetType(WebInputEvent::Type::kGestureDoubleTap);
@@ -1543,8 +1549,9 @@ static QPoint getWheelEventDelta(const blink::WebGestureEvent &webEvent)
 {
     static const float cDefaultQtScrollStep = 20.f;
     static const int wheelScrollLines = QGuiApplication::styleHints()->wheelScrollLines();
-    return QPoint(webEvent.data.scroll_update.delta_x * QWheelEvent::DefaultDeltasPerStep / (wheelScrollLines * cDefaultQtScrollStep),
-                  webEvent.data.scroll_update.delta_y * QWheelEvent::DefaultDeltasPerStep / (wheelScrollLines * cDefaultQtScrollStep));
+    static const float deltasPerStep = static_cast<float>(QWheelEvent::DefaultDeltasPerStep);
+    return QPoint(webEvent.data.scroll_update.delta_x * deltasPerStep / (wheelScrollLines * cDefaultQtScrollStep),
+                  webEvent.data.scroll_update.delta_y * deltasPerStep / (wheelScrollLines * cDefaultQtScrollStep));
 }
 
 blink::WebMouseWheelEvent::Phase toBlinkPhase(QWheelEvent *ev)
@@ -1564,6 +1571,22 @@ blink::WebMouseWheelEvent::Phase toBlinkPhase(QWheelEvent *ev)
     return blink::WebMouseWheelEvent::kPhaseNone;
 }
 
+blink::WebMouseWheelEvent::Phase getMomentumPhase(QWheelEvent *ev)
+{
+    switch (ev->phase()) {
+    case Qt::ScrollMomentum:
+        return blink::WebMouseWheelEvent::kPhaseBegan;
+    case Qt::ScrollEnd:
+        return blink::WebMouseWheelEvent::kPhaseEnded;
+    case Qt::NoScrollPhase:
+    case Qt::ScrollBegin:
+    case Qt::ScrollUpdate:
+        return blink::WebMouseWheelEvent::kPhaseNone;
+    }
+    Q_UNREACHABLE();
+    return blink::WebMouseWheelEvent::kPhaseNone;
+}
+
 blink::WebMouseWheelEvent WebEventFactory::toWebWheelEvent(QWheelEvent *ev)
 {
     WebMouseWheelEvent webEvent;
@@ -1575,11 +1598,12 @@ blink::WebMouseWheelEvent WebEventFactory::toWebWheelEvent(QWheelEvent *ev)
     webEvent.SetPositionInScreen(static_cast<float>(ev->globalPosition().x()),
                                  static_cast<float>(ev->globalPosition().y()));
 
-    webEvent.wheel_ticks_x = static_cast<float>(ev->angleDelta().x()) / QWheelEvent::DefaultDeltasPerStep;
-    webEvent.wheel_ticks_y = static_cast<float>(ev->angleDelta().y()) / QWheelEvent::DefaultDeltasPerStep;
+    webEvent.wheel_ticks_x = ev->angleDelta().x() / static_cast<float>(QWheelEvent::DefaultDeltasPerStep);
+    webEvent.wheel_ticks_y = ev->angleDelta().y() / static_cast<float>(QWheelEvent::DefaultDeltasPerStep);
     webEvent.phase = toBlinkPhase(ev);
 #if defined(Q_OS_DARWIN)
     // PrecisePixel is a macOS term meaning it is a system scroll gesture, see qnsview_mouse.mm
+    webEvent.momentum_phase = getMomentumPhase(ev);
     if (ev->source() == Qt::MouseEventSynthesizedBySystem)
         webEvent.delta_units = ui::ScrollGranularity::kScrollByPrecisePixel;
 #endif
@@ -1598,6 +1622,9 @@ bool WebEventFactory::coalesceWebWheelEvent(blink::WebMouseWheelEvent &webEvent,
     if (toBlinkPhase(ev) != webEvent.phase)
         return false;
 #if defined(Q_OS_DARWIN)
+    if (getMomentumPhase(ev) != webEvent.momentum_phase)
+        return false;
+
     if ((webEvent.delta_units == ui::ScrollGranularity::kScrollByPrecisePixel)
             != (ev->source() == Qt::MouseEventSynthesizedBySystem))
         return false;
@@ -1609,8 +1636,8 @@ bool WebEventFactory::coalesceWebWheelEvent(blink::WebMouseWheelEvent &webEvent,
     webEvent.SetPositionInScreen(static_cast<float>(ev->globalPosition().x()),
                                  static_cast<float>(ev->globalPosition().y()));
 
-    webEvent.wheel_ticks_x += static_cast<float>(ev->angleDelta().x()) / QWheelEvent::DefaultDeltasPerStep;
-    webEvent.wheel_ticks_y += static_cast<float>(ev->angleDelta().y()) / QWheelEvent::DefaultDeltasPerStep;
+    webEvent.wheel_ticks_x += ev->angleDelta().x() / static_cast<float>(QWheelEvent::DefaultDeltasPerStep);
+    webEvent.wheel_ticks_y += ev->angleDelta().y() / static_cast<float>(QWheelEvent::DefaultDeltasPerStep);
     setBlinkWheelEventDelta(webEvent);
 
     return true;
@@ -1638,23 +1665,28 @@ void WebEventFactory::sendUnhandledWheelEvent(const blink::WebGestureEvent &even
 
 content::NativeWebKeyboardEvent WebEventFactory::toWebKeyboardEvent(QKeyEvent *ev)
 {
-    content::NativeWebKeyboardEvent webKitEvent(reinterpret_cast<gfx::NativeEvent>(ev));
+    content::NativeWebKeyboardEvent webKitEvent(ToNativeEvent(ev));
     webKitEvent.SetTimeStamp(base::TimeTicks::Now());
-    webKitEvent.SetModifiers(modifiersForEvent(ev));
+    bool isBackTabWithoutModifier =
+            ev->key() == Qt::Key_Backtab && ev->modifiers() == Qt::NoModifier;
+    webKitEvent.SetModifiers(isBackTabWithoutModifier ? WebInputEvent::kShiftKey
+                                                      : modifiersForEvent(ev));
     webKitEvent.SetType(webEventTypeForEvent(ev));
 
     int qtKey = qtKeyForKeyEvent(ev);
-    Qt::KeyboardModifiers qtModifiers = qtModifiersForEvent(ev);
-    QString qtText = qtTextForKeyEvent(ev, qtKey, qtModifiers);
+    Qt::KeyboardModifiers qtModifiers =
+            isBackTabWithoutModifier ? Qt::ShiftModifier : qtModifiersForEvent(ev);
+    const QString qtText = qtTextForKeyEvent(ev, qtKey, qtModifiers);
 
     webKitEvent.native_key_code = nativeKeyCodeForKeyEvent(ev);
     webKitEvent.windows_key_code = windowsKeyCodeForQtKey(qtKey, qtModifiers & Qt::KeypadModifier);
 
     if (qtKey >= Qt::Key_Escape)
         webKitEvent.dom_key = domKeyForQtKey(qtKey);
-    else if (!qtText.isEmpty())
-        webKitEvent.dom_key = ui::DomKey::FromCharacter(qtText.toUcs4().first());
-    else {
+    else if (!qtText.isEmpty()) {
+        QStringIterator it(qtText);
+        webKitEvent.dom_key = ui::DomKey::FromCharacter(it.next());
+    } else {
         QChar ch(qtKey);
         if (!(qtModifiers & Qt::ShiftModifier)) // No way to check for caps lock
             ch = ch.toLower();

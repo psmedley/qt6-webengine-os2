@@ -41,14 +41,16 @@
 #define TOOLS_GN_RSP_TARGET_WRITER_H_
 
 #include <iosfwd>
+#include <memory>
 #include "gn/path_output.h"
 
 class Target;
 class NinjaCBinaryTargetWriter;
+class ResolvedTargetData;
 
 class RspTargetWriter {
  public:
-  enum Type { NONE, OBJECTS, ARCHIVES, DEFINES, LFLAGS, LIBS };
+  enum Type { NONE, OBJECTS, ARCHIVES, DEFINES, LFLAGS, LIBS, LDIR};
   RspTargetWriter(const NinjaCBinaryTargetWriter* writer,
                   const Target* target,
                   Type type,
@@ -56,12 +58,14 @@ class RspTargetWriter {
   ~RspTargetWriter();
   void Run();
   static Type strToType(const std::string& str);
+  const ResolvedTargetData& resolved() const;
 
  private:
   Type type_;
   const Target* target_;
   const NinjaCBinaryTargetWriter* nwriter_;
   std::ostream& out_;
+  mutable std::unique_ptr<ResolvedTargetData> resolved_;
 };
 
 #endif  // TOOLS_GN_RSP_TARGET_WRITER_H_

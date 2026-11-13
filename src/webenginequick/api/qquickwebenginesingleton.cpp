@@ -12,7 +12,7 @@ QT_BEGIN_NAMESPACE
 
 /*!
     \qmltype WebEngine
-    //! \instantiates QQuickWebEngineSingleton
+    //! \nativetype QQuickWebEngineSingleton
     \inqmlmodule QtWebEngine
     \since QtWebEngine 1.1
     \brief Provides access to the default settings and profiles shared by all web engine views.
@@ -54,18 +54,12 @@ QQuickWebEngineSettings *QQuickWebEngineSingleton::settings() const
 */
 QQuickWebEngineProfile *QQuickWebEngineSingleton::defaultProfile() const
 {
-    auto profile = QQuickWebEngineProfile::defaultProfile();
-
-    // MEMO first ever call to default profile will create one without context
-    // it needs something to get qml engine from (WebEngine singleton is created in qml land)
-    profile->ensureQmlContext(this);
-
-    return profile;
+    return QQuickWebEngineProfile::defaultProfile();
 }
 
 /*!
     \qmlmethod WebEngineScript WebEngine::script
-    //! \instantiates QWebEngineScript
+    //! \nativetype QWebEngineScript
     \since QtWebEngine 6.2
 
     Constructs WebEngineScript, which can be set up and inserted into user scripts' collection

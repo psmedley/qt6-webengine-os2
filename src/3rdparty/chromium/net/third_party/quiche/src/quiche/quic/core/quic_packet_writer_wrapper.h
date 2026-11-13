@@ -15,7 +15,7 @@ namespace quic {
 // Wraps a writer object to allow dynamically extending functionality. Use
 // cases: replace writer while dispatcher and connections hold on to the
 // wrapper; mix in monitoring; mix in mocks in unit tests.
-class QUIC_NO_EXPORT QuicPacketWriterWrapper : public QuicPacketWriter {
+class QUICHE_EXPORT QuicPacketWriterWrapper : public QuicPacketWriter {
  public:
   QuicPacketWriterWrapper();
   QuicPacketWriterWrapper(const QuicPacketWriterWrapper&) = delete;
@@ -27,14 +27,16 @@ class QUIC_NO_EXPORT QuicPacketWriterWrapper : public QuicPacketWriter {
   WriteResult WritePacket(const char* buffer, size_t buf_len,
                           const QuicIpAddress& self_address,
                           const QuicSocketAddress& peer_address,
-                          PerPacketOptions* options) override;
+                          PerPacketOptions* options,
+                          const QuicPacketWriterParams& params) override;
   bool IsWriteBlocked() const override;
   void SetWritable() override;
-  absl::optional<int> MessageTooBigErrorCode() const override;
+  std::optional<int> MessageTooBigErrorCode() const override;
   QuicByteCount GetMaxPacketSize(
       const QuicSocketAddress& peer_address) const override;
   bool SupportsReleaseTime() const override;
   bool IsBatchMode() const override;
+  bool SupportsEcn() const override { return writer_->SupportsEcn(); }
   QuicPacketBuffer GetNextWriteLocation(
       const QuicIpAddress& self_address,
       const QuicSocketAddress& peer_address) override;

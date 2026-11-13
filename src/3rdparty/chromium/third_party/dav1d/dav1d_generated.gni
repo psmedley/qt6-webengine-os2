@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors
+# Copyright 2023 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -49,6 +49,7 @@ x86_asm_sources = [
   "libdav1d/src/x86/mc_avx512.asm",
   "libdav1d/src/x86/mc_sse.asm",
   "libdav1d/src/x86/msac.asm",
+  "libdav1d/src/x86/pal.asm",
   "libdav1d/src/x86/refmvs.asm",
 ]
 
@@ -140,6 +141,7 @@ c_headers = [
   "libdav1d/src/mem.h",
   "libdav1d/src/msac.h",
   "libdav1d/src/obu.h",
+  "libdav1d/src/pal.h",
   "libdav1d/src/picture.h",
   "libdav1d/src/qm.h",
   "libdav1d/src/recon.h",
@@ -149,6 +151,7 @@ c_headers = [
   "libdav1d/src/tables.h",
   "libdav1d/src/thread.h",
   "libdav1d/src/thread_data.h",
+  "libdav1d/src/thread_task.h",
   "libdav1d/src/warpmv.h",
   "libdav1d/src/wedge.h",
 ]
@@ -163,22 +166,19 @@ c_sources = [
   "libdav1d/src/intra_edge.c",
   "libdav1d/src/itx_1d.c",
   "libdav1d/src/lf_mask.c",
+  "libdav1d/src/lib.c",
   "libdav1d/src/log.c",
   "libdav1d/src/mem.c",
   "libdav1d/src/msac.c",
   "libdav1d/src/obu.c",
+  "libdav1d/src/pal.c",
   "libdav1d/src/picture.c",
   "libdav1d/src/qm.c",
   "libdav1d/src/ref.c",
   "libdav1d/src/refmvs.c",
   "libdav1d/src/scan.c",
   "libdav1d/src/tables.c",
+  "libdav1d/src/thread_task.c",
   "libdav1d/src/warpmv.c",
   "libdav1d/src/wedge.c",
-]
-
-entry_point_sources = [
-  "libdav1d/src/lib.c",
-  "libdav1d/src/thread_task.c",
-  "libdav1d/src/thread_task.h",
 ]

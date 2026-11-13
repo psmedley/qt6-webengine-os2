@@ -24,6 +24,15 @@
 extern "C" {
 #endif
 
+void aom_comp_mask_upsampled_pred(MACROBLOCKD *xd, const AV1_COMMON *const cm,
+                                  int mi_row, int mi_col, const MV *const mv,
+                                  uint8_t *comp_pred, const uint8_t *pred,
+                                  int width, int height, int subpel_x_q3,
+                                  int subpel_y_q3, const uint8_t *ref,
+                                  int ref_stride, const uint8_t *mask,
+                                  int mask_stride, int invert_mask,
+                                  int subpel_search);
+
 void aom_highbd_comp_mask_upsampled_pred(
     MACROBLOCKD *xd, const struct AV1Common *const cm, int mi_row, int mi_col,
     const MV *const mv, uint8_t *comp_pred8, const uint8_t *pred8, int width,
@@ -39,6 +48,10 @@ void av1_enc_build_inter_predictor(const AV1_COMMON *cm, MACROBLOCKD *xd,
                                    int plane_from, int plane_to);
 
 void av1_enc_build_inter_predictor_y(MACROBLOCKD *xd, int mi_row, int mi_col);
+
+void av1_enc_build_inter_predictor_y_nonrd(MACROBLOCKD *xd,
+                                           InterPredParams *inter_pred_params,
+                                           const SubpelParams *subpel_params);
 
 // Build one inter predictor. It is called for building predictor for single
 // reference case, or just the 1st or 2nd reference in compound reference case.

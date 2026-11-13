@@ -16,17 +16,48 @@
 
 #include "src/trace_processor/importers/common/track_tracker.h"
 
+#include <optional>
+
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
+#include "src/trace_processor/storage/trace_storage.h"
 
 namespace perfetto {
 namespace trace_processor {
 
+namespace {
+
+const char* GetNameForGroup(TrackTracker::Group group) {
+  switch (group) {
+    case TrackTracker::Group::kMemory:
+      return "Memory";
+    case TrackTracker::Group::kIo:
+      return "IO";
+    case TrackTracker::Group::kVirtio:
+      return "Virtio";
+    case TrackTracker::Group::kNetwork:
+      return "Network";
+    case TrackTracker::Group::kPower:
+      return "Power";
+    case TrackTracker::Group::kDeviceState:
+      return "Device State";
+    case TrackTracker::Group::kThermals:
+      return "Thermals";
+    case TrackTracker::Group::kClockFrequency:
+      return "Clock Freqeuncy";
+    case TrackTracker::Group::kSizeSentinel:
+      PERFETTO_FATAL("Unexpected size passed as group");
+  }
+  PERFETTO_FATAL("For GCC");
+}
+
+}  // namespace
+
 TrackTracker::TrackTracker(TraceProcessorContext* context)
     : source_key_(context->storage->InternString("source")),
-      source_id_key_(context->storage->InternString("source_id")),
-      source_id_is_process_scoped_key_(
-          context->storage->InternString("source_id_is_process_scoped")),
+      trace_id_key_(context->storage->InternString("trace_id")),
+      trace_id_is_process_scoped_key_(
+          context->storage->InternString("trace_id_is_process_scoped")),
       source_scope_key_(context->storage->InternString("source_scope")),
       category_key_(context->storage->InternString("category")),
       fuchsia_source_(context->storage->InternString("fuchsia")),
@@ -70,8 +101,9 @@ TrackId TrackTracker::InternCpuTrack(StringId name, uint32_t cpu) {
     return it->second;
   }
 
-  tables::TrackTable::Row row(name);
-  auto id = context_->storage->mutable_track_table()->Insert(row).id;
+  tables::CpuTrackTable::Row row(name);
+  row.cpu = cpu;
+  auto id = context_->storage->mutable_cpu_track_table()->Insert(row).id;
   cpu_tracks_[std::make_pair(name, cpu)] = id;
 
   return id;
@@ -89,16 +121,30 @@ TrackId TrackTracker::InternGpuTrack(const tables::GpuTrackTable::Row& row) {
   return id;
 }
 
+TrackId TrackTracker::InternGpuWorkPeriodTrack(
+    const tables::GpuWorkPeriodTrackTable::Row& row) {
+  GpuWorkPeriodTrackTuple tuple{row.name, row.gpu_id, row.uid};
+
+  auto it = gpu_work_period_tracks_.find(tuple);
+  if (it != gpu_work_period_tracks_.end())
+    return it->second;
+
+  auto id =
+      context_->storage->mutable_gpu_work_period_track_table()->Insert(row).id;
+  gpu_work_period_tracks_[tuple] = id;
+  return id;
+}
+
 TrackId TrackTracker::InternLegacyChromeAsyncTrack(
     StringId name,
     uint32_t upid,
-    int64_t source_id,
-    bool source_id_is_process_scoped,
+    int64_t trace_id,
+    bool trace_id_is_process_scoped,
     StringId source_scope) {
   ChromeTrackTuple tuple;
-  if (source_id_is_process_scoped)
+  if (trace_id_is_process_scoped)
     tuple.upid = upid;
-  tuple.source_id = source_id;
+  tuple.trace_id = trace_id;
   tuple.source_scope = source_scope;
 
   auto it = chrome_tracks_.find(tuple);
@@ -124,9 +170,9 @@ TrackId TrackTracker::InternLegacyChromeAsyncTrack(
 
   context_->args_tracker->AddArgsTo(id)
       .AddArg(source_key_, Variadic::String(chrome_source_))
-      .AddArg(source_id_key_, Variadic::Integer(source_id))
-      .AddArg(source_id_is_process_scoped_key_,
-              Variadic::Boolean(source_id_is_process_scoped))
+      .AddArg(trace_id_key_, Variadic::Integer(trace_id))
+      .AddArg(trace_id_is_process_scoped_key_,
+              Variadic::Boolean(trace_id_is_process_scoped))
       .AddArg(source_scope_key_, Variadic::String(source_scope));
 
   return id;
@@ -192,7 +238,8 @@ TrackId TrackTracker::GetOrCreateTriggerTrack() {
   return *trigger_track_id_;
 }
 
-TrackId TrackTracker::InternGlobalCounterTrack(StringId name,
+TrackId TrackTracker::InternGlobalCounterTrack(TrackTracker::Group group,
+                                               StringId name,
                                                SetArgsCallback callback,
                                                StringId unit,
                                                StringId description) {
@@ -202,6 +249,7 @@ TrackId TrackTracker::InternGlobalCounterTrack(StringId name,
   }
 
   tables::CounterTrackTable::Row row(name);
+  row.parent_id = InternTrackForGroup(group);
   row.unit = unit;
   row.description = description;
   TrackId track =
@@ -323,20 +371,6 @@ TrackId TrackTracker::InternEnergyCounterTrack(StringId name,
   return track;
 }
 
-TrackId TrackTracker::InternUidCounterTrack(StringId name, int32_t uid) {
-  auto it = uid_counter_tracks_.find(std::make_pair(name, uid));
-  if (it != uid_counter_tracks_.end()) {
-    return it->second;
-  }
-
-  tables::UidCounterTrackTable::Row row(name);
-  row.uid = uid;
-  TrackId track =
-      context_->storage->mutable_uid_counter_track_table()->Insert(row).id;
-  uid_counter_tracks_[std::make_pair(name, uid)] = track;
-  return track;
-}
-
 TrackId TrackTracker::InternEnergyPerUidCounterTrack(StringId name,
                                                      int32_t consumer_id,
                                                      int32_t uid) {
@@ -377,6 +411,19 @@ TrackId TrackTracker::CreatePerfCounterTrack(StringId name,
   row.cpu = cpu;
   row.is_timebase = is_timebase;
   return context_->storage->mutable_perf_counter_track_table()->Insert(row).id;
+}
+
+TrackId TrackTracker::InternTrackForGroup(TrackTracker::Group group) {
+  uint32_t group_idx = static_cast<uint32_t>(group);
+  const std::optional<TrackId>& group_id = group_track_ids_[group_idx];
+  if (group_id) {
+    return *group_id;
+  }
+
+  StringId id = context_->storage->InternString(GetNameForGroup(group));
+  TrackId track_id = context_->storage->mutable_track_table()->Insert({id}).id;
+  group_track_ids_[group_idx] = track_id;
+  return track_id;
 }
 
 }  // namespace trace_processor

@@ -9,11 +9,14 @@
 #include "base/strings/stringprintf.h"
 #include "components/performance_manager/execution_context/execution_context_registry_impl.h"
 #include "components/performance_manager/public/graph/graph.h"
+#include "components/performance_manager/public/performance_manager.h"
 #include "components/performance_manager/test_support/performance_manager_browsertest_harness.h"
+#include "components/performance_manager/test_support/run_in_graph.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -34,6 +37,13 @@ class V8ContextTrackerTest : public PerformanceManagerBrowserTestHarness {
     Super::SetUp();
   }
 
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    // Force site-per-process so the number of internal utility v8 contexts is
+    // stable.
+    content::IsolateAllSitesForTesting(command_line);
+    PerformanceManagerBrowserTestHarness::SetUpCommandLine(command_line);
+  }
+
   void ExpectCounts(size_t v8_context_count,
                     size_t execution_context_count,
                     size_t detached_v8_context_count,
@@ -52,7 +62,13 @@ class V8ContextTrackerTest : public PerformanceManagerBrowserTestHarness {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, AboutBlank) {
+// TODO(crbug.com/1482180): Re-enable on Mac.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_AboutBlank DISABLED_AboutBlank
+#else
+#define MAYBE_AboutBlank AboutBlank
+#endif
+IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, MAYBE_AboutBlank) {
   ExpectCounts(0, 0, 0, 0);
   ASSERT_TRUE(NavigateToURL(shell(), GURL("about:blank")));
   ExpectCounts(1, 1, 0, 0);
@@ -83,7 +99,14 @@ IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, SameOriginIframeAttributionData) {
   });
 }
 
-IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, CrossOriginIframeAttributionData) {
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_CrossOriginIframeAttributionData \
+  DISABLED_CrossOriginIframeAttributionData
+#else
+#define MAYBE_CrossOriginIframeAttributionData CrossOriginIframeAttributionData
+#endif  // BUILDFLAG(IS_MAC)
+IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest,
+                       MAYBE_CrossOriginIframeAttributionData) {
   GURL urla(embedded_test_server()->GetURL("a.com", "/a_embeds_b.html"));
   auto* contents = shell()->web_contents();
   ASSERT_TRUE(
@@ -110,28 +133,50 @@ IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, CrossOriginIframeAttributionData) {
   });
 }
 
-IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, SameDocNavigation) {
+IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, SameSiteNavigation) {
   ExpectCounts(0, 0, 0, 0);
   auto* contents = shell()->web_contents();
   GURL urla(embedded_test_server()->GetURL("a.com", "/a_embeds_b.html"));
   ASSERT_TRUE(
       NavigateAndWaitForConsoleMessage(contents, urla, "b.html loaded"));
-  ExpectCounts(2, 2, 0, 0);
 
   // Get pointers to the RFHs for each frame.
   content::RenderFrameHost* rfha = contents->GetPrimaryMainFrame();
   content::RenderFrameHost* rfhb = ChildFrameAt(rfha, 0);
+  bool rfh_should_change =
+      rfhb->ShouldChangeRenderFrameHostOnSameSiteNavigation();
 
-  // Execute a same document navigation in the child frame. This causes a
+  // In addition to a context corresponding to each window, an internal utility
+  // context is created for each isolate.
+  ASSERT_NE(rfha->GetProcess(), rfhb->GetProcess());
+  constexpr size_t kNumUtilityContexts = 2;
+  ExpectCounts(2 + kNumUtilityContexts, 2, 0, 0);
+
+  // Execute a same site navigation in the child frame. This causes a
   // v8 context to be detached, and new context attached to the execution
-  // context. So there will remain 2 execution contexts, there will be 3
-  // v8 contexts, 1 one of which is detached.
+  // context.
   GURL urlb(embedded_test_server()->GetURL("b.com", "/b.html?foo=bar"));
   ASSERT_TRUE(ExecJs(
       rfhb, base::StringPrintf("location.href = \"%s\"", urlb.spec().c_str())));
   WaitForLoad(contents);
 
-  ExpectCounts(3, 2, 1, 0);
+  if (rfh_should_change) {
+    // When RenderDocument is enabled, a new RenderFrameHost will be created for
+    // the navigation to `urlb`. Both a new V8 context and ExecutionContext are
+    // created, and the old ExecutionContext is destroyed.
+    ExpectCounts(/*v8_context_count=*/3 + kNumUtilityContexts,
+                 /*execution_context_count=*/3,
+                 /*detached_v8_context_count=*/1,
+                 /*destroyed_execution_context_count=*/1);
+  } else {
+    // When RenderDocument is disabled, the same RenderFrameHost will be reused
+    // for the navigation to `urlb`. So only a new V8 context will be created,
+    // not a new ExecutionContext.
+    ExpectCounts(/*v8_context_count=*/3 + kNumUtilityContexts,
+                 /*execution_context_count=*/2,
+                 /*detached_v8_context_count=*/1,
+                 /*destroyed_execution_context_count=*/0);
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, DetachedContext) {
@@ -140,7 +185,9 @@ IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, DetachedContext) {
   GURL urla(embedded_test_server()->GetURL("a.com", "/a_embeds_a.html"));
   ASSERT_TRUE(
       NavigateAndWaitForConsoleMessage(contents, urla, "a.html loaded"));
-  ExpectCounts(2, 2, 0, 0);
+  // In addition to a context corresponding to each window, an internal utility
+  // context is for the isolate.
+  ExpectCounts(3, 2, 0, 0);
 
   // Get pointers to the RFHs for each frame.
   content::RenderFrameHost* rfha = contents->GetPrimaryMainFrame();
@@ -153,7 +200,7 @@ IN_PROC_BROWSER_TEST_F(V8ContextTrackerTest, DetachedContext) {
                      "iframe.parentNode.removeChild(iframe); "
                      "console.log('detached and leaked iframe');"));
 
-  ExpectCounts(2, 2, 1, 1);
+  ExpectCounts(3, 2, 1, 1);
 }
 
 }  // namespace v8_memory

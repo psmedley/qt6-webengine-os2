@@ -18,8 +18,9 @@
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
 #include "include/core/SkTypes.h"
-#include "include/utils/SkRandom.h"
+#include "src/base/SkRandom.h"
 #include "tools/ToolUtils.h"
+#include "tools/fonts/FontToolUtils.h"
 
 namespace skiagm {
 
@@ -30,9 +31,9 @@ class DegenerateSegmentsGM : public GM {
         const char* fName2;
     };
 
-    SkString onShortName() override { return SkString("degeneratesegments"); }
+    SkString getName() const override { return SkString("degeneratesegments"); }
 
-    SkISize onISize() override { return {896, 930}; }
+    SkISize getISize() override { return {896, 930}; }
 
     typedef SkPoint (*AddSegmentFunc)(SkPathBuilder&, SkPoint&);
 
@@ -293,7 +294,7 @@ class DegenerateSegmentsGM : public GM {
         SkPaint titlePaint;
         titlePaint.setColor(SK_ColorBLACK);
         titlePaint.setAntiAlias(true);
-        SkFont     font(ToolUtils::create_portable_typeface(), 15);
+        SkFont     font(ToolUtils::DefaultPortableTypeface(), 15);
         const char title[] = "Random Paths Drawn Into Rectangle Clips With "
                              "Indicated Style, Fill and Linecaps, "
                              "with Stroke width 6";

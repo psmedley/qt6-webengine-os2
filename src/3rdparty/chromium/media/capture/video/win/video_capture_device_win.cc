@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "base/feature_list.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/trace_event/trace_event.h"
@@ -237,7 +238,9 @@ ComPtr<IPin> VideoCaptureDeviceWin::GetPin(ComPtr<IBaseFilter> capture_filter,
 VideoPixelFormat VideoCaptureDeviceWin::TranslateMediaSubtypeToPixelFormat(
     const GUID& sub_type) {
   static struct {
-    const GUID& sub_type;
+    // This field is not a raw_ref<> because it was filtered by the rewriter
+    // for: #global-scope
+    RAW_PTR_EXCLUSION const GUID& sub_type;
     VideoPixelFormat format;
   } const kMediaSubtypeToPixelFormatCorrespondence[] = {
       {kMediaSubTypeI420, PIXEL_FORMAT_I420},
@@ -333,15 +336,6 @@ VideoCaptureDeviceWin::~VideoCaptureDeviceWin() {
 
   if (capture_graph_builder_.Get())
     capture_graph_builder_.Reset();
-
-  if (!take_photo_callbacks_.empty()) {
-    for (size_t k = 0; k < take_photo_callbacks_.size(); k++) {
-      LogWindowsImageCaptureOutcome(
-          VideoCaptureWinBackend::kDirectShow,
-          ImageCaptureOutcome::kFailedUsingVideoStream,
-          IsHighResolution(capture_format_));
-    }
-  }
 }
 
 bool VideoCaptureDeviceWin::Init() {
@@ -909,15 +903,6 @@ void VideoCaptureDeviceWin::FrameReceived(const uint8_t* buffer,
     mojom::BlobPtr blob = RotateAndBlobify(buffer, length, format, 0);
     if (blob) {
       std::move(cb).Run(std::move(blob));
-      LogWindowsImageCaptureOutcome(
-          VideoCaptureWinBackend::kDirectShow,
-          ImageCaptureOutcome::kSucceededUsingVideoStream,
-          IsHighResolution(format));
-    } else {
-      LogWindowsImageCaptureOutcome(
-          VideoCaptureWinBackend::kDirectShow,
-          ImageCaptureOutcome::kFailedUsingVideoStream,
-          IsHighResolution(format));
     }
   }
 }
@@ -937,8 +922,8 @@ bool VideoCaptureDeviceWin::CreateCapabilityMap() {
 void VideoCaptureDeviceWin::SetAntiFlickerInCaptureFilter(
     const VideoCaptureParams& params) {
   const PowerLineFrequency power_line_frequency = GetPowerLineFrequency(params);
-  if (power_line_frequency != PowerLineFrequency::FREQUENCY_50HZ &&
-      power_line_frequency != PowerLineFrequency::FREQUENCY_60HZ) {
+  if (power_line_frequency != PowerLineFrequency::k50Hz &&
+      power_line_frequency != PowerLineFrequency::k60Hz) {
     return;
   }
   ComPtr<IKsPropertySet> ks_propset;
@@ -954,8 +939,7 @@ void VideoCaptureDeviceWin::SetAntiFlickerInCaptureFilter(
     data.Property.Set = PROPSETID_VIDCAP_VIDEOPROCAMP;
     data.Property.Id = KSPROPERTY_VIDEOPROCAMP_POWERLINE_FREQUENCY;
     data.Property.Flags = KSPROPERTY_TYPE_SET;
-    data.Value =
-        (power_line_frequency == PowerLineFrequency::FREQUENCY_50HZ) ? 1 : 2;
+    data.Value = (power_line_frequency == PowerLineFrequency::k50Hz) ? 1 : 2;
     data.Flags = KSPROPERTY_VIDEOPROCAMP_FLAGS_MANUAL;
     hr = ks_propset->Set(PROPSETID_VIDCAP_VIDEOPROCAMP,
                          KSPROPERTY_VIDEOPROCAMP_POWERLINE_FREQUENCY, &data,

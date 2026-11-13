@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,12 +41,10 @@ bool TrimPropName(ByteString* sPropName) {
 void MakeNameTypeString(const ByteString& name,
                         CFX_Value::DataType eType,
                         BinaryBuffer* result) {
-  uint32_t dwNameLen = (uint32_t)name.GetLength();
-  result->AppendBlock(&dwNameLen, sizeof(uint32_t));
+  uint32_t dwNameLen = pdfium::base::checked_cast<uint32_t>(name.GetLength());
+  result->AppendUint32(dwNameLen);
   result->AppendString(name);
-
-  uint16_t wType = static_cast<uint16_t>(eType);
-  result->AppendBlock(&wType, sizeof(uint16_t));
+  result->AppendUint16(static_cast<uint16_t>(eType));
 }
 
 bool MakeByteString(const ByteString& name,
@@ -55,20 +53,19 @@ bool MakeByteString(const ByteString& name,
   switch (pData.nType) {
     case CFX_Value::DataType::kNumber: {
       MakeNameTypeString(name, pData.nType, result);
-      double dData = pData.dData;
-      result->AppendBlock(&dData, sizeof(double));
+      result->AppendDouble(pData.dData);
       return true;
     }
     case CFX_Value::DataType::kBoolean: {
       MakeNameTypeString(name, pData.nType, result);
-      uint16_t wData = static_cast<uint16_t>(pData.bData);
-      result->AppendBlock(&wData, sizeof(uint16_t));
+      result->AppendUint16(static_cast<uint16_t>(pData.bData));
       return true;
     }
     case CFX_Value::DataType::kString: {
       MakeNameTypeString(name, pData.nType, result);
-      uint32_t dwDataLen = (uint32_t)pData.sData.GetLength();
-      result->AppendBlock(&dwDataLen, sizeof(uint32_t));
+      uint32_t dwDataLen =
+          pdfium::base::checked_cast<uint32_t>(pData.sData.GetLength());
+      result->AppendUint32(dwDataLen);
       result->AppendString(pData.sData);
       return true;
     }
@@ -78,7 +75,6 @@ bool MakeByteString(const ByteString& name,
     }
     // Arrays don't get persisted per JS spec page 484.
     case CFX_Value::DataType::kObject:
-    default:
       break;
   }
   return false;
@@ -296,10 +292,12 @@ bool CFX_GlobalData::LoadGlobalPersistentVariablesFromBuffer(
     return false;
 
   for (int32_t i = 0, sz = dwCount; i < sz; i++) {
-    if (p > buffer.end())
+    if (p + sizeof(uint32_t) >= buffer.end()) {
       break;
+    }
 
-    uint32_t dwNameLen = *((uint32_t*)p);
+    uint32_t dwNameLen = 0;
+    memcpy(&dwNameLen, p, sizeof(uint32_t));
     p += sizeof(uint32_t);
     if (p + dwNameLen > buffer.end())
       break;
@@ -307,21 +305,25 @@ bool CFX_GlobalData::LoadGlobalPersistentVariablesFromBuffer(
     ByteString sEntry = ByteString(p, dwNameLen);
     p += sizeof(char) * dwNameLen;
 
-    CFX_Value::DataType wDataType =
-        static_cast<CFX_Value::DataType>(*((uint16_t*)p));
+    uint16_t wDataType = 0;
+    memcpy(&wDataType, p, sizeof(uint16_t));
     p += sizeof(uint16_t);
 
-    switch (wDataType) {
+    CFX_Value::DataType eDataType = static_cast<CFX_Value::DataType>(wDataType);
+
+    switch (eDataType) {
       case CFX_Value::DataType::kNumber: {
         double dData = 0;
         switch (wVersion) {
           case 1: {
-            uint32_t dwData = *((uint32_t*)p);
+            uint32_t dwData = 0;
+            memcpy(&dwData, p, sizeof(uint32_t));
             p += sizeof(uint32_t);
             dData = dwData;
           } break;
           case 2: {
-            dData = *((double*)p);
+            dData = 0;
+            memcpy(&dData, p, sizeof(double));
             p += sizeof(double);
           } break;
         }
@@ -329,13 +331,15 @@ bool CFX_GlobalData::LoadGlobalPersistentVariablesFromBuffer(
         SetGlobalVariablePersistent(sEntry, true);
       } break;
       case CFX_Value::DataType::kBoolean: {
-        uint16_t wData = *((uint16_t*)p);
+        uint16_t wData = 0;
+        memcpy(&wData, p, sizeof(uint16_t));
         p += sizeof(uint16_t);
         SetGlobalVariableBoolean(sEntry, (bool)(wData == 1));
         SetGlobalVariablePersistent(sEntry, true);
       } break;
       case CFX_Value::DataType::kString: {
-        uint32_t dwLength = *((uint32_t*)p);
+        uint32_t dwLength = 0;
+        memcpy(&dwLength, p, sizeof(uint32_t));
         p += sizeof(uint32_t);
         if (p + dwLength > buffer.end())
           break;
@@ -349,8 +353,7 @@ bool CFX_GlobalData::LoadGlobalPersistentVariablesFromBuffer(
         SetGlobalVariablePersistent(sEntry, true);
       } break;
       case CFX_Value::DataType::kObject:
-      default:
-        // Arrays aren't allowed in these buffers, nor are unrecoginzed tags.
+        // Arrays aren't allowed in these buffers, nor are unrecognized tags.
         return false;
     }
   }
@@ -379,14 +382,12 @@ bool CFX_GlobalData::SaveGlobalPersisitentVariables() {
   }
 
   BinaryBuffer sFile;
-  uint16_t wType = kMagic;
-  uint16_t wVersion = 2;
-  sFile.AppendBlock(&wType, sizeof(uint16_t));
-  sFile.AppendBlock(&wVersion, sizeof(uint16_t));
-  sFile.AppendBlock(&nCount, sizeof(uint32_t));
+  sFile.AppendUint16(kMagic);
+  sFile.AppendUint16(kMaxVersion);
+  sFile.AppendUint32(nCount);
 
   uint32_t dwSize = pdfium::base::checked_cast<uint32_t>(sData.GetSize());
-  sFile.AppendBlock(&dwSize, sizeof(uint32_t));
+  sFile.AppendUint32(dwSize);
   sFile.AppendSpan(sData.GetSpan());
 
   CRYPT_ArcFourCryptBlock(sFile.GetMutableSpan(), kRC4KEY);

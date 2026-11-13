@@ -3,10 +3,11 @@
 // found in the LICENSE file.
 
 #include <memory>
+#include <optional>
 #include <string>
 
-#include "base/bind.h"
 #include "base/debug/leak_annotations.h"
+#include "base/functional/bind.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -80,8 +81,7 @@ IN_PROC_BROWSER_TEST_P(SystemDisplayExtensionApiFunctionTest, SetDisplay) {
             api_test_utils::RunFunctionAndReturnError(
                 set_info_function.get(), "[\"display_id\", {}]", profile()));
 
-  std::unique_ptr<base::DictionaryValue> set_info =
-      provider_->GetSetInfoValue();
+  std::optional<base::Value::Dict> set_info = provider_->GetSetInfoValue();
   EXPECT_FALSE(set_info);
 }
 

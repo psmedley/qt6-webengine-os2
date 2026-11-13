@@ -1,17 +1,23 @@
 // Copyright (C) 2017 Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef URL_REQUEST_CUSTOM_JOB_PROXY_H_
 #define URL_REQUEST_CUSTOM_JOB_PROXY_H_
 
-#include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 #include <QtCore/QPointer>
+#include <QMap>
+#include <QByteArray>
 
 QT_FORWARD_DECLARE_CLASS(QIODevice)
+
+namespace network {
+class ResourceRequestBody;
+}
 
 namespace QtWebEngineCore {
 
@@ -29,6 +35,7 @@ public:
     public:
         std::string m_mimeType;
         std::string m_charset;
+        QMultiMap<QByteArray, QByteArray> m_additionalResponseHeaders;
         GURL m_redirect;
         QIODevice *m_device;
         int64_t m_firstBytePosition;
@@ -38,6 +45,7 @@ public:
         virtual void notifyCanceled() = 0;
         virtual void notifyAborted() = 0;
         virtual void notifyStartFailure(int) = 0;
+        virtual void notifySuccess() = 0;
         virtual void notifyReadyRead() = 0;
         virtual base::SequencedTaskRunner *taskRunner() = 0;
     };
@@ -49,12 +57,16 @@ public:
 
     // Called from URLRequestCustomJobDelegate via post:
     //void setReplyCharset(const std::string &);
-    void reply(std::string mimeType, QIODevice *device);
+    void reply(std::string mimeType, QIODevice *device,
+               QMultiMap<QByteArray, QByteArray> additionalResponseHeaders);
     void redirect(GURL url);
     void abort();
     void fail(int error);
+    void succeed();
     void release();
-    void initialize(GURL url, std::string method, absl::optional<url::Origin> initiatorOrigin, std::map<std::string, std::string> headers);
+    void initialize(GURL url, std::string method, absl::optional<url::Origin> initiatorOrigin,
+                    std::map<std::string, std::string> headers,
+                    scoped_refptr<network::ResourceRequestBody> requestBody);
     void readyRead();
 
     // IO thread owned:

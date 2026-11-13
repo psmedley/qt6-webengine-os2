@@ -1,10 +1,12 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "client_cert_qt.h"
 
-#include "base/bind.h"
-#include "base/callback_forward.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_forward.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "crypto/crypto_buildflags.h"
 #include "net/ssl/client_cert_store.h"
@@ -16,7 +18,6 @@
 #include "third_party/boringssl/src/include/openssl/evp.h"
 
 #include "client_cert_store_data.h"
-#include "profile_io_data_qt.h"
 
 #include <QtNetwork/qtnetworkglobal.h>
 

@@ -8,14 +8,22 @@
 #ifndef GrDistanceFieldGeoProc_DEFINED
 #define GrDistanceFieldGeoProc_DEFINED
 
-#include "src/core/SkArenaAlloc.h"
-#include "src/gpu/ganesh/GrGeometryProcessor.h"
-#include "src/gpu/ganesh/GrProcessor.h"
+#if !defined(SK_DISABLE_SDF_TEXT)
 
-class GrGLDistanceFieldA8TextGeoProc;
-class GrGLDistanceFieldPathGeoProc;
-class GrGLDistanceFieldLCDTextGeoProc;
-class GrInvariantOutput;
+#include "include/core/SkMatrix.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkSize.h"
+#include "src/base/SkArenaAlloc.h"
+#include "src/gpu/ganesh/GrGeometryProcessor.h"
+#include "src/gpu/ganesh/GrProcessorUnitTest.h"
+#include "src/gpu/ganesh/GrSamplerState.h"
+
+#include <cstdint>
+#include <memory>
+
+class GrSurfaceProxyView;
+namespace skgpu { class KeyBuilder; }
+struct GrShaderCaps;
 
 enum GrDistanceFieldEffectFlags {
     kSimilarity_DistanceFieldEffectFlag   = 0x001, // ctm is similarity matrix
@@ -263,5 +271,7 @@ private:
 
     using INHERITED = GrGeometryProcessor;
 };
+
+#endif // !defined(SK_DISABLE_SDF_TEXT)
 
 #endif

@@ -20,12 +20,11 @@
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
 #include "connections/implementation/mediums/bluetooth_radio.h"
-#include "internal/platform/medium_environment.h"
 #include "internal/platform/ble.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/medium_environment.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace {
@@ -50,8 +49,6 @@ class BleTest : public ::testing::TestWithParam<FeatureFlags> {
  protected:
   using DiscoveredPeripheralCallback = BleMedium::DiscoveredPeripheralCallback;
 
-  BleTest() { env_.Stop(); }
-
   MediumEnvironment& env_{MediumEnvironment::Instance()};
 };
 
@@ -75,11 +72,7 @@ TEST_P(BleTest, CanStartAcceptingConnectionsAndConnect) {
                          fast_advertisement_service_uuid);
   ble_a.StartAcceptingConnections(
       service_id,
-      {
-          .accepted_cb = [&accept_latch](
-                             BleSocket socket,
-                             const std::string&) { accept_latch.CountDown(); },
-      });
+      [&](BleSocket socket, const std::string&) { accept_latch.CountDown(); });
   BlePeripheral discovered_peripheral;
   ble_b.StartScanning(
       service_id, fast_advertisement_service_uuid,
@@ -129,11 +122,7 @@ TEST_P(BleTest, CanCancelConnect) {
                          fast_advertisement_service_uuid);
   ble_a.StartAcceptingConnections(
       service_id,
-      {
-          .accepted_cb = [&accept_latch](
-                             BleSocket socket,
-                             const std::string&) { accept_latch.CountDown(); },
-      });
+      [&](BleSocket socket, const std::string&) { accept_latch.CountDown(); });
   BlePeripheral discovered_peripheral;
   ble_b.StartScanning(
       service_id, fast_advertisement_service_uuid,
@@ -181,10 +170,10 @@ TEST_F(BleTest, CanConstructValidObject) {
 
   EXPECT_TRUE(ble_a.IsMediumValid());
   EXPECT_TRUE(ble_a.IsAdapterValid());
-  EXPECT_FALSE(ble_a.IsAvailable());
+  EXPECT_TRUE(ble_a.IsAvailable());
   EXPECT_TRUE(ble_b.IsMediumValid());
   EXPECT_TRUE(ble_b.IsAdapterValid());
-  EXPECT_FALSE(ble_b.IsAvailable());
+  EXPECT_TRUE(ble_b.IsAvailable());
   EXPECT_NE(&radio_a.GetBluetoothAdapter(), &radio_b.GetBluetoothAdapter());
   env_.Stop();
 }
@@ -258,7 +247,66 @@ TEST_F(BleTest, CanStartDiscovery) {
   env_.Stop();
 }
 
+TEST_F(BleTest, HandleDupeFindingsFromDiscovery) {
+  env_.Start();
+  BluetoothRadio radio_a;
+  BluetoothRadio radio_b;
+  Ble ble_a{radio_a};
+  Ble ble_b{radio_b};
+  radio_a.Enable();
+  radio_b.Enable();
+  std::string service_id(kServiceID);
+  ByteArray advertisement_bytes{std::string(kAdvertisementString)};
+  std::string fast_advertisement_service_uuid(kFastAdvertisementServiceUuid);
+  // expecting two discoveries from the same peripheral.
+  CountDownLatch discovery_latch(2);
+  // Expecting the peripheral lost will trigger lost_cb.
+  CountDownLatch lost_latch(1);
+
+  ble_b.StartAdvertising(service_id, advertisement_bytes,
+                         fast_advertisement_service_uuid);
+
+  EXPECT_TRUE(ble_a.StartScanning(
+      service_id, fast_advertisement_service_uuid,
+      DiscoveredPeripheralCallback{
+          .peripheral_discovered_cb =
+              [&discovery_latch](
+                  BlePeripheral& peripheral, const std::string& service_id,
+                  const ByteArray& advertisement_bytes,
+                  bool fast_advertisement) { discovery_latch.CountDown(); },
+          .peripheral_lost_cb =
+              [&lost_latch](BlePeripheral& peripheral,
+                            const std::string& service_id) {
+                lost_latch.CountDown();
+              },
+      }));
+  ble_b.StartAdvertising(service_id, advertisement_bytes,
+                         fast_advertisement_service_uuid);
+  EXPECT_TRUE(discovery_latch.Await(kWaitDuration).result());
+  ble_b.StopAdvertising(service_id);
+  EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(ble_a.StopScanning(service_id));
+  env_.Stop();
+}
+
+TEST_F(BleTest, CanStartAndStopLegacyAdvertising) {
+  env_.Start();
+  BluetoothRadio radio_a;
+  Ble ble_a{radio_a};
+  radio_a.Enable();
+  std::string service_id(kServiceID);
+  std::string legacy_service_id(std::string{kServiceID} + "-Legacy");
+  std::string device_a_endpoint_id{"1A1A"};
+  std::string fast_advertisement_service_uuid(kFastAdvertisementServiceUuid);
+  EXPECT_TRUE(ble_a.StartLegacyAdvertising(service_id, device_a_endpoint_id,
+                                           fast_advertisement_service_uuid));
+  EXPECT_FALSE(ble_a.IsAdvertising(service_id));
+  EXPECT_TRUE(ble_a.IsAdvertising(legacy_service_id));
+  EXPECT_TRUE(ble_a.StopLegacyAdvertising(service_id));
+  EXPECT_FALSE(ble_a.IsAdvertising(legacy_service_id));
+  env_.Stop();
+}
+
 }  // namespace
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

@@ -9,10 +9,10 @@
 #include <set>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/no_destructor.h"
 #include "base/ranges/algorithm.h"
 #include "base/strings/string_split.h"
@@ -21,6 +21,10 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "chrome/browser/profiles/profile.h"
+#if !BUILDFLAG(IS_QTWEBENGINE)
+#include "chrome/browser/profiles/profiles_state.h"
+#endif
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_hunspell_dictionary.h"
 #include "components/language/core/browser/pref_names.h"
@@ -38,8 +42,6 @@
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -64,6 +66,16 @@ SpellcheckService::SpellCheckerBinder& GetSpellCheckerBinderOverride() {
   return *binder;
 }
 
+// Only record spelling-configuration metrics for profiles in which the user
+// can configure spelling.
+bool RecordSpellingConfigurationMetrics(content::BrowserContext* context) {
+#if !BUILDFLAG(IS_QTWEBENGINE)
+  return profiles::IsRegularUserProfile(Profile::FromBrowserContext(context));
+#else
+  return true;
+#endif
+}
+
 }  // namespace
 
 // TODO(rlp): I do not like globals, but keeping these for now during
@@ -84,7 +96,7 @@ SpellcheckService::SpellcheckService(content::BrowserContext* context)
   dictionaries_pref.Init(spellcheck::prefs::kSpellCheckDictionaries, prefs);
   std::string first_of_dictionaries;
 
-#if (BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)) && !defined(TOOLKIT_QT)
+#if (BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)) && !BUILDFLAG(IS_QTWEBENGINE)
   // Ensure that the renderer always knows the platform spellchecking
   // language. This language is used for initialization of the text iterator.
   // If the iterator is not initialized, then the context menu does not show
@@ -157,9 +169,6 @@ SpellcheckService::SpellcheckService(content::BrowserContext* context)
       std::make_unique<SpellcheckCustomDictionary>(context_->GetPath());
   custom_dictionary_->AddObserver(this);
   custom_dictionary_->Load();
-
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
-                 content::NotificationService::AllSources());
 
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   if (spellcheck::UseBrowserSpellChecker() &&
@@ -371,12 +380,19 @@ void SpellcheckService::EnableFirstUserLanguageForSpellcheck(
 
 void SpellcheckService::StartRecordingMetrics(bool spellcheck_enabled) {
   metrics_ = std::make_unique<SpellCheckHostMetrics>();
-  metrics_->RecordEnabledStats(spellcheck_enabled);
+  auto record_configuration_metrics =
+      RecordSpellingConfigurationMetrics(context_);
+  if (record_configuration_metrics) {
+    metrics_->RecordEnabledStats(spellcheck_enabled);
+  }
+
   OnUseSpellingServiceChanged();
 
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
-  RecordChromeLocalesStats();
-  RecordSpellcheckLocalesStats();
+  if (record_configuration_metrics) {
+    RecordChromeLocalesStats();
+    RecordSpellcheckLocalesStats();
+  }
 #endif  // BUILDFLAG(IS_WIN)
 }
 
@@ -472,7 +488,9 @@ void SpellcheckService::LoadDictionaries() {
   }
 
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
-  RecordSpellcheckLocalesStats();
+  if (RecordSpellingConfigurationMetrics(context_)) {
+    RecordSpellcheckLocalesStats();
+  }
 
   if (base::FeatureList::IsEnabled(
           spellcheck::kWinDelaySpellcheckServiceInit) &&
@@ -514,7 +532,7 @@ bool SpellcheckService::IsSpellcheckEnabled() const {
   }
 #endif  // BUILDFLAG(IS_WIN)
 
-#if defined(TOOLKIT_QT) && BUILDFLAG(IS_MAC) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
+#if BUILDFLAG(IS_QTWEBENGINE) && BUILDFLAG(IS_MAC) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   enable_if_uninitialized = true;
 #endif
 
@@ -522,11 +540,9 @@ bool SpellcheckService::IsSpellcheckEnabled() const {
          (!hunspell_dictionaries_.empty() || enable_if_uninitialized);
 }
 
-void SpellcheckService::Observe(int type,
-                                const content::NotificationSource& source,
-                                const content::NotificationDetails& details) {
-  DCHECK_EQ(content::NOTIFICATION_RENDERER_PROCESS_CREATED, type);
-  InitForRenderer(content::Source<content::RenderProcessHost>(source).ptr());
+void SpellcheckService::OnRenderProcessHostCreated(
+    content::RenderProcessHost* host) {
+  InitForRenderer(host);
 }
 
 void SpellcheckService::OnCustomDictionaryLoaded() {
@@ -567,7 +583,7 @@ void SpellcheckService::OnHunspellDictionaryDownloadSuccess(
 
 void SpellcheckService::OnHunspellDictionaryDownloadFailure(
     const std::string& language) {
-#ifdef TOOLKIT_QT
+#if BUILDFLAG(IS_QTWEBENGINE)
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     context_->FailedToLoadDictionary(language);
 #endif
@@ -847,8 +863,9 @@ void SpellcheckService::OnSpellCheckDictionariesChanged() {
 void SpellcheckService::OnUseSpellingServiceChanged() {
   bool enabled = pref_change_registrar_.prefs()->GetBoolean(
       spellcheck::prefs::kSpellCheckUseSpellingService);
-  if (metrics_)
+  if (metrics_ && RecordSpellingConfigurationMetrics(context_)) {
     metrics_->RecordSpellingServiceStats(enabled);
+  }
 }
 
 void SpellcheckService::OnAcceptLanguagesChanged() {
@@ -871,7 +888,9 @@ void SpellcheckService::OnAcceptLanguagesChanged() {
   dictionaries_pref.SetValue(filtered_dictionaries);
 
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
-  RecordChromeLocalesStats();
+  if (RecordSpellingConfigurationMetrics(context_)) {
+    RecordChromeLocalesStats();
+  }
 #endif  // BUILDFLAG(IS_WIN)
 #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 }
@@ -884,9 +903,9 @@ std::vector<std::string> SpellcheckService::GetNormalizedAcceptLanguages(
                         ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   if (normalize_for_spellcheck) {
-    std::transform(
-        accept_languages.begin(), accept_languages.end(),
-        accept_languages.begin(), [&](const std::string& language) {
+    base::ranges::transform(
+        accept_languages, accept_languages.begin(),
+        [&](const std::string& language) {
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
           if (spellcheck::UseBrowserSpellChecker() &&
               UsesWindowsDictionary(language))
@@ -906,32 +925,29 @@ void SpellcheckService::InitializePlatformSpellchecker() {
   // since metrics on the availability of Windows platform language packs are
   // being recorded. Thus method should only be called once, except in test
   // code.
-  if (!platform_spell_checker() &&
-      spellcheck::WindowsVersionSupportsSpellchecker()) {
+  if (!platform_spell_checker()) {
     platform_spell_checker_ = std::make_unique<WindowsSpellChecker>(
         base::ThreadPool::CreateCOMSTATaskRunner({base::MayBlock()}));
   }
 }
 
 void SpellcheckService::RecordSpellcheckLocalesStats() {
-  if (spellcheck::WindowsVersionSupportsSpellchecker() && metrics_ &&
-      platform_spell_checker() && !hunspell_dictionaries_.empty()) {
+  if (metrics_ && platform_spell_checker() && !hunspell_dictionaries_.empty()) {
     std::vector<std::string> hunspell_locales;
     for (auto& dict : hunspell_dictionaries_) {
       hunspell_locales.push_back(dict->GetLanguage());
     }
     spellcheck_platform::RecordSpellcheckLocalesStats(
-        platform_spell_checker(), std::move(hunspell_locales), metrics_.get());
+        platform_spell_checker(), std::move(hunspell_locales));
   }
 }
 
 void SpellcheckService::RecordChromeLocalesStats() {
   const auto& accept_languages =
       GetNormalizedAcceptLanguages(/* normalize_for_spellcheck */ false);
-  if (spellcheck::WindowsVersionSupportsSpellchecker() && metrics_ &&
-      platform_spell_checker() && !accept_languages.empty()) {
-    spellcheck_platform::RecordChromeLocalesStats(
-        platform_spell_checker(), std::move(accept_languages), metrics_.get());
+  if (metrics_ && platform_spell_checker() && !accept_languages.empty()) {
+    spellcheck_platform::RecordChromeLocalesStats(platform_spell_checker(),
+                                                  std::move(accept_languages));
   }
 }
 

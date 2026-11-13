@@ -60,8 +60,8 @@ const char* const
         "repeated",  // LABEL_REPEATED
 };
 
-base::Optional<std::string> MinimizeType(const std::string& a,
-                                         const std::string& b) {
+std::optional<std::string> MinimizeType(const std::string& a,
+                                        const std::string& b) {
   auto a_pieces = base::SplitString(a, ".");
   auto b_pieces = base::SplitString(b, ".");
 
@@ -71,7 +71,7 @@ base::Optional<std::string> MinimizeType(const std::string& a,
       return a.substr(skip);
     skip += a_pieces[i].size() + 1;
   }
-  return base::nullopt;
+  return std::nullopt;
 }
 
 std::string SimpleFieldTypeFromDescriptor(
@@ -198,7 +198,9 @@ ProtoFile::Field FieldFromDescriptor(
     const google::protobuf::Descriptor& parent,
     const google::protobuf::FieldDescriptor& desc) {
   auto field = InitFromDescriptor<ProtoFile::Field>(desc);
-  field.label = kLabelToName[desc.label()];
+  // Map fields have label repeated but are actually emitted without a label
+  // in practice.
+  field.label = desc.is_map() ? "" : kLabelToName[desc.label()];
   field.packageless_type = FieldTypeFromDescriptor(parent, desc, true);
   field.type = FieldTypeFromDescriptor(parent, desc, false);
   field.name = desc.name();
@@ -263,8 +265,10 @@ ProtoFile::Message MessageFromDescriptor(
 }  // namespace
 
 ProtoFile ProtoFileFromDescriptor(
+    std::string preamble,
     const google::protobuf::FileDescriptor& desc) {
   ProtoFile file;
+  file.preamble = std::move(preamble);
   for (int i = 0; i < desc.enum_type_count(); ++i) {
     file.enums.push_back(EnumFromDescriptor(*desc.enum_type(i)));
   }

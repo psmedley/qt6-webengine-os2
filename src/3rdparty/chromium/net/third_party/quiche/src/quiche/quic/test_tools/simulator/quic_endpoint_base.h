@@ -79,14 +79,16 @@ class QuicEndpointBase : public Endpoint,
     WriteResult WritePacket(const char* buffer, size_t buf_len,
                             const QuicIpAddress& self_address,
                             const QuicSocketAddress& peer_address,
-                            PerPacketOptions* options) override;
+                            PerPacketOptions* options,
+                            const QuicPacketWriterParams& params) override;
     bool IsWriteBlocked() const override;
     void SetWritable() override;
-    absl::optional<int> MessageTooBigErrorCode() const override;
+    std::optional<int> MessageTooBigErrorCode() const override;
     QuicByteCount GetMaxPacketSize(
         const QuicSocketAddress& peer_address) const override;
     bool SupportsReleaseTime() const override;
     bool IsBatchMode() const override;
+    bool SupportsEcn() const override { return false; }
     QuicPacketBuffer GetNextWriteLocation(
         const QuicIpAddress& self_address,
         const QuicSocketAddress& peer_address) override;

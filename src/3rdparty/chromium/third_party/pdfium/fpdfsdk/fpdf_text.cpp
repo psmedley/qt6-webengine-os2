@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,6 +69,37 @@ FPDFText_GetUnicode(FPDF_TEXTPAGE text_page, int index) {
 
   const CPDF_TextPage::CharInfo& charinfo = textpage->GetCharInfo(index);
   return charinfo.m_Unicode;
+}
+
+FPDF_EXPORT int FPDF_CALLCONV FPDFText_IsGenerated(FPDF_TEXTPAGE text_page,
+                                                   int index) {
+  CPDF_TextPage* textpage = GetTextPageForValidIndex(text_page, index);
+  if (!textpage)
+    return -1;
+
+  const CPDF_TextPage::CharInfo& charinfo = textpage->GetCharInfo(index);
+  return charinfo.m_CharType == CPDF_TextPage::CharType::kGenerated ? 1 : 0;
+}
+
+FPDF_EXPORT int FPDF_CALLCONV FPDFText_IsHyphen(FPDF_TEXTPAGE text_page,
+                                                int index) {
+  CPDF_TextPage* textpage = GetTextPageForValidIndex(text_page, index);
+  if (!textpage) {
+    return -1;
+  }
+
+  const CPDF_TextPage::CharInfo& charinfo = textpage->GetCharInfo(index);
+  return charinfo.m_CharType == CPDF_TextPage::CharType::kHyphen;
+}
+
+FPDF_EXPORT int FPDF_CALLCONV
+FPDFText_HasUnicodeMapError(FPDF_TEXTPAGE text_page, int index) {
+  CPDF_TextPage* textpage = GetTextPageForValidIndex(text_page, index);
+  if (!textpage)
+    return -1;
+
+  const CPDF_TextPage::CharInfo& charinfo = textpage->GetCharInfo(index);
+  return charinfo.m_CharType == CPDF_TextPage::CharType::kNotUnicode;
 }
 
 FPDF_EXPORT double FPDF_CALLCONV FPDFText_GetFontSize(FPDF_TEXTPAGE text_page,
@@ -149,12 +180,12 @@ FPDFText_GetFillColor(FPDF_TEXTPAGE text_page,
   if (!charinfo.m_pTextObj)
     return false;
 
-  FX_COLORREF fill_color = charinfo.m_pTextObj->m_ColorState.GetFillColorRef();
+  FX_COLORREF fill_color = charinfo.m_pTextObj->color_state().GetFillColorRef();
   *R = FXSYS_GetRValue(fill_color);
   *G = FXSYS_GetGValue(fill_color);
   *B = FXSYS_GetBValue(fill_color);
   *A = FXSYS_GetUnsignedAlpha(
-      charinfo.m_pTextObj->m_GeneralState.GetFillAlpha());
+      charinfo.m_pTextObj->general_state().GetFillAlpha());
   return true;
 }
 
@@ -174,12 +205,12 @@ FPDFText_GetStrokeColor(FPDF_TEXTPAGE text_page,
     return false;
 
   FX_COLORREF stroke_color =
-      charinfo.m_pTextObj->m_ColorState.GetStrokeColorRef();
+      charinfo.m_pTextObj->color_state().GetStrokeColorRef();
   *R = FXSYS_GetRValue(stroke_color);
   *G = FXSYS_GetGValue(stroke_color);
   *B = FXSYS_GetBValue(stroke_color);
   *A = FXSYS_GetUnsignedAlpha(
-      charinfo.m_pTextObj->m_GeneralState.GetStrokeAlpha());
+      charinfo.m_pTextObj->general_state().GetStrokeAlpha());
   return true;
 }
 
@@ -307,8 +338,6 @@ FPDF_EXPORT int FPDF_CALLCONV FPDFText_GetText(FPDF_TEXTPAGE page,
   if (str.GetLength() > static_cast<size_t>(char_count))
     str = str.First(static_cast<size_t>(char_count));
 
-  // UFT16LE_Encode doesn't handle surrogate pairs properly, so it is expected
-  // the number of items to stay the same.
   ByteString byte_str = str.ToUTF16LE();
   size_t byte_str_len = byte_str.GetLength();
   size_t ret_count = byte_str_len / kBytesPerCharacter;

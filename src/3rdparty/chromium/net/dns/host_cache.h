@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -37,7 +38,6 @@
 #include "net/dns/public/host_resolver_results.h"
 #include "net/dns/public/host_resolver_source.h"
 #include "net/log/net_log_capture_mode.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
 #include "url/scheme_host_port.h"
 
@@ -46,6 +46,8 @@ class TickClock;
 }  // namespace base
 
 namespace net {
+
+class HostResolverInternalResult;
 
 // Cache used by HostResolver to map hostnames to their resolved result.
 class NET_EXPORT HostCache {
@@ -123,15 +125,15 @@ class NET_EXPORT HostCache {
       SOURCE_CONFIG,
     };
 
-    // |ttl=absl::nullopt| for unknown TTL.
+    // |ttl=std::nullopt| for unknown TTL.
     template <typename T>
     Entry(int error,
           T&& results,
           Source source,
-          absl::optional<base::TimeDelta> ttl)
+          std::optional<base::TimeDelta> ttl)
         : error_(error),
           source_(source),
-          ttl_(ttl ? ttl.value() : base::Seconds(-1)) {
+          ttl_(ttl ? ttl.value() : kUnknownTtl) {
       DCHECK(!ttl || ttl.value() >= base::TimeDelta());
       SetResult(std::forward<T>(results));
     }
@@ -139,19 +141,28 @@ class NET_EXPORT HostCache {
     // Use when |ttl| is unknown.
     template <typename T>
     Entry(int error, T&& results, Source source)
-        : Entry(error, std::forward<T>(results), source, absl::nullopt) {}
+        : Entry(error, std::forward<T>(results), source, std::nullopt) {}
 
     // Use for address entries.
     Entry(int error,
           std::vector<IPEndPoint> ip_endpoints,
           std::set<std::string> aliases,
           Source source,
-          absl::optional<base::TimeDelta> ttl = absl::nullopt);
+          std::optional<base::TimeDelta> ttl = std::nullopt);
 
     // For errors with no |results|.
     Entry(int error,
           Source source,
-          absl::optional<base::TimeDelta> ttl = absl::nullopt);
+          std::optional<base::TimeDelta> ttl = std::nullopt);
+
+    // Adaptor to construct from HostResolverInternalResults. Only supports
+    // results extracted from a single DnsTransaction. `empty_source` is Source
+    // to assume if `results` is empty of any results from which Source can be
+    // read.
+    Entry(std::set<std::unique_ptr<HostResolverInternalResult>> results,
+          base::Time now,
+          base::TimeTicks now_ticks,
+          Source empty_source = SOURCE_UNKNOWN);
 
     Entry(const Entry& entry);
     Entry(Entry&& entry);
@@ -185,59 +196,50 @@ class NET_EXPORT HostCache {
              error_ != ERR_HOST_RESOLVER_QUEUE_TOO_LARGE;
     }
     void set_error(int error) { error_ = error; }
-    absl::optional<std::vector<HostResolverEndpointResult>> GetEndpoints()
-        const;
-    const std::vector<IPEndPoint>* ip_endpoints() const {
-      return base::OptionalToPtr(ip_endpoints_);
+    std::vector<HostResolverEndpointResult> GetEndpoints() const;
+    const std::vector<IPEndPoint>& ip_endpoints() const {
+      return ip_endpoints_;
     }
-    void set_ip_endpoints(
-        absl::optional<std::vector<IPEndPoint>> ip_endpoints) {
+    void set_ip_endpoints(std::vector<IPEndPoint> ip_endpoints) {
       ip_endpoints_ = std::move(ip_endpoints);
     }
-    absl::optional<std::vector<ConnectionEndpointMetadata>> GetMetadatas()
-        const;
-    void ClearMetadatas() { endpoint_metadatas_.reset(); }
-    const std::set<std::string>* aliases() const {
-      return base::OptionalToPtr(aliases_);
-    }
+    std::vector<ConnectionEndpointMetadata> GetMetadatas() const;
+    void ClearMetadatas() { endpoint_metadatas_.clear(); }
+    const std::set<std::string>& aliases() const { return aliases_; }
     void set_aliases(std::set<std::string> aliases) {
       aliases_ = std::move(aliases);
     }
-    const absl::optional<std::vector<std::string>>& text_records() const {
+    const std::vector<std::string>& text_records() const {
       return text_records_;
     }
-    void set_text_records(
-        absl::optional<std::vector<std::string>> text_records) {
+    void set_text_records(std::vector<std::string> text_records) {
       text_records_ = std::move(text_records);
     }
-    const absl::optional<std::vector<HostPortPair>>& hostnames() const {
-      return hostnames_;
-    }
-    void set_hostnames(absl::optional<std::vector<HostPortPair>> hostnames) {
+    const std::vector<HostPortPair>& hostnames() const { return hostnames_; }
+    void set_hostnames(std::vector<HostPortPair> hostnames) {
       hostnames_ = std::move(hostnames);
     }
-    const std::vector<bool>* https_record_compatibility() const {
-      return base::OptionalToPtr(https_record_compatibility_);
+    const std::vector<bool>& https_record_compatibility() const {
+      return https_record_compatibility_;
     }
     void set_https_record_compatibility(
-        absl::optional<std::vector<bool>> https_record_compatibility) {
+        std::vector<bool> https_record_compatibility) {
       https_record_compatibility_ = std::move(https_record_compatibility);
     }
-    absl::optional<bool> pinning() const { return pinning_; }
-    void set_pinning(absl::optional<bool> pinning) { pinning_ = pinning; }
+    std::optional<bool> pinning() const { return pinning_; }
+    void set_pinning(std::optional<bool> pinning) { pinning_ = pinning; }
 
-    const absl::optional<std::set<std::string>>& canonical_names() const {
+    const std::set<std::string>& canonical_names() const {
       return canonical_names_;
     }
-    void set_canonical_names(
-        absl::optional<std::set<std::string>> canonical_names) {
+    void set_canonical_names(std::set<std::string> canonical_names) {
       canonical_names_ = std::move(canonical_names);
     }
 
     Source source() const { return source_; }
     bool has_ttl() const { return ttl_ >= base::TimeDelta(); }
     base::TimeDelta ttl() const { return ttl_; }
-    absl::optional<base::TimeDelta> GetOptionalTtl() const;
+    std::optional<base::TimeDelta> GetOptionalTtl() const;
     void set_ttl(base::TimeDelta ttl) { ttl_ = ttl; }
 
     base::TimeTicks expires() const { return expires_; }
@@ -262,10 +264,17 @@ class NET_EXPORT HostCache {
     // set to |port| if the current port is 0. Preserves any non-zero ports.
     HostCache::Entry CopyWithDefaultPort(uint16_t port) const;
 
+    static std::optional<base::TimeDelta> TtlFromInternalResults(
+        const std::set<std::unique_ptr<HostResolverInternalResult>>& results,
+        base::Time now,
+        base::TimeTicks now_ticks);
+
    private:
     using HttpsRecordPriority = uint16_t;
 
     friend class HostCache;
+
+    static constexpr base::TimeDelta kUnknownTtl = base::Seconds(-1);
 
     Entry(const Entry& entry,
           base::TimeTicks now,
@@ -273,14 +282,13 @@ class NET_EXPORT HostCache {
           int network_changes);
 
     Entry(int error,
-          absl::optional<std::vector<IPEndPoint>> ip_endpoints,
-          absl::optional<
-              std::multimap<HttpsRecordPriority, ConnectionEndpointMetadata>>
+          std::vector<IPEndPoint> ip_endpoints,
+          std::multimap<HttpsRecordPriority, ConnectionEndpointMetadata>
               endpoint_metadatas,
-          absl::optional<std::set<std::string>> aliases,
-          absl::optional<std::vector<std::string>>&& text_results,
-          absl::optional<std::vector<HostPortPair>>&& hostnames,
-          absl::optional<std::vector<bool>>&& https_record_compatibility,
+          std::set<std::string> aliases,
+          std::vector<std::string>&& text_results,
+          std::vector<HostPortPair>&& hostnames,
+          std::vector<bool>&& https_record_compatibility,
           Source source,
           base::TimeTicks expires,
           int network_changes);
@@ -315,13 +323,12 @@ class NET_EXPORT HostCache {
 
     // The resolve results for this entry.
     int error_ = ERR_FAILED;
-    absl::optional<std::vector<IPEndPoint>> ip_endpoints_;
-    absl::optional<
-        std::multimap<HttpsRecordPriority, ConnectionEndpointMetadata>>
+    std::vector<IPEndPoint> ip_endpoints_;
+    std::multimap<HttpsRecordPriority, ConnectionEndpointMetadata>
         endpoint_metadatas_;
-    absl::optional<std::set<std::string>> aliases_;
-    absl::optional<std::vector<std::string>> text_records_;
-    absl::optional<std::vector<HostPortPair>> hostnames_;
+    std::set<std::string> aliases_;
+    std::vector<std::string> text_records_;
+    std::vector<HostPortPair> hostnames_;
 
     // Bool of whether each HTTPS record received is compatible
     // (draft-ietf-dnsop-svcb-https-08#section-8), considering alias records to
@@ -331,7 +338,7 @@ class NET_EXPORT HostCache {
     // successfully received records of that experimental type.
     //
     // For either usage, cleared before inserting in cache.
-    absl::optional<std::vector<bool>> https_record_compatibility_;
+    std::vector<bool> https_record_compatibility_;
 
     // Where results were obtained (e.g. DNS lookup, hosts file, etc).
     Source source_ = SOURCE_UNKNOWN;
@@ -342,14 +349,14 @@ class NET_EXPORT HostCache {
     // Note: This flag is not yet used, and should be removed if the proposals
     // for followup queries after insecure/expired bootstrap are abandoned (see
     // TODO(crbug.com/1200908) in HostResolverManager).
-    absl::optional<bool> pinning_;
+    std::optional<bool> pinning_;
 
     // The final name at the end of the alias chain that was the record name for
     // the A/AAAA records.
-    absl::optional<std::set<std::string>> canonical_names_;
+    std::set<std::string> canonical_names_;
 
     // TTL obtained from the nameserver. Negative if unknown.
-    base::TimeDelta ttl_ = base::Seconds(-1);
+    base::TimeDelta ttl_ = kUnknownTtl;
 
     base::TimeTicks expires_;
     // Copied from the cache's network_changes_ when the entry is set; can

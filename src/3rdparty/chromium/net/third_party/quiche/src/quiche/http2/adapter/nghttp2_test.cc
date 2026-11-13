@@ -174,7 +174,8 @@ TEST_F(Nghttp2ClientTest, ClientSendsRequest) {
     nvs.push_back({.name = ToUint8Ptr(h.first.data()),
                    .value = ToUint8Ptr(h.second.data()),
                    .namelen = h.first.size(),
-                   .valuelen = h.second.size()});
+                   .valuelen = h.second.size(),
+                   .flags = NGHTTP2_NV_FLAG_NONE});
   }
   const absl::string_view kBody = "This is an example request body.";
   TestDataSource source{kBody};
@@ -197,6 +198,63 @@ TEST_F(Nghttp2ClientTest, ClientSendsRequest) {
 
   // Once the request is flushed, the client no longer wants to write.
   EXPECT_FALSE(nghttp2_session_want_write(session_.get()));
+}
+
+class Nghttp2ServerTest : public Nghttp2Test {
+ public:
+  Perspective GetPerspective() override { return Perspective::kServer; }
+};
+
+// Verifies the behavior when a stream ends early.
+TEST_F(Nghttp2ServerTest, MismatchedContentLength) {
+  const std::string initial_frames =
+      TestFrameSequence()
+          .ClientPreface()
+          .Headers(1,
+                   {{":method", "POST"},
+                    {":scheme", "https"},
+                    {":authority", "example.com"},
+                    {":path", "/"},
+                    {"content-length", "50"}},
+                   /*fin=*/false)
+          .Data(1, "Less than 50 bytes.", true)
+          .Serialize();
+
+  testing::InSequence seq;
+  EXPECT_CALL(mock_callbacks_, OnBeginFrame(HasFrameHeader(0, SETTINGS, _)));
+
+  EXPECT_CALL(mock_callbacks_, OnFrameRecv(IsSettings(testing::IsEmpty())));
+
+  // HEADERS on stream 1
+  EXPECT_CALL(mock_callbacks_, OnBeginFrame(HasFrameHeader(
+                                   1, HEADERS, NGHTTP2_FLAG_END_HEADERS)));
+
+  EXPECT_CALL(mock_callbacks_,
+              OnBeginHeaders(IsHeaders(1, NGHTTP2_FLAG_END_HEADERS,
+                                       NGHTTP2_HCAT_REQUEST)));
+
+  EXPECT_CALL(mock_callbacks_, OnHeader(_, ":method", "POST", _));
+  EXPECT_CALL(mock_callbacks_, OnHeader(_, ":scheme", "https", _));
+  EXPECT_CALL(mock_callbacks_, OnHeader(_, ":authority", "example.com", _));
+  EXPECT_CALL(mock_callbacks_, OnHeader(_, ":path", "/", _));
+  EXPECT_CALL(mock_callbacks_, OnHeader(_, "content-length", "50", _));
+  EXPECT_CALL(mock_callbacks_,
+              OnFrameRecv(IsHeaders(1, NGHTTP2_FLAG_END_HEADERS,
+                                    NGHTTP2_HCAT_REQUEST)));
+
+  // DATA on stream 1
+  EXPECT_CALL(mock_callbacks_,
+              OnBeginFrame(HasFrameHeader(1, DATA, NGHTTP2_FLAG_END_STREAM)));
+
+  EXPECT_CALL(mock_callbacks_, OnDataChunkRecv(NGHTTP2_FLAG_END_STREAM, 1,
+                                               "Less than 50 bytes."));
+
+  // No OnFrameRecv() callback for the DATA frame, since there is a
+  // Content-Length mismatch error.
+
+  ssize_t result = nghttp2_session_mem_recv(
+      session_.get(), ToUint8Ptr(initial_frames.data()), initial_frames.size());
+  ASSERT_EQ(result, initial_frames.size());
 }
 
 }  // namespace

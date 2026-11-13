@@ -20,15 +20,21 @@
 #include <stdint.h>
 
 #include <limits>
+#include <memory>
 #include <numeric>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include "perfetto/base/logging.h"
-#include "perfetto/ext/base/optional.h"
+#include "perfetto/base/status.h"
+#include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/db/column.h"
 #include "src/trace_processor/db/column_storage_overlay.h"
+#include "src/trace_processor/db/query_executor.h"
 #include "src/trace_processor/db/typed_column.h"
+#include "src/trace_processor/util/status_macros.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -91,6 +97,8 @@ class Table {
     std::vector<Column> columns;
   };
 
+  static bool kUseFilterV2;
+
   Table();
   virtual ~Table();
 
@@ -115,6 +123,13 @@ class Table {
   RowMap FilterToRowMap(
       const std::vector<Constraint>& cs,
       RowMap::OptimizeFor optimize_for = RowMap::OptimizeFor::kMemory) const {
+    if (kUseFilterV2) {
+      if (optimize_for == RowMap::OptimizeFor::kMemory) {
+        return QueryExecutor::FilterLegacy(this, cs);
+      }
+      return RowMap(QueryExecutor::FilterLegacy(this, cs).TakeAsIndexVector());
+    }
+
     RowMap rm(0, row_count_, optimize_for);
     for (const Constraint& c : cs) {
       columns_[c.col_idx].FilterInto(c.op, c.value, &rm);
@@ -127,7 +142,7 @@ class Table {
   // Note: the RowMap should not reorder this table; this is guaranteed if the
   // passed RowMap is generated using |FilterToRowMap|.
   Table Apply(RowMap rm) const {
-    Table table = CopyExceptRowMaps();
+    Table table = CopyExceptOverlays();
     table.row_count_ = rm.size();
     table.overlays_.reserve(overlays_.size());
     for (const ColumnStorageOverlay& map : overlays_) {
@@ -137,7 +152,7 @@ class Table {
     // Pretty much any application of a RowMap will break the requirements on
     // kSetId so remove it.
     for (auto& col : table.columns_) {
-      col.flags_ &= ~Column::Flag::kSetId;
+      col.flags_ &= ~ColumnLegacy::Flag::kSetId;
     }
     return table;
   }
@@ -146,21 +161,22 @@ class Table {
   Table Sort(const std::vector<Order>& od) const;
 
   // Returns the column at index |idx| in the Table.
-  const Column& GetColumn(uint32_t idx) const { return columns_[idx]; }
+  const ColumnLegacy& GetColumn(uint32_t idx) const { return columns_[idx]; }
 
-  // Returns the column index with the given name or base::nullopt otherwise.
-  base::Optional<uint32_t> GetColumnIndexByName(const char* name) const {
-    auto it = std::find_if(
-        columns_.begin(), columns_.end(),
-        [name](const Column& col) { return strcmp(col.name(), name) == 0; });
+  // Returns the column index with the given name or std::nullopt otherwise.
+  std::optional<uint32_t> GetColumnIndexByName(const char* name) const {
+    auto it = std::find_if(columns_.begin(), columns_.end(),
+                           [name](const ColumnLegacy& col) {
+                             return strcmp(col.name(), name) == 0;
+                           });
     if (it == columns_.end())
-      return base::nullopt;
+      return std::nullopt;
     return static_cast<uint32_t>(std::distance(columns_.begin(), it));
   }
 
   // Returns the column with the given name or nullptr otherwise.
-  const Column* GetColumnByName(const char* name) const {
-    base::Optional<uint32_t> opt_idx = GetColumnIndexByName(name);
+  const ColumnLegacy* GetColumnByName(const char* name) const {
+    std::optional<uint32_t> opt_idx = GetColumnIndexByName(name);
     if (!opt_idx)
       return nullptr;
     return &columns_[*opt_idx];
@@ -204,7 +220,7 @@ class Table {
   const std::vector<ColumnStorageOverlay>& overlays() const {
     return overlays_;
   }
-  const std::vector<Column>& columns() const { return columns_; }
+  const std::vector<ColumnLegacy>& columns() const { return columns_; }
 
  protected:
   explicit Table(StringPool* pool);
@@ -218,16 +234,16 @@ class Table {
   }
 
   std::vector<ColumnStorageOverlay> overlays_;
-  std::vector<Column> columns_;
+  std::vector<ColumnLegacy> columns_;
   uint32_t row_count_ = 0;
 
   StringPool* string_pool_ = nullptr;
 
  private:
-  friend class Column;
+  friend class ColumnLegacy;
   friend class View;
 
-  Table CopyExceptRowMaps() const;
+  Table CopyExceptOverlays() const;
 };
 
 }  // namespace trace_processor

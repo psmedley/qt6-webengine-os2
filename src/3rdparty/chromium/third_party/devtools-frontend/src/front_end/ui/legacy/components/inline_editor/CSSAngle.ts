@@ -4,22 +4,20 @@
 
 import * as ComponentHelpers from '../../../components/helpers/helpers.js';
 import * as LitHtml from '../../../lit-html/lit-html.js';
-import cssAngleStyles from './cssAngle.css.js';
 
+import cssAngleStyles from './cssAngle.css.js';
+import {CSSAngleEditor, type CSSAngleEditorData} from './CSSAngleEditor.js';
+import {CSSAngleSwatch, type CSSAngleSwatchData} from './CSSAngleSwatch.js';
 import {
+  type Angle,
   AngleUnit,
   convertAngleUnit,
   getNewAngleFromEvent,
   getNextUnit,
   parseText,
   roundAngleByUnit,
-  type Angle,
 } from './CSSAngleUtils.js';
 import {ValueChangedEvent} from './InlineEditorUtils.js';
-
-import {CSSAngleEditor, type CSSAngleEditorData} from './CSSAngleEditor.js';
-
-import {CSSAngleSwatch, type CSSAngleSwatchData} from './CSSAngleSwatch.js';
 
 const {render, html} = LitHtml;
 const styleMap = LitHtml.Directives.styleMap;
@@ -44,6 +42,12 @@ export class UnitChangedEvent extends Event {
     super(UnitChangedEvent.eventName, {});
     this.data = {value};
   }
+}
+
+interface EventTypes {
+  [PopoverToggledEvent.eventName]: PopoverToggledEvent;
+  [UnitChangedEvent.eventName]: UnitChangedEvent;
+  [ValueChangedEvent.eventName]: ValueChangedEvent;
 }
 
 export interface CSSAngleData {
@@ -97,7 +101,7 @@ export class CSSAngle extends HTMLElement {
   // We bind and unbind mouse event listeners upon popping over and minifying,
   // because we anticipate most of the time this widget is minified even when
   // it's attached to the DOM tree.
-  popover(): void {
+  popOver(): void {
     if (!this.containingPane) {
       return;
     }
@@ -118,13 +122,32 @@ export class CSSAngle extends HTMLElement {
     const miniIconBottom = this.swatchElement.getBoundingClientRect().bottom;
     const miniIconLeft = this.swatchElement.getBoundingClientRect().left;
     if (miniIconBottom && miniIconLeft) {
-      this.popoverStyleTop = `${miniIconBottom}px`;
-      this.popoverStyleLeft = `${miniIconLeft}px`;
+      // We offset mini icon's X and Y positions with the containing styles
+      // pane's positions because DevTools' root SplitWidget's
+      // insertion-point-sidebar slot, where most of the DevTools content lives,
+      // has an offset of positions, which makes all of its children's DOMRect
+      // positions to have this offset.
+      const offsetTop = this.containingPane.getBoundingClientRect().top;
+      const offsetLeft = this.containingPane.getBoundingClientRect().left;
+      this.popoverStyleTop = `${miniIconBottom - offsetTop}px`;
+      this.popoverStyleLeft = `${miniIconLeft - offsetLeft}px`;
     }
 
     this.popoverOpen = true;
     this.render();
     this.angleElement.focus();
+  }
+
+  override addEventListener<K extends keyof EventTypes>(
+      type: K, listener: (this: CSSAngle, ev: EventTypes[K]) => void,
+      options?: boolean|AddEventListenerOptions|undefined): void;
+  override addEventListener<K extends keyof HTMLElementEventMap>(
+      type: K, listener: (this: HTMLElement, ev: HTMLElementEventMap[K]) => void,
+      options?: boolean|AddEventListenerOptions|undefined): void;
+  override addEventListener(
+      type: string, listener: EventListenerOrEventListenerObject,
+      options?: boolean|AddEventListenerOptions|undefined): void {
+    super.addEventListener(type, listener, options);
   }
 
   minify(): void {
@@ -176,7 +199,7 @@ export class CSSAngle extends HTMLElement {
       this.displayNextUnit();
       return;
     }
-    this.popoverOpen ? this.minify() : this.popover();
+    this.popoverOpen ? this.minify() : this.popOver();
   }
 
   // Fix that the previous text will be selected when double-clicking the angle icon

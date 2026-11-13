@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -107,6 +107,12 @@ void LogWithLevel(LogLevel level,
   if (g_log_messages_for_test) {
     g_log_messages_for_test->push_back(ss_str);
   }
+}
+
+void LogTraceMessage(const std::string& message) {
+  const std::string to_write = message + '\n';
+  const auto bytes_written = write(g_log_fd, to_write.c_str(), to_write.size());
+  OSP_DCHECK(bytes_written);
 }
 
 [[noreturn]] void Break() {

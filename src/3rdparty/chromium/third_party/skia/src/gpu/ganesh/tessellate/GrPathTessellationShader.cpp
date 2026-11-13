@@ -7,7 +7,7 @@
 
 #include "src/gpu/ganesh/tessellate/GrPathTessellationShader.h"
 
-#include "src/core/SkMathPriv.h"
+#include "src/base/SkMathPriv.h"
 #include "src/gpu/KeyBuilder.h"
 #include "src/gpu/ganesh/effects/GrDisableColorXP.h"
 #include "src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.h"
@@ -16,6 +16,8 @@
 #include "src/gpu/tessellate/FixedCountBufferUtils.h"
 #include "src/gpu/tessellate/Tessellation.h"
 #include "src/gpu/tessellate/WangsFormula.h"
+
+using namespace skia_private;
 
 namespace {
 
@@ -99,8 +101,8 @@ public:
             fInstanceAttribs.emplace_back("curveType", kFloat_GrVertexAttribType, SkSLType::kFloat);
         }
         this->setInstanceAttributesWithImplicitOffsets(fInstanceAttribs.data(),
-                                                       fInstanceAttribs.count());
-        SkASSERT(fInstanceAttribs.count() <= kMaxInstanceAttribCount);
+                                                       fInstanceAttribs.size());
+        SkASSERT(fInstanceAttribs.size() <= kMaxInstanceAttribCount);
         SkASSERT(this->instanceStride() ==
                  sizeof(SkPoint) * 4 + PatchAttribsStride(fAttribs));
 
@@ -121,7 +123,7 @@ private:
     std::unique_ptr<ProgramImpl> makeProgramImpl(const GrShaderCaps&) const final;
 
     constexpr static int kMaxInstanceAttribCount = 5;
-    SkSTArray<kMaxInstanceAttribCount, Attribute> fInstanceAttribs;
+    STArray<kMaxInstanceAttribCount, Attribute> fInstanceAttribs;
 };
 
 std::unique_ptr<GrGeometryProcessor::ProgramImpl> MiddleOutShader::makeProgramImpl(

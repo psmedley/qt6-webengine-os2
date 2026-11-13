@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Engine} from '../common/engine';
-import {NUM, STR} from '../common/query_result';
 import {CallsiteInfo, CpuProfileSampleSelection} from '../common/state';
-import {CpuProfileDetails} from '../frontend/globals';
+import {CpuProfileDetails, globals} from '../frontend/globals';
 import {publishCpuProfileDetails} from '../frontend/publish';
+import {Engine} from '../trace_processor/engine';
+import {NUM, STR} from '../trace_processor/query_result';
 
 import {Controller} from './controller';
-import {globals} from './globals';
 
 export interface CpuProfileControllerArgs {
   engine: Engine;
@@ -56,7 +55,9 @@ export class CpuProfileController extends Controller<'main'> {
 
     this.getSampleData(selectedSample.id)
         .then((sampleData) => {
+          /* eslint-disable @typescript-eslint/strict-boolean-expressions */
           if (sampleData !== undefined && selectedSample &&
+              /* eslint-enable */
               this.lastSelectedSample &&
               this.lastSelectedSample.id === selectedSample.id) {
             const cpuProfileDetails: CpuProfileDetails = {
@@ -115,7 +116,7 @@ export class CpuProfileController extends Controller<'main'> {
             WHERE symbol.symbol_set_id = spf.symbol_set_id
             LIMIT 1
           ),
-          spf.name
+          COALESCE(spf.deobfuscated_name, spf.name)
         ) AS name,
         spm.name AS mapping
       FROM cpu_profile_stack_sample AS samples

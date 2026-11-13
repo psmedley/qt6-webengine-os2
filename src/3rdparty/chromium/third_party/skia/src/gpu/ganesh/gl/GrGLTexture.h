@@ -9,9 +9,10 @@
 #ifndef GrGLTexture_DEFINED
 #define GrGLTexture_DEFINED
 
-#include "include/private/gpu/ganesh/GrGLTypesPriv.h"
+#include "include/gpu/ganesh/SkImageGanesh.h"
 #include "src/gpu/ganesh/GrGpu.h"
 #include "src/gpu/ganesh/GrTexture.h"
+#include "src/gpu/ganesh/gl/GrGLTypesPriv.h"
 #include "src/gpu/ganesh/gl/GrGLUtil.h"
 
 class GrGLGpu;
@@ -24,11 +25,12 @@ public:
         GrGLuint fID                        = 0;
         GrGLFormat fFormat                  = GrGLFormat::kUnknown;
         GrBackendObjectOwnership fOwnership = GrBackendObjectOwnership::kOwned;
+        skgpu::Protected fIsProtected       = skgpu::Protected::kNo;
     };
 
     static GrTextureType TextureTypeFromTarget(GrGLenum textureTarget);
 
-    GrGLTexture(GrGLGpu*, SkBudgeted, const Desc&, GrMipmapStatus, std::string_view label);
+    GrGLTexture(GrGLGpu*, skgpu::Budgeted, const Desc&, GrMipmapStatus, std::string_view label);
 
     ~GrGLTexture() override {}
 
@@ -81,7 +83,7 @@ protected:
     void onAbandon() override;
     void onRelease() override;
 
-    bool onStealBackendTexture(GrBackendTexture*, SkImage::BackendTextureReleaseProc*) override;
+    bool onStealBackendTexture(GrBackendTexture*, SkImages::BackendTextureReleaseProc*) override;
 
     void onSetLabel() override;
 

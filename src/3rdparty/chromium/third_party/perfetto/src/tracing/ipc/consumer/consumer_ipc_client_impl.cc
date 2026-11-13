@@ -221,7 +221,9 @@ void ConsumerIPCClientImpl::FreeBuffers() {
   consumer_port_.FreeBuffers(req, std::move(async_response));
 }
 
-void ConsumerIPCClientImpl::Flush(uint32_t timeout_ms, FlushCallback callback) {
+void ConsumerIPCClientImpl::Flush(uint32_t timeout_ms,
+                                  FlushCallback callback,
+                                  FlushFlags flush_flags) {
   if (!connected_) {
     PERFETTO_DLOG("Cannot Flush(), not connected to tracing service");
     return callback(/*success=*/false);
@@ -229,6 +231,7 @@ void ConsumerIPCClientImpl::Flush(uint32_t timeout_ms, FlushCallback callback) {
 
   protos::gen::FlushRequest req;
   req.set_timeout_ms(static_cast<uint32_t>(timeout_ms));
+  req.set_flags(flush_flags.flags());
   ipc::Deferred<protos::gen::FlushResponse> async_response;
   async_response.Bind(
       [callback](ipc::AsyncResult<protos::gen::FlushResponse> response) {
@@ -459,4 +462,33 @@ void ConsumerIPCClientImpl::SaveTraceForBugreport(
   consumer_port_.SaveTraceForBugreport(req, std::move(async_response));
 }
 
+void ConsumerIPCClientImpl::CloneSession(TracingSessionID tsid) {
+  if (!connected_) {
+    PERFETTO_DLOG("Cannot CloneSession(), not connected to tracing service");
+    return;
+  }
+
+  protos::gen::CloneSessionRequest req;
+  req.set_session_id(tsid);
+  ipc::Deferred<protos::gen::CloneSessionResponse> async_response;
+  auto weak_this = weak_ptr_factory_.GetWeakPtr();
+
+  async_response.Bind(
+      [weak_this](
+          ipc::AsyncResult<protos::gen::CloneSessionResponse> response) {
+        if (!weak_this)
+          return;
+        if (!response) {
+          // If the IPC fails, we are talking to an older version of the service
+          // that didn't support CloneSession at all.
+          weak_this->consumer_->OnSessionCloned(
+              {false, "CloneSession IPC not supported", {}});
+        } else {
+          base::Uuid uuid(response->uuid_lsb(), response->uuid_msb());
+          weak_this->consumer_->OnSessionCloned(
+              {response->success(), response->error(), uuid});
+        }
+      });
+  consumer_port_.CloneSession(req, std::move(async_response));
+}
 }  // namespace perfetto

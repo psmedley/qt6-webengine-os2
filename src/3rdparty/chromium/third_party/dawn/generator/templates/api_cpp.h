@@ -1,19 +1,32 @@
-//* Copyright 2017 The Dawn Authors
+//* Copyright 2017 The Dawn & Tint Authors
 //*
-//* Licensed under the Apache License, Version 2.0 (the "License");
-//* you may not use this file except in compliance with the License.
-//* You may obtain a copy of the License at
+//* Redistribution and use in source and binary forms, with or without
+//* modification, are permitted provided that the following conditions are met:
 //*
-//*     http://www.apache.org/licenses/LICENSE-2.0
+//* 1. Redistributions of source code must retain the above copyright notice, this
+//*    list of conditions and the following disclaimer.
 //*
-//* Unless required by applicable law or agreed to in writing, software
-//* distributed under the License is distributed on an "AS IS" BASIS,
-//* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//* See the License for the specific language governing permissions and
-//* limitations under the License.
+//* 2. Redistributions in binary form must reproduce the above copyright notice,
+//*    this list of conditions and the following disclaimer in the documentation
+//*    and/or other materials provided with the distribution.
+//*
+//* 3. Neither the name of the copyright holder nor the names of its
+//*    contributors may be used to endorse or promote products derived from
+//*    this software without specific prior written permission.
+//*
+//* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+//* AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+//* IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//* DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+//* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+//* DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//* SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+//* CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+//* OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+//* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 {% set API = metadata.api.upper() %}
 {% set api = API.lower() %}
-{% if 'dawn' not in enabled_tags %}
+{% if 'dawn' in enabled_tags %}
     #ifdef __EMSCRIPTEN__
     #error "Do not include this header. Emscripten already provides headers needed for {{metadata.api}}."
     #endif
@@ -21,9 +34,13 @@
 #ifndef {{API}}_CPP_H_
 #define {{API}}_CPP_H_
 
-#include "dawn/{{api}}.h"
-#include "dawn/EnumClassBitmasks.h"
+#include "{{api}}/{{api}}.h"
+#include "{{api}}/{{api}}_cpp_chained_struct.h"
+#include "{{api}}/{{api}}_enum_class_bitmasks.h"
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 
 namespace {{metadata.namespace}} {
 
@@ -69,6 +86,26 @@ namespace {{metadata.namespace}} {
     {% for type in by_category["structure"] %}
         struct {{as_cppType(type.name)}};
     {% endfor %}
+
+
+    // Special class for booleans in order to allow implicit conversions.
+    {% set BoolCppType = as_cppType(types["bool"].name) %}
+    {% set BoolCType = as_cType(types["bool"].name) %}
+    class {{BoolCppType}} {
+      public:
+        constexpr {{BoolCppType}}() = default;
+        // NOLINTNEXTLINE(runtime/explicit) allow implicit construction
+        constexpr {{BoolCppType}}(bool value) : mValue(static_cast<{{BoolCType}}>(value)) {}
+        // NOLINTNEXTLINE(runtime/explicit) allow implicit construction
+        {{BoolCppType}}({{BoolCType}} value): mValue(value) {}
+
+        constexpr operator bool() const { return static_cast<bool>(mValue); }
+
+      private:
+        friend struct std::hash<{{BoolCppType}}>;
+        // Default to false.
+        {{BoolCType}} mValue = static_cast<{{BoolCType}}>(false);
+    };
 
     {% for typeDef in by_category["typedef"] %}
         // {{as_cppType(typeDef.name)}} is deprecated.
@@ -136,7 +173,7 @@ namespace {{metadata.namespace}} {
         CType Get() const {
             return mHandle;
         }
-        CType Release() {
+        CType MoveToCHandle() {
             CType result = mHandle;
             mHandle = 0;
             return result;
@@ -151,7 +188,7 @@ namespace {{metadata.namespace}} {
         CType mHandle = nullptr;
     };
 
-{% macro render_cpp_default_value(member, is_struct=True) -%}
+{% macro render_cpp_default_value(member, is_struct, force_default=False) -%}
     {%- if member.json_data.get("no_default", false) -%}
     {%- elif member.annotation in ["*", "const*"] and member.optional or member.default_value == "nullptr" -%}
         {{" "}}= nullptr
@@ -165,6 +202,9 @@ namespace {{metadata.namespace}} {
         {{" "}}= {{member.default_value}}
     {%- else -%}
         {{assert(member.default_value == None)}}
+        {%- if force_default -%}
+            {{" "}}= {}
+        {%- endif -%}
     {%- endif -%}
 {%- endmacro %}
 
@@ -203,7 +243,7 @@ namespace {{metadata.namespace}} {
 
     {% endfor %}
 
-    {% for function in by_category["function"] %}
+    {% for function in by_category["function"] if not function.no_cpp %}
         {{as_cppType(function.return_type.name)}} {{as_cppType(function.name)}}(
             {%- for arg in function.arguments -%}
                 {%- if not loop.first %}, {% endif -%}
@@ -211,16 +251,6 @@ namespace {{metadata.namespace}} {
             {%- endfor -%}
         );
     {% endfor %}
-
-    struct ChainedStruct {
-        ChainedStruct const * nextInChain = nullptr;
-        SType sType = SType::Invalid;
-    };
-
-    struct ChainedStructOut {
-        ChainedStruct * nextInChain = nullptr;
-        SType sType = SType::Invalid;
-    };
 
     {% for type in by_category["structure"] %}
         {% set Out = "Out" if type.output else "" %}
@@ -235,12 +265,22 @@ namespace {{metadata.namespace}} {
                 }
         {% else %}
             struct {{as_cppType(type.name)}} {
+                {% if type.has_free_members_function %}
+                    {{as_cppType(type.name)}}() = default;
+                {% endif %}
         {% endif %}
+            {% if type.has_free_members_function %}
+                ~{{as_cppType(type.name)}}();
+                {{as_cppType(type.name)}}(const {{as_cppType(type.name)}}&) = delete;
+                {{as_cppType(type.name)}}& operator=(const {{as_cppType(type.name)}}&) = delete;
+                {{as_cppType(type.name)}}({{as_cppType(type.name)}}&&);
+                {{as_cppType(type.name)}}& operator=({{as_cppType(type.name)}}&&);
+            {% endif %}
             {% if type.extensible %}
                 ChainedStruct{{Out}} {{const}} * nextInChain = nullptr;
             {% endif %}
             {% for member in type.members %}
-                {% set member_declaration = as_annotated_cppType(member) + render_cpp_default_value(member) %}
+                {% set member_declaration = as_annotated_cppType(member, type.has_free_members_function) + render_cpp_default_value(member, True, type.has_free_members_function) %}
                 {% if type.chained and loop.first %}
                     //* Align the first member after ChainedStruct to match the C struct layout.
                     //* It has to be aligned both to its natural and ChainedStruct's alignment.
@@ -254,19 +294,32 @@ namespace {{metadata.namespace}} {
 
     {% endfor %}
 
-    // The operators of EnumClassBitmmasks in the dawn:: namespace need to be imported
-    // in the {{metadata.namespace}} namespace for Argument Dependent Lookup.
-    DAWN_IMPORT_BITMASK_OPERATORS
+    {%- if metadata.namespace != 'wgpu' %}
+        // The operators of webgpu_enum_class_bitmasks.h are in the wgpu:: namespace,
+        // and need to be imported into this namespace for Argument Dependent Lookup.
+        WGPU_IMPORT_BITMASK_OPERATORS
+    {% endif %}
 }  // namespace {{metadata.namespace}}
 
-namespace dawn {
+namespace wgpu {
     {% for type in by_category["bitmask"] %}
         template<>
-        struct IsDawnBitmask<{{metadata.namespace}}::{{as_cppType(type.name)}}> {
+        struct IsWGPUBitmask<{{metadata.namespace}}::{{as_cppType(type.name)}}> {
             static constexpr bool enable = true;
         };
 
     {% endfor %}
-} // namespace dawn
+} // namespace wgpu
+
+namespace std {
+// Custom boolean class needs corresponding hash function so that it appears as a transparent bool.
+template <>
+struct hash<{{metadata.namespace}}::{{BoolCppType}}> {
+  public:
+    size_t operator()(const {{metadata.namespace}}::{{BoolCppType}} &v) const {
+        return hash<bool>()(v);
+    }
+};
+}  // namespace std
 
 #endif // {{API}}_CPP_H_

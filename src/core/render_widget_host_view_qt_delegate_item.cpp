@@ -5,14 +5,19 @@
 
 #include "render_widget_host_view_qt_delegate_client.h"
 
+#include <QtCore/qrunnable.h>
+#include <QtCore/qthread.h>
 #include <QtGui/qevent.h>
 #include <QtGui/qguiapplication.h>
 #include <QtGui/qwindow.h>
 #include <QtQuick/qsgimagenode.h>
+#include <rhi/qrhi.h>
 
 #if QT_CONFIG(accessibility)
 #include <QtGui/qaccessible.h>
 #endif
+
+using namespace Qt::StringLiterals;
 
 namespace QtWebEngineCore {
 
@@ -30,12 +35,15 @@ RenderWidgetHostViewQtDelegateItem::RenderWidgetHostViewQtDelegateItem(RenderWid
         setFocus(true);
         setActiveFocusOnTab(true);
     }
-    bind(client->compositorId());
+    bind(client->compositorId()); // Compositor::Observer
 }
 
 RenderWidgetHostViewQtDelegateItem::~RenderWidgetHostViewQtDelegateItem()
 {
-    releaseVulkanResources();
+    if (QQuickItem::window())
+        releaseResources();
+
+    unbind(); // Compositor::Observer
     if (m_widgetDelegate) {
         m_widgetDelegate->Unbind();
         m_widgetDelegate->Destroy();
@@ -53,8 +61,8 @@ void RenderWidgetHostViewQtDelegateItem::initAsPopup(const QRect &screenRect)
 QRectF RenderWidgetHostViewQtDelegateItem::viewGeometry() const
 {
     // Transform the entire rect to find the correct top left corner.
-    const QPointF p1 = mapToGlobal(mapFromScene(QPointF(0, 0)));
-    const QPointF p2 = mapToGlobal(mapFromScene(QPointF(width(), height())));
+    const QPointF p1 = mapToGlobal(mapFromItem(this, QPointF(0, 0)));
+    const QPointF p2 = mapToGlobal(mapFromItem(this, QPointF(width(), height())));
     QRectF geometry = QRectF(p1, p2).normalized();
     // But keep the size untransformed to behave like other QQuickItems.
     geometry.setSize(size());
@@ -126,6 +134,8 @@ void RenderWidgetHostViewQtDelegateItem::readyToSwap()
 
 void RenderWidgetHostViewQtDelegateItem::updateCursor(const QCursor &cursor)
 {
+    if (m_widgetDelegate)
+        m_widgetDelegate->SetCursor(cursor);
     setCursor(cursor);
 }
 
@@ -283,9 +293,9 @@ void RenderWidgetHostViewQtDelegateItem::touchEvent(QTouchEvent *event)
 
 void RenderWidgetHostViewQtDelegateItem::hoverMoveEvent(QHoverEvent *event)
 {
+    event->ignore();
     if ((!m_isPopup && m_widgetDelegate && !m_widgetDelegate->ActiveFocusOnPress())
         || event->position() == event->oldPosF()) {
-        event->ignore();
         return;
     }
     m_client->forwardEvent(event);
@@ -293,6 +303,7 @@ void RenderWidgetHostViewQtDelegateItem::hoverMoveEvent(QHoverEvent *event)
 
 void RenderWidgetHostViewQtDelegateItem::hoverLeaveEvent(QHoverEvent *event)
 {
+    event->ignore();
     m_client->forwardEvent(event);
 }
 
@@ -316,24 +327,29 @@ void RenderWidgetHostViewQtDelegateItem::itemChange(ItemChange change, const Ite
 {
     QQuickItem::itemChange(change, value);
     if (change == QQuickItem::ItemSceneChange) {
-        for (const QMetaObject::Connection &c : std::as_const(m_windowConnections))
-            disconnect(c);
-        m_windowConnections.clear();
+        if (!m_windowConnections.isEmpty()) {
+            for (const QMetaObject::Connection &c : std::as_const(m_windowConnections))
+                disconnect(c);
+            m_windowConnections.clear();
+        }
+
         if (value.window) {
             m_windowConnections.append(connect(value.window, &QQuickWindow::beforeRendering,
                                                this, &RenderWidgetHostViewQtDelegateItem::onBeforeRendering, Qt::DirectConnection));
-            m_windowConnections.append(connect(value.window, &QQuickWindow::afterFrameEnd,
-                                               this, &RenderWidgetHostViewQtDelegateItem::onAfterRendering, Qt::DirectConnection));
+            m_windowConnections.append(connect(value.window, &QQuickWindow::afterFrameEnd, this,
+                                               &RenderWidgetHostViewQtDelegateItem::onAfterFrameEnd,
+                                               Qt::DirectConnection));
             m_windowConnections.append(connect(value.window, SIGNAL(xChanged(int)), SLOT(onWindowPosChanged())));
-            m_windowConnections.append(connect(value.window, SIGNAL(yChanged(int)), SLOT(onWindowPosChanged())));
-#if QT_CONFIG(webengine_vulkan)
             m_windowConnections.append(
-                    connect(value.window, &QQuickWindow::sceneGraphAboutToStop, this,
-                            &RenderWidgetHostViewQtDelegateItem::releaseVulkanResources,
-                            Qt::DirectConnection));
-#endif
+                    connect(value.window, SIGNAL(yChanged(int)), SLOT(onWindowPosChanged())));
+            m_windowConnections.append(connect(
+                    value.window, &QQuickWindow::sceneGraphAboutToStop, this,
+                    &RenderWidgetHostViewQtDelegateItem::releaseResources, Qt::DirectConnection));
+            m_windowConnections.append(connect(
+                    value.window, &QQuickWindow::sceneGraphInvalidated, this,
+                    &RenderWidgetHostViewQtDelegateItem::releaseResources, Qt::DirectConnection));
             if (!m_isPopup)
-                m_windowConnections.append(connect(value.window, SIGNAL(closing(QQuickCloseEvent *)), SLOT(onHide())));
+                m_windowConnections.append(connect(value.window, SIGNAL(closing(QQuickCloseEvent*)), SLOT(onHide())));
         }
         m_client->visualPropertiesChanged();
     } else if (change == QQuickItem::ItemVisibleHasChanged) {
@@ -344,6 +360,63 @@ void RenderWidgetHostViewQtDelegateItem::itemChange(ItemChange change, const Ite
             if (!m_isPopup)
                 onHide();
         }
+    } else if (change == QQuickItem::ItemDevicePixelRatioHasChanged) {
+        m_client->visualPropertiesChanged();
+    }
+}
+
+class CleanupJob : public QRunnable
+{
+public:
+    CleanupJob(Compositor::Handle<Compositor> compositor) : m_compositor(std::move(compositor)) { }
+
+    ~CleanupJob()
+    {
+        if (m_compositor->hasResources()) {
+            qWarning("Failed to release graphics resources because the clean-up render job was "
+                     "deleted.");
+        }
+    }
+
+    void run() override { m_compositor->releaseResources(); }
+
+private:
+    Compositor::Handle<Compositor> m_compositor;
+};
+
+void RenderWidgetHostViewQtDelegateItem::releaseResources()
+{
+    auto comp = compositor();
+    if (!comp || comp->type() != Compositor::Type::Native || !comp->hasResources())
+        return;
+
+    comp->releaseTexture();
+
+    QQuickWindow *win = QQuickItem::window();
+    if (!win) {
+        qWarning("Failed to release graphics resources because QQuickWindow is not available.");
+        return;
+    }
+
+    QRhi *rhi = win->rhi();
+    if (!rhi) {
+        qWarning("Failed to release graphics resources because RHI is not available.");
+        return;
+    }
+
+    // Do not schedule clean-up if the resources were created on the current thread.
+    if (QThread::currentThread() == rhi->thread()) {
+        comp->releaseResources();
+        return;
+    }
+
+    if (win->isExposed())
+        win->scheduleRenderJob(new CleanupJob(std::move(comp)), QQuickWindow::NoStage);
+    else {
+        // TODO: Try to find a proper way to schedule job on the render thread if the window is
+        // not exposed.
+        // This is reproducible with ./tst_qquickwebengineviewgraphics simpleGraphics simpleGraphics
+        qWarning("Failed to release graphics resources because QQuickWindow is not exposed.");
     }
 }
 
@@ -352,6 +425,12 @@ QSGNode *RenderWidgetHostViewQtDelegateItem::updatePaintNode(QSGNode *oldNode, U
     auto comp = compositor();
     if (!comp)
         return oldNode;
+
+    if (comp->type() == Compositor::Type::Native
+        && QGuiApplication::platformName() == "offscreen"_L1) {
+        comp->swapFrame();
+        return oldNode;
+    }
 
     QQuickWindow *win = QQuickItem::window();
 
@@ -403,10 +482,10 @@ void RenderWidgetHostViewQtDelegateItem::onBeforeRendering()
     comp->waitForTexture();
 }
 
-void RenderWidgetHostViewQtDelegateItem::onAfterRendering()
+void RenderWidgetHostViewQtDelegateItem::onAfterFrameEnd()
 {
     auto comp = compositor();
-    if (!comp || comp->type() != Compositor::Type::NativeBuffer)
+    if (!comp || comp->type() != Compositor::Type::Native)
         return;
     comp->releaseTexture();
 }
@@ -420,17 +499,6 @@ void RenderWidgetHostViewQtDelegateItem::onHide()
 {
     QFocusEvent event(QEvent::FocusOut, Qt::OtherFocusReason);
     m_client->forwardEvent(&event);
-}
-
-void RenderWidgetHostViewQtDelegateItem::releaseVulkanResources()
-{
-#if QT_CONFIG(webengine_vulkan)
-    auto comp = compositor();
-    if (!comp || comp->type() != Compositor::Type::Vulkan)
-        return;
-
-    comp->releaseVulkanResources(QQuickItem::window());
-#endif
 }
 
 void RenderWidgetHostViewQtDelegateItem::adapterClientChanged(WebContentsAdapterClient *client)
@@ -449,10 +517,8 @@ void RenderWidgetHostViewQtDelegateItem::updateAdapterClientIfNeeded(WebContents
 
 void RenderWidgetHostViewQtDelegateItem::unhandledWheelEvent(QWheelEvent *ev)
 {
-    if (QWindow *w = Window()) {
-        if (QWindow *p = w->parent())
-            qApp->sendEvent(p, ev);
-    }
+    if (m_widgetDelegate)
+        m_widgetDelegate->unhandledWheelEvent(ev);
 }
 
 } // namespace QtWebEngineCore

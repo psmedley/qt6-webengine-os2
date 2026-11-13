@@ -30,11 +30,19 @@
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/service_id_constants.h"
 #include "internal/platform/exception.h"
+#include "internal/proto/analytics/connections_log.pb.h"
+#include "proto/connections_enums.pb.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace {
+using ::location::nearby::analytics::proto::ConnectionsLog;
+using ::location::nearby::connections::BandwidthUpgradeNegotiationFrame;
+using ::location::nearby::connections::
+    BandwidthUpgradeNegotiationFrame_UpgradePathInfo;
+using ::location::nearby::connections::OfflineFrame;
+using ::location::nearby::connections::V1Frame;
+using ::location::nearby::proto::connections::DisconnectionReason;
 
 constexpr absl::string_view kServiceIdA = "ServiceA";
 constexpr absl::string_view kServiceIdB = "ServiceB";
@@ -42,6 +50,7 @@ constexpr absl::string_view kEndpointId1 = "Endpoint1";
 constexpr absl::string_view kEndpointId2 = "Endpoint2";
 constexpr absl::string_view kEndpointId3 = "Endpoint3";
 constexpr absl::string_view kEndpointId4 = "Endpoint4";
+constexpr absl::string_view kEndpointId5 = "Endpoint5";
 
 class BwuManagerTest : public ::testing::Test {
  protected:
@@ -49,20 +58,25 @@ class BwuManagerTest : public ::testing::Test {
     // Set up fake BWU handlers for WebRTC and WifiLAN.
     absl::flat_hash_map<Medium, std::unique_ptr<BwuHandler>> handlers;
     auto fake_web_rtc = std::make_unique<FakeBwuHandler>(Medium::WEB_RTC);
-    auto fake_wifi_lan =
-        std::make_unique<FakeBwuHandler>(Medium::WIFI_LAN);
+    auto fake_wifi_lan = std::make_unique<FakeBwuHandler>(Medium::WIFI_LAN);
+    auto fake_wifi_direct =
+        std::make_unique<FakeBwuHandler>(Medium::WIFI_DIRECT);
     auto fake_wifi_hotspot =
         std::make_unique<FakeBwuHandler>(Medium::WIFI_HOTSPOT);
     fake_web_rtc_bwu_handler_ = fake_web_rtc.get();
     fake_wifi_lan_bwu_handler_ = fake_wifi_lan.get();
+    fake_wifi_direct_bwu_handler_ = fake_wifi_direct.get();
     fake_wifi_hotspot_bwu_handler_ = fake_wifi_hotspot.get();
     handlers.emplace(Medium::WEB_RTC, std::move(fake_web_rtc));
     handlers.emplace(Medium::WIFI_LAN, std::move(fake_wifi_lan));
+    handlers.emplace(Medium::WIFI_DIRECT, std::move(fake_wifi_direct));
     handlers.emplace(Medium::WIFI_HOTSPOT, std::move(fake_wifi_hotspot));
 
     BwuManager::Config config;
-    config.allow_upgrade_to = BooleanMediumSelector{
-        .web_rtc = true, .wifi_lan = true, .wifi_hotspot = true};
+    config.allow_upgrade_to = BooleanMediumSelector{.web_rtc = true,
+                                                    .wifi_lan = true,
+                                                    .wifi_hotspot = true,
+                                                    .wifi_direct = true};
 
     bwu_manager_ = std::make_unique<BwuManager>(mediums_, em_, ecm_,
                                                 std::move(handlers), config);
@@ -85,6 +99,11 @@ class BwuManagerTest : public ::testing::Test {
                                     std::move(channel));
     return channel_raw;
   }
+  void UnRegisterChannelForEndpoint(absl::string_view endpoint_id) {
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(endpoint_id), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+  }
 
   // Upgrade from |initial_medium| to |upgrade_medium|, close down the BLUETOOTH
   // channel, return the upgraded endpoint channel. This logic is tested in
@@ -100,6 +119,9 @@ class BwuManagerTest : public ::testing::Test {
         break;
       case Medium::WIFI_LAN:
         handler = fake_wifi_lan_bwu_handler_;
+        break;
+      case Medium::WIFI_DIRECT:
+        handler = fake_wifi_direct_bwu_handler_;
         break;
       case Medium::WIFI_HOTSPOT:
         handler = fake_wifi_hotspot_bwu_handler_;
@@ -138,10 +160,69 @@ class BwuManagerTest : public ::testing::Test {
   Mediums mediums_;
   FakeBwuHandler* fake_web_rtc_bwu_handler_ = nullptr;
   FakeBwuHandler* fake_wifi_lan_bwu_handler_ = nullptr;
+  FakeBwuHandler* fake_wifi_direct_bwu_handler_ = nullptr;
   FakeBwuHandler* fake_wifi_hotspot_bwu_handler_ = nullptr;
   std::unique_ptr<BwuManager> bwu_manager_;
   PacketMetaData packet_meta_data_;
 };
+
+TEST(BwuManagerBaseTest, AllowToUpgradeMedium) {
+  ClientProxy client;
+  EndpointChannelManager ecm;
+  EndpointManager em(&ecm);
+  Mediums mediums;
+  BwuManager::Config config;
+  config.allow_upgrade_to.SetAll(false);
+  absl::flat_hash_map<Medium, std::unique_ptr<BwuHandler>> handlers;
+  auto bwu_manager = std::make_unique<BwuManager>(mediums, em, ecm,
+                                                  std::move(handlers), config);
+
+  auto channel1 = std::make_unique<FakeEndpointChannel>(
+      Medium::BLUETOOTH, std::string(kServiceIdA));
+  ecm.RegisterChannelForEndpoint(&client, std::string(kEndpointId1),
+                                 std::move(channel1));
+  bwu_manager->InitiateBwuForEndpoint(&client, std::string(kEndpointId1),
+                                      Medium::WIFI_LAN);
+  EXPECT_TRUE(bwu_manager->IsUpgradeOngoing(std::string(kEndpointId1)));
+  ecm.UnregisterChannelForEndpoint(
+      std::string(kEndpointId1), DisconnectionReason::LOCAL_DISCONNECTION,
+      ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+
+  auto channel2 = std::make_unique<FakeEndpointChannel>(
+      Medium::BLUETOOTH, std::string(kServiceIdA));
+  ecm.RegisterChannelForEndpoint(&client, std::string(kEndpointId2),
+                                 std::move(channel2));
+  bwu_manager->InitiateBwuForEndpoint(&client, std::string(kEndpointId2),
+                                      Medium::WIFI_HOTSPOT);
+  EXPECT_TRUE(bwu_manager->IsUpgradeOngoing(std::string(kEndpointId2)));
+  ecm.UnregisterChannelForEndpoint(
+      std::string(kEndpointId2), DisconnectionReason::LOCAL_DISCONNECTION,
+      ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+
+  auto channel3 = std::make_unique<FakeEndpointChannel>(
+      Medium::BLUETOOTH, std::string(kServiceIdA));
+  ecm.RegisterChannelForEndpoint(&client, std::string(kEndpointId3),
+                                 std::move(channel3));
+  bwu_manager->InitiateBwuForEndpoint(&client, std::string(kEndpointId3),
+                                      Medium::WIFI_DIRECT);
+  EXPECT_TRUE(bwu_manager->IsUpgradeOngoing(std::string(kEndpointId3)));
+  ecm.UnregisterChannelForEndpoint(
+      std::string(kEndpointId3), DisconnectionReason::LOCAL_DISCONNECTION,
+      ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+
+  auto channel4 = std::make_unique<FakeEndpointChannel>(
+      Medium::WEB_RTC, std::string(kServiceIdA));
+  ecm.RegisterChannelForEndpoint(&client, std::string(kEndpointId4),
+                                 std::move(channel4));
+  bwu_manager->InitiateBwuForEndpoint(&client, std::string(kEndpointId4),
+                                      Medium::BLUETOOTH);
+  EXPECT_FALSE(bwu_manager->IsUpgradeOngoing(std::string(kEndpointId4)));
+  ecm.UnregisterChannelForEndpoint(
+      std::string(kEndpointId4), DisconnectionReason::LOCAL_DISCONNECTION,
+      ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+
+  bwu_manager->Shutdown();
+}
 
 class BwuManagerTestParam : public BwuManagerTest,
                             public ::testing::WithParamInterface<bool> {
@@ -167,6 +248,7 @@ TEST_P(BwuManagerTestParam, InitiateBwu_Success) {
   EXPECT_TRUE(fake_wifi_lan_bwu_handler_->handle_initialize_calls().empty());
   EXPECT_TRUE(
       fake_wifi_hotspot_bwu_handler_->handle_initialize_calls().empty());
+  EXPECT_TRUE(fake_wifi_direct_bwu_handler_->handle_initialize_calls().empty());
   EXPECT_EQ(WrapInitiatorUpgradeServiceId(kServiceIdA),
             fake_web_rtc_bwu_handler_->handle_initialize_calls()[0].service_id);
   EXPECT_EQ(
@@ -209,8 +291,9 @@ TEST_P(BwuManagerTestParam, InitiateBwu_Success) {
       dynamic_cast<FakeEndpointChannel*>(shared_initial_channel.get());
   EXPECT_FALSE(upgraded_channel->IsPaused());
   EXPECT_TRUE(old_channel->is_closed());
-  EXPECT_EQ(proto::connections::DisconnectionReason::UPGRADED,
+  EXPECT_EQ(location::nearby::proto::connections::DisconnectionReason::UPGRADED,
             old_channel->disconnection_reason());
+  UnRegisterChannelForEndpoint(kEndpointId1);
 }
 
 TEST_P(BwuManagerTestParam,
@@ -224,6 +307,7 @@ TEST_P(BwuManagerTestParam,
   bwu_manager_->InitiateBwuForEndpoint(&client_, std::string(kEndpointId1),
                                        Medium::WEB_RTC);
   EXPECT_EQ(1u, fake_web_rtc_bwu_handler_->handle_initialize_calls().size());
+  UnRegisterChannelForEndpoint(kEndpointId1);
 }
 
 TEST_P(BwuManagerTestParam,
@@ -235,11 +319,11 @@ TEST_P(BwuManagerTestParam,
                                        Medium::WIFI_HOTSPOT);
   EXPECT_TRUE(
       fake_wifi_hotspot_bwu_handler_->handle_initialize_calls().empty());
+  UnRegisterChannelForEndpoint(kEndpointId1);
 }
 
-TEST_P(BwuManagerTestParam, InitiateBwu_Error_NoMediumHandler) {
-  // Try to upgrade to a medium without a handler (WIFI_HOTSPOT is not support
-  // in these tests). Should just early return with no action.
+TEST_P(BwuManagerTestParam, InitiateBwu_Error_NoInitialMedium) {
+  // Try to upgrade to a Medium without an initial Medium.
   bwu_manager_->InitiateBwuForEndpoint(&client_, std::string(kEndpointId1),
                                        Medium::WIFI_HOTSPOT);
 
@@ -248,6 +332,7 @@ TEST_P(BwuManagerTestParam, InitiateBwu_Error_NoMediumHandler) {
   EXPECT_TRUE(fake_wifi_lan_bwu_handler_->handle_initialize_calls().empty());
   EXPECT_TRUE(
       fake_wifi_hotspot_bwu_handler_->handle_initialize_calls().empty());
+  EXPECT_TRUE(fake_wifi_direct_bwu_handler_->handle_initialize_calls().empty());
 }
 
 TEST_P(BwuManagerTestParam, InitiateBwu_Error_UpgradeAlreadyInProgress) {
@@ -265,6 +350,8 @@ TEST_P(BwuManagerTestParam, InitiateBwu_Error_UpgradeAlreadyInProgress) {
   EXPECT_TRUE(fake_wifi_lan_bwu_handler_->handle_initialize_calls().empty());
   EXPECT_TRUE(
       fake_wifi_hotspot_bwu_handler_->handle_initialize_calls().empty());
+  EXPECT_TRUE(fake_wifi_direct_bwu_handler_->handle_initialize_calls().empty());
+  UnRegisterChannelForEndpoint(kEndpointId1);
 }
 
 TEST_P(BwuManagerTestParam,
@@ -296,6 +383,7 @@ TEST_P(BwuManagerTestParam,
             ecm_.GetChannelForEndpoint(std::string(kEndpointId1)).get());
   EXPECT_EQ(initial_channel,
             ecm_.GetChannelForEndpoint(std::string(kEndpointId1)).get());
+  UnRegisterChannelForEndpoint(kEndpointId1);
 }
 
 TEST_F(BwuManagerTest,
@@ -318,9 +406,12 @@ TEST_F(BwuManagerTest,
     // Disconnect the first WebRTC endpoint. We don't expect a revert until the
     // last WebRTC endpoint for the service is disconnected.
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId1));
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id,
-                                       std::string(kEndpointId1), latch);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId1), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id, std::string(kEndpointId1), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
     ASSERT_EQ(1u, fake_web_rtc_bwu_handler_->disconnect_calls().size());
     EXPECT_EQ(kEndpointId1,
               fake_web_rtc_bwu_handler_->disconnect_calls()[0].endpoint_id);
@@ -329,9 +420,12 @@ TEST_F(BwuManagerTest,
   {
     // Disconnect the second WebRTC endpoint. We expect a revert.
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId2));
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id,
-                                       std::string(kEndpointId2), latch);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId2), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id, std::string(kEndpointId2), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
     ASSERT_EQ(2u, fake_web_rtc_bwu_handler_->disconnect_calls().size());
     EXPECT_EQ(kEndpointId2,
               fake_web_rtc_bwu_handler_->disconnect_calls()[1].endpoint_id);
@@ -361,9 +455,12 @@ TEST_F(BwuManagerTest,
   {
     // Disconnect the first WebRTC endpoint.
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId1));
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id,
-                                       std::string(kEndpointId1), latch);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId1), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id, std::string(kEndpointId1), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
     ASSERT_EQ(1u, fake_web_rtc_bwu_handler_->disconnect_calls().size());
     EXPECT_EQ(kEndpointId1,
               fake_web_rtc_bwu_handler_->disconnect_calls()[0].endpoint_id);
@@ -378,9 +475,12 @@ TEST_F(BwuManagerTest,
   {
     // Disconnect the second WebRTC endpoint.
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId2));
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id,
-                                       std::string(kEndpointId2), latch);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId2), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id, std::string(kEndpointId2), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
 
     // Note(nohle): There appears to be an off-by-one error in the
     // existing/flag-disabled code. Revert is called when there are "<= 1"
@@ -412,28 +512,33 @@ TEST_F(BwuManagerTest,
   {
     CountDownLatch latch(1);
     EXPECT_EQ(2u, ecm_.GetConnectedEndpointsCount());
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId1));
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId1), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
     EXPECT_EQ(1u, ecm_.GetConnectedEndpointsCount());
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id_A,
-                                       std::string(kEndpointId1), latch);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_A, std::string(kEndpointId1), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
     ASSERT_EQ(1u, fake_wifi_lan_bwu_handler_->disconnect_calls().size());
     EXPECT_EQ(kEndpointId1,
               fake_wifi_lan_bwu_handler_->disconnect_calls()[0].endpoint_id);
 
-      // With the support_multiple_bwu_mediums flag enabled, we have more
-      // granular per-service tracking. So, we can revert for each service when
-      // the last endpoint of that medium for the service goes down.
-      ASSERT_EQ(1u, fake_wifi_lan_bwu_handler_->handle_revert_calls().size());
-      EXPECT_EQ(
-          upgrade_service_id_A,
-          fake_wifi_lan_bwu_handler_->handle_revert_calls()[0].service_id);
+    // With the support_multiple_bwu_mediums flag enabled, we have more
+    // granular per-service tracking. So, we can revert for each service when
+    // the last endpoint of that medium for the service goes down.
+    ASSERT_EQ(1u, fake_wifi_lan_bwu_handler_->handle_revert_calls().size());
+    EXPECT_EQ(upgrade_service_id_A,
+              fake_wifi_lan_bwu_handler_->handle_revert_calls()[0].service_id);
   }
   {
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId2));
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId2), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
     EXPECT_EQ(0u, ecm_.GetConnectedEndpointsCount());
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id_B,
-                                       std::string(kEndpointId2), latch);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_B, std::string(kEndpointId2), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
     ASSERT_EQ(2u, fake_wifi_lan_bwu_handler_->disconnect_calls().size());
     EXPECT_EQ(kEndpointId2,
               fake_wifi_lan_bwu_handler_->disconnect_calls()[1].endpoint_id);
@@ -462,10 +567,13 @@ TEST_F(BwuManagerTest,
   {
     CountDownLatch latch(1);
     EXPECT_EQ(2u, ecm_.GetConnectedEndpointsCount());
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId1));
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId1), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
     EXPECT_EQ(1u, ecm_.GetConnectedEndpointsCount());
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id_A,
-                                       std::string(kEndpointId1), latch);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_A, std::string(kEndpointId1), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
     ASSERT_EQ(1u, fake_wifi_lan_bwu_handler_->disconnect_calls().size());
     EXPECT_EQ(kEndpointId1,
               fake_wifi_lan_bwu_handler_->disconnect_calls()[0].endpoint_id);
@@ -479,10 +587,13 @@ TEST_F(BwuManagerTest,
   }
   {
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId2));
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId2), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
     EXPECT_EQ(0u, ecm_.GetConnectedEndpointsCount());
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id_B,
-                                       std::string(kEndpointId2), latch);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_B, std::string(kEndpointId2), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
     // Note(nohle): There appears to be an off-by-one error in the
     // existing/flag-disabled code. Revert is called when there are "<= 1"
     // (instead of "== 0") connected endpoints.
@@ -504,10 +615,13 @@ TEST_F(
   CreateInitialEndpoint(kServiceIdA, kEndpointId2, Medium::BLUETOOTH);
   CreateInitialEndpoint(kServiceIdB, kEndpointId3, Medium::BLUETOOTH);
   CreateInitialEndpoint(kServiceIdB, kEndpointId4, Medium::BLUETOOTH);
+  CreateInitialEndpoint(kServiceIdB, kEndpointId5, Medium::BLUETOOTH);
   FullyUpgradeEndpoint(kEndpointId1, /*initial_medium=*/Medium::BLUETOOTH,
                        /*upgrade_medium=*/Medium::WEB_RTC);
   FullyUpgradeEndpoint(kEndpointId4, /*initial_medium=*/Medium::BLUETOOTH,
                        /*upgrade_medium=*/Medium::WIFI_HOTSPOT);
+  FullyUpgradeEndpoint(kEndpointId5, /*initial_medium=*/Medium::BLUETOOTH,
+                       /*upgrade_medium=*/Medium::WIFI_DIRECT);
   FullyUpgradeEndpoint(kEndpointId2, /*initial_medium=*/Medium::BLUETOOTH,
                        /*upgrade_medium=*/Medium::WIFI_LAN);
   FullyUpgradeEndpoint(kEndpointId3, /*initial_medium=*/Medium::BLUETOOTH,
@@ -522,14 +636,19 @@ TEST_F(
   EXPECT_TRUE(fake_web_rtc_bwu_handler_->disconnect_calls().empty());
   EXPECT_TRUE(fake_wifi_lan_bwu_handler_->disconnect_calls().empty());
   EXPECT_TRUE(fake_wifi_hotspot_bwu_handler_->disconnect_calls().empty());
+  EXPECT_TRUE(fake_wifi_direct_bwu_handler_->disconnect_calls().empty());
   EXPECT_TRUE(fake_web_rtc_bwu_handler_->handle_revert_calls().empty());
   EXPECT_TRUE(fake_wifi_lan_bwu_handler_->handle_revert_calls().empty());
   EXPECT_TRUE(fake_wifi_hotspot_bwu_handler_->handle_revert_calls().empty());
+  EXPECT_TRUE(fake_wifi_direct_bwu_handler_->handle_revert_calls().empty());
   {
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId1));
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id_A,
-                                       std::string(kEndpointId1), latch);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId1), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_A, std::string(kEndpointId1), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
 
     // No more WebRTC channels for service A; expect revert call.
     ASSERT_EQ(1u, fake_web_rtc_bwu_handler_->disconnect_calls().size());
@@ -544,12 +663,17 @@ TEST_F(
     EXPECT_TRUE(fake_wifi_lan_bwu_handler_->handle_revert_calls().empty());
     EXPECT_TRUE(fake_wifi_hotspot_bwu_handler_->disconnect_calls().empty());
     EXPECT_TRUE(fake_wifi_hotspot_bwu_handler_->handle_revert_calls().empty());
+    EXPECT_TRUE(fake_wifi_direct_bwu_handler_->disconnect_calls().empty());
+    EXPECT_TRUE(fake_wifi_direct_bwu_handler_->handle_revert_calls().empty());
   }
   {
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId2));
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id_A,
-                                       std::string(kEndpointId2), latch);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId2), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_A, std::string(kEndpointId2), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
 
     // We reverted a WLAN channel; no additional WebRTC calls expected.
     EXPECT_EQ(1u, fake_web_rtc_bwu_handler_->disconnect_calls().size());
@@ -565,9 +689,12 @@ TEST_F(
   }
   {
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId3));
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id_B,
-                                       std::string(kEndpointId3), latch);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId3), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_B, std::string(kEndpointId3), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
 
     // We reverted a WLAN channel; no additional WebRTC calls expected.
     EXPECT_EQ(1u, fake_web_rtc_bwu_handler_->disconnect_calls().size());
@@ -583,9 +710,12 @@ TEST_F(
   }
   {
     CountDownLatch latch(1);
-    ecm_.UnregisterChannelForEndpoint(std::string(kEndpointId4));
-    bwu_manager_->OnEndpointDisconnect(&client_, upgrade_service_id_B,
-                                       std::string(kEndpointId4), latch);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId4), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_B, std::string(kEndpointId4), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
 
     // We reverted a Hotspot channel; no additional WebRTC calls expected.
     EXPECT_EQ(1u, fake_web_rtc_bwu_handler_->disconnect_calls().size());
@@ -600,6 +730,28 @@ TEST_F(
     EXPECT_EQ(
         upgrade_service_id_B,
         fake_wifi_hotspot_bwu_handler_->handle_revert_calls()[0].service_id);
+  }
+  {
+    CountDownLatch latch(1);
+    ecm_.UnregisterChannelForEndpoint(
+        std::string(kEndpointId5), DisconnectionReason::LOCAL_DISCONNECTION,
+        ConnectionsLog::EstablishedConnection::UNSAFE_DISCONNECTION);
+    bwu_manager_->OnEndpointDisconnect(
+        &client_, upgrade_service_id_B, std::string(kEndpointId5), latch,
+        DisconnectionReason::LOCAL_DISCONNECTION);
+
+    // We reverted a WifiDirect channel; no additional WebRTC calls expected.
+    EXPECT_EQ(1u, fake_web_rtc_bwu_handler_->disconnect_calls().size());
+    EXPECT_EQ(1u, fake_web_rtc_bwu_handler_->handle_revert_calls().size());
+
+    // No more WifiDirect channels for service B; expect revert call.
+    ASSERT_EQ(1u, fake_wifi_direct_bwu_handler_->disconnect_calls().size());
+    EXPECT_EQ(kEndpointId5,
+              fake_wifi_direct_bwu_handler_->disconnect_calls()[0].endpoint_id);
+    ASSERT_EQ(1u, fake_wifi_direct_bwu_handler_->handle_revert_calls().size());
+    EXPECT_EQ(
+        upgrade_service_id_B,
+        fake_wifi_direct_bwu_handler_->handle_revert_calls()[0].service_id);
   }
 }
 
@@ -630,11 +782,14 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagEnabled) {
                                 std::string(kEndpointId3), &client_,
                                 Medium::WEB_RTC, packet_meta_data_);
 
-    // With the flag enabled, we can safely revert WebRTC just for service B
-    // because service B has no active WebRTC endpoints.
-    ASSERT_EQ(1u, fake_web_rtc_bwu_handler_->handle_revert_calls().size());
-    EXPECT_EQ(WrapInitiatorUpgradeServiceId(kServiceIdB),
-              fake_web_rtc_bwu_handler_->handle_revert_calls()[0].service_id);
+  // With the flag enabled, we can safely revert WebRTC just for service B
+  // because service B has no active WebRTC endpoints.
+  ASSERT_EQ(1u, fake_web_rtc_bwu_handler_->handle_revert_calls().size());
+  EXPECT_EQ(WrapInitiatorUpgradeServiceId(kServiceIdB),
+            fake_web_rtc_bwu_handler_->handle_revert_calls()[0].service_id);
+  UnRegisterChannelForEndpoint(kEndpointId1);
+  UnRegisterChannelForEndpoint(kEndpointId2);
+  UnRegisterChannelForEndpoint(kEndpointId3);
 }
 
 TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagDisabled) {
@@ -669,6 +824,42 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagDisabled) {
   // endpoints for _any_ service. We don't have service-level bookkeeping; we
   // only know that there is some active WebRTC endpoint.
   EXPECT_TRUE(fake_web_rtc_bwu_handler_->handle_revert_calls().empty());
+  UnRegisterChannelForEndpoint(kEndpointId1);
+  UnRegisterChannelForEndpoint(kEndpointId2);
+  UnRegisterChannelForEndpoint(kEndpointId3);
+}
+
+TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_WifiDirect) {
+  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums = true;
+  OfflineFrame frame;
+  CreateInitialEndpoint(kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
+
+  ByteArray bytes = parser::ForBwuWifiDirectPathAvailable(
+      /*ssid=*/"Direct-12345678", /*password=*/"87654321", /*port=*/2143,
+      /*frequency=*/2412, /*supports_disabling_encryption=*/false,
+      /*gateway=*/"123.234.23.1");
+  frame.ParseFromString(std::string(bytes));
+
+  ::nearby::connections::V1Frame* v1_frame = frame.mutable_v1();
+  ::nearby::connections::BandwidthUpgradeNegotiationFrame* sub_frame =
+      v1_frame->mutable_bandwidth_upgrade_negotiation();
+  ::nearby::connections::BandwidthUpgradeNegotiationFrame_UpgradePathInfo*
+      upgrade_path_info = sub_frame->mutable_upgrade_path_info();
+  upgrade_path_info->set_supports_client_introduction_ack(false);
+  bwu_manager_->OnIncomingFrame(frame, std::string(kEndpointId1), &client_,
+                                Medium::BLUETOOTH, packet_meta_data_);
+  CountDownLatch latch(1);
+  bwu_manager_->OnEndpointDisconnect(&client_, (std::string)kServiceIdA,
+                                     std::string(kEndpointId1), latch,
+                                     DisconnectionReason::LOCAL_DISCONNECTION);
+
+  ASSERT_EQ(fake_wifi_direct_bwu_handler_->disconnect_calls().size(), 1u);
+  EXPECT_EQ(kEndpointId1,
+            fake_wifi_direct_bwu_handler_->disconnect_calls()[0].endpoint_id);
+  // This is called by the RESPONDER--call RevertInitiatorState only when
+  // BWU Medium is Hotspot or WifiDirect.
+  ASSERT_EQ(fake_wifi_direct_bwu_handler_->handle_revert_calls().size(), 1u);
+  UnRegisterChannelForEndpoint(kEndpointId1);
 }
 
 TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Hotspot) {
@@ -679,7 +870,8 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Hotspot) {
   ExceptionOr<OfflineFrame> hotspot_path_available_frame =
       parser::FromBytes(parser::ForBwuWifiHotspotPathAvailable(
           /*ssid=*/"Direct-357a2d8c", /*password=*/"b592f7d3",
-          /*port=*/1234, /*gateway=*/"123.234.23.1", false));
+          /*port=*/1234, /*frequency=*/2412, /*gateway=*/"123.234.23.1",
+          false));
   OfflineFrame frame = hotspot_path_available_frame.result();
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();
@@ -693,9 +885,11 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Hotspot) {
                                 Medium::BLUETOOTH, packet_meta_data_);
   CountDownLatch latch(1);
   bwu_manager_->OnEndpointDisconnect(&client_, (std::string)kServiceIdA,
-                                     std::string(kEndpointId1), latch);
+                                     std::string(kEndpointId1), latch,
+                                     DisconnectionReason::LOCAL_DISCONNECTION);
 
   ASSERT_EQ(fake_wifi_hotspot_bwu_handler_->handle_revert_calls().size(), 1u);
+  UnRegisterChannelForEndpoint(kEndpointId1);
 }
 
 TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Wlan) {
@@ -719,9 +913,11 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Wlan) {
                                 Medium::BLUETOOTH, packet_meta_data_);
   CountDownLatch latch(1);
   bwu_manager_->OnEndpointDisconnect(&client_, (std::string)kServiceIdA,
-                                     std::string(kEndpointId1), latch);
+                                     std::string(kEndpointId1), latch,
+                                     DisconnectionReason::LOCAL_DISCONNECTION);
 
   ASSERT_EQ(fake_wifi_lan_bwu_handler_->handle_revert_calls().size(), 0u);
+  UnRegisterChannelForEndpoint(kEndpointId1);
 }
 
 TEST_F(BwuManagerTest, OnReceiveBwuEvent) {
@@ -738,4 +934,3 @@ INSTANTIATE_TEST_SUITE_P(BwuManagerTestParam, BwuManagerTestParam,
 }  // namespace
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

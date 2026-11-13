@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,20 +45,33 @@ FX_ARGB CPDF_RenderOptions::TranslateColor(FX_ARGB argb) const {
   return ArgbEncode(a, gray, gray, gray);
 }
 
-FX_ARGB CPDF_RenderOptions::TranslateObjectColor(
+FX_ARGB CPDF_RenderOptions::TranslateObjectFillColor(
     FX_ARGB argb,
-    CPDF_PageObject::Type object_type,
-    RenderType render_type) const {
-  if (!ColorModeIs(kForcedColor))
+    CPDF_PageObject::Type object_type) const {
+  if (!ColorModeIs(kForcedColor)) {
     return TranslateColor(argb);
-
+  }
   switch (object_type) {
     case CPDF_PageObject::Type::kPath:
-      return render_type == RenderType::kFill ? m_ColorScheme.path_fill_color
-                                              : m_ColorScheme.path_stroke_color;
+      return m_ColorScheme.path_fill_color;
     case CPDF_PageObject::Type::kText:
-      return render_type == RenderType::kFill ? m_ColorScheme.text_fill_color
-                                              : m_ColorScheme.text_stroke_color;
+      return m_ColorScheme.text_fill_color;
+    default:
+      return argb;
+  }
+}
+
+FX_ARGB CPDF_RenderOptions::TranslateObjectStrokeColor(
+    FX_ARGB argb,
+    CPDF_PageObject::Type object_type) const {
+  if (!ColorModeIs(kForcedColor)) {
+    return TranslateColor(argb);
+  }
+  switch (object_type) {
+    case CPDF_PageObject::Type::kPath:
+      return m_ColorScheme.path_stroke_color;
+    case CPDF_PageObject::Type::kText:
+      return m_ColorScheme.text_stroke_color;
     default:
       return argb;
   }
@@ -66,4 +79,13 @@ FX_ARGB CPDF_RenderOptions::TranslateObjectColor(
 
 uint32_t CPDF_RenderOptions::GetCacheSizeLimit() const {
   return kCacheSizeLimitBytes;
+}
+
+bool CPDF_RenderOptions::CheckOCGDictVisible(const CPDF_Dictionary* pOC) const {
+  return !m_pOCContext || m_pOCContext->CheckOCGDictVisible(pOC);
+}
+
+bool CPDF_RenderOptions::CheckPageObjectVisible(
+    const CPDF_PageObject* pPageObj) const {
+  return !m_pOCContext || m_pOCContext->CheckPageObjectVisible(pPageObj);
 }

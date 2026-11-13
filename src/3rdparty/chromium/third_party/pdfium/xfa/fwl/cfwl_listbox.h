@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include "core/fxcrt/unowned_ptr.h"
 #include "xfa/fwl/cfwl_edit.h"
 #include "xfa/fwl/cfwl_event.h"
 #include "xfa/fwl/cfwl_listbox.h"
@@ -136,8 +137,8 @@ class CFWL_ListBox : public CFWL_Widget {
   bool m_bLButtonDown = false;
   float m_fItemHeight = 0.0f;
   float m_fScorllBarWidth = 0.0f;
-  Item* m_hAnchor = nullptr;
-  std::vector<std::unique_ptr<Item>> m_ItemArray;
+  std::vector<std::unique_ptr<Item>> m_ItemArray;  // Must outlive `m_hAnchor`.
+  UnownedPtr<Item> m_hAnchor;
 };
 
 #endif  // XFA_FWL_CFWL_LISTBOX_H_

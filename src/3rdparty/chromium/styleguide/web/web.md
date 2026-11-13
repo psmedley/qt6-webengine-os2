@@ -4,14 +4,15 @@
 
 ## Where does this style guide apply?
 
-This style guide targets Chromium frontend features implemented with JavaScript,
-CSS, and HTML.  Developers of these features should adhere to the following
+This style guide targets Chromium frontend features implemented with TypeScript,
+CSS, and HTML. Developers of these features should adhere to the following
 rules where possible, just like those using C++ conform to the [Chromium C++
 styleguide](../c++/c++.md).
 
 This guide follows and builds on:
 
 * [Google HTML/CSS Style Guide](https://google.github.io/styleguide/htmlcssguide.html)
+* [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html)
 * [Google JavaScript Style Guide](https://google.github.io/styleguide/jsguide.html)
 * [Google Polymer Style Guide](http://go/polymer-style)
 
@@ -27,7 +28,7 @@ When designing a feature with web technologies, separate the:
 * **content** you are presenting to the user (**HTML**)
 * **styling** of the data (**CSS**)
 * **logic** that controls the dynamic behavior of the content and presentation
-  (**JS**)
+  (**TS**)
 
 This highlights the concern of each part of the code and promotes looser
 coupling (which makes refactor easier down the road).
@@ -38,7 +39,7 @@ Another way to envision this principle is using the MVC pattern:
 |:-------------:|:-------------:|
 | Model         | HTML          |
 | View          | CSS           |
-| Controller    | JS            |
+| Controller    | TS            |
 
 It's also often appropriate to separate each implementation into separate files.
 
@@ -230,8 +231,12 @@ compatibility issues are less relevant for Chrome-only code).
 * Use scalable `font-size` units like `%` or `em` to respect users' default font
   size
 
-* Don't use CSS Mixins (`--mixin: {}` or `@apply --mixin;`) in new code. [We're
-  removing them.](https://crbug.com/973674)
+* Don't use CSS Mixins (`--mixin: {}` or `@apply --mixin;`).
+    * CSS Mixins are defunct after Oct 2022, see
+      [crrev.com/c/3953559](https://crrev.com/c/3953559)
+    * All CSS Mixins usages have been removed from Chromium, see
+      [crbug.com/973674](https://crbug.com/973674) and
+      [crbug.com/1320797](https://crbug.com/1320797)
     * Mixins were [dropped from CSS](https://www.xanthir.com/b4o00) in favor of
       [CSS Shadow Parts](https://drafts.csswg.org/css-shadow-parts/).
     * Instead, replace CSS mixin usage with one of these natively supported
@@ -290,15 +295,15 @@ Use RTL-friendly versions of things like `margin` or `padding` where possible:
 For properties that don't have an RTL-friendly alternatives, use
 `html[dir='rtl']` as a prefix in your selectors.
 
-## JavaScript/TypeScript
+## TypeScript
 
-New WebUI code (except for ChromeOS specific code) should be written in
-TypeScript.
+New WebUI code should be written in TypeScript. Some legacy code is still using
+JavaScript, but it is expected that all code should migrate to TS eventually.
 
 ### Style
 
-See the [Google JavaScript Style
-Guide](https://google.github.io/styleguide/jsguide.html) as well as
+See the [Google TypeScript Style
+Guide](https://google.github.io/styleguide/tsguide.html) as well as
 [ECMAScript Features in Chromium](es.md).
 
 * Use `$('element-id')` instead of `document.getElementById`. This function can
@@ -311,20 +316,37 @@ Guide](https://google.github.io/styleguide/jsguide.html) as well as
     * Use `@type` (instead of `@return` or `@param`) for JSDoc annotations on
       getters/setters
 
-* For legacy code using closure, see [Annotating JavaScript for the Closure
-  Compiler](https://developers.google.com/closure/compiler/docs/js-for-compiler)
-  for @ directives
-
 * Prefer `event.preventDefault()` to `return false` from event handlers
 
 * Prefer `this.addEventListener('foo-changed', this.onFooChanged_.bind(this));`
   instead of always using an arrow function wrapper, when it makes the code less
   verbose without compromising type safety (for example in TypeScript files).
 
-### Closure compiler
+* When using `?.` be aware that information about the original location of the
+  null/undefined value can be lost. You should avoid cases like this and instead
+  prefer explicit error checking:
+```js
+const enterKey = keyboards.getCurrentKeyboard()?.getKeys()?.getEnterKey();
+// ... Lots of code here.
+if (!enterKey) {
+  // Something has gone wrong here, but it is unclear what.
+}
+```
 
-* Closure compiler should only be used by legacy code that has not yet been
-  converted to use TypeScript.
+* Don't use `?.` as a way to silence TypeScript "object is possibly null"
+  errors. Instead use `assert()` statements. Only use the optional chaining
+  feature when the code needs to handle null/undefined gracefully.
+
+
+### Closure compiler (legacy ChromeOS Ash code only)
+
+* Closure compiler can only be used on legacy ChromeOS Ash code. All other
+  platforms and new ChromeOS code are required to use TypeScript to add type
+  checking.
+
+* For legacy code using closure, see [Annotating JavaScript for the Closure
+  Compiler](https://developers.google.com/closure/compiler/docs/js-for-compiler)
+  for @ directives
 
 * Use the [closure
   compiler](https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md)
@@ -559,7 +581,7 @@ ts_library("build_ts") {
   ]
   deps = [
     "//third_party/polymer/v3_0:library",
-    "//ui/webui/resources:library",
+    "//ui/webui/resources/js:build_ts",
   ]
   extra_deps = [
     ":preprocess",

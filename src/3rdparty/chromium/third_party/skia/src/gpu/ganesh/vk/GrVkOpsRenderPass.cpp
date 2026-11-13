@@ -30,6 +30,8 @@
 #include "src/gpu/ganesh/vk/GrVkSemaphore.h"
 #include "src/gpu/ganesh/vk/GrVkTexture.h"
 
+using namespace skia_private;
+
 /////////////////////////////////////////////////////////////////////////////
 
 void get_vk_load_store_ops(GrLoadOp loadOpIn, GrStoreOp storeOpIn,
@@ -348,7 +350,7 @@ bool GrVkOpsRenderPass::set(GrRenderTarget* rt,
                             const GrOpsRenderPass::LoadAndStoreInfo& resolveInfo,
                             GrVkRenderPass::SelfDependencyFlags selfDepFlags,
                             GrVkRenderPass::LoadFromResolve loadFromResolve,
-                            const SkTArray<GrSurfaceProxy*, true>& sampledProxies) {
+                            const TArray<GrSurfaceProxy*, true>& sampledProxies) {
     SkASSERT(!fRenderTarget);
     SkASSERT(fGpu == rt->getContext()->priv().getGpu());
 
@@ -365,7 +367,7 @@ bool GrVkOpsRenderPass::set(GrRenderTarget* rt,
 
     this->INHERITED::set(rt, origin);
 
-    for (int i = 0; i < sampledProxies.count(); ++i) {
+    for (int i = 0; i < sampledProxies.size(); ++i) {
         if (sampledProxies[i]->isInstantiated()) {
             SkASSERT(sampledProxies[i]->asTextureProxy());
             GrVkTexture* vkTex = static_cast<GrVkTexture*>(sampledProxies[i]->peekTexture());

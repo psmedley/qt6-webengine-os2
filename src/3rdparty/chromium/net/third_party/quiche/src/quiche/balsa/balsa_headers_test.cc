@@ -2577,14 +2577,6 @@ TEST(BalsaHeaders,
 }
 
 TEST(BalsaHeaders, CopyFrom) {
-  // TODO(fenix): test -all- member variables.
-  // (remaining: transfer_encoding_is_chunked_
-  //             content_length_
-  //             content_length_status_
-  //             parsed_response_code_
-  //             connection_close_token_found_
-  //             connection_keep_alive_token_found_
-  //             content_encoding_gzip_token_found_)
   BalsaHeaders headers1, headers2;
   absl::string_view method("GET");
   absl::string_view uri("/foo");
@@ -2763,8 +2755,9 @@ TEST(BalsaHeaders, IteratorWorksWithOStreamAsExpected) {
     BalsaHeaders::const_header_lines_iterator chli;
     actual << chli;
     // Note that the output depends on the flavor of standard library in use.
-    EXPECT_THAT(actual.str(), AnyOf(StrEq("[0, 0]"),        // libstdc++
-                                    StrEq("[(nil), 0]")));  // libc++
+    EXPECT_THAT(actual.str(), AnyOf(StrEq("[0, 0]"),      // libstdc++
+                                    StrEq("[(nil), 0]"),  // libc++
+                                    StrEq("[0x0, 0]")));  // libc++ on Mac
   }
   {
     BalsaHeaders headers;

@@ -9,10 +9,12 @@
 #include <memory>
 
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_metrics.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/bookmarks/test/test_bookmark_client.h"
+#include "components/sync/base/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
@@ -20,6 +22,28 @@ using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
 
 namespace {
+
+// TestBookmarkClient that supports undoing removals.
+class TestBookmarkClientWithUndo : public bookmarks::TestBookmarkClient {
+ public:
+  explicit TestBookmarkClientWithUndo(BookmarkUndoService* undo_service)
+      : undo_service_(undo_service) {}
+
+  ~TestBookmarkClientWithUndo() override = default;
+
+  // BookmarkClient overrides.
+  void OnBookmarkNodeRemovedUndoable(
+      BookmarkModel* model,
+      const BookmarkNode* parent,
+      size_t index,
+      std::unique_ptr<BookmarkNode> node) override {
+    undo_service_->AddUndoEntryForRemovedNode(model, parent, index,
+                                              std::move(node));
+  }
+
+ private:
+  const raw_ptr<BookmarkUndoService, DanglingUntriaged> undo_service_;
+};
 
 class BookmarkUndoServiceTest : public testing::Test {
  public:
@@ -35,8 +59,10 @@ class BookmarkUndoServiceTest : public testing::Test {
   BookmarkUndoService* GetUndoService();
 
  private:
-  std::unique_ptr<bookmarks::BookmarkModel> bookmark_model_;
+  base::test::ScopedFeatureList features_{
+      syncer::kEnableBookmarkFoldersForAccountStorage};
   std::unique_ptr<BookmarkUndoService> bookmark_undo_service_;
+  std::unique_ptr<bookmarks::BookmarkModel> bookmark_model_;
 };
 
 BookmarkUndoServiceTest::BookmarkUndoServiceTest() {}
@@ -44,9 +70,11 @@ BookmarkUndoServiceTest::BookmarkUndoServiceTest() {}
 void BookmarkUndoServiceTest::SetUp() {
   DCHECK(!bookmark_model_);
   DCHECK(!bookmark_undo_service_);
-  bookmark_model_ = bookmarks::TestBookmarkClient::CreateModel();
   bookmark_undo_service_ = std::make_unique<BookmarkUndoService>();
-  bookmark_undo_service_->Start(bookmark_model_.get());
+  bookmark_model_ = bookmarks::TestBookmarkClient::CreateModelWithClient(
+      std::make_unique<TestBookmarkClientWithUndo>(
+          bookmark_undo_service_.get()));
+  bookmark_undo_service_->StartObservingBookmarkModel(bookmark_model_.get());
   bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model_.get());
 }
 
@@ -91,7 +119,8 @@ TEST_F(BookmarkUndoServiceTest, UndoBookmarkRemove) {
 
   const BookmarkNode* parent = model->other_node();
   model->AddURL(parent, 0, u"foo", GURL("http://www.bar.com"));
-  model->Remove(parent->children().front().get());
+  model->Remove(parent->children().front().get(),
+                bookmarks::metrics::BookmarkEditSource::kOther);
 
   EXPECT_EQ(2U, undo_service->undo_manager()->undo_count());
   EXPECT_EQ(0U, undo_service->undo_manager()->redo_count());
@@ -175,6 +204,68 @@ TEST_F(BookmarkUndoServiceTest, UndoBookmarkMoveWithinFolder) {
   EXPECT_EQ(model->other_node()->children()[2].get(), n1);
 }
 
+// Test moving bookmarks across NodeTypeForUuidLookup boundaries.
+TEST_F(BookmarkUndoServiceTest, UndoBookmarkMoveAcrossNodeTypeForUuidLookup) {
+  BookmarkModel* model = GetModel();
+  BookmarkUndoService* undo_service = GetUndoService();
+
+  model->CreateAccountPermanentFolders();
+  ASSERT_NE(nullptr, model->account_other_node());
+  ASSERT_NE(model->other_node(), model->account_other_node());
+
+  const BookmarkNode* n1 =
+      model->AddURL(model->other_node(), 0, u"foo", GURL("http://www.foo.com"));
+
+  ASSERT_EQ(1u, model->other_node()->children().size());
+  ASSERT_EQ(0u, model->account_other_node()->children().size());
+  ASSERT_EQ(n1,
+            model->GetNodeByUuid(
+                n1->uuid(),
+                BookmarkModel::NodeTypeForUuidLookup::kLocalOrSyncableNodes));
+  ASSERT_EQ(nullptr, model->GetNodeByUuid(
+                         n1->uuid(),
+                         BookmarkModel::NodeTypeForUuidLookup::kAccountNodes));
+
+  // Move from kLocalOrSyncableNodes to kAccountNodes.
+  model->Move(n1, model->account_other_node(), 0);
+
+  ASSERT_EQ(0u, model->other_node()->children().size());
+  ASSERT_EQ(1u, model->account_other_node()->children().size());
+  ASSERT_EQ(nullptr,
+            model->GetNodeByUuid(
+                n1->uuid(),
+                BookmarkModel::NodeTypeForUuidLookup::kLocalOrSyncableNodes));
+  ASSERT_EQ(
+      n1, model->GetNodeByUuid(
+              n1->uuid(), BookmarkModel::NodeTypeForUuidLookup::kAccountNodes));
+
+  // Undo the move and check that it was moved back to kLocalOrSyncableNodes.
+  undo_service->undo_manager()->Undo();
+
+  EXPECT_EQ(1u, model->other_node()->children().size());
+  EXPECT_EQ(0u, model->account_other_node()->children().size());
+  EXPECT_EQ(n1,
+            model->GetNodeByUuid(
+                n1->uuid(),
+                BookmarkModel::NodeTypeForUuidLookup::kLocalOrSyncableNodes));
+  EXPECT_EQ(nullptr, model->GetNodeByUuid(
+                         n1->uuid(),
+                         BookmarkModel::NodeTypeForUuidLookup::kAccountNodes));
+
+  // Redo the move and check that it moves again to kAccountNodes.
+  undo_service->undo_manager()->Redo();
+
+  EXPECT_EQ(0u, model->other_node()->children().size());
+  EXPECT_EQ(1u, model->account_other_node()->children().size());
+  EXPECT_EQ(nullptr,
+            model->GetNodeByUuid(
+                n1->uuid(),
+                BookmarkModel::NodeTypeForUuidLookup::kLocalOrSyncableNodes));
+  EXPECT_EQ(
+      n1, model->GetNodeByUuid(
+              n1->uuid(), BookmarkModel::NodeTypeForUuidLookup::kAccountNodes));
+}
+
 // Test undo of a bookmark moved to a different folder.
 TEST_F(BookmarkUndoServiceTest, UndoBookmarkMoveToOtherFolder) {
   BookmarkModel* model = GetModel();
@@ -218,7 +309,8 @@ TEST_F(BookmarkUndoServiceTest, UndoBookmarkRenameDelete) {
   model->AddURL(f1, 0, u"foo", GURL("http://www.foo.com"));
   model->SetTitle(f1, u"Renamed",
                   bookmarks::metrics::BookmarkEditSource::kOther);
-  model->Remove(model->other_node()->children().front().get());
+  model->Remove(model->other_node()->children().front().get(),
+                bookmarks::metrics::BookmarkEditSource::kOther);
 
   // Undo the folder removal and ensure the folder and bookmark were restored.
   undo_service->undo_manager()->Undo();
@@ -353,7 +445,8 @@ TEST_F(BookmarkUndoServiceTest, UndoRemoveFolderWithBookmarks) {
   new_folder = model->AddFolder(parent, 0, u"folder");
   model->AddURL(new_folder, 0, u"bar", GURL("http://www.bar.com"));
 
-  model->Remove(parent->children().front().get());
+  model->Remove(parent->children().front().get(),
+                bookmarks::metrics::BookmarkEditSource::kOther);
 
   // Test that the undo restores the bookmark and folder.
   undo_service->undo_manager()->Undo();
@@ -400,7 +493,8 @@ TEST_F(BookmarkUndoServiceTest, UndoRemoveFolderWithSubfolders) {
       model->AddFolder(new_folder, 1, u"subfolder2");
   model->AddURL(sub_folder2, 0, u"bar", GURL("http://www.bar.com"));
 
-  model->Remove(parent->children()[0].get());
+  model->Remove(parent->children()[0].get(),
+                bookmarks::metrics::BookmarkEditSource::kOther);
 
   // Test that the undo restores the subfolders and their contents.
   undo_service->undo_manager()->Undo();
@@ -447,6 +541,43 @@ TEST_F(BookmarkUndoServiceTest, TestUpperLimit) {
   const BookmarkNode* node = model->other_node()->children().front().get();
   EXPECT_EQ(node->GetTitle(), u"foo");
   EXPECT_EQ(node->url(), GURL("http://www.foo.com"));
+}
+
+TEST_F(BookmarkUndoServiceTest, UndoMoveToOtherModel) {
+  std::unique_ptr<BookmarkModel> second_model =
+      bookmarks::TestBookmarkClient::CreateModel();
+  GetUndoService()->StartObservingBookmarkModel(second_model.get());
+  bookmarks::test::WaitForBookmarkModelToLoad(second_model.get());
+
+  const BookmarkNode* root = GetModel()->mobile_node();
+  const BookmarkNode* folder = GetModel()->AddFolder(root, 0, u"folder");
+  GetModel()->AddURL(folder, 0, u"foo", GURL("http://foo.com"));
+  GetModel()->AddURL(folder, 1, u"bar", GURL("http://bar.com"));
+  base::Uuid folder_uuid_before_move = folder->uuid();
+  const BookmarkNode* dest_folder = second_model->mobile_node();
+  ASSERT_TRUE(dest_folder->children().empty());
+
+  GetModel()->MoveToOtherModelWithNewNodeIdsAndUuids(folder, second_model.get(),
+                                                     dest_folder);
+
+  GetUndoService()->undo_manager()->Undo();
+
+  ASSERT_EQ(root->children().size(), 1u);
+  const BookmarkNode* undone_folder = root->children().front().get();
+  EXPECT_EQ(undone_folder->GetTitle(), u"folder");
+  ASSERT_EQ(undone_folder->children().size(), 2u);
+  const BookmarkNode* undone_foo = undone_folder->children()[0].get();
+  EXPECT_EQ(undone_foo->GetTitle(), u"foo");
+  EXPECT_EQ(undone_foo->GetTitledUrlNodeUrl(), GURL("http://foo.com"));
+  const BookmarkNode* undone_bar = undone_folder->children()[1].get();
+  EXPECT_EQ(undone_bar->GetTitle(), u"bar");
+  EXPECT_EQ(undone_bar->GetTitledUrlNodeUrl(), GURL("http://bar.com"));
+  // Undoing the move should preserve UUIDs.
+  EXPECT_EQ(undone_folder->uuid(), folder_uuid_before_move);
+
+  EXPECT_TRUE(dest_folder->children().empty());
+
+  second_model->Shutdown();
 }
 
 } // namespace

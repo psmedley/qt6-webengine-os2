@@ -3,49 +3,50 @@
 // found in the LICENSE file.
 
 import * as i18n from '../../../core/i18n/i18n.js';
+import * as Platform from '../../../core/platform/platform.js';
+import type * as Protocol from '../../../generated/protocol.js';
 import * as DataGrid from '../../../ui/components/data_grid/data_grid.js';
 import * as ComponentHelpers from '../../../ui/components/helpers/helpers.js';
 import * as IconButton from '../../../ui/components/icon_button/icon_button.js';
 import * as LitHtml from '../../../ui/lit-html/lit-html.js';
-import type * as Protocol from '../../../generated/protocol.js';
 
 import interestGroupAccessGridStyles from './interestGroupAccessGrid.css.js';
 
 const UIStrings = {
   /**
-  *@description Hover text for an info icon in the Interest Group Event panel
-  * An interest group is an ad targeting group stored on the browser that can
-  * be used to show a certain set of advertisements in the future as the
-  * outcome of a FLEDGE auction.
-  */
+   *@description Hover text for an info icon in the Interest Group Event panel
+   * An interest group is an ad targeting group stored on the browser that can
+   * be used to show a certain set of advertisements in the future as the
+   * outcome of a FLEDGE auction.
+   */
   allInterestGroupStorageEvents: 'All interest group storage events.',
   /**
-    *@description Text in InterestGroupStorage Items View of the Application panel
-    * Date and time of an Interest Group storage event in a locale-
-    * dependent format.
-    */
+   *@description Text in InterestGroupStorage Items View of the Application panel
+   * Date and time of an Interest Group storage event in a locale-
+   * dependent format.
+   */
   eventTime: 'Event Time',
   /**
-  *@description Text in InterestGroupStorage Items View of the Application panel
-  * Type of interest group event such as 'join', 'bid', 'win', or 'leave'.
-  */
+   *@description Text in InterestGroupStorage Items View of the Application panel
+   * Type of interest group event such as 'join', 'bid', 'win', or 'leave'.
+   */
   eventType: 'Access Type',
   /**
    *@description Text in InterestGroupStorage Items View of the Application panel
    * Owner of the interest group. The origin that controls the
    * content of information associated with the interest group such as which
    * ads get displayed.
-  */
+   */
   groupOwner: 'Owner',
   /**
    *@description Text in InterestGroupStorage Items View of the Application panel
    * Name of the interest group. The name is unique per-owner and identifies the
    * interest group.
-  */
+   */
   groupName: 'Name',
   /**
    *@description Text shown instead of a table when the table would be empty.
-  */
+   */
   noEvents: 'No interest group events recorded.',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/components/InterestGroupAccessGrid.ts', UIStrings);
@@ -74,7 +75,7 @@ export class InterestGroupAccessGrid extends HTMLElement {
         <${IconButton.Icon.Icon.litTagName} class="info-icon" title=${
             i18nString(UIStrings.allInterestGroupStorageEvents)}
           .data=${
-            {iconName: 'ic_info_black_18dp', color: 'var(--color-link)', width: '14px'} as
+            {iconName: 'info', color: 'var(--icon-default)', width: '16px'} as
             IconButton.Icon.IconWithName}>
         </${IconButton.Icon.Icon.litTagName}>
         ${this.#renderGridOrNoDataMessage()}
@@ -88,10 +89,11 @@ export class InterestGroupAccessGrid extends HTMLElement {
       return LitHtml.html`<div class="no-events-message">${i18nString(UIStrings.noEvents)}</div>`;
     }
 
+    const k = Platform.StringUtilities.kebab;
     const gridData: DataGrid.DataGridController.DataGridControllerData = {
       columns: [
         {
-          id: 'event-time',
+          id: k('event-time'),
           title: i18nString(UIStrings.eventTime),
           widthWeighting: 10,
           hideable: false,
@@ -99,7 +101,7 @@ export class InterestGroupAccessGrid extends HTMLElement {
           sortable: true,
         },
         {
-          id: 'event-type',
+          id: k('event-type'),
           title: i18nString(UIStrings.eventType),
           widthWeighting: 5,
           hideable: false,
@@ -107,7 +109,7 @@ export class InterestGroupAccessGrid extends HTMLElement {
           sortable: true,
         },
         {
-          id: 'event-group-owner',
+          id: k('event-group-owner'),
           title: i18nString(UIStrings.groupOwner),
           widthWeighting: 10,
           hideable: false,
@@ -115,7 +117,7 @@ export class InterestGroupAccessGrid extends HTMLElement {
           sortable: true,
         },
         {
-          id: 'event-group-name',
+          id: k('event-group-name'),
           title: i18nString(UIStrings.groupName),
           widthWeighting: 10,
           hideable: false,

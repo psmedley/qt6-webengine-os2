@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as Root from '../../../core/root/root.js';
 import * as SDK from '../../../core/sdk/sdk.js';
-import * as Formatter from '../../../models/formatter/formatter.js';
+import * as Bindings from '../../../models/bindings/bindings.js';
 import * as JavaScriptMetaData from '../../../models/javascript_metadata/javascript_metadata.js';
+import * as SourceMapScopes from '../../../models/source_map_scopes/source_map_scopes.js';
 import * as CodeMirror from '../../../third_party/codemirror.next/codemirror.next.js';
 import * as UI from '../../legacy/legacy.js';
 
@@ -175,6 +177,12 @@ export async function javascriptCompletionSource(cx: CodeMirror.CompletionContex
     return null;
   }
 
+  const script = getExecutionContext()?.debuggerModel.selectedCallFrame()?.script;
+  if (script &&
+      Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance().pluginManager.hasPluginForScript(script)) {
+    return null;
+  }
+
   let result: CompletionSet;
   let quote: string|undefined = undefined;
   if (query.type === QueryType.Expression) {
@@ -212,7 +220,9 @@ export async function javascriptCompletionSource(cx: CodeMirror.CompletionContex
   return {
     from: query.from ?? cx.pos,
     options: result.completions,
-    validFor: !quote ? SPAN_IDENT : quote === '\'' ? SPAN_SINGLE_QUOTE : SPAN_DOUBLE_QUOTE,
+    validFor: !quote   ? SPAN_IDENT :
+        quote === '\'' ? SPAN_SINGLE_QUOTE :
+                         SPAN_DOUBLE_QUOTE,
   };
 }
 
@@ -238,6 +248,7 @@ async function evaluateExpression(
         generatePreview: false,
         throwOnSideEffect: true,
         timeout: 500,
+        replMode: true,
       },
       false, false);
   if ('error' in result || result.exceptionDetails || !result.object) {
@@ -265,7 +276,8 @@ class PropertyCache {
 
   constructor() {
     const clear = (): void => this.#cache.clear();
-    SDK.ConsoleModel.ConsoleModel.instance().addEventListener(SDK.ConsoleModel.Events.CommandEvaluated, clear);
+    SDK.TargetManager.TargetManager.instance().addModelListener(
+        SDK.ConsoleModel.ConsoleModel, SDK.ConsoleModel.Events.CommandEvaluated, clear);
     UI.Context.Context.instance().addFlavorChangeListener(SDK.RuntimeModel.ExecutionContext, clear);
     SDK.TargetManager.TargetManager.instance().addModelListener(
         SDK.DebuggerModel.DebuggerModel, SDK.DebuggerModel.Events.DebuggerResumed, clear);
@@ -377,7 +389,7 @@ async function completePropertiesInner(
     const isFunction = object.type === 'function';
     for (const prop of properties.properties || []) {
       if (!prop.symbol && !(isFunction && (prop.name === 'arguments' || prop.name === 'caller')) &&
-          (!prop.private || expression === 'this') && (quoted || SPAN_IDENT.test(prop.name))) {
+          (quoted || SPAN_IDENT.test(prop.name))) {
         const label =
             quoted ? quoted + prop.name.replaceAll('\\', '\\\\').replaceAll(quoted, '\\' + quoted) + quoted : prop.name;
         const apply = (quoted && !hasBracket) ? `${label}]` : undefined;
@@ -398,10 +410,16 @@ async function completeExpressionInScope(): Promise<CompletionSet> {
     return result;
   }
 
-  const frames =
-      await Promise.all(selectedFrame.scopeChain().map(scope => scope.object().getAllProperties(false, false)));
-  for (const frame of frames) {
-    for (const property of frame.properties || []) {
+  const scopeObjectForScope = (scope: SDK.DebuggerModel.Scope): SDK.RemoteObject.RemoteObject =>
+      // TODO(crbug.com/1444349): Inline into `map` call below when experiment is removed.
+      Root.Runtime.experiments.isEnabled('evaluateExpressionsWithSourceMaps') ?
+      SourceMapScopes.NamesResolver.resolveScopeInObject(scope) :
+      scope.object();
+
+  const scopes = await Promise.all(
+      selectedFrame.scopeChain().map(scope => scopeObjectForScope(scope).getAllProperties(false, false)));
+  for (const scope of scopes) {
+    for (const property of scope.properties || []) {
       result.add({
         label: property.name,
         type: property.value?.type === 'function' ? 'function' : 'variable',
@@ -524,6 +542,86 @@ async function getArgumentsForExpression(
       .finally(() => context.runtimeModel.releaseObjectGroup('argumentsHint'));
 }
 
+export function argumentsList(input: string): string[] {
+  function parseParamList(cursor: CodeMirror.TreeCursor): string[] {
+    while (cursor.name !== 'ParamList' && cursor.nextSibling()) {
+    }
+    const parameters = [];
+    if (cursor.name === 'ParamList' && cursor.firstChild()) {
+      let prefix = '';
+      do {
+        switch (cursor.name as string) {
+          case 'ArrayPattern':
+            parameters.push(prefix + 'arr');
+            prefix = '';
+            break;
+          case 'ObjectPattern':
+            parameters.push(prefix + 'obj');
+            prefix = '';
+            break;
+          case 'VariableDefinition':
+            parameters.push(prefix + input.slice(cursor.from, cursor.to));
+            prefix = '';
+            break;
+          case 'Spread':
+            prefix = '...';
+            break;
+        }
+      } while (cursor.nextSibling());
+    }
+    return parameters;
+  }
+  try {
+    try {
+      // First check if the |input| can be parsed as a method definition.
+      const {parser} = CodeMirror.javascript.javascriptLanguage.configure({strict: true, top: 'SingleClassItem'});
+      const cursor = parser.parse(input).cursor();
+      if (cursor.firstChild() && cursor.name === 'MethodDeclaration' && cursor.firstChild()) {
+        return parseParamList(cursor);
+      }
+      throw new Error('SingleClassItem rule is expected to have exactly one MethodDeclaration child');
+    } catch {
+      // Otherwise fall back to parsing as an expression.
+      const {parser} = CodeMirror.javascript.javascriptLanguage.configure({strict: true, top: 'SingleExpression'});
+      const cursor = parser.parse(input).cursor();
+      if (!cursor.firstChild()) {
+        throw new Error('SingleExpression rule is expected to have children');
+      }
+      switch (cursor.name) {
+        case 'ArrowFunction':
+        case 'FunctionExpression': {
+          if (!cursor.firstChild()) {
+            throw new Error(`${cursor.name} rule is expected to have children`);
+          }
+          return parseParamList(cursor);
+        }
+        case 'ClassExpression': {
+          if (!cursor.firstChild()) {
+            throw new Error(`${cursor.name} rule is expected to have children`);
+          }
+          while (cursor.nextSibling() && cursor.name as string !== 'ClassBody') {
+          }
+          if (cursor.name as string === 'ClassBody' && cursor.firstChild()) {
+            do {
+              if (cursor.name as string === 'MethodDeclaration' && cursor.firstChild()) {
+                if (cursor.name as string === 'PropertyDefinition' &&
+                    input.slice(cursor.from, cursor.to) === 'constructor') {
+                  return parseParamList(cursor);
+                }
+                cursor.parent();
+              }
+            } while (cursor.nextSibling());
+          }
+          return [];
+        }
+      }
+      throw new Error('Unexpected expression');
+    }
+  } catch (cause) {
+    throw new Error(`Failed to parse for arguments list: ${input}`, {cause});
+  }
+}
+
 async function getArgumentsForFunctionValue(
     object: SDK.RemoteObject.RemoteObject,
     receiverObjGetter: () => Promise<SDK.RemoteObject.RemoteObject|null>,
@@ -534,7 +632,7 @@ async function getArgumentsForFunctionValue(
     return null;
   }
   if (!description.endsWith('{ [native code] }')) {
-    return [await Formatter.FormatterWorkerPool.formatterWorkerPool().argumentsList(description)];
+    return [argumentsList(description)];
   }
 
   // Check if this is a bound function.
@@ -609,9 +707,9 @@ async function prototypesFromObject(object: SDK.RemoteObject.RemoteObject): Prom
   if (object.type === 'undefined' || object.subtype === 'null') {
     return [];
   }
-  return await object.callFunctionJSON(function() {
+  return await object.callFunctionJSON(function(this: Object) {
     const result = [];
-    for (let object: Object = this; object; object = Object.getPrototypeOf(object)) {
+    for (let object = this; object; object = Object.getPrototypeOf(object)) {
       if (typeof object === 'object' && object.constructor && object.constructor.name) {
         result[result.length] = object.constructor.name;
       }

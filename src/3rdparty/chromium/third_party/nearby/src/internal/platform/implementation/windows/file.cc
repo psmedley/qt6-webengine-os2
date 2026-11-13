@@ -24,8 +24,8 @@
 #include "absl/strings/string_view.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/windows/utils.h"
+#include "internal/platform/logging.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
 
@@ -42,6 +42,13 @@ IOFile::IOFile(const absl::string_view file_path, size_t size)
   file_.open(wide_path, std::ios::binary | std::ios::in | std::ios::ate);
 
   total_size_ = file_.tellg();
+  if (total_size_ == -1) {
+    // Unsure why it consistently returns -1 when the file size exceeds 2GB. If
+    // obtaining the file size through tellg fails, use the size provided
+    // in the parameters.
+     total_size_ = size;
+  }
+
   file_.seekg(0);
 }
 
@@ -57,27 +64,31 @@ IOFile::IOFile(const absl::string_view file_path)
 }
 
 ExceptionOr<ByteArray> IOFile::Read(std::int64_t size) {
-  if (!file_.is_open()) {
+  try {
+    if (!file_.is_open()) {
+      return ExceptionOr<ByteArray>{Exception::kIo};
+    }
+
+    if (!file_.good()) {
+      return ExceptionOr<ByteArray>{Exception::kIo};
+    }
+
+    if (file_.peek() == EOF) {
+      return ExceptionOr<ByteArray>{ByteArray{}};
+    }
+
+    ByteArray bytes(size);
+    std::unique_ptr<char[]> read_bytes{new char[size]};
+    file_.read(read_bytes.get(), static_cast<ptrdiff_t>(size));
+    auto num_bytes_read = file_.gcount();
+    if (num_bytes_read == 0) {
+      return ExceptionOr<ByteArray>{Exception::kIo};
+    }
+    return ExceptionOr<ByteArray>(ByteArray(read_bytes.get(), num_bytes_read));
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << "Fail to read";
     return ExceptionOr<ByteArray>{Exception::kIo};
   }
-
-  if (file_.peek() == EOF) {
-    return ExceptionOr<ByteArray>{ByteArray{}};
-  }
-
-  if (!file_.good()) {
-    return ExceptionOr<ByteArray>{Exception::kIo};
-  }
-
-  ByteArray bytes(size);
-  std::unique_ptr<char[]> read_bytes{new char[size]};
-  file_.read(read_bytes.get(), static_cast<ptrdiff_t>(size));
-  auto num_bytes_read = file_.gcount();
-  if (num_bytes_read == 0) {
-    return ExceptionOr<ByteArray>{Exception::kIo};
-  }
-
-  return ExceptionOr<ByteArray>(ByteArray(read_bytes.get(), num_bytes_read));
 }
 
 Exception IOFile::Close() {
@@ -88,17 +99,22 @@ Exception IOFile::Close() {
 }
 
 Exception IOFile::Write(const ByteArray& data) {
-  if (!file_.is_open()) {
+  try {
+    if (!file_.is_open()) {
+      return {Exception::kIo};
+    }
+
+    if (!file_.good()) {
+      return {Exception::kIo};
+    }
+
+    file_.write(data.data(), data.size());
+    file_.flush();
+    return {file_.good() ? Exception::kSuccess : Exception::kIo};
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << "Fail to write";
     return {Exception::kIo};
   }
-
-  if (!file_.good()) {
-    return {Exception::kIo};
-  }
-
-  file_.write(data.data(), data.size());
-  file_.flush();
-  return {file_.good() ? Exception::kSuccess : Exception::kIo};
 }
 
 Exception IOFile::Flush() {
@@ -108,4 +124,3 @@ Exception IOFile::Flush() {
 
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location

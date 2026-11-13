@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,10 +39,10 @@ void CPDF_PathObject::CalcBoundingBox() {
   if (!m_Path.HasRef())
     return;
   CFX_FloatRect rect;
-  float width = m_GraphState.GetLineWidth();
+  float width = graph_state().GetLineWidth();
   if (m_bStroke && width != 0) {
-    rect =
-        m_Path.GetBoundingBoxForStrokePath(width, m_GraphState.GetMiterLimit());
+    rect = m_Path.GetBoundingBoxForStrokePath(width,
+                                              graph_state().GetMiterLimit());
   } else {
     rect = m_Path.GetBoundingBox();
   }

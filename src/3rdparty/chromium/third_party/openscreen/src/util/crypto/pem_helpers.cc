@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "absl/strings/match.h"
 #include "util/osp_logging.h"
+#include "util/stringutil.h"
 
 namespace openscreen {
 
 std::vector<std::string> ReadCertificatesFromPemFile(
-    absl::string_view filename) {
+    std::string_view filename) {
   FILE* fp = fopen(filename.data(), "r");
   if (!fp) {
     return {};
@@ -27,7 +27,7 @@ std::vector<std::string> ReadCertificatesFromPemFile(
   unsigned char* data;
   long length;  // NOLINT
   while (PEM_read(fp, &name, &header, &data, &length) == 1) {
-    if (absl::StartsWith(name, "CERTIFICATE")) {
+    if (stringutil::starts_with(name, "CERTIFICATE")) {
       certs.emplace_back(reinterpret_cast<char*>(data), length);
     }
     OPENSSL_free(name);
@@ -38,7 +38,7 @@ std::vector<std::string> ReadCertificatesFromPemFile(
   return certs;
 }
 
-bssl::UniquePtr<EVP_PKEY> ReadKeyFromPemFile(absl::string_view filename) {
+bssl::UniquePtr<EVP_PKEY> ReadKeyFromPemFile(std::string_view filename) {
   FILE* fp = fopen(filename.data(), "r");
   if (!fp) {
     return nullptr;
@@ -49,7 +49,7 @@ bssl::UniquePtr<EVP_PKEY> ReadKeyFromPemFile(absl::string_view filename) {
   unsigned char* data;
   long length;  // NOLINT
   while (PEM_read(fp, &name, &header, &data, &length) == 1) {
-    if (absl::StartsWith(name, "RSA PRIVATE KEY")) {
+    if (stringutil::starts_with(name, "RSA PRIVATE KEY")) {
       OSP_DCHECK(!pkey);
       CBS cbs;
       CBS_init(&cbs, data, length);

@@ -14,6 +14,7 @@
 #include "base/files/file_path.h"
 #include "gn/args.h"
 #include "gn/label.h"
+#include "gn/label_pattern.h"
 #include "gn/scope.h"
 #include "gn/source_dir.h"
 #include "gn/source_file.h"
@@ -34,6 +35,12 @@ class BuildSettings {
   // Root target label.
   const Label& root_target_label() const { return root_target_label_; }
   void SetRootTargetLabel(const Label& r);
+
+  // Root target label patterns.
+  const std::vector<LabelPattern>& root_patterns() const {
+    return root_patterns_;
+  }
+  void SetRootPatterns(std::vector<LabelPattern>&& root_patterns);
 
   // Absolute path of the source root on the local system. Everything is
   // relative to this. Does not end in a [back]slash.
@@ -60,6 +67,15 @@ class BuildSettings {
     return ninja_required_version_;
   }
   void set_ninja_required_version(Version v) { ninja_required_version_ = v; }
+
+  // The 'no_stamp_files' boolean flag can be set to generate Ninja files
+  // that use phony rules instead of stamp files in most cases. This reduces
+  // the size of the generated Ninja build plans, but requires Ninja 1.11
+  // or greater to properly process them.
+  bool no_stamp_files() const { return no_stamp_files_; }
+  void set_no_stamp_files(bool no_stamp_files) {
+    no_stamp_files_ = no_stamp_files;
+  }
 
   const SourceFile& build_config_file() const { return build_config_file_; }
   void set_build_config_file(const SourceFile& f) { build_config_file_ = f; }
@@ -126,6 +142,7 @@ class BuildSettings {
 
  private:
   Label root_target_label_;
+  std::vector<LabelPattern> root_patterns_;
   base::FilePath dotfile_name_;
   base::FilePath root_path_;
   std::string root_path_utf8_;
@@ -134,6 +151,7 @@ class BuildSettings {
 
   // See 40045b9 for the reason behind using 1.7.2 as the default version.
   Version ninja_required_version_{1, 7, 2};
+  bool no_stamp_files_ = false;
 
   SourceFile build_config_file_;
   SourceFile arg_file_template_path_;

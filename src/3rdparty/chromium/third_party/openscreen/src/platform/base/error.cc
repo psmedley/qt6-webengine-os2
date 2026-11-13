@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -283,6 +283,12 @@ std::ostream& operator<<(std::ostream& os, const Error::Code& code) {
 std::string Error::ToString() const {
   std::stringstream ss;
   ss << *this;
+  return ss.str();
+}
+
+std::string ToString(openscreen::Error::Code code) {
+  std::ostringstream ss;
+  ss << code;
   return ss.str();
 }
 

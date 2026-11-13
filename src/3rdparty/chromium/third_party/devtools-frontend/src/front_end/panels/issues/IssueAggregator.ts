@@ -34,14 +34,15 @@ export class AggregatedIssue extends IssuesManager.Issue.Issue {
   #affectedLocations = new Map<string, Protocol.Audits.SourceCodeLocation>();
   #heavyAdIssues = new Set<IssuesManager.HeavyAdIssue.HeavyAdIssue>();
   #blockedByResponseDetails = new Map<string, Protocol.Audits.BlockedByResponseIssueDetails>();
+  #bounceTrackingSites = new Set<string>();
   #corsIssues = new Set<IssuesManager.CorsIssue.CorsIssue>();
   #cspIssues = new Set<IssuesManager.ContentSecurityPolicyIssue.ContentSecurityPolicyIssue>();
   #deprecationIssues = new Set<IssuesManager.DeprecationIssue.DeprecationIssue>();
   #issueKind = IssuesManager.Issue.IssueKind.Improvement;
   #lowContrastIssues = new Set<IssuesManager.LowTextContrastIssue.LowTextContrastIssue>();
+  #metadataAllowedSites = new Set<string>();
   #mixedContentIssues = new Set<IssuesManager.MixedContentIssue.MixedContentIssue>();
   #sharedArrayBufferIssues = new Set<IssuesManager.SharedArrayBufferIssue.SharedArrayBufferIssue>();
-  #trustedWebActivityIssues = new Set<IssuesManager.TrustedWebActivityIssue.TrustedWebActivityIssue>();
   #quirksModeIssues = new Set<IssuesManager.QuirksModeIssue.QuirksModeIssue>();
   #attributionReportingIssues = new Set<IssuesManager.AttributionReportingIssue.AttributionReportingIssue>();
   #genericIssues = new Set<IssuesManager.GenericIssue.GenericIssue>();
@@ -62,11 +63,11 @@ export class AggregatedIssue extends IssuesManager.Issue.Issue {
     return this.#key;
   }
 
-  getBlockedByResponseDetails(): Iterable<Protocol.Audits.BlockedByResponseIssueDetails> {
+  override getBlockedByResponseDetails(): Iterable<Protocol.Audits.BlockedByResponseIssueDetails> {
     return this.#blockedByResponseDetails.values();
   }
 
-  cookies(): Iterable<Protocol.Audits.AffectedCookie> {
+  override cookies(): Iterable<Protocol.Audits.AffectedCookie> {
     return Array.from(this.#affectedCookies.values()).map(x => x.cookie);
   }
 
@@ -74,8 +75,12 @@ export class AggregatedIssue extends IssuesManager.Issue.Issue {
     return this.#affectedRawCookieLines.values();
   }
 
-  sources(): Iterable<Protocol.Audits.SourceCodeLocation> {
+  override sources(): Iterable<Protocol.Audits.SourceCodeLocation> {
     return this.#affectedLocations.values();
+  }
+
+  getBounceTrackingSites(): Iterable<string> {
+    return this.#bounceTrackingSites.values();
   }
 
   cookiesWithRequestIndicator(): Iterable<{
@@ -89,12 +94,12 @@ export class AggregatedIssue extends IssuesManager.Issue.Issue {
     return this.#heavyAdIssues;
   }
 
-  getMixedContentIssues(): Iterable<IssuesManager.MixedContentIssue.MixedContentIssue> {
-    return this.#mixedContentIssues;
+  getMetadataAllowedSites(): Iterable<string> {
+    return this.#metadataAllowedSites.values();
   }
 
-  getTrustedWebActivityIssues(): Iterable<IssuesManager.TrustedWebActivityIssue.TrustedWebActivityIssue> {
-    return this.#trustedWebActivityIssues;
+  getMixedContentIssues(): Iterable<IssuesManager.MixedContentIssue.MixedContentIssue> {
+    return this.#mixedContentIssues;
   }
 
   getCorsIssues(): Set<IssuesManager.CorsIssue.CorsIssue> {
@@ -113,7 +118,7 @@ export class AggregatedIssue extends IssuesManager.Issue.Issue {
     return this.#lowContrastIssues;
   }
 
-  requests(): Iterable<Protocol.Audits.AffectedRequest> {
+  override requests(): Iterable<Protocol.Audits.AffectedRequest> {
     return this.#affectedRequests.values();
   }
 
@@ -184,10 +189,20 @@ export class AggregatedIssue extends IssuesManager.Issue.Issue {
         this.#affectedRawCookieLines.set(rawCookieLine, {rawCookieLine, hasRequest});
       }
     }
+    for (const site of issue.trackingSites()) {
+      if (!this.#bounceTrackingSites.has(site)) {
+        this.#bounceTrackingSites.add(site);
+      }
+    }
     for (const location of issue.sources()) {
       const key = JSON.stringify(location);
       if (!this.#affectedLocations.has(key)) {
         this.#affectedLocations.set(key, location);
+      }
+    }
+    for (const site of issue.metadataAllowedSites()) {
+      if (!this.#metadataAllowedSites.has(site)) {
+        this.#metadataAllowedSites.add(site);
       }
     }
     if (issue instanceof IssuesManager.MixedContentIssue.MixedContentIssue) {
@@ -199,9 +214,6 @@ export class AggregatedIssue extends IssuesManager.Issue.Issue {
     for (const details of issue.getBlockedByResponseDetails()) {
       const key = JSON.stringify(details, ['parentFrame', 'blockedFrame', 'requestId', 'frameId', 'reason', 'request']);
       this.#blockedByResponseDetails.set(key, details);
-    }
-    if (issue instanceof IssuesManager.TrustedWebActivityIssue.TrustedWebActivityIssue) {
-      this.#trustedWebActivityIssues.add(issue);
     }
     if (issue instanceof IssuesManager.ContentSecurityPolicyIssue.ContentSecurityPolicyIssue) {
       this.#cspIssues.add(issue);
@@ -233,11 +245,11 @@ export class AggregatedIssue extends IssuesManager.Issue.Issue {
     return this.#issueKind;
   }
 
-  isHidden(): boolean {
+  override isHidden(): boolean {
     return this.#representative?.isHidden() || false;
   }
 
-  setHidden(_value: boolean): void {
+  override setHidden(_value: boolean): void {
     throw new Error('Should not call setHidden on aggregatedIssue');
   }
 }

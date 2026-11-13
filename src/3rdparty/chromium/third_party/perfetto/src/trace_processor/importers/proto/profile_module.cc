@@ -18,9 +18,11 @@
 #include <string>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "src/trace_processor/importers/common/args_translation_table.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
+#include "src/trace_processor/importers/common/deobfuscation_mapping_table.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/proto/heap_profile_tracker.h"
@@ -29,10 +31,10 @@
 #include "src/trace_processor/importers/proto/profile_packet_utils.h"
 #include "src/trace_processor/importers/proto/profiler_util.h"
 #include "src/trace_processor/importers/proto/stack_profile_tracker.h"
+#include "src/trace_processor/sorter/trace_sorter.h"
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
-#include "src/trace_processor/tables/profiler_tables.h"
-#include "src/trace_processor/trace_sorter.h"
+#include "src/trace_processor/tables/profiler_tables_py.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "src/trace_processor/util/stack_traces_util.h"
 
@@ -125,9 +127,9 @@ ModuleResult ProfileModule::TokenizeStreamingProfilePacket(
   // the current timestamp of the packet sequence.
   auto packet_ts =
       sequence_state->IncrementAndGetTrackEventTimeNs(/*delta_ns=*/0);
-  auto trace_ts = context_->clock_tracker->ToTraceTime(
+  base::StatusOr<int64_t> trace_ts = context_->clock_tracker->ToTraceTime(
       protos::pbzero::BUILTIN_CLOCK_MONOTONIC, packet_ts);
-  if (trace_ts)
+  if (trace_ts.ok())
     packet_ts = *trace_ts;
 
   // Increment the sequence's timestamp by all deltas.
@@ -136,8 +138,8 @@ ModuleResult ProfileModule::TokenizeStreamingProfilePacket(
     sequence_state->IncrementAndGetTrackEventTimeNs(*timestamp_it * 1000);
   }
 
-  context_->sorter->PushTracePacket(packet_ts, sequence_state,
-                                    std::move(*packet));
+  context_->sorter->PushTracePacket(
+      packet_ts, sequence_state->current_generation(), std::move(*packet));
   return ModuleResult::Handled();
 }
 
@@ -249,7 +251,7 @@ void ProfileModule::ParsePerfSample(
       sequence_state->state()->sequence_stack_profile_tracker();
   ProfilePacketInternLookup intern_lookup(sequence_state);
   uint64_t callstack_iid = sample.callstack_iid();
-  base::Optional<CallsiteId> cs_id =
+  std::optional<CallsiteId> cs_id =
       stack_tracker.FindOrInsertCallstack(callstack_iid, &intern_lookup);
 
   // A failed lookup of the interned callstack can mean either:
@@ -283,7 +285,7 @@ void ProfileModule::ParsePerfSample(
   StringPool::Id cpu_mode_id =
       storage->InternString(ProfilePacketUtils::StringifyCpuMode(cpu_mode));
 
-  base::Optional<StringPool::Id> unwind_error_id;
+  std::optional<StringPool::Id> unwind_error_id;
   if (sample.has_unwind_error()) {
     auto unwind_error =
         static_cast<Profiling::StackUnwindError>(sample.unwind_error());
@@ -340,12 +342,13 @@ void ProfileModule::ParseProfilePacket(
   for (auto it = packet.process_dumps(); it; ++it) {
     protos::pbzero::ProfilePacket::ProcessHeapSamples::Decoder entry(*it);
 
-    auto maybe_timestamp = context_->clock_tracker->ToTraceTime(
-        protos::pbzero::BUILTIN_CLOCK_MONOTONIC_COARSE,
-        static_cast<int64_t>(entry.timestamp()));
+    base::StatusOr<int64_t> maybe_timestamp =
+        context_->clock_tracker->ToTraceTime(
+            protos::pbzero::BUILTIN_CLOCK_MONOTONIC_COARSE,
+            static_cast<int64_t>(entry.timestamp()));
 
     // ToTraceTime() increments the clock_sync_failure error stat in this case.
-    if (!maybe_timestamp)
+    if (!maybe_timestamp.ok())
       continue;
 
     int64_t timestamp = *maybe_timestamp;
@@ -503,6 +506,7 @@ void ProfileModule::ParseDeobfuscationMapping(int64_t,
                                               PacketSequenceStateGeneration*,
                                               uint32_t /* seq_id */,
                                               ConstBytes blob) {
+  DeobfuscationMappingTable deobfuscation_mapping_table;
   protos::pbzero::DeobfuscationMapping::Decoder deobfuscation_mapping(
       blob.data, blob.size);
   if (deobfuscation_mapping.package_name().size == 0)
@@ -517,6 +521,7 @@ void ProfileModule::ParseDeobfuscationMapping(int64_t,
   for (auto class_it = deobfuscation_mapping.obfuscated_classes(); class_it;
        ++class_it) {
     protos::pbzero::ObfuscatedClass::Decoder cls(*class_it);
+    base::FlatHashMap<StringId, StringId> obfuscated_to_deobfuscated_members;
     for (auto member_it = cls.obfuscated_methods(); member_it; ++member_it) {
       protos::pbzero::ObfuscatedMember::Decoder member(*member_it);
       std::string merged_obfuscated = cls.obfuscated_name().ToStdString() +
@@ -556,8 +561,21 @@ void ProfileModule::ParseDeobfuscationMapping(int64_t,
             context_->storage->InternString(
                 base::StringView(merged_deobfuscated)));
       }
+      obfuscated_to_deobfuscated_members[context_->storage->InternString(
+          member.obfuscated_name())] =
+          context_->storage->InternString(member.deobfuscated_name());
     }
+    // Members can contain a class name (e.g "ClassA.FunctionF")
+    deobfuscation_mapping_table.AddClassTranslation(
+        DeobfuscationMappingTable::PackageId{
+            deobfuscation_mapping.package_name().ToStdString(),
+            deobfuscation_mapping.version_code()},
+        context_->storage->InternString(cls.obfuscated_name()),
+        context_->storage->InternString(cls.deobfuscated_name()),
+        std::move(obfuscated_to_deobfuscated_members));
   }
+  context_->args_translation_table->AddDeobfuscationMappingTable(
+      std::move(deobfuscation_mapping_table));
 }
 
 void ProfileModule::ParseSmapsPacket(int64_t ts, ConstBytes blob) {

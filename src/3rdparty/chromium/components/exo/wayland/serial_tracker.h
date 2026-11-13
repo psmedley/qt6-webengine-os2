@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 struct wl_display;
@@ -21,14 +22,22 @@ class SerialTracker {
   enum EventType {
     POINTER_ENTER,
     POINTER_LEAVE,
-    POINTER_BUTTON_DOWN,
-    POINTER_BUTTON_UP,
-
+    POINTER_LEFT_BUTTON_DOWN,
+    POINTER_LEFT_BUTTON_UP,
+    POINTER_MIDDLE_BUTTON_DOWN,
+    POINTER_MIDDLE_BUTTON_UP,
+    POINTER_RIGHT_BUTTON_DOWN,
+    POINTER_RIGHT_BUTTON_UP,
+    POINTER_FORWARD_BUTTON_DOWN,
+    POINTER_FORWARD_BUTTON_UP,
+    POINTER_BACK_BUTTON_DOWN,
+    POINTER_BACK_BUTTON_UP,
     TOUCH_DOWN,
     TOUCH_UP,
-
     OTHER_EVENT,
   };
+
+  static std::string ToString(EventType type);
 
   explicit SerialTracker(struct wl_display* display);
   SerialTracker(const SerialTracker&) = delete;
@@ -39,15 +48,6 @@ class SerialTracker {
   void Shutdown();
 
   uint32_t GetNextSerial(EventType type);
-
-  // Get the serial number of the last {pointer,touch} pressed event, or nullopt
-  // if the press has since been released.
-  absl::optional<uint32_t> GetPointerDownSerial();
-  absl::optional<uint32_t> GetTouchDownSerial();
-
-  // Needed because wl_touch::cancel doesn't send a serial number, so we can't
-  // test for it in GetNextSerial.
-  void ResetTouchDownSerial();
 
   // If there exists a serial for key already, returns it. Or, it creates
   // a new serial, and returns it.
@@ -61,8 +61,10 @@ class SerialTracker {
   // never sent or is too old.
   absl::optional<EventType> GetEventType(uint32_t serial) const;
 
+  std::string ToString() const;
+
  private:
-  struct wl_display* display_;
+  raw_ptr<struct wl_display, DanglingUntriaged> display_;
 
   // EventTypes are stored in a circular buffer, because serial numbers are
   // issued sequentially and we only want to store the most recent events.
@@ -74,8 +76,6 @@ class SerialTracker {
   uint32_t min_event_ = 1;
   uint32_t max_event_ = 1;
 
-  absl::optional<uint32_t> pointer_down_serial_;
-  absl::optional<uint32_t> touch_down_serial_;
   absl::optional<uint32_t> key_serial_;
 };
 

@@ -9,13 +9,13 @@
 
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkStream.h"
-#include "include/private/SkFixed.h"
-#include "include/private/SkMalloc.h"
-#include "include/private/SkTDArray.h"
-#include "include/private/SkTLogic.h"
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkFixed.h"
+#include "include/private/base/SkMalloc.h"
+#include "include/private/base/SkTDArray.h"
+#include "include/private/base/SkTLogic.h"
+#include "include/private/base/SkTemplates.h"
+#include "src/base/SkTSearch.h"
 #include "src/core/SkOSFile.h"
-#include "src/core/SkTSearch.h"
 #include "src/ports/SkFontMgr_android_parser.h"
 
 #include <expat.h>
@@ -24,6 +24,8 @@
 #include <string.h>
 
 #include <memory>
+
+using namespace skia_private;
 
 #define LMP_SYSTEM_FONTS_FILE "/system/etc/fonts.xml"
 #define OLD_SYSTEM_FONTS_FILE "/system/etc/system_fonts.xml"
@@ -138,7 +140,7 @@ static bool is_whitespace(char c) {
 }
 
 static void trim_string(SkString* s) {
-    char* str = s->writable_str();
+    char* str = s->data();
     const char* start = str;  // start is inclusive
     const char* end = start + s->size();  // end is exclusive
     while (is_whitespace(*start)) { ++start; }
@@ -153,7 +155,7 @@ static void trim_string(SkString* s) {
 }
 
 static void parse_space_separated_languages(const char* value, size_t valueLen,
-                                            SkTArray<SkLanguage, true>& languages)
+                                            TArray<SkLanguage, true>& languages)
 {
     size_t i = 0;
     while (true) {
@@ -185,7 +187,7 @@ static const TagHandler axisHandler = {
                 if (valueLen == 4) {
                     axisTag = SkSetFourByteTag(value[0], value[1], value[2], value[3]);
                     axisTagIsValid = true;
-                    for (int j = 0; j < file.fVariationDesignPosition.count() - 1; ++j) {
+                    for (int j = 0; j < file.fVariationDesignPosition.size() - 1; ++j) {
                         if (file.fVariationDesignPosition[j].axis == axisTag) {
                             axisTagIsValid = false;
                             SK_FONTCONFIGPARSER_WARNING("'%c%c%c%c' axis specified more than once",
@@ -327,7 +329,7 @@ static const TagHandler familyHandler = {
 static FontFamily* find_family(FamilyData* self, const SkString& familyName) {
     for (int i = 0; i < self->fFamilies.size(); i++) {
         FontFamily* candidate = self->fFamilies[i];
-        for (int j = 0; j < candidate->fNames.count(); j++) {
+        for (int j = 0; j < candidate->fNames.size(); j++) {
             if (candidate->fNames[j] == familyName) {
                 return candidate;
             }
@@ -375,7 +377,7 @@ static const TagHandler aliasHandler = {
             FontFamily* family = new FontFamily(targetFamily->fBasePath, self->fIsFallback);
             family->fNames.push_back().set(aliasName);
 
-            for (int i = 0; i < targetFamily->fFonts.count(); i++) {
+            for (int i = 0; i < targetFamily->fFonts.size(); i++) {
                 if (targetFamily->fFonts[i].fWeight == weight) {
                     family->fFonts.push_back(targetFamily->fFonts[i]);
                 }
@@ -430,7 +432,7 @@ static const TagHandler fileHandler = {
                     } else if (MEMEQ("compact", value, valueLen)) {
                         currentFamily.fVariant = kCompact_FontVariant;
                     }
-                    if (currentFamily.fFonts.count() > 1 && currentFamily.fVariant != prevVariant) {
+                    if (currentFamily.fFonts.size() > 1 && currentFamily.fVariant != prevVariant) {
                         SK_FONTCONFIGPARSER_WARNING("'%s' unexpected variant found\n"
                             "Note: Every font file within a family must have identical variants.",
                             value);
@@ -440,7 +442,7 @@ static const TagHandler fileHandler = {
                     SkLanguage currentLanguage = SkLanguage(value, valueLen);
                     bool showWarning = false;
                     if (currentFamily.fLanguages.empty()) {
-                        showWarning = (currentFamily.fFonts.count() > 1);
+                        showWarning = (currentFamily.fFonts.size() > 1);
                         currentFamily.fLanguages.push_back(std::move(currentLanguage));
                     } else if (currentFamily.fLanguages[0] != currentLanguage) {
                         showWarning = true;

@@ -9,14 +9,14 @@
 #define skgpu_graphite_geom_Rect_DEFINED
 
 #include "include/core/SkRect.h"
-#include "include/private/SkVx.h"
+#include "src/base/SkVx.h"
 
 namespace skgpu::graphite {
 
 #define AI SK_ALWAYS_INLINE
 
 /**
- * SIMD rect implementation. Vales are stored internally in the form: [left, top, -right, -bot].
+ * SIMD rect implementation. Values are stored internally in the form: [left, top, -right, -bot].
  *
  * Some operations (e.g., intersect, inset) may return a negative or empty rect
  * (negative meaning, left >= right or top >= bot).
@@ -32,6 +32,10 @@ public:
     AI Rect(float l, float t, float r, float b) : fVals(NegateBotRight({l,t,r,b})) {}
     AI Rect(float2 topLeft, float2 botRight) : fVals(topLeft, -botRight) {}
     AI Rect(const SkRect& r) : fVals(NegateBotRight(float4::Load(r.asScalars()))) {}
+
+    AI static Rect LTRB(float4 ltrb) {
+        return Rect(NegateBotRight(ltrb));
+    }
 
     AI static Rect XYWH(float x, float y, float w, float h) {
         return Rect(x, y, x + w, y + h);
@@ -84,8 +88,16 @@ public:
     AI void setTopLeft(float2 topLeft) { fVals.xy() = topLeft; }
     AI void setBotRight(float2 botRight) { fVals.zw() = -botRight; }
 
-    AI SkRect asSkRect() const { return skvx::bit_pun<SkRect>(this->ltrb()); }
-    AI SkIRect asSkIRect() const { return skvx::bit_pun<SkIRect>(skvx::cast<int>(this->ltrb())); }
+    AI SkRect asSkRect() const {
+        SkRect rect;
+        this->ltrb().store(&rect);
+        return rect;
+    }
+    AI SkIRect asSkIRect() const {
+        SkIRect rect;
+        skvx::cast<int>(this->ltrb()).store(&rect);
+        return rect;
+    }
 
     AI bool isEmptyNegativeOrNaN() const {
         return !all(fVals.xy() + fVals.zw() < 0);  // !([l-r, r-b] < 0) == ([w, h] <= 0)
@@ -142,7 +154,7 @@ public:
 private:
     AI static float4 NegateBotRight(float4 vals) {  // Returns [vals.xy, -vals.zw].
         using uint4 = skvx::uint4;
-        return skvx::bit_pun<float4>(skvx::bit_pun<uint4>(vals) ^ uint4(0, 0, 1u << 31, 1u << 31));
+        return sk_bit_cast<float4>(sk_bit_cast<uint4>(vals) ^ uint4(0, 0, 1u << 31, 1u << 31));
     }
 
     AI Rect(float4 vals) : fVals(vals) {}  // vals.zw must already be negated.

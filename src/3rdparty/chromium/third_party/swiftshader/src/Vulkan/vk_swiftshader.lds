@@ -3,6 +3,7 @@ global:
 	# Loader-ICD interface functions
 	vk_icdGetInstanceProcAddr;
 	vk_icdNegotiateLoaderICDInterfaceVersion;
+	vk_icdGetPhysicalDeviceProcAddr;
 
 	# Vulkan 1.0 API entry functions
 	vkCreateInstance;
@@ -148,8 +149,11 @@ global:
 	vkGetPhysicalDeviceSurfaceFormatsKHR;
 
 	# VK_KHR_get_surface_capabilities2
-	#vkGetPhysicalDeviceSurfaceCapabilities2KHR;
-	#vkGetPhysicalDeviceSurfaceFormats2KHR;
+	vkGetPhysicalDeviceSurfaceCapabilities2KHR;
+	vkGetPhysicalDeviceSurfaceFormats2KHR;
+
+	# VK_EXT_swapchain_maintenance1
+	vkReleaseSwapchainImagesEXT;
 
 	# VK_KHR_surface
 	vkGetPhysicalDeviceSurfacePresentModesKHR;

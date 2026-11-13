@@ -8,6 +8,7 @@
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "content/browser/preloading/prerender/prerender_final_status.h"
 #include "content/browser/preloading/prerender/prerender_host_registry.h"
 #include "content/browser/renderer_host/frame_tree.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
@@ -76,43 +77,33 @@ class ScreenOrientationBrowserTest : public ContentBrowserTest  {
   }
 
   int GetOrientationAngle() {
-    int angle =
-        ExecuteScriptAndGetValue(shell()->web_contents()->GetPrimaryMainFrame(),
-                                 "screen.orientation.angle")
-            .GetInt();
-    return angle;
+    return EvalJs(shell()->web_contents()->GetPrimaryMainFrame(),
+                  "screen.orientation.angle")
+        .ExtractInt();
   }
 
   std::string GetOrientationType() {
-    std::string type =
-        ExecuteScriptAndGetValue(shell()->web_contents()->GetPrimaryMainFrame(),
-                                 "screen.orientation.type")
-            .GetString();
-    return type;
+    return EvalJs(shell()->web_contents()->GetPrimaryMainFrame(),
+                  "screen.orientation.type")
+        .ExtractString();
   }
 
   bool ScreenOrientationSupported() {
-    bool support =
-        ExecuteScriptAndGetValue(shell()->web_contents()->GetPrimaryMainFrame(),
-                                 "'orientation' in screen")
-            .GetBool();
-    return support;
+    return EvalJs(shell()->web_contents()->GetPrimaryMainFrame(),
+                  "'orientation' in screen")
+        .ExtractBool();
   }
 
   bool WindowOrientationSupported() {
-    bool support =
-        ExecuteScriptAndGetValue(shell()->web_contents()->GetPrimaryMainFrame(),
-                                 "'orientation' in window")
-            .GetBool();
-    return support;
+    return EvalJs(shell()->web_contents()->GetPrimaryMainFrame(),
+                  "'orientation' in window")
+        .ExtractBool();
   }
 
   int GetWindowOrientationAngle() {
-    int angle =
-        ExecuteScriptAndGetValue(shell()->web_contents()->GetPrimaryMainFrame(),
-                                 "window.orientation")
-            .GetInt();
-    return angle;
+    return EvalJs(shell()->web_contents()->GetPrimaryMainFrame(),
+                  "window.orientation")
+        .ExtractInt();
   }
 };
 
@@ -369,7 +360,7 @@ IN_PROC_BROWSER_TEST_F(ScreenOrientationOOPIFBrowserTest,
                                        screen_info.orientation_type);
 
   // Let the navigation finish and make sure it succeeded.
-  delayer.WaitForNavigationFinished();
+  ASSERT_TRUE(delayer.WaitForNavigationFinished());
   EXPECT_EQ(second_url,
             web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL());
 
@@ -431,7 +422,7 @@ class ScreenOrientationLockForPrerenderBrowserTest
 
   // ScreenOrientationBrowserTest:
   void SetUp() override {
-    prerender_helper_.SetUp(embedded_test_server());
+    prerender_helper_.RegisterServerRequestMonitor(embedded_test_server());
     ScreenOrientationBrowserTest::SetUp();
   }
 
@@ -487,8 +478,9 @@ IN_PROC_BROWSER_TEST_F(ScreenOrientationLockForPrerenderBrowserTest,
   GURL initial_url = embedded_test_server()->GetURL("/empty.html");
   NavigateToURLBlockUntilNavigationsComplete(shell(), initial_url, 1);
 
-  EXPECT_TRUE(ExecuteScript(web_contents()->GetPrimaryMainFrame(),
-                            "screen.orientation.lock('portrait')"));
+  EXPECT_TRUE(ExecJs(web_contents()->GetPrimaryMainFrame(),
+                     "screen.orientation.lock('portrait')",
+                     EXECUTE_SCRIPT_NO_RESOLVE_PROMISES));
 
   // Delegate did apply lock once.
   EXPECT_EQ(1, delegate.lock_count());
@@ -534,8 +526,7 @@ IN_PROC_BROWSER_TEST_F(ScreenOrientationLockForPrerenderBrowserTest,
   test::PrerenderHostObserver prerender_observer(*web_contents(), host_id);
   PrerenderHostRegistry* registry =
       static_cast<WebContentsImpl*>(web_contents())->GetPrerenderHostRegistry();
-  registry->CancelHost(host_id,
-                       PrerenderHost::FinalStatus::kRendererProcessKilled);
+  registry->CancelHost(host_id, PrerenderFinalStatus::kRendererProcessKilled);
   prerender_observer.WaitForDestroyed();
 
   // Delegate should not apply unlock.

@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -216,13 +216,14 @@ bool CXFA_FFNotify::RunScript(CXFA_Script* script, CXFA_Node* item) {
   if (!pDocView)
     return false;
 
-  CXFA_EventParam EventParam;
-  EventParam.m_eType = XFA_EVENT_Unknown;
+  CXFA_EventParam EventParam(XFA_EVENT_Unknown);
+  EventParam.m_bTargeted = false;
 
-  XFA_EventError iRet;
-  bool bRet;
-  std::tie(iRet, bRet) = item->ExecuteBoolScript(pDocView, script, &EventParam);
-  return iRet == XFA_EventError::kSuccess && bRet;
+  CXFA_Node::BoolScriptResult result =
+      item->ExecuteBoolScript(pDocView, script, &EventParam);
+
+  return result.xfa_event_result == XFA_EventError::kSuccess &&
+         result.script_result;
 }
 
 XFA_EventError CXFA_FFNotify::ExecEventByDeepFirst(CXFA_Node* pFormNode,
@@ -249,9 +250,17 @@ CXFA_FFApp::CallbackIface* CXFA_FFNotify::GetAppProvider() {
   return m_pDoc->GetApp()->GetAppProvider();
 }
 
-CXFA_FFWidgetHandler* CXFA_FFNotify::GetWidgetHandler() {
+void CXFA_FFNotify::HandleWidgetEvent(CXFA_Node* pNode,
+                                      CXFA_EventParam* pParam) {
   CXFA_FFDocView* pDocView = m_pDoc->GetDocView();
-  return pDocView ? pDocView->GetWidgetHandler() : nullptr;
+  if (!pDocView)
+    return;
+
+  CXFA_FFWidgetHandler* pHandler = pDocView->GetWidgetHandler();
+  if (!pHandler)
+    return;
+
+  pHandler->ProcessEvent(pNode, pParam);
 }
 
 void CXFA_FFNotify::OpenDropDownList(CXFA_Node* pNode) {

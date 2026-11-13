@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,15 +20,15 @@
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_stream.h"
+#include "core/fxcrt/span_util.h"
 #include "third_party/base/check.h"
-#include "third_party/base/notreached.h"
 
 // Indexed by 8-bit character code, contains either:
 //   'W' - for whitespace: NUL, TAB, CR, LF, FF, SPACE, 0x80, 0xff
 //   'N' - for numeric: 0123456789+-.
 //   'D' - for delimiter: %()/<>[]{}
 //   'R' - otherwise.
-const char PDF_CharType[256] = {
+const char kPDFCharTypes[256] = {
     // NUL  SOH  STX  ETX  EOT  ENQ  ACK  BEL  BS   HT   LF   VT   FF   CR   SO
     // SI
     'W', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'W', 'W', 'R', 'W', 'W', 'R',
@@ -39,7 +39,7 @@ const char PDF_CharType[256] = {
     'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R',
     'R',
 
-    // SP    !    "    #    $    %    &    ´    (    )    *    +    ,    -    .
+    // SP    !    "    #    $    %    &    '    (    )    *    +    ,    -    .
     // /
     'W', 'R', 'R', 'R', 'R', 'D', 'R', 'R', 'D', 'D', 'R', 'N', 'R', 'N', 'N',
     'D',
@@ -80,7 +80,7 @@ absl::optional<FX_FILESIZE> GetHeaderOffset(
   static constexpr size_t kBufSize = 4;
   uint8_t buf[kBufSize];
   for (FX_FILESIZE offset = 0; offset <= 1024; ++offset) {
-    if (!pFile->ReadBlockAtOffset(buf, offset, kBufSize))
+    if (!pFile->ReadBlockAtOffset(buf, offset))
       return absl::nullopt;
 
     if (memcmp(buf, "%PDF", 4) == 0)
@@ -232,7 +232,7 @@ std::ostream& operator<<(std::ostream& buf, const CPDF_Object* pObj) {
       buf << "<<";
       for (const auto& it : locker) {
         const ByteString& key = it.first;
-        const CPDF_Object* pValue = it.second.Get();
+        const RetainPtr<CPDF_Object>& pValue = it.second;
         buf << "/" << PDF_NameEncode(key);
         if (!pValue->IsInline()) {
           buf << " " << pValue->GetObjNum() << " 0 R ";
@@ -248,14 +248,11 @@ std::ostream& operator<<(std::ostream& buf, const CPDF_Object* pObj) {
       buf << p->GetDict().Get() << "stream\r\n";
       auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(std::move(p));
       pAcc->LoadAllDataRaw();
-      pdfium::span<const uint8_t> span = pAcc->GetSpan();
-      buf.write(reinterpret_cast<const char*>(span.data()), span.size());
+      auto span = fxcrt::reinterpret_span<const char>(pAcc->GetSpan());
+      buf.write(span.data(), span.size());
       buf << "\r\nendstream";
       break;
     }
-    default:
-      NOTREACHED();
-      break;
   }
   return buf;
 }

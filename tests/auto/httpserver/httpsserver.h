@@ -1,5 +1,5 @@
 // Copyright (C) 2019 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 #ifndef HTTPSSERVER_H
 #define HTTPSSERVER_H
 
@@ -7,53 +7,66 @@
 #include "httpserver.h"
 
 #include <QDebug>
-#include <QFile>
-#include <QSslKey>
-#include <QSslSocket>
-#include <QSslConfiguration>
-#include <QTcpServer>
+#include <QtCore/qfile.h>
+#include <QtNetwork/qsslkey.h>
+#include <QtNetwork/qsslsocket.h>
+#include <QtNetwork/qsslconfiguration.h>
+#include <QtNetwork/qsslserver.h>
 
-struct SslTcpServer : QTcpServer
+static QSslServer *createServer(const QString &certificateFileName, const QString &keyFileName,
+                                const QString &ca)
 {
-    SslTcpServer(const QString &certPath, const QString &keyPath) {
-        sslconf.setLocalCertificateChain(QSslCertificate::fromPath(certPath));
-        sslconf.setPrivateKey(readKey(keyPath));
-    }
+    QSslConfiguration configuration(QSslConfiguration::defaultConfiguration());
 
-    void incomingConnection(qintptr d) override {
-        auto socket = new QSslSocket(this);
-        socket->setSslConfiguration(sslconf);
-
-        if (!socket->setSocketDescriptor(d)) {
-            qWarning() << "Failed to setup ssl socket!";
-            delete socket;
-            return;
+    QFile keyFile(keyFileName);
+    if (keyFile.open(QIODevice::ReadOnly)) {
+        QSslKey key(keyFile.readAll(), QSsl::Rsa, QSsl::Pem, QSsl::PrivateKey);
+        if (!key.isNull()) {
+            configuration.setPrivateKey(key);
+        } else {
+            qCritical() << "Could not parse key: " << keyFileName;
         }
-
-        connect(socket, QOverload<QSslSocket::SocketError>::of(&QSslSocket::errorOccurred),
-                [] (QSslSocket::SocketError e) { qWarning() << "! Socket Error:" << e; });
-        connect(socket, QOverload<const QList<QSslError> &>::of(&QSslSocket::sslErrors),
-                [] (const QList<QSslError> &le) { qWarning() << "! SSL Errors:\n" << le; });
-
-        addPendingConnection(socket);
-        socket->startServerEncryption();
+    } else {
+        qCritical() << "Could not find key: " << keyFileName;
     }
 
-    QSslKey readKey(const QString &path) const {
-        QFile file(path);
-        file.open(QIODevice::ReadOnly);
-        return QSslKey(file.readAll(), QSsl::Rsa, QSsl::Pem);
+    QList<QSslCertificate> localCerts = QSslCertificate::fromPath(certificateFileName);
+    if (!localCerts.isEmpty()) {
+        configuration.setLocalCertificateChain(localCerts);
+    } else {
+        qCritical() << "Could not find certificate: " << certificateFileName;
     }
 
-    QSslConfiguration sslconf;
-};
+    if (!ca.isEmpty()) {
+        QList<QSslCertificate> caCerts = QSslCertificate::fromPath(ca);
+        if (!caCerts.isEmpty()) {
+            configuration.addCaCertificates(caCerts);
+            configuration.setPeerVerifyMode(QSslSocket::VerifyPeer);
+        } else {
+            qCritical() << "Could not find certificate: " << certificateFileName;
+        }
+    }
+
+    QSslServer *server = new QSslServer();
+    server->setSslConfiguration(configuration);
+    return server;
+}
 
 struct HttpsServer : HttpServer
 {
-    HttpsServer(const QString &certPath, const QString &keyPath, QObject *parent = nullptr)
-        : HttpServer(new SslTcpServer(certPath, keyPath), "https", QHostAddress::LocalHost, 0,
+    HttpsServer(const QString &certPath, const QString &keyPath, const QString &ca,
+                quint16 port = 0, QObject *parent = nullptr)
+        : HttpServer(createServer(certPath, keyPath, ca), "https", QHostAddress::LocalHost, port,
                      parent)
     {
+    }
+
+    void setVerifyMode(const QSslSocket::PeerVerifyMode verifyMode)
+    {
+        QSslServer *server = static_cast<QSslServer *>(getTcpServer());
+        QSslConfiguration config = server->sslConfiguration();
+        config.setPeerVerifyMode(verifyMode);
+        server->setSslConfiguration(config);
     }
 };
 

@@ -19,11 +19,11 @@
 #include <dirent.h>
 
 #include "perfetto/ext/base/file_utils.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/temp_file.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/tracing/core/data_source_config.h"
 #include "src/base/test/test_task_runner.h"
-#include "src/traced/probes/common/cpu_freq_info_for_testing.h"
 #include "src/tracing/core/trace_writer_for_testing.h"
 #include "test/gtest_and_gmock.h"
 
@@ -33,6 +33,7 @@
 
 using ::perfetto::protos::gen::ProcessStatsConfig;
 using ::testing::_;
+using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::Invoke;
@@ -48,16 +49,15 @@ class TestProcessStatsDataSource : public ProcessStatsDataSource {
   TestProcessStatsDataSource(base::TaskRunner* task_runner,
                              TracingSessionID id,
                              std::unique_ptr<TraceWriter> writer,
-                             const DataSourceConfig& config,
-                             std::unique_ptr<CpuFreqInfo> cpu_freq_info)
-      : ProcessStatsDataSource(task_runner,
-                               id,
-                               std::move(writer),
-                               config,
-                               std::move(cpu_freq_info)) {}
+                             const DataSourceConfig& config)
+      : ProcessStatsDataSource(task_runner, id, std::move(writer), config) {}
 
-  MOCK_METHOD0(OpenProcDir, base::ScopedDir());
-  MOCK_METHOD2(ReadProcPidFile, std::string(int32_t pid, const std::string&));
+  MOCK_METHOD(const char*, GetProcMountpoint, (), (override));
+  MOCK_METHOD(base::ScopedDir, OpenProcDir, (), (override));
+  MOCK_METHOD(std::string,
+              ReadProcPidFile,
+              (int32_t pid, const std::string&),
+              (override));
 };
 
 class ProcessStatsDataSourceTest : public ::testing::Test {
@@ -70,14 +70,12 @@ class ProcessStatsDataSourceTest : public ::testing::Test {
         std::unique_ptr<TraceWriterForTesting>(new TraceWriterForTesting());
     writer_raw_ = writer.get();
     return std::unique_ptr<TestProcessStatsDataSource>(
-        new TestProcessStatsDataSource(
-            &task_runner_, 0, std::move(writer), cfg,
-            cpu_freq_info_for_testing.GetInstance()));
+        new TestProcessStatsDataSource(&task_runner_, 0, std::move(writer),
+                                       cfg));
   }
 
   base::TestTaskRunner task_runner_;
   TraceWriterForTesting* writer_raw_;
-  CpuFreqInfoForTesting cpu_freq_info_for_testing;
 };
 
 TEST_F(ProcessStatsDataSourceTest, WriteOnceProcess) {
@@ -321,6 +319,7 @@ TEST_F(ProcessStatsDataSourceTest, ProcessStats) {
   DataSourceConfig ds_config;
   ProcessStatsConfig cfg;
   cfg.set_proc_stats_poll_ms(1);
+  cfg.set_resolve_process_fds(true);
   cfg.add_quirks(ProcessStatsConfig::DISABLE_ON_DEMAND);
   ds_config.set_process_stats_config_raw(cfg.SerializeAsString());
   auto data_source = GetProcessStatsDataSource(ds_config);
@@ -328,31 +327,55 @@ TEST_F(ProcessStatsDataSourceTest, ProcessStats) {
   // Populate a fake /proc/ directory.
   auto fake_proc = base::TempDir::Create();
   const int kPids[] = {1, 2};
+  const uint64_t kFds[] = {5u, 7u};
+  const char kDevice[] = "/dev/dummy";
   std::vector<std::string> dirs_to_delete;
+  std::vector<std::string> links_to_delete;
   for (int pid : kPids) {
-    char path[256];
-    sprintf(path, "%s/%d", fake_proc.path().c_str(), pid);
-    dirs_to_delete.push_back(path);
-    mkdir(path, 0755);
+    base::StackString<256> path("%s/%d", fake_proc.path().c_str(), pid);
+    dirs_to_delete.push_back(path.ToStdString());
+    EXPECT_EQ(mkdir(path.c_str(), 0755), 0)
+        << "mkdir('" << path.c_str() << "') failed";
+
+    base::StackString<256> path_fd("%s/fd", path.c_str());
+    dirs_to_delete.push_back(path_fd.ToStdString());
+    EXPECT_EQ(mkdir(path_fd.c_str(), 0755), 0)
+        << "mkdir('" << path_fd.c_str() << "') failed";
+
+    for (auto fd : kFds) {
+      base::StackString<256> link("%s/%" PRIu64, path_fd.c_str(), fd);
+      links_to_delete.push_back(link.ToStdString());
+      EXPECT_EQ(symlink(kDevice, link.c_str()), 0)
+          << "symlink('" << kDevice << "','" << link.c_str() << "') failed";
+    }
   }
 
   auto checkpoint = task_runner_.CreateCheckpoint("all_done");
 
-  EXPECT_CALL(*data_source, OpenProcDir()).WillRepeatedly(Invoke([&fake_proc] {
-    return base::ScopedDir(opendir(fake_proc.path().c_str()));
-  }));
+  const auto fake_proc_path = fake_proc.path();
+  EXPECT_CALL(*data_source, OpenProcDir())
+      .WillRepeatedly(Invoke([&fake_proc_path] {
+        return base::ScopedDir(opendir(fake_proc_path.c_str()));
+      }));
+  EXPECT_CALL(*data_source, GetProcMountpoint())
+      .WillRepeatedly(
+          Invoke([&fake_proc_path] { return fake_proc_path.c_str(); }));
 
   const int kNumIters = 4;
   int iter = 0;
   for (int pid : kPids) {
     EXPECT_CALL(*data_source, ReadProcPidFile(pid, "status"))
-        .WillRepeatedly(Invoke([checkpoint, &iter](int32_t p,
-                                                   const std::string&) {
-          char ret[1024];
-          sprintf(ret, "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n",
+        .WillRepeatedly(
+            Invoke([checkpoint, &iter](int32_t p, const std::string&) {
+              base::StackString<1024> ret(
+                  "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n",
                   p * 100 + iter * 10 + 1, p * 100 + iter * 10 + 2);
-          return std::string(ret);
-        }));
+              return ret.ToStdString();
+            }));
+
+    // By default scan_smaps_rollup is off and /proc/<pid>/smaps_rollup
+    // shouldn't be read.
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "smaps_rollup")).Times(0);
 
     EXPECT_CALL(*data_source, ReadProcPidFile(pid, "oom_score_adj"))
         .WillRepeatedly(Invoke(
@@ -387,13 +410,22 @@ TEST_F(ProcessStatsDataSourceTest, ProcessStats) {
               pid * 100 + iter * 10 + 2);
     ASSERT_EQ(static_cast<int>(proc_counters.oom_score_adj()),
               pid * 100 + iter * 10 + 3);
+    ASSERT_EQ(proc_counters.fds().size(), base::ArraySize(kFds));
+    for (const auto& fd_path : proc_counters.fds()) {
+      ASSERT_THAT(kFds, Contains(fd_path.fd()));
+      ASSERT_EQ(fd_path.path(), kDevice);
+    }
     if (pid == kPids[base::ArraySize(kPids) - 1])
       iter++;
   }
 
   // Cleanup |fake_proc|. TempDir checks that the directory is empty.
-  for (std::string& path : dirs_to_delete)
-    base::Rmdir(path);
+  for (auto path = links_to_delete.rbegin(); path != links_to_delete.rend();
+       path++)
+    unlink(path->c_str());
+  for (auto path = dirs_to_delete.rbegin(); path != dirs_to_delete.rend();
+       path++)
+    base::Rmdir(*path);
 }
 
 TEST_F(ProcessStatsDataSourceTest, CacheProcessStats) {
@@ -409,9 +441,8 @@ TEST_F(ProcessStatsDataSourceTest, CacheProcessStats) {
   auto fake_proc = base::TempDir::Create();
   const int kPid = 1;
 
-  char path[256];
-  sprintf(path, "%s/%d", fake_proc.path().c_str(), kPid);
-  mkdir(path, 0755);
+  base::StackString<256> path("%s/%d", fake_proc.path().c_str(), kPid);
+  mkdir(path.c_str(), 0755);
 
   auto checkpoint = task_runner_.CreateCheckpoint("all_done");
 
@@ -423,10 +454,10 @@ TEST_F(ProcessStatsDataSourceTest, CacheProcessStats) {
   int iter = 0;
   EXPECT_CALL(*data_source, ReadProcPidFile(kPid, "status"))
       .WillRepeatedly(Invoke([checkpoint](int32_t p, const std::string&) {
-        char ret[1024];
-        sprintf(ret, "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n",
-                p * 100 + 1, p * 100 + 2);
-        return std::string(ret);
+        base::StackString<1024> ret(
+            "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n", p * 100 + 1,
+            p * 100 + 2);
+        return ret.ToStdString();
       }));
 
   EXPECT_CALL(*data_source, ReadProcPidFile(kPid, "oom_score_adj"))
@@ -461,7 +492,7 @@ TEST_F(ProcessStatsDataSourceTest, CacheProcessStats) {
   }
 
   // Cleanup |fake_proc|. TempDir checks that the directory is empty.
-  base::Rmdir(path);
+  base::Rmdir(path.ToStdString());
 }
 
 TEST_F(ProcessStatsDataSourceTest, NamespacedProcess) {
@@ -498,6 +529,96 @@ TEST_F(ProcessStatsDataSourceTest, NamespacedProcess) {
   ASSERT_EQ(first_thread.tgid(), 42);
   auto nstid = first_thread.nstid();
   EXPECT_THAT(nstid, ElementsAre(3));
+}
+
+TEST_F(ProcessStatsDataSourceTest, ScanSmapsRollupIsOn) {
+  DataSourceConfig ds_config;
+  ProcessStatsConfig cfg;
+  cfg.set_proc_stats_poll_ms(1);
+  cfg.set_resolve_process_fds(true);
+  cfg.set_scan_smaps_rollup(true);
+  cfg.add_quirks(ProcessStatsConfig::DISABLE_ON_DEMAND);
+  ds_config.set_process_stats_config_raw(cfg.SerializeAsString());
+  auto data_source = GetProcessStatsDataSource(ds_config);
+
+  // Populate a fake /proc/ directory.
+  auto fake_proc = base::TempDir::Create();
+  const int kPids[] = {1, 2};
+  std::vector<std::string> dirs_to_delete;
+  for (int pid : kPids) {
+    base::StackString<256> path("%s/%d", fake_proc.path().c_str(), pid);
+    dirs_to_delete.push_back(path.ToStdString());
+    EXPECT_EQ(mkdir(path.c_str(), 0755), 0)
+        << "mkdir('" << path.c_str() << "') failed";
+  }
+
+  auto checkpoint = task_runner_.CreateCheckpoint("all_done");
+  const auto fake_proc_path = fake_proc.path();
+  EXPECT_CALL(*data_source, OpenProcDir())
+      .WillRepeatedly(Invoke([&fake_proc_path] {
+        return base::ScopedDir(opendir(fake_proc_path.c_str()));
+      }));
+  EXPECT_CALL(*data_source, GetProcMountpoint())
+      .WillRepeatedly(
+          Invoke([&fake_proc_path] { return fake_proc_path.c_str(); }));
+
+  const int kNumIters = 4;
+  int iter = 0;
+  for (int pid : kPids) {
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "status"))
+        .WillRepeatedly(
+            Invoke([checkpoint, &iter](int32_t p, const std::string&) {
+              base::StackString<1024> ret(
+                  "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n",
+                  p * 100 + iter * 10 + 1, p * 100 + iter * 10 + 2);
+              return ret.ToStdString();
+            }));
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "smaps_rollup"))
+        .WillRepeatedly(
+            Invoke([checkpoint, &iter](int32_t p, const std::string&) {
+              base::StackString<1024> ret(
+                  "Name:	pid_10\nRss:	 %d kB\nPss:\t%d  kB\n",
+                  p * 100 + iter * 10 + 4, p * 100 + iter * 10 + 5);
+              return ret.ToStdString();
+            }));
+
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "oom_score_adj"))
+        .WillRepeatedly(Invoke(
+            [checkpoint, kPids, &iter](int32_t inner_pid, const std::string&) {
+              auto oom_score = inner_pid * 100 + iter * 10 + 3;
+              if (inner_pid == kPids[base::ArraySize(kPids) - 1]) {
+                if (++iter == kNumIters)
+                  checkpoint();
+              }
+              return std::to_string(oom_score);
+            }));
+  }
+
+  data_source->Start();
+  task_runner_.RunUntilCheckpoint("all_done");
+  data_source->Flush(1 /* FlushRequestId */, []() {});
+
+  std::vector<protos::gen::ProcessStats::Process> processes;
+  auto trace = writer_raw_->GetAllTracePackets();
+  for (const auto& packet : trace) {
+    for (const auto& process : packet.process_stats().processes()) {
+      processes.push_back(process);
+    }
+  }
+  ASSERT_EQ(processes.size(), kNumIters * base::ArraySize(kPids));
+  iter = 0;
+  for (const auto& proc_counters : processes) {
+    int32_t pid = proc_counters.pid();
+    ASSERT_EQ(static_cast<int>(proc_counters.smr_rss_kb()),
+              pid * 100 + iter * 10 + 4);
+    ASSERT_EQ(static_cast<int>(proc_counters.smr_pss_kb()),
+              pid * 100 + iter * 10 + 5);
+    if (pid == kPids[base::ArraySize(kPids) - 1])
+      iter++;
+  }
+  for (auto path = dirs_to_delete.rbegin(); path != dirs_to_delete.rend();
+       path++)
+    base::Rmdir(*path);
 }
 
 }  // namespace

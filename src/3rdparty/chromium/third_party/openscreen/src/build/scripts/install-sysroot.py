@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -44,7 +44,7 @@ URL_PREFIX = 'https://storage.googleapis.com'
 URL_PATH = 'openscreen-sysroots'
 
 VALID_ARCHS = ('arm', 'arm64')
-VALID_PLATFORMS = ('stretch', 'sid')
+VALID_PLATFORMS = ('stretch', 'bullseye')
 
 
 class Error(Exception):

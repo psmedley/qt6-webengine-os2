@@ -1,5 +1,5 @@
 # Copyright (C) 2022 The Qt Company Ltd.
-# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 cmake_minimum_required(VERSION 3.16)
 project(printme LANGUAGES CXX)
@@ -33,7 +33,6 @@ target_link_libraries(printme PUBLIC
 
 # Resources:
 set(data_resource_files
-    "data/icon.svg"
     "data/index.html"
     "data/style.css"
 )

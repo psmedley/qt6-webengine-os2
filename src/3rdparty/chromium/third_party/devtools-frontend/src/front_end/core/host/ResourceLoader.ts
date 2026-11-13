@@ -12,58 +12,58 @@ import {type LoadNetworkResourceResult} from './InspectorFrontendHostAPI.js';
 
 const UIStrings = {
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   systemError: 'System error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   connectionError: 'Connection error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   certificateError: 'Certificate error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   httpError: 'HTTP error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   cacheError: 'Cache error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   signedExchangeError: 'Signed Exchange error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   ftpError: 'FTP error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   certificateManagerError: 'Certificate manager error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   dnsResolverError: 'DNS resolver error',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   unknownError: 'Unknown error',
   /**
-  *@description Phrase used in error messages that carry a network error name
-  *@example {404} PH1
-  *@example {net::ERR_INSUFFICIENT_RESOURCES} PH2
-  */
+   *@description Phrase used in error messages that carry a network error name
+   *@example {404} PH1
+   *@example {net::ERR_INSUFFICIENT_RESOURCES} PH2
+   */
   httpErrorStatusCodeSS: 'HTTP error: status code {PH1}, {PH2}',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   invalidUrl: 'Invalid URL',
   /**
-  *@description Name of an error category used in error messages
-  */
+   *@description Name of an error category used in error messages
+   */
   decodingDataUrlFailed: 'Decoding Data URL failed',
 };
 const str_ = i18n.i18n.registerUIStrings('core/host/ResourceLoader.ts', UIStrings);
@@ -106,9 +106,9 @@ export let load = function(
           [x: string]: string,
         },
         arg2: string, arg3: LoadErrorDescription) => void,
-    allowFileUNCPaths: boolean): void {
+    allowRemoteFilePaths: boolean): void {
   const stream = new Common.StringOutputStream.StringOutputStream();
-  loadAsStream(url, headers, stream, mycallback, allowFileUNCPaths);
+  loadAsStream(url, headers, stream, mycallback, allowRemoteFilePaths);
 
   function mycallback(
       success: boolean, headers: {
@@ -234,6 +234,15 @@ const loadXHR = (url: string): Promise<string> => {
   });
 };
 
+function canBeRemoteFilePath(url: string): boolean {
+  try {
+    const urlObject = new URL(url);
+    return urlObject.protocol === 'file:' && urlObject.host !== '';
+  } catch (exception) {
+    return false;
+  }
+}
+
 export const loadAsStream = function(
     url: string, headers: {
       [x: string]: string,
@@ -244,7 +253,7 @@ export const loadAsStream = function(
            [x: string]: string,
          },
           arg2: LoadErrorDescription) => void),
-    allowFileUNCPaths?: boolean): void {
+    allowRemoteFilePaths?: boolean): void {
   const streamId = _bindOutputStream(stream);
   const parsedURL = new Common.ParsedURL.ParsedURL(url);
   if (parsedURL.isDataURL()) {
@@ -252,13 +261,14 @@ export const loadAsStream = function(
     return;
   }
 
-  if (!allowFileUNCPaths && url.startsWith('file:////')) {
+  if (!allowRemoteFilePaths && canBeRemoteFilePath(url)) {
+    // Remote file paths can cause security problems, see crbug.com/1342722.
     if (callback) {
       callback(/* success */ false, /* headers */ {}, {
         statusCode: 400,  // BAD_REQUEST
         netError: -20,    // BLOCKED_BY_CLIENT
         netErrorName: 'net::BLOCKED_BY_CLIENT',
-        message: 'Loading from a Windows Share via UNC path is prohibited for security reasons.',
+        message: 'Loading from a remote file path is prohibited for security reasons.',
       });
     }
     return;

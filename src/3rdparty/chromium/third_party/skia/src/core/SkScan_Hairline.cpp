@@ -6,10 +6,10 @@
  */
 
 #include "include/core/SkPaint.h"
+#include "src/base/SkMathPriv.h"
 #include "src/core/SkBlitter.h"
 #include "src/core/SkFDot6.h"
 #include "src/core/SkLineClipper.h"
-#include "src/core/SkMathPriv.h"
 #include "src/core/SkPathPriv.h"
 #include "src/core/SkRasterClip.h"
 #include "src/core/SkScan.h"
@@ -212,7 +212,7 @@ void SkScan::HairRect(const SkRect& rect, const SkRasterClip& clip, SkBlitter* b
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "include/core/SkPath.h"
-#include "include/private/SkVx.h"
+#include "src/base/SkVx.h"
 #include "src/core/SkGeometry.h"
 
 #define kMaxCubicSubdivideLevel 9
@@ -360,7 +360,7 @@ using mask2 = skvx::Vec<2, uint32_t>;
 
 static inline mask2 float2_is_finite(const float2& x) {
     const mask2 exp_mask = mask2(0xFF << 23);
-    return (skvx::bit_pun<mask2>(x) & exp_mask) != exp_mask;
+    return (sk_bit_cast<mask2>(x) & exp_mask) != exp_mask;
 }
 
 static void hair_cubic(const SkPoint pts[4], const SkRegion* clip, SkBlitter* blitter,

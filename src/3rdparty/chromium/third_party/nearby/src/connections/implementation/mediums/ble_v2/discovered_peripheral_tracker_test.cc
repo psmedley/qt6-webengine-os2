@@ -18,14 +18,15 @@
 #include <string>
 
 #include "gtest/gtest.h"
+#include "connections/implementation/mediums/ble_v2/advertisement_read_result.h"
 #include "connections/implementation/mediums/ble_v2/ble_utils.h"
 #include "connections/implementation/mediums/ble_v2/bloom_filter.h"
-#include "internal/platform/bluetooth_adapter.h"
+#include "internal/platform/ble_v2.h"
 #include "internal/platform/count_down_latch.h"
+#include "internal/platform/medium_environment.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/mutex_lock.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace mediums {
@@ -36,7 +37,6 @@ constexpr absl::Duration kWaitDuration = absl::Milliseconds(1000);
 constexpr absl::string_view kFastAdvertisementServiceUuid = "FE2C";
 constexpr absl::string_view kServiceIdA = "A";
 constexpr absl::string_view kServiceIdB = "B";
-constexpr absl::string_view kMacAddress1 = "4C:8B:1D:CE:BA:D1";
 constexpr absl::string_view kData = "\x04\x02\x00";
 constexpr absl::string_view kData2 = "\x07\x00\x07";
 constexpr absl::string_view kDeviceToken = "\x04\x20";
@@ -102,26 +102,21 @@ ByteArray GenerateRandomAdvertisementHash() {
   return random_advertisement_hash;
 }
 
-// A stub BlePeripheral implementation.
-class BlePeripheralStub : public api::ble_v2::BlePeripheral {
- public:
-  explicit BlePeripheralStub(absl::string_view mac_address) {
-    mac_address_ = std::string(mac_address);
-  }
-
-  std::string GetAddress() const override { return mac_address_; }
-
- private:
-  std::string mac_address_;
-};
-
 class DiscoveredPeripheralTrackerTest : public testing::Test {
  public:
-  void SetUp() override {}
+  void SetUp() override {
+    MediumEnvironment::Instance().Start();
+    adapter_peripheral_ = std::make_unique<BluetoothAdapter>();
+    adapter_central_ = std::make_unique<BluetoothAdapter>();
+    ble_peripheral_ = std::make_unique<BleV2Medium>(*adapter_peripheral_);
+    ble_central_ = std::make_unique<BleV2Medium>(*adapter_central_);
+  }
 
-  BleV2Peripheral CreateBlePeripheral(absl::string_view mac_address) {
-    ble_peripheral_ = std::make_unique<BlePeripheralStub>(mac_address);
-    return BleV2Peripheral(ble_peripheral_.get());
+  void TearDown() override { MediumEnvironment::Instance().Stop(); }
+
+  BleV2Peripheral CreateBlePeripheral() {
+    return ble_central_->GetRemotePeripheral(
+        adapter_peripheral_->GetMacAddress());
   }
 
   // Simulates to see a fast advertisement.
@@ -129,7 +124,7 @@ class DiscoveredPeripheralTrackerTest : public testing::Test {
       const api::ble_v2::BleAdvertisementData& advertisement_data,
       const std::vector<ByteArray>& advertisement_bytes_list,
       CountDownLatch& fetch_latch) {
-    BleV2Peripheral peripheral = CreateBlePeripheral(kMacAddress1);
+    BleV2Peripheral peripheral = CreateBlePeripheral();
 
     discovered_peripheral_tracker_.ProcessFoundBleAdvertisement(
         peripheral, advertisement_data,
@@ -141,7 +136,7 @@ class DiscoveredPeripheralTrackerTest : public testing::Test {
       const api::ble_v2::BleAdvertisementData& advertisement_data,
       const std::vector<ByteArray>& advertisement_bytes_list,
       CountDownLatch& fetch_latch) {
-    BleV2Peripheral peripheral = CreateBlePeripheral(kMacAddress1);
+    BleV2Peripheral peripheral = CreateBlePeripheral();
 
     discovered_peripheral_tracker_.ProcessFoundBleAdvertisement(
         peripheral, advertisement_data,
@@ -158,29 +153,28 @@ class DiscoveredPeripheralTrackerTest : public testing::Test {
   DiscoveredPeripheralTracker::AdvertisementFetcher GetAdvertisementFetcher(
       CountDownLatch& fetch_latch,
       const std::vector<ByteArray>& advertisement_bytes_list) {
-    return {
-        .fetch_advertisements =
-            [this, &fetch_latch, &advertisement_bytes_list](
-                BleV2Peripheral peripheral, int num_slots, int psm,
-                const std::vector<std::string>& interesting_service_ids,
-                mediums::AdvertisementReadResult& advertisement_read_result) {
-              MutexLock lock(&mutex_);
-              fetch_count_++;
-              int slot = 0;
-              for (const auto& advertisement_bytes : advertisement_bytes_list) {
-                advertisement_read_result.AddAdvertisement(slot++,
-                                                           advertisement_bytes);
-              }
-              advertisement_read_result.RecordLastReadStatus(
-                  /*is_success=*/true);
-              fetch_latch.CountDown();
-            },
+    return [this, &fetch_latch, &advertisement_bytes_list](
+               BleV2Peripheral peripheral, int num_slots, int psm,
+               const std::vector<std::string>& interesting_service_ids,
+               mediums::AdvertisementReadResult& advertisement_read_result) {
+      MutexLock lock(&mutex_);
+      fetch_count_++;
+      int slot = 0;
+      for (const auto& advertisement_bytes : advertisement_bytes_list) {
+        advertisement_read_result.AddAdvertisement(slot++, advertisement_bytes);
+      }
+      advertisement_read_result.RecordLastReadStatus(
+          /*is_success=*/true);
+      fetch_latch.CountDown();
     };
   }
 
+  std::unique_ptr<BluetoothAdapter> adapter_peripheral_;
+  std::unique_ptr<BluetoothAdapter> adapter_central_;
+  std::unique_ptr<BleV2Medium> ble_peripheral_;
+  std::unique_ptr<BleV2Medium> ble_central_;
   mutable Mutex mutex_;
   int fetch_count_ ABSL_GUARDED_BY(mutex_) = 0;
-  std::unique_ptr<BlePeripheralStub> ble_peripheral_;
   DiscoveredPeripheralTracker discovered_peripheral_tracker_;
 };
 
@@ -967,4 +961,3 @@ TEST_F(DiscoveredPeripheralTrackerTest,
 }  // namespace mediums
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

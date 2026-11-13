@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/feature_list.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/cpp/cross_origin_embedder_policy.h"
@@ -117,6 +118,7 @@ DedicatedWorker::DedicatedWorker(
     base::FunctionRef<DedicatedWorkerMessagingProxy*(DedicatedWorker*)>
         context_proxy_factory)
     : AbstractWorker(context),
+      ActiveScriptWrappable<DedicatedWorker>({}),
       script_request_url_(script_request_url),
       options_(options),
       context_proxy_(context_proxy_factory(this)),
@@ -469,9 +471,7 @@ DedicatedWorker::CreateGlobalScopeCreationParams(
   if (auto* window = DynamicTo<LocalDOMWindow>(execution_context)) {
     // When the main thread creates a new DedicatedWorker.
     auto* frame = window->GetFrame();
-    if (frame) {
-      parent_devtools_token = frame->GetDevToolsFrameToken();
-    }
+    parent_devtools_token = frame->GetDevToolsFrameToken();
     settings = std::make_unique<WorkerSettings>(frame->GetSettings());
     agent_group_scheduler_compositor_task_runner =
         execution_context->GetScheduler()
@@ -515,15 +515,16 @@ DedicatedWorker::CreateGlobalScopeCreationParams(
       nullptr /* worklet_module_responses_map */,
       std::move(browser_interface_broker_),
       mojo::NullRemote() /* code_cache_host_interface */,
+      mojo::NullRemote() /* blob_url_store */,
       CreateBeginFrameProviderParams(*execution_context),
       execution_context->GetSecurityContext().GetPermissionsPolicy(),
       execution_context->GetAgentClusterID(), execution_context->UkmSourceID(),
       execution_context->GetExecutionContextToken(),
       execution_context->CrossOriginIsolatedCapability(),
-      execution_context->IsolatedApplicationCapability(),
+      execution_context->IsIsolatedContext(),
       /*interface_registry=*/nullptr,
       std::move(agent_group_scheduler_compositor_task_runner),
-      top_level_frame_security_origin);
+      top_level_frame_security_origin, execution_context->HasStorageAccess());
 }
 
 scoped_refptr<WebWorkerFetchContext>

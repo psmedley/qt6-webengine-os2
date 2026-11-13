@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,12 +25,11 @@
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "core/fxcrt/autorestorer.h"
 #include "core/fxcrt/cfx_read_only_vector_stream.h"
-#include "core/fxcrt/fixed_uninit_data_vector.h"
+#include "core/fxcrt/fixed_size_data_vector.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
-#include "third_party/base/numerics/safe_math.h"
 
 namespace {
 
@@ -44,27 +43,26 @@ enum class ReadStatus {
 
 class ReadableSubStream final : public IFX_SeekableReadStream {
  public:
-  ReadableSubStream(const RetainPtr<IFX_SeekableReadStream>& pFileRead,
+  ReadableSubStream(RetainPtr<IFX_SeekableReadStream> pFileRead,
                     FX_FILESIZE part_offset,
                     FX_FILESIZE part_size)
-      : m_pFileRead(pFileRead),
+      : m_pFileRead(std::move(pFileRead)),
         m_PartOffset(part_offset),
         m_PartSize(part_size) {}
 
   ~ReadableSubStream() override = default;
 
   // IFX_SeekableReadStream overrides:
-  bool ReadBlockAtOffset(void* buffer,
-                         FX_FILESIZE offset,
-                         size_t size) override {
+  bool ReadBlockAtOffset(pdfium::span<uint8_t> buffer,
+                         FX_FILESIZE offset) override {
     FX_SAFE_FILESIZE safe_end = offset;
-    safe_end += size;
+    safe_end += buffer.size();
     // Check that requested range is valid, to prevent calling of ReadBlock
     // of original m_pFileRead with incorrect params.
     if (!safe_end.IsValid() || safe_end.ValueOrDie() > m_PartSize)
       return false;
 
-    return m_pFileRead->ReadBlockAtOffset(buffer, m_PartOffset + offset, size);
+    return m_pFileRead->ReadBlockAtOffset(buffer, m_PartOffset + offset);
   }
 
   FX_FILESIZE GetSize() override { return m_PartSize; }
@@ -82,17 +80,18 @@ int CPDF_SyntaxParser::s_CurrentRecursionDepth = 0;
 
 // static
 std::unique_ptr<CPDF_SyntaxParser> CPDF_SyntaxParser::CreateForTesting(
-    const RetainPtr<IFX_SeekableReadStream>& pFileAccess,
+    RetainPtr<IFX_SeekableReadStream> pFileAccess,
     FX_FILESIZE HeaderOffset) {
   return std::make_unique<CPDF_SyntaxParser>(
-      pdfium::MakeRetain<CPDF_ReadValidator>(pFileAccess, nullptr),
+      pdfium::MakeRetain<CPDF_ReadValidator>(std::move(pFileAccess), nullptr),
       HeaderOffset);
 }
 
 CPDF_SyntaxParser::CPDF_SyntaxParser(
-    const RetainPtr<IFX_SeekableReadStream>& pFileAccess)
+    RetainPtr<IFX_SeekableReadStream> pFileAccess)
     : CPDF_SyntaxParser(
-          pdfium::MakeRetain<CPDF_ReadValidator>(pFileAccess, nullptr),
+          pdfium::MakeRetain<CPDF_ReadValidator>(std::move(pFileAccess),
+                                                 nullptr),
           0) {}
 
 CPDF_SyntaxParser::CPDF_SyntaxParser(RetainPtr<CPDF_ReadValidator> validator,
@@ -121,8 +120,7 @@ bool CPDF_SyntaxParser::ReadBlockAt(FX_FILESIZE read_pos) {
     read_size = m_FileLen - read_pos;
 
   m_pFileBuf.resize(read_size);
-  if (!m_pFileAccess->ReadBlockAtOffset(m_pFileBuf.data(), read_pos,
-                                        read_size)) {
+  if (!m_pFileAccess->ReadBlockAtOffset(m_pFileBuf, read_pos)) {
     m_pFileBuf.clear();
     return false;
   }
@@ -164,10 +162,10 @@ bool CPDF_SyntaxParser::GetCharAtBackward(FX_FILESIZE pos, uint8_t* ch) {
   return true;
 }
 
-bool CPDF_SyntaxParser::ReadBlock(uint8_t* pBuf, uint32_t size) {
-  if (!m_pFileAccess->ReadBlockAtOffset(pBuf, m_Pos + m_HeaderOffset, size))
+bool CPDF_SyntaxParser::ReadBlock(pdfium::span<uint8_t> buffer) {
+  if (!m_pFileAccess->ReadBlockAtOffset(buffer, m_Pos + m_HeaderOffset))
     return false;
-  m_Pos += size;
+  m_Pos += buffer.size();
   return true;
 }
 
@@ -589,7 +587,8 @@ RetainPtr<CPDF_Object> CPDF_SyntaxParser::GetObjectBodyInternal(
       }
 
       // `key` has to be "/X" at the minimum.
-      if (key.GetLength() > 1) {
+      // `pObj` cannot be a stream, per ISO 32000-1:2008 section 7.3.8.1.
+      if (key.GetLength() > 1 && !pObj->IsStream()) {
         pDict->SetFor(key.Substr(1), std::move(pObj));
       }
     }
@@ -792,9 +791,8 @@ RetainPtr<CPDF_Stream> CPDF_SyntaxParser::ReadStream(
     // `substream` is ultimately holding references to. To avoid unexpectedly
     // changing object lifetimes by handing `substream` to `pStream`, make a
     // copy of the data here.
-    FixedUninitDataVector<uint8_t> data(substream->GetSize());
-    bool did_read = substream->ReadBlockAtOffset(data.writable_span().data(), 0,
-                                                 data.size());
+    auto data = FixedSizeDataVector<uint8_t>::Uninit(substream->GetSize());
+    bool did_read = substream->ReadBlockAtOffset(data.span(), 0);
     CHECK(did_read);
     auto data_as_stream =
         pdfium::MakeRetain<CFX_ReadOnlyVectorStream>(std::move(data));
@@ -803,8 +801,7 @@ RetainPtr<CPDF_Stream> CPDF_SyntaxParser::ReadStream(
     pStream->InitStreamFromFile(std::move(data_as_stream), std::move(pDict));
   } else {
     DCHECK(!len);
-    pStream = pdfium::MakeRetain<CPDF_Stream>(pdfium::span<const uint8_t>(),
-                                              std::move(pDict));
+    pStream = pdfium::MakeRetain<CPDF_Stream>(std::move(pDict));
   }
   const FX_FILESIZE end_stream_offset = GetPos();
   memset(m_WordBuffer, 0, kEndObjStr.GetLength() + 1);

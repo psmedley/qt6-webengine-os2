@@ -31,6 +31,7 @@ devtools_module("perf_ui") {
     "ChartViewport.ts",
     "FilmStripView.ts",
     "FlameChart.ts",
+    "Font.ts",
     "GCActionDelegate.ts",
     "LineLevelProfile.ts",
     "LiveHeapProfile.ts",
@@ -38,6 +39,7 @@ devtools_module("perf_ui") {
     "OverviewGrid.ts",
     "PieChart.ts",
     "TimelineGrid.ts",
+    "TimelineOverviewCalculator.ts",
     "TimelineOverviewPane.ts",
   ]
 
@@ -48,6 +50,7 @@ devtools_module("perf_ui") {
     "../../../../core/platform:bundle",
     "../../../../core/sdk:bundle",
     "../../../../models/bindings:bundle",
+    "../../../../models/cpu_profile:bundle",
     "../../../../models/timeline_model:bundle",
     "../../../../models/workspace:bundle",
     "../../../../ui/legacy:bundle",
@@ -73,32 +76,29 @@ devtools_entrypoint("bundle") {
 
   visibility = [
     ":*",
-    "../../../../../test/unittests/front_end/ui/legacy/components/perf_ui/*",
+    "../../../../../test/unittests/*",
     "../../../../panels/layer_viewer/*",
     "../../../../panels/media/*",
     "../../../../panels/network/*",
     "../../../../panels/profiler/*",
     "../../../../panels/timeline/*",
-
-    # TODO(crbug.com/1202788): Remove invalid dependents
     "../../../components/docs/perf_piechart/*",
+    "../../../components/docs/performance_panel/*",
   ]
 
   visibility += devtools_ui_legacy_visibility
 }
 
-devtools_entrypoint("legacy") {
-  entrypoint = "perf_ui-legacy.ts"
-
-  deps = [ ":bundle" ]
-
-  visibility = [ "../../../..:legacy_entrypoints" ]
-}
-
 devtools_entrypoint("meta") {
   entrypoint = "perf_ui-meta.ts"
 
-  deps = [ ":bundle" ]
+  deps = [
+    ":bundle",
+    "../../../../core/common:bundle",
+    "../../../../core/i18n:bundle",
+    "../../../../core/root:bundle",
+    "../../../../ui/legacy:bundle",
+  ]
 
   visibility = [ "../../../../entrypoints/*" ]
 }

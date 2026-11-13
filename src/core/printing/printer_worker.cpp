@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "printer_worker.h"
 
@@ -27,22 +28,8 @@ void PrinterWorker::print()
 
     PdfiumDocumentWrapperQt pdfiumWrapper(m_data->constData(), m_data->size());
 
-    const QPageRanges ranges = m_device->pageRanges();
-    int toPage = ranges.firstPage();
-    int fromPage = ranges.lastPage();
-    bool ascendingOrder = true;
-
-    if (fromPage == 0 && toPage == 0) {
-        fromPage = 1;
-        toPage = pdfiumWrapper.pageCount();
-    }
-    fromPage = qMax(1, fromPage);
-    toPage = qMin(pdfiumWrapper.pageCount(), toPage);
-
-    if (!m_firstPageFirst) {
-        qSwap(fromPage, toPage);
-        ascendingOrder = false;
-    }
+    const int fromPage = m_firstPageFirst ? 0 : pdfiumWrapper.pageCount() - 1;
+    const int toPage = m_firstPageFirst ? pdfiumWrapper.pageCount() : -1;
 
     int pageCopies = 1;
     if (m_collateCopies) {
@@ -58,10 +45,8 @@ void PrinterWorker::print()
         if (printedDocuments > 0)
             m_device->newPage();
 
-        int currentPageIndex = fromPage;
-
-        for (int i = 0; true; i++) {
-            QSizeF documentSize = (pdfiumWrapper.pageSize(currentPageIndex - 1) * resolution);
+        for (int i = fromPage; i != toPage; m_firstPageFirst ? i++ : i--) {
+            QSizeF documentSize = (pdfiumWrapper.pageSize(i) * resolution);
             bool isLandscape = documentSize.width() > documentSize.height();
             m_device->setPageOrientation(isLandscape ? QPageLayout::Landscape
                                                       : QPageLayout::Portrait);
@@ -77,29 +62,21 @@ void PrinterWorker::print()
                 return;
             }
 
-            if (i > 0)
+            if (i != fromPage)
                 m_device->newPage();
 
             for (int printedPages = 0; printedPages < pageCopies; printedPages++) {
                 if (printedPages > 0)
                     m_device->newPage();
 
-                QImage currentImage = pdfiumWrapper.pageAsQImage(
-                        currentPageIndex - 1, documentSize.width(), documentSize.height());
+                QImage currentImage =
+                        pdfiumWrapper.pageAsQImage(i, documentSize.width(), documentSize.height());
                 if (currentImage.isNull()) {
                     Q_EMIT resultReady(false);
                     return;
                 }
                 painter.drawImage(0, 0, currentImage);
             }
-
-            if (currentPageIndex == toPage)
-                break;
-
-            if (ascendingOrder)
-                currentPageIndex++;
-            else
-                currentPageIndex--;
         }
     }
     painter.end();

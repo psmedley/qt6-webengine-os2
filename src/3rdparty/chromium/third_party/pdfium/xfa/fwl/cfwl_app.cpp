@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,8 @@ CFWL_App::CFWL_App(AdapterIface* pAdapter)
           pAdapter->GetWidgetMgrAdapter(),
           this)),
       m_pNoteDriver(cppgc::MakeGarbageCollected<CFWL_NoteDriver>(
-          pAdapter->GetHeap()->GetAllocationHandle())) {}
+          pAdapter->GetHeap()->GetAllocationHandle(),
+          this)) {}
 
 CFWL_App::~CFWL_App() = default;
 

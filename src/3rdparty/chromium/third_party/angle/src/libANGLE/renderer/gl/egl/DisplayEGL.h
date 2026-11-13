@@ -22,7 +22,6 @@ namespace rx
 class FunctionsEGL;
 class FunctionsEGLDL;
 class RendererEGL;
-class WorkerContext;
 
 class DisplayEGL : public DisplayGL
 {
@@ -35,15 +34,11 @@ class DisplayEGL : public DisplayGL
                            EGLenum target,
                            const egl::AttributeMap &attribs) override;
 
-    EGLSyncImpl *createSync(const egl::AttributeMap &attribs) override;
+    EGLSyncImpl *createSync() override;
 
     void setBlobCacheFuncs(EGLSetBlobFuncANDROID set, EGLGetBlobFuncANDROID get) override;
 
     virtual void destroyNativeContext(EGLContext context);
-
-    virtual WorkerContext *createWorkerContext(std::string *infoLog,
-                                               EGLContext sharedContext,
-                                               const native_egl::AttributeVector workerAttribs);
 
     egl::Error initialize(egl::Display *display) override;
     void terminate() override;
@@ -106,6 +101,16 @@ class DisplayEGL : public DisplayGL
 
     const FunctionsEGL *getFunctionsEGL() const;
 
+    DeviceImpl *createDevice() override;
+
+    bool supportsDmaBufFormat(EGLint format) const override;
+    egl::Error queryDmaBufFormats(EGLint maxFormats, EGLint *formats, EGLint *numFormats) override;
+    egl::Error queryDmaBufModifiers(EGLint format,
+                                    EGLint maxModifiers,
+                                    EGLuint64KHR *modifiers,
+                                    EGLBoolean *externalOnly,
+                                    EGLint *numModifiers) override;
+
   protected:
     virtual EGLint fixSurfaceType(EGLint surfaceType) const;
 
@@ -114,8 +119,7 @@ class DisplayEGL : public DisplayGL
 
     egl::Error initializeContext(EGLContext shareContext,
                                  const egl::AttributeMap &eglAttributes,
-                                 EGLContext *outContext,
-                                 native_egl::AttributeVector *outAttribs) const;
+                                 EGLContext *outContext) const;
 
     void generateExtensions(egl::DisplayExtensions *outExtensions) const override;
 
@@ -135,6 +139,11 @@ class DisplayEGL : public DisplayGL
                                     T *value,
                                     const char *extension,
                                     const U &defaultValue) const;
+
+    egl::Error findConfig(egl::Display *display,
+                          bool forMockPbuffer,
+                          EGLConfig *outConfig,
+                          std::vector<EGLint> *outConfigAttribs);
 
     std::shared_ptr<RendererEGL> mRenderer;
     std::map<EGLAttrib, std::weak_ptr<RendererEGL>> mVirtualizationGroups;
@@ -165,6 +174,12 @@ class DisplayEGL : public DisplayGL
     bool mSupportsNoConfigContexts = false;
 
     EGLSurface mMockPbuffer = EGL_NO_SURFACE;
+
+    // Supported DRM formats
+    bool mSupportsDmaBufImportModifiers = false;
+    bool mNoOpDmaBufImportModifiers     = false;
+    std::vector<EGLint> mDrmFormats;
+    bool mDrmFormatsInitialized = false;
 };
 
 }  // namespace rx

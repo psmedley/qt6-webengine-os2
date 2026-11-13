@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import("perfetto.gni")
+import("perfetto_python.gni")
+import("pkg_config.gni")
 import("proto_library.gni")
 
 if (perfetto_root_path == "//") {
@@ -55,7 +57,10 @@ action("gen_buildflags") {
   } else {
     perfetto_watchdog = "0"
   }
-  if (enable_perfetto_tools) {
+
+  # We need local symbolization to run diff tests in chrome.
+  if (enable_perfetto_tools ||
+      (enable_perfetto_trace_processor && build_with_chromium)) {
     perfetto_local_symbolizer =
         "PERFETTO_BUILDFLAG_DEFINE_PERFETTO_OS_LINUX() || " +
         "PERFETTO_BUILDFLAG_DEFINE_PERFETTO_OS_MAC() ||" +
@@ -223,8 +228,19 @@ config("system_protoc") {
   libs = [ "protoc" ]  # This will link against libprotoc.so
 }
 
+# pkg_deps selects the appropriate pkg-config based on current_toolchain and
+# this is a no-op if |perfetto_use_pkgconfig| is false.
+pkg_config("pkgconfig_protobuf") {
+  pkg_deps = [ "protobuf" ]
+}
+
 config("system_protobuf") {
-  libs = [ "protobuf" ]  # This will link against libprotobuf.so
+  if (perfetto_use_pkgconfig) {
+    configs = [ ":pkgconfig_protobuf" ]
+  } else {
+    # Fallback if pkg-config isn't enabled.
+    libs = [ "protobuf" ]  # This will link against libprotobuf.so
+  }
 }
 
 # protoc compiler library, it's used for building protoc plugins.
@@ -274,13 +290,8 @@ config("protobuf_gen_config") {
     "GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER",
   ]
   cflags = []
-  if (is_clang || !is_win) {
-    cflags += [
-      "-Wno-unknown-warning-option",
-      "-Wno-deprecated",
-      "-Wno-undef",
-      "-Wno-zero-as-null-pointer-constant",
-    ]
+  if (!is_clang && !is_win) {
+    cflags += [ "-Wno-deprecated-declarations" ]
   }
   if (is_clang && is_win) {
     cflags += [
@@ -291,6 +302,12 @@ config("protobuf_gen_config") {
       "-Wno-undefined-reinterpret-cast",
       "-Wno-inconsistent-missing-destructor-override",
       "-Wno-unused-parameter",
+      "-Wno-shadow-field-in-constructor",
+      "-Wno-zero-as-null-pointer-constant",
+
+      # Fixed in upstream protobuf v3.22.0
+      # d37cbfd4485f("Update inlined_string_field.h"), but we don't have that.
+      "-Wno-undef",
     ]
   }
 
@@ -404,10 +421,26 @@ if (enable_perfetto_llvm_demangle) {
   }
 }
 
+# Allows overriding platform-specific functionality used by base at a
+# build-system level. This allows e.g. different implementations of base
+# functions in Google3.
+group("base_platform") {
+  public_deps = [ "../src/base:perfetto_base_default_platform" ]
+}
+
 # Used by fuzzers.
 if (enable_perfetto_fuzzers && use_libfuzzer) {
   group("libfuzzer") {
     assert(perfetto_root_path == "//")
     public_deps = [ "//buildtools:libfuzzer" ]
   }
+}
+
+# Python libraries which need to be installed on the system
+# or provided (for other build systems).
+perfetto_py_library("pandas_py") {
+}
+perfetto_py_library("tp_vendor_py") {
+}
+perfetto_py_library("protobuf_py") {
 }

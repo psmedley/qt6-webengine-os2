@@ -1,6 +1,9 @@
 #ifndef QUICHE_SPDY_CORE_HTTP2_HEADER_BLOCK_HPACK_LISTENER_H_
 #define QUICHE_SPDY_CORE_HTTP2_HEADER_BLOCK_HPACK_LISTENER_H_
 
+#include <string>
+#include <utility>
+
 #include "absl/strings/string_view.h"
 #include "quiche/http2/hpack/decoder/hpack_decoder_listener.h"
 #include "quiche/common/platform/api/quiche_export.h"
@@ -11,7 +14,7 @@ namespace spdy {
 
 // This class simply gathers the key-value pairs emitted by an HpackDecoder in
 // a Http2HeaderBlock.
-class QUICHE_EXPORT_PRIVATE Http2HeaderBlockHpackListener
+class QUICHE_EXPORT Http2HeaderBlockHpackListener
     : public http2::HpackDecoderListener {
  public:
   Http2HeaderBlockHpackListener() {}
@@ -21,7 +24,7 @@ class QUICHE_EXPORT_PRIVATE Http2HeaderBlockHpackListener
     hpack_error_ = false;
   }
 
-  void OnHeader(const std::string& name, const std::string& value) override {
+  void OnHeader(absl::string_view name, absl::string_view value) override {
     header_block_.AppendValueOrAddHeader(name, value);
   }
 

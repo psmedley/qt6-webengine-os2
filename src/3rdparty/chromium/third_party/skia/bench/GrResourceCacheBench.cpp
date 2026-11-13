@@ -23,7 +23,7 @@ class BenchResource : public GrGpuResource {
 public:
     BenchResource(GrGpu* gpu, std::string_view label)
         : INHERITED(gpu, label) {
-        this->registerWithCache(SkBudgeted::kYes);
+        this->registerWithCache(skgpu::Budgeted::kYes);
     }
 
     static void ComputeKey(int i, int keyData32Count, skgpu::UniqueKey* key) {
@@ -80,7 +80,7 @@ protected:
         GrResourceCache* cache = context->priv().getResourceCache();
 
         // Make sure the cache is empty.
-        cache->purgeUnlockedResources();
+        cache->purgeUnlockedResources(GrPurgeResourceOptions::kAllResources);
         SkASSERT(0 == cache->getResourceCount() && 0 == cache->getResourceBytes());
 
         GrGpu* gpu = context->priv().getGpu();
@@ -126,7 +126,7 @@ protected:
         GrResourceCache* cache = fContext->priv().getResourceCache();
 
         // Make sure the cache is empty.
-        cache->purgeUnlockedResources();
+        cache->purgeUnlockedResources(GrPurgeResourceOptions::kAllResources);
         SkASSERT(0 == cache->getResourceCount() && 0 == cache->getResourceBytes());
 
         GrGpu* gpu = fContext->priv().getGpu();

@@ -46,8 +46,8 @@ struct ParseFieldResult {
 
 // Parses one field and returns the field itself and a pointer to the next
 // field to parse. If parsing fails, the returned |next| == |buffer|.
-PERFETTO_ALWAYS_INLINE ParseFieldResult
-ParseOneField(const uint8_t* const buffer, const uint8_t* const end) {
+ParseFieldResult ParseOneField(const uint8_t* const buffer,
+                               const uint8_t* const end) {
   ParseFieldResult res{ParseFieldResult::kAbort, buffer, Field{}};
 
   // The first byte of a proto field is structured as follows:
@@ -135,9 +135,9 @@ ParseOneField(const uint8_t* const buffer, const uint8_t* const end) {
 
   res.next = new_pos;
 
-  if (PERFETTO_UNLIKELY(field_id > std::numeric_limits<uint16_t>::max())) {
-    PERFETTO_DLOG("Skipping field %" PRIu32 " because its id > 0xFFFF",
-                  field_id);
+  if (PERFETTO_UNLIKELY(field_id > Field::kMaxId)) {
+    PERFETTO_DLOG("Skipping field %" PRIu32 " because its id > %" PRIu32,
+                  field_id, Field::kMaxId);
     res.parse_res = ParseFieldResult::kSkip;
     return res;
   }
@@ -151,7 +151,7 @@ ParseOneField(const uint8_t* const buffer, const uint8_t* const end) {
   }
 
   res.parse_res = ParseFieldResult::kOk;
-  res.field.initialize(static_cast<uint16_t>(field_id), field_type, int_value,
+  res.field.initialize(field_id, field_type, int_value,
                        static_cast<uint32_t>(size));
   return res;
 }
@@ -172,7 +172,6 @@ Field ProtoDecoder::FindField(uint32_t field_id) {
   return res;
 }
 
-PERFETTO_ALWAYS_INLINE
 Field ProtoDecoder::ReadField() {
   ParseFieldResult res;
   do {

@@ -79,9 +79,10 @@ static void dec_setup_mi(CommonModeInfoParams *mi_params) {
 static void dec_free_mi(CommonModeInfoParams *mi_params) {
   aom_free(mi_params->mi_alloc);
   mi_params->mi_alloc = NULL;
+  mi_params->mi_alloc_size = 0;
   aom_free(mi_params->mi_grid_base);
   mi_params->mi_grid_base = NULL;
-  mi_params->mi_alloc_size = 0;
+  mi_params->mi_grid_size = 0;
   aom_free(mi_params->tx_type_map);
   mi_params->tx_type_map = NULL;
 }
@@ -183,10 +184,12 @@ void av1_decoder_remove(AV1Decoder *pbi) {
   aom_free(pbi->lf_worker.data1);
 
   if (pbi->thread_data) {
-    for (int worker_idx = 1; worker_idx < pbi->max_threads; worker_idx++) {
+    for (int worker_idx = 1; worker_idx < pbi->num_workers; worker_idx++) {
       DecWorkerData *const thread_data = pbi->thread_data + worker_idx;
-      av1_free_mc_tmp_buf(thread_data->td);
-      aom_free(thread_data->td);
+      if (thread_data->td != NULL) {
+        av1_free_mc_tmp_buf(thread_data->td);
+        aom_free(thread_data->td);
+      }
     }
     aom_free(pbi->thread_data);
   }
@@ -215,7 +218,7 @@ void av1_decoder_remove(AV1Decoder *pbi) {
 
   if (pbi->num_workers > 0) {
     av1_loop_filter_dealloc(&pbi->lf_row_sync);
-    av1_loop_restoration_dealloc(&pbi->lr_row_sync, pbi->num_workers);
+    av1_loop_restoration_dealloc(&pbi->lr_row_sync);
     av1_dealloc_dec_jobs(&pbi->tile_mt_info);
   }
 
@@ -225,6 +228,7 @@ void av1_decoder_remove(AV1Decoder *pbi) {
 #endif
   av1_free_mc_tmp_buf(&pbi->td);
   aom_img_metadata_array_free(pbi->metadata);
+  av1_remove_common(&pbi->common);
   aom_free(pbi);
 }
 

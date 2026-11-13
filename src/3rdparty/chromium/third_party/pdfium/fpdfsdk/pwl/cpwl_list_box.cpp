@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -194,9 +194,10 @@ void CPWL_ListBox::ScrollWindowVertically(float pos) {
   m_pListCtrl->SetScrollPos(CFX_PointF(0, pos));
 }
 
-bool CPWL_ListBox::RePosChildWnd() {
-  if (!CPWL_Wnd::RePosChildWnd())
+bool CPWL_ListBox::RepositionChildWnd() {
+  if (!CPWL_Wnd::RepositionChildWnd()) {
     return false;
+  }
 
   m_pListCtrl->SetPlateRect(GetListRect());
   return true;
@@ -204,22 +205,21 @@ bool CPWL_ListBox::RePosChildWnd() {
 
 bool CPWL_ListBox::OnNotifySelectionChanged(bool bKeyDown,
                                             Mask<FWL_EVENTFLAG> nFlag) {
-  ObservedPtr<CPWL_Wnd> thisObserved(this);
+  ObservedPtr<CPWL_Wnd> this_observed(this);
 
   WideString swChange = GetText();
   WideString strChangeEx;
   int nSelStart = 0;
   int nSelEnd = pdfium::base::checked_cast<int>(swChange.GetLength());
-  bool bRC;
-  bool bExit;
-  std::tie(bRC, bExit) = GetFillerNotify()->OnBeforeKeyStroke(
-      GetAttachedData(), swChange, strChangeEx, nSelStart, nSelEnd, bKeyDown,
-      nFlag);
+  IPWL_FillerNotify::BeforeKeystrokeResult result =
+      GetFillerNotify()->OnBeforeKeyStroke(GetAttachedData(), swChange,
+                                           strChangeEx, nSelStart, nSelEnd,
+                                           bKeyDown, nFlag);
 
-  if (!thisObserved)
+  if (!this_observed) {
     return false;
-
-  return bExit;
+  }
+  return result.exit;
 }
 
 CFX_FloatRect CPWL_ListBox::GetFocusRect() const {
@@ -270,15 +270,13 @@ void CPWL_ListBox::OnSetScrollInfoY(float fPlateMin,
                           Info.fContentMax - Info.fContentMin) ||
       FXSYS_IsFloatEqual(Info.fPlateWidth,
                          Info.fContentMax - Info.fContentMin)) {
-    if (pScroll->IsVisible()) {
-      pScroll->SetVisible(false);
-      RePosChildWnd();
+    if (pScroll->IsVisible() && pScroll->SetVisible(false)) {
+      RepositionChildWnd();
     }
-  } else {
-    if (!pScroll->IsVisible()) {
-      pScroll->SetVisible(true);
-      RePosChildWnd();
-    }
+    return;
+  }
+  if (!pScroll->IsVisible() && pScroll->SetVisible(true)) {
+    RepositionChildWnd();
   }
 }
 
@@ -286,8 +284,8 @@ void CPWL_ListBox::OnSetScrollPosY(float fy) {
   SetScrollPosition(fy);
 }
 
-void CPWL_ListBox::OnInvalidateRect(const CFX_FloatRect& rect) {
-  InvalidateRect(&rect);
+bool CPWL_ListBox::OnInvalidateRect(const CFX_FloatRect& rect) {
+  return InvalidateRect(&rect);
 }
 
 void CPWL_ListBox::Select(int32_t nItemIndex) {

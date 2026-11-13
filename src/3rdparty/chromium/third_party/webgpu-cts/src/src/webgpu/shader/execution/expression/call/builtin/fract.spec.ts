@@ -10,12 +10,11 @@ Component-wise when T is a vector.
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { TypeF32 } from '../../../../../util/conversion.js';
-import { fractInterval } from '../../../../../util/f32_interval.js';
-import { fullF32Range } from '../../../../../util/math.js';
-import { allInputSources, Case, makeUnaryToF32IntervalCase, run } from '../../expression.js';
+import { TypeF16, TypeF32 } from '../../../../../util/conversion.js';
+import { allInputSources, run } from '../../expression.js';
 
 import { builtin } from './builtin.js';
+import { d } from './fract.cache.js';
 
 export const g = makeTestGroup(GPUTest);
 
@@ -34,28 +33,7 @@ g.test('f32')
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    const makeCase = (x: number): Case => {
-      return makeUnaryToF32IntervalCase(x, fractInterval);
-    };
-
-    const cases: Array<Case> = [
-      0.5, // 0.5 -> 0.5
-      0.9, // ~0.9 -> ~0.9
-      1, // 1 -> 0
-      2, // 2 -> 0
-      1.11, // ~1.11 -> ~0.11
-      10.0001, // ~10.0001 -> ~0.0001
-      -0.1, // ~-0.1 -> ~0.9
-      -0.5, // -0.5 -> 0.5
-      -0.9, // ~-0.9 -> ~0.1
-      -1, // -1 -> 0
-      -2, // -2 -> 0
-      -1.11, // ~-1.11 -> ~0.89
-      -10.0001, // -10.0001 -> ~0.9999
-      ...fullF32Range(),
-    ].map(makeCase);
-
-    // prettier-ignore
+    const cases = await d.get('f32');
     await run(t, builtin('fract'), [TypeF32], TypeF32, t.params, cases);
   });
 
@@ -65,4 +43,10 @@ g.test('f16')
   .params(u =>
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
-  .unimplemented();
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get('f16');
+    await run(t, builtin('fract'), [TypeF16], TypeF16, t.params, cases);
+  });

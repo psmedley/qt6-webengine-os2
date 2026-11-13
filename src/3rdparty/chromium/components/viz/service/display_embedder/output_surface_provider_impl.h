@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/service/display_embedder/output_surface_provider.h"
@@ -26,7 +27,6 @@ class SoftwareOutputDevice;
 
 #if defined(TOOLKIT_QT)
 class OutputSurface;
-class VizProcessContextProvider;
 #endif
 
 // In-process implementation of OutputSurfaceProvider.
@@ -55,6 +55,9 @@ class VIZ_SERVICE_EXPORT OutputSurfaceProviderImpl
       DisplayCompositorMemoryAndTaskController* gpu_dependency,
       const RendererSettings& renderer_settings,
       const DebugRendererSettings* debug_settings) override;
+
+  gpu::SharedImageManager* GetSharedImageManager() override;
+  gpu::SyncPointManager* GetSyncPointManager() override;
 
  private:
 #if defined(TOOLKIT_QT)

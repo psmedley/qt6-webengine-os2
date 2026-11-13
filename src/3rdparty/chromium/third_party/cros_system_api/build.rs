@@ -26,11 +26,6 @@ const OPTS: Option<&[&str]> = None;
 // ebuild. Otherwise, the source files will not be accessible when building dev-rust/system_api.
 const BINDINGS_TO_GENERATE: &[(&str, &str, BindingsType)] = &[
     (
-        "org_chromium_authpolicy",
-        "authpolicy/dbus_bindings/org.chromium.AuthPolicy.xml",
-        BindingsType::Client(OPTS),
-    ),
-    (
         "org_chromium_debugd",
         "debugd/dbus_bindings/org.chromium.debugd.xml",
         BindingsType::Client(OPTS),
@@ -56,13 +51,33 @@ const BINDINGS_TO_GENERATE: &[(&str, &str, BindingsType)] = &[
         BindingsType::Client(OPTS),
     ),
     (
+        "org_chromium_printscanmgr",
+        "printscanmgr/dbus_bindings/org.chromium.printscanmgr.xml",
+        BindingsType::Client(OPTS),
+    ),
+    (
         "org_chromium_sessionmanagerinterface",
         "login_manager/dbus_bindings/org.chromium.SessionManagerInterface.xml",
         BindingsType::Client(OPTS),
     ),
     (
+        "org_chromium_spaced",
+        "spaced/dbus_bindings/org.chromium.Spaced.xml",
+        BindingsType::Client(OPTS),
+    ),
+    (
+        "org_chromium_swapmanagement",
+        "swap_management/dbus_bindings/org.chromium.SwapManagement.xml",
+        BindingsType::Client(OPTS),
+    ),
+    (
         "org_chromium_userdataauth",
         "cryptohome/dbus_bindings/org.chromium.UserDataAuth.xml",
+        BindingsType::Client(OPTS),
+    ),
+    (
+        "org_chromium_vm_concierge",
+        "vm_tools/dbus_bindings/org.chromium.VmConcierge.xml",
         BindingsType::Client(OPTS),
     ),
     (
@@ -82,22 +97,47 @@ const PROTOS_TO_GENERATE: &[(&str, &str)] = &[
         "system_api/dbus/cryptohome/auth_factor.proto",
     ),
     (
+        "battery_saver",
+        "system_api/dbus/power_manager/battery_saver.proto",
+    ),
+    (
         "concierge_service",
         "system_api/dbus/vm_concierge/concierge_service.proto",
     ),
     ("dlcservice", "system_api/dbus/dlcservice/dlcservice.proto"),
     ("fido", "system_api/dbus/cryptohome/fido.proto"),
     ("key", "system_api/dbus/cryptohome/key.proto"),
+    (
+        "printscanmgr_service",
+        "system_api/dbus/printscanmgr/printscanmgr_service.proto",
+    ),
+    (
+        "recoverable_key_store",
+        "system_api/dbus/cryptohome/recoverable_key_store.proto",
+    ),
+    (
+        "resource_manager",
+        "system_api/dbus/resource_manager/resource_manager.proto",
+    ),
     ("rpc", "system_api/dbus/cryptohome/rpc.proto"),
     (
         "shadercached",
         "system_api/dbus/shadercached/shadercached.proto",
     ),
+    ("spaced", "system_api/dbus/spaced/spaced.proto"),
     (
         "UserDataAuth",
         "system_api/dbus/cryptohome/UserDataAuth.proto",
     ),
+    (
+        "vm_memory_management",
+        "system_api/non_standard_ipc/vm_memory_management/vm_memory_management.proto",
+    ),
     ("vtpm_interface", "vtpm/vtpm_interface.proto"),
+    (
+        "update_engine",
+        "system_api/dbus/update_engine/update_engine.proto",
+    ),
 ];
 
 fn generate_protos(source_dir: &Path, protos: &[(&str, &str)]) -> Result<()> {
@@ -119,7 +159,7 @@ fn generate_protos(source_dir: &Path, protos: &[(&str, &str)]) -> Result<()> {
         let parent_input_dir = source_dir.join("system_api/dbus");
 
         // Invoke protobuf compiler.
-        protoc_rust::Codegen::new()
+        protobuf_codegen::Codegen::new()
             .input(input_path.as_os_str().to_str().unwrap())
             .include(input_dir.as_os_str().to_str().unwrap())
             .include(parent_input_dir)
@@ -134,6 +174,11 @@ fn generate_protos(source_dir: &Path, protos: &[(&str, &str)]) -> Result<()> {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=dbus");
+    for (_, directory, _) in BINDINGS_TO_GENERATE {
+        println!("cargo:rerun-if-changed=../{}", directory);
+    }
     generate_module(Path::new(SOURCE_DIR), BINDINGS_TO_GENERATE).unwrap();
     generate_protos(Path::new(SOURCE_DIR), PROTOS_TO_GENERATE).unwrap();
 }

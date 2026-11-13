@@ -9,14 +9,13 @@
 #define SkCanvasStack_DEFINED
 
 #include "include/core/SkCanvas.h"
-#include "include/core/SkClipOp.h"
 #include "include/core/SkM44.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkRegion.h"
 #include "include/core/SkTypes.h"
-#include "include/private/SkTArray.h"
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTypeTraits.h"
 #include "include/utils/SkNWayCanvas.h"
 
 #include <memory>
@@ -25,6 +24,7 @@
 class SkPath;
 class SkRRect;
 class SkShader;
+enum class SkClipOp;
 struct SkRect;
 
 /**
@@ -74,7 +74,7 @@ private:
         using sk_is_trivially_relocatable = std::true_type;
     };
 
-    SkTArray<CanvasData> fCanvasData;
+    skia_private::TArray<CanvasData> fCanvasData;
 
     using INHERITED = SkNWayCanvas;
 };

@@ -4,10 +4,13 @@
 
 #include "net/cert/x509_util_win.h"
 
+#include <string_view>
+
 #include "base/logging.h"
 #include "crypto/scoped_capi_types.h"
 #include "crypto/sha2.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "net/net_buildflags.h"
 #include "third_party/boringssl/src/include/openssl/pool.h"
 
@@ -27,27 +30,20 @@ scoped_refptr<X509Certificate> CreateX509CertificateFromCertContexts(
     X509Certificate::UnsafeCreateOptions options) {
   if (!os_cert || !os_cert->pbCertEncoded || !os_cert->cbCertEncoded)
     return nullptr;
-  bssl::UniquePtr<CRYPTO_BUFFER> cert_handle(
-      X509Certificate::CreateCertBufferFromBytes(
-          base::make_span(os_cert->pbCertEncoded, os_cert->cbCertEncoded)));
-  if (!cert_handle)
-    return nullptr;
+  bssl::UniquePtr<CRYPTO_BUFFER> cert_handle(x509_util::CreateCryptoBuffer(
+      base::make_span(os_cert->pbCertEncoded, os_cert->cbCertEncoded)));
+
   std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
   for (PCCERT_CONTEXT os_intermediate : os_chain) {
     if (!os_intermediate || !os_intermediate->pbCertEncoded ||
         !os_intermediate->cbCertEncoded)
       return nullptr;
-    bssl::UniquePtr<CRYPTO_BUFFER> intermediate_cert_handle(
-        X509Certificate::CreateCertBufferFromBytes(base::make_span(
-            os_intermediate->pbCertEncoded, os_intermediate->cbCertEncoded)));
-    if (!intermediate_cert_handle)
-      return nullptr;
-    intermediates.push_back(std::move(intermediate_cert_handle));
+    intermediates.push_back(x509_util::CreateCryptoBuffer(base::make_span(
+        os_intermediate->pbCertEncoded, os_intermediate->cbCertEncoded)));
   }
-  scoped_refptr<X509Certificate> result(
-      X509Certificate::CreateFromBufferUnsafeOptions(
-          std::move(cert_handle), std::move(intermediates), options));
-  return result;
+
+  return X509Certificate::CreateFromBufferUnsafeOptions(
+      std::move(cert_handle), std::move(intermediates), options);
 }
 
 crypto::ScopedPCCERT_CONTEXT CreateCertContextWithChain(
@@ -104,8 +100,8 @@ SHA256HashValue CalculateFingerprint256(PCCERT_CONTEXT cert) {
   // * < Windows Vista does not have universal SHA-256 support.
   // * More efficient on Windows > Vista (less overhead since non-default CSP
   // is not needed).
-  base::StringPiece der_cert(reinterpret_cast<const char*>(cert->pbCertEncoded),
-                             cert->cbCertEncoded);
+  std::string_view der_cert(reinterpret_cast<const char*>(cert->pbCertEncoded),
+                            cert->cbCertEncoded);
   crypto::SHA256HashString(der_cert, sha256.data, sizeof(sha256.data));
   return sha256;
 }

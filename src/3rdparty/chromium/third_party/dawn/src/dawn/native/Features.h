@@ -1,58 +1,55 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_FEATURES_H_
 #define SRC_DAWN_NATIVE_FEATURES_H_
 
 #include <bitset>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "dawn/common/ityp_bitset.h"
 #include "dawn/native/DawnNative.h"
+#include "dawn/native/Features_autogen.h"
 #include "dawn/webgpu_cpp.h"
 
 namespace dawn::native {
 
-enum class Feature {
-    TextureCompressionBC,
-    TextureCompressionETC2,
-    TextureCompressionASTC,
-    PipelineStatisticsQuery,
-    TimestampQuery,
-    DepthClipControl,
-    Depth32FloatStencil8,
-    ChromiumExperimentalDp4a,
-    IndirectFirstInstance,
-    ShaderF16,
-    RG11B10UfloatRenderable,
+enum class FeatureLevel { Compatibility, Core };
 
-    // Dawn-specific
-    DawnInternalUsages,
-    MultiPlanarFormats,
-    DawnNative,
+extern const ityp::array<Feature, FeatureInfo, kEnumCount<Feature>> kFeatureNameAndInfoList;
 
-    EnumCount,
-    InvalidEnum = EnumCount,
-    FeatureMin = TextureCompressionBC,
-};
+wgpu::FeatureName ToAPI(Feature feature);
+Feature FromAPI(wgpu::FeatureName feature);
 
 // A wrapper of the bitset to store if an feature is enabled or not. This wrapper provides the
 // convenience to convert the enums of enum class Feature to the indices of a bitset.
 struct FeaturesSet {
-    std::bitset<static_cast<size_t>(Feature::EnumCount)> featuresBitSet;
+    ityp::bitset<Feature, kEnumCount<Feature>> featuresBitSet;
 
     void EnableFeature(Feature feature);
     void EnableFeature(wgpu::FeatureName feature);
@@ -62,23 +59,6 @@ struct FeaturesSet {
     // non-null.
     size_t EnumerateFeatures(wgpu::FeatureName* features) const;
     std::vector<const char*> GetEnabledFeatureNames() const;
-};
-
-wgpu::FeatureName FeatureEnumToAPIFeature(Feature feature);
-
-class FeaturesInfo {
-  public:
-    FeaturesInfo();
-    ~FeaturesInfo();
-
-    // Used to query the details of an feature. Return nullptr if featureName is not a valid
-    // name of an feature supported in Dawn
-    const FeatureInfo* GetFeatureInfo(wgpu::FeatureName feature) const;
-    Feature FeatureNameToEnum(const char* featureName) const;
-    wgpu::FeatureName FeatureNameToAPIEnum(const char* featureName) const;
-
-  private:
-    std::unordered_map<std::string, Feature> mFeatureNameToEnumMap;
 };
 
 }  // namespace dawn::native

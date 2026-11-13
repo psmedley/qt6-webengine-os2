@@ -13,17 +13,17 @@
 // limitations under the License.
 
 import {Draft, produce} from 'immer';
-import * as m from 'mithril';
+import m from 'mithril';
 
+import {copyToClipboard} from '../base/clipboard';
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {RecordConfig} from '../controller/record_config_types';
 
-import {copyToClipboard} from './clipboard';
 import {globals} from './globals';
 
-declare type Setter<T> = (draft: Draft<RecordConfig>, val: T) => void;
-declare type Getter<T> = (cfg: RecordConfig) => T;
+export declare type Setter<T> = (draft: Draft<RecordConfig>, val: T) => void;
+export declare type Getter<T> = (cfg: RecordConfig) => T;
 
 function defaultSort(a: string, b: string) {
   return a.localeCompare(b);
@@ -187,6 +187,7 @@ export class Slider implements m.ClassComponent<SliderAttrs> {
     const id = attrs.title.replace(/[^a-z0-9]/gmi, '_').toLowerCase();
     const maxIdx = attrs.values.length - 1;
     const val = attrs.get(globals.state.recordConfig);
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     let min = attrs.min || 1;
     if (attrs.zeroIsDefault) {
       min = Math.min(0, min);
@@ -363,11 +364,14 @@ export class CodeSnippet implements m.ClassComponent<CodeSnippetAttrs> {
 }
 
 
-interface CategoriesCheckboxListParams {
-  categories: Map<string, string>;
-  title: string;
+export interface CategoryGetter {
   get: Getter<string[]>;
   set: Setter<string[]>;
+}
+
+type CategoriesCheckboxListParams = CategoryGetter&{
+  categories: Map<string, string>;
+  title: string;
 }
 
 export class CategoriesCheckboxList implements

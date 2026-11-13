@@ -15,6 +15,7 @@
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -34,6 +35,10 @@
 #include "sandbox/linux/system_headers/linux_ptrace.h"
 #include "sandbox/linux/system_headers/linux_syscalls.h"
 #include "sandbox/linux/system_headers/linux_time.h"
+
+#if !defined(MAP_DROPPABLE)
+#define MAP_DROPPABLE	0x08    // Zero memory under memory pressure.
+#endif
 
 #if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) && \
     !defined(__arm__) && !defined(__aarch64__) &&             \
@@ -116,8 +121,6 @@ inline bool IsBuggyGlibcSemPost() {
 
 }  // namespace.
 
-#define CASES SANDBOX_BPF_DSL_CASES
-
 using sandbox::bpf_dsl::Allow;
 using sandbox::bpf_dsl::Arg;
 using sandbox::bpf_dsl::BoolExpr;
@@ -169,12 +172,25 @@ ResultExpr RestrictCloneToThreadsAndEPERMFork() {
 ResultExpr RestrictPrctl() {
   // Will need to add seccomp compositing in the future. PR_SET_PTRACER is
   // used by breakpad but not needed anymore.
-  const Arg<int> option(0);
+  const Arg<int> option(0), arg(1);
   return Switch(option)
-      .CASES((PR_GET_NAME, PR_SET_NAME, PR_GET_DUMPABLE, PR_SET_DUMPABLE
+      .Cases({PR_GET_NAME, PR_SET_NAME, PR_GET_DUMPABLE, PR_SET_DUMPABLE
 #if BUILDFLAG(IS_ANDROID)
-              , PR_SET_VMA, PR_SET_PTRACER, PR_SET_TIMERSLACK
-              , PR_GET_NO_NEW_PRIVS, PR_PAC_RESET_KEYS
+              , PR_SET_PTRACER, PR_SET_TIMERSLACK
+              , PR_GET_NO_NEW_PRIVS
+#if defined(ARCH_CPU_ARM64)
+                ,
+                PR_PAC_RESET_KEYS
+                // PR_GET_TAGGED_ADDR_CTRL is used by debuggerd to report
+                // whether memory tagging is active.
+                ,
+                PR_GET_TAGGED_ADDR_CTRL
+                // PR_PAC_GET_ENABLED_KEYS is used by debuggerd to report
+                // whether pointer authentication is enabled and which keys (A
+                // or B) are active.
+                ,
+                PR_PAC_GET_ENABLED_KEYS
+#endif
 
 // Enable PR_SET_TIMERSLACK_PID, an Android custom prctl which is used in:
 // https://android.googlesource.com/platform/system/core/+/lollipop-release/libcutils/sched_policy.c.
@@ -203,27 +219,32 @@ ResultExpr RestrictPrctl() {
               , PR_SET_TIMERSLACK_PID_2
               , PR_SET_TIMERSLACK_PID_3
 #endif  // BUILDFLAG(IS_ANDROID)
-              ),
+              },
              Allow())
+      .Cases({PR_SET_VMA},
+             If(arg == PR_SET_VMA_ANON_NAME, Allow()).Else(CrashSIGSYSPrctl()))
       .Default(
           If(option == PR_SET_PTRACER, Error(EPERM)).Else(CrashSIGSYSPrctl()));
 }
 
 ResultExpr RestrictIoctl() {
   const Arg<int> request(1);
-  return Switch(request).CASES((TCGETS, FIONREAD), Allow()).Default(
+  return Switch(request).Cases({TCGETS, FIONREAD}, Allow()).Default(
       CrashSIGSYSIoctl());
 }
 
 ResultExpr RestrictMmapFlags() {
-  // The flags you see are actually the allowed ones, and the variable is a
-  // "denied" mask because of the negation operator.
-  // Significantly, we don't permit MAP_HUGETLB, or the newer flags such as
-  // MAP_POPULATE.
+#if BUILDFLAG(IS_ANDROID) && defined(__x86_64__)
+  const uint64_t kArchSpecificAllowedMask = MAP_32BIT;
+#else
+  const uint64_t kArchSpecificAllowedMask = 0;
+#endif
+  // The flags MAP_HUGETLB and MAP_POPULATE are specifically not permitted.
   // TODO(davidung), remove MAP_DENYWRITE with updated Tegra libraries.
   const uint64_t kAllowedMask = MAP_SHARED | MAP_PRIVATE | MAP_ANONYMOUS |
                                 MAP_STACK | MAP_NORESERVE | MAP_FIXED |
-                                MAP_DENYWRITE | MAP_LOCKED;
+                                MAP_DENYWRITE | MAP_LOCKED | MAP_DROPPABLE |
+                                kArchSpecificAllowedMask;
   const Arg<int> flags(3);
   return If((flags & ~kAllowedMask) == 0, Allow()).Else(CrashSIGSYS());
 }
@@ -270,7 +291,7 @@ ResultExpr RestrictFcntlCommands() {
                                  kOsSpecificSeals;
   // clang-format off
   return Switch(cmd)
-      .CASES((F_GETFL,
+      .Cases({F_GETFL,
               F_GETFD,
               F_GET_SEALS,
               F_SETFD,
@@ -278,7 +299,7 @@ ResultExpr RestrictFcntlCommands() {
               F_SETLKW,
               F_GETLK,
               F_DUPFD,
-              F_DUPFD_CLOEXEC),
+              F_DUPFD_CLOEXEC},
              Allow())
       .Case(F_SETFL,
             If((long_arg & ~kAllowedMask) == 0, Allow()).Else(CrashSIGSYS()))
@@ -296,14 +317,14 @@ ResultExpr RestrictSocketcallCommand() {
   // worried about, socket(2), remains blocked.
   const Arg<int> call(0);
   return Switch(call)
-      .CASES((SYS_SOCKETPAIR,
+      .Cases({SYS_SOCKETPAIR,
               SYS_SHUTDOWN,
               SYS_RECV,
               SYS_SEND,
               SYS_RECVFROM,
               SYS_SENDTO,
               SYS_RECVMSG,
-              SYS_SENDMSG),
+              SYS_SENDMSG},
              Allow())
       .Default(Error(EPERM));
 }
@@ -328,13 +349,13 @@ ResultExpr RestrictFutex() {
   const uint64_t kAllowedFutexFlags = FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME;
   const Arg<int> op(1);
   return Switch(op & ~kAllowedFutexFlags)
-      .CASES((FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE, FUTEX_CMP_REQUEUE,
+      .Cases({FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE, FUTEX_CMP_REQUEUE,
 #if BUILDFLAG(ENABLE_MUTEX_PRIORITY_INHERITANCE)
               // Enable priority-inheritance operations.
               FUTEX_LOCK_PI, FUTEX_UNLOCK_PI, FUTEX_TRYLOCK_PI,
               FUTEX_WAIT_REQUEUE_PI, FUTEX_CMP_REQUEUE_PI,
 #endif  // BUILDFLAG(ENABLE_MUTEX_PRIORITY_INHERITANCE)
-              FUTEX_WAKE_OP, FUTEX_WAIT_BITSET, FUTEX_WAKE_BITSET),
+              FUTEX_WAKE_OP, FUTEX_WAIT_BITSET, FUTEX_WAKE_BITSET},
              Allow())
       .Default(IsBuggyGlibcSemPost() ? Error(EINVAL) : CrashSIGSYSFutex());
 }
@@ -343,7 +364,7 @@ ResultExpr RestrictGetSetpriority(pid_t target_pid) {
   const Arg<int> which(0);
   const Arg<int> who(1);
   return If(which == PRIO_PROCESS,
-            Switch(who).CASES((0, target_pid), Allow()).Default(Error(EPERM)))
+            Switch(who).Cases({0, target_pid}, Allow()).Default(Error(EPERM)))
       .Else(CrashSIGSYS());
 }
 
@@ -364,7 +385,7 @@ ResultExpr RestrictSchedTarget(pid_t target_pid, int sysno) {
     case __NR_sched_setscheduler: {
       const Arg<pid_t> pid(0);
       return Switch(pid)
-          .CASES((0, target_pid), Allow())
+          .Cases({0, target_pid}, Allow())
           .Default(RewriteSchedSIGSYS());
     }
     default:
@@ -375,7 +396,7 @@ ResultExpr RestrictSchedTarget(pid_t target_pid, int sysno) {
 
 ResultExpr RestrictPrlimit64(pid_t target_pid) {
   const Arg<pid_t> pid(0);
-  return Switch(pid).CASES((0, target_pid), Allow()).Default(CrashSIGSYS());
+  return Switch(pid).Cases({0, target_pid}, Allow()).Default(CrashSIGSYS());
 }
 
 ResultExpr RestrictGetrusage() {
@@ -393,7 +414,7 @@ ResultExpr RestrictClockID() {
 
   return
     If((clockid & kIsPidBit) == 0,
-      Switch(clockid).CASES((
+      Switch(clockid).Cases({
               CLOCK_BOOTTIME,
               CLOCK_MONOTONIC,
               CLOCK_MONOTONIC_COARSE,
@@ -401,7 +422,7 @@ ResultExpr RestrictClockID() {
               CLOCK_PROCESS_CPUTIME_ID,
               CLOCK_REALTIME,
               CLOCK_REALTIME_COARSE,
-              CLOCK_THREAD_CPUTIME_ID),
+              CLOCK_THREAD_CPUTIME_ID},
              Allow())
       .Default(CrashSIGSYS()))
 #if BUILDFLAG(IS_ANDROID)
@@ -415,9 +436,13 @@ ResultExpr RestrictClockID() {
 #define GRND_NONBLOCK 1
 #endif
 
+#if !defined(GRND_INSECURE)
+#define GRND_INSECURE 4
+#endif
+
 ResultExpr RestrictGetRandom() {
   const Arg<unsigned int> flags(2);
-  const unsigned int kGoodFlags = GRND_NONBLOCK;
+  const unsigned int kGoodFlags = GRND_NONBLOCK | GRND_INSECURE;
   return If((flags & ~kGoodFlags) == 0, Allow()).Else(CrashSIGSYS());
 }
 
@@ -442,7 +467,7 @@ ResultExpr RestrictPtrace() {
   const Arg<uintptr_t> addr(2);
 #endif
   return Switch(request)
-      .CASES((
+      .Cases({
 #if !defined(__aarch64__)
                  PTRACE_GETREGS, PTRACE_GETFPREGS, PTRACE_GET_THREAD_AREA,
                  PTRACE_GETREGSET,
@@ -450,7 +475,7 @@ ResultExpr RestrictPtrace() {
 #if defined(__arm__)
                  PTRACE_GETVFPREGS,
 #endif
-                 PTRACE_PEEKDATA, PTRACE_ATTACH, PTRACE_DETACH),
+                 PTRACE_PEEKDATA, PTRACE_ATTACH, PTRACE_DETACH},
              Allow())
 #if defined(__aarch64__)
       .Case(
@@ -471,6 +496,44 @@ ResultExpr RestrictGoogle3Threading(int sysno) {
 
   const Arg<int> which(0);
   return If(which == ITIMER_PROF, Allow()).Else(Error(EPERM));
+}
+
+ResultExpr RestrictPipe2() {
+  const Arg<int> flags(1);
+  return If((flags & ~(O_CLOEXEC|O_DIRECT|O_NONBLOCK)) == 0, Allow())
+      .Else(CrashSIGSYS());
+}
+
+SANDBOX_EXPORT bpf_dsl::ResultExpr RestrictSockSendFlags(int sysno) {
+  size_t argIndex;
+  switch (sysno) {
+#if defined(__arm__) || \
+    (defined(ARCH_CPU_MIPS_FAMILY) && defined(ARCH_CPU_32_BITS))
+    case __NR_send:
+      argIndex = 3;
+      break;
+#endif
+#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || \
+    defined(__mips__) || defined(__aarch64__)
+    case __NR_sendto:  // Could specify destination.
+      argIndex = 3;
+      break;
+    case __NR_sendmsg:  // Could specify destination.
+      argIndex = 2;
+      break;
+#endif
+    case __NR_sendmmsg:  // Could specify destination.
+      argIndex = 3;
+      break;
+    default:
+      NOTREACHED();
+  }
+
+  // In particular, does not include MSG_OOB due to its history of security
+  // vulnerabilities, see crbug.com/428177287.
+  const Arg<int> flags(argIndex);
+  return If((flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) == 0, Allow())
+      .Else(CrashSIGSYS());
 }
 
 }  // namespace sandbox.

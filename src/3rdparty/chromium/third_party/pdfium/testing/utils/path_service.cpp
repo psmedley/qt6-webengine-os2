@@ -1,4 +1,4 @@
-// Copyright 2015 PDFium Authors. All rights reserved.
+// Copyright 2015 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -157,15 +157,17 @@ bool PathService::GetTestDataDir(std::string* path) {
 }
 
 // static
-bool PathService::GetTestFilePath(const std::string& file_name,
-                                  std::string* path) {
-  if (!GetTestDataDir(path))
-    return false;
+std::string PathService::GetTestFilePath(const std::string& file_name) {
+  std::string path;
+  if (!GetTestDataDir(&path)) {
+    return std::string();
+  }
 
-  if (!EndsWithSeparator(*path))
-    path->push_back(PATH_SEPARATOR);
-  path->append(file_name);
-  return true;
+  if (!EndsWithSeparator(path)) {
+    path.push_back(PATH_SEPARATOR);
+  }
+  path.append(file_name);
+  return path;
 }
 
 // static

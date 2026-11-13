@@ -1,5 +1,5 @@
 // Copyright (C) 2022 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
@@ -17,6 +17,11 @@ Window {
         id: doc
         source: "test.pdf"
         onPasswordRequired: function() { passwordDialog.open() }
+    }
+
+    Component.onCompleted: {
+        if (Application.arguments.length > 2)
+            doc.source = Application.arguments[Application.arguments.length - 1]
     }
 
     FileDialog {
@@ -85,6 +90,7 @@ Window {
                 PdfPageImage {
                     id: image
                     document: doc
+                    retainWhileLoading: true
 
                     property real zoomFactor: Math.sqrt(2)
 
@@ -118,6 +124,10 @@ Window {
                             image.sourceSize.width = image.implicitWidth / image.zoomFactor
                             image.sourceSize.height = image.implicitHeight / image.zoomFactor
                         }
+                    }
+                    Shortcut {
+                        sequence: StandardKey.SelectAll
+                        onActivated: selection.selectAll()
                     }
                     Shortcut {
                         sequence: "Ctrl+0"

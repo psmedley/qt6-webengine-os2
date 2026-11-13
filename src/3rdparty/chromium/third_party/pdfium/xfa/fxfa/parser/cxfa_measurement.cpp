@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -127,8 +127,7 @@ bool CXFA_Measurement::ToUnitInternal(XFA_Unit eUnit, float* fValue) const {
       *fValue /= kPtToPc;
       return true;
     default:
-      NOTREACHED();
-      return false;
+      NOTREACHED_NORETURN();
   }
 }
 

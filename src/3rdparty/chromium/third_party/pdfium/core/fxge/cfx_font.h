@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,14 +16,14 @@
 #include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_codepage_forward.h"
 #include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxcrt/retain_ptr.h"
+#include "core/fxcrt/unowned_ptr_exclusion.h"
 #include "core/fxge/cfx_face.h"
 #include "core/fxge/freetype/fx_freetype.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
+#if defined(PDF_USE_SKIA)
 #include "core/fxge/fx_font.h"
 #endif
 
@@ -57,12 +57,6 @@ class CFX_Font {
 
   static const char kDefaultAnsiFontName[];
   static const char kUniversalDefaultFontName[];
-
-  // Returns negative values on failure.
-  static int GetWeightLevel(FX_Charset charset, size_t index);
-
-  // |angle| is typically negative.
-  static int GetSkewFromAngle(int angle);
 
   static ByteString GetDefaultFontNameByCharset(FX_Charset nCharset);
   static FX_Charset GetCharSetFromUnicode(uint16_t word);
@@ -128,17 +122,15 @@ class CFX_Font {
   absl::optional<FX_RECT> GetBBox() const;
 
   bool IsEmbedded() const { return m_bEmbedded; }
-  uint8_t* GetSubData() const { return m_pGsubData.get(); }
-  void SetSubData(uint8_t* data) { m_pGsubData.reset(data); }
   FontType GetFontType() const { return m_FontType; }
   void SetFontType(FontType type) { m_FontType = type; }
   uint64_t GetObjectTag() const { return m_ObjectTag; }
   pdfium::span<uint8_t> GetFontSpan() const { return m_FontData; }
-  void AdjustMMParams(int glyph_index, int dest_width, int weight) const;
   std::unique_ptr<CFX_Path> LoadGlyphPathImpl(uint32_t glyph_index,
                                               int dest_width) const;
+  int GetGlyphWidthImpl(uint32_t glyph_index, int dest_width, int weight) const;
 
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
+#if defined(PDF_USE_SKIA)
   CFX_TypeFace* GetDeviceCache() const;
   bool IsSubstFontBold() const;
 #endif
@@ -165,7 +157,6 @@ class CFX_Font {
   mutable RetainPtr<CFX_Face> m_Face;
   mutable RetainPtr<CFX_GlyphCache> m_GlyphCache;
   std::unique_ptr<CFX_SubstFont> m_pSubstFont;
-  std::unique_ptr<uint8_t, FxFreeDeleter> m_pGsubData;
   DataVector<uint8_t> m_FontDataAllocation;
   pdfium::span<uint8_t> m_FontData;
   FontType m_FontType = FontType::kUnknown;
@@ -173,7 +164,7 @@ class CFX_Font {
   bool m_bEmbedded = false;
   bool m_bVertical = false;
 #if BUILDFLAG(IS_APPLE)
-  void* m_pPlatformFont = nullptr;
+  UNOWNED_PTR_EXCLUSION void* m_pPlatformFont = nullptr;
 #endif
 };
 

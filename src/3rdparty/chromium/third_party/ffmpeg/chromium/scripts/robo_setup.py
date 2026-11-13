@@ -38,6 +38,7 @@ def InstallPrereqs(robo_configuration):
   if robo_configuration.host_operating_system() == "linux":
     packages.Nasm.Install(robo_configuration)
     packages.GccAarch64LinuxGNU.Install(robo_configuration)
+    packages.GccMultilib.Install(robo_configuration)
   else:
     raise Exception("I don't know how to install deps for host os %s" %
                     robo_configuration.host_operating_system())
@@ -72,7 +73,7 @@ def EnsureNewASANDirWorks(robo_configuration):
   # flags, etc.  Step 28.iii, and elsewhere.
   opts = ("is_debug=false", "is_clang=true", "proprietary_codecs=true",
           "media_use_libvpx=true", "media_use_ffmpeg=true",
-          'ffmpeg_branding="Chrome"', "use_goma=true", "is_asan=true",
+          'ffmpeg_branding="Chrome"', "use_remoteexec=true", "is_asan=true",
           "dcheck_always_on=true")
   print(opts)
   with open(os.path.join(directory_name, "args.gn"), "w") as f:
@@ -204,7 +205,7 @@ def EnsureChromiumNasm(robo_configuration):
   if not os.path.exists(chromium_nasm_path):
     shell.log("Building Chromium's nasm")
     if robo_configuration.Call([
-        "ninja", "-j5000", "-C",
+        "autoninja", "-C",
         robo_configuration.relative_asan_directory(), "third_party/nasm"
     ]):
       raise Exception("Failed to build nasm")

@@ -1,34 +1,54 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_UTILS_WGPUHELPERS_H_
 #define SRC_DAWN_UTILS_WGPUHELPERS_H_
 
 #include <array>
 #include <initializer_list>
+#include <string>
 #include <vector>
 
 #include "dawn/common/Constants.h"
 #include "dawn/utils/TextureUtils.h"
 #include "dawn/webgpu_cpp.h"
 
-namespace utils {
+namespace dawn::utils {
 
 enum Expectation { Success, Failure };
 
-wgpu::ShaderModule CreateShaderModuleFromASM(const wgpu::Device& device, const char* source);
+#if TINT_BUILD_SPV_READER
+wgpu::ShaderModule CreateShaderModuleFromASM(
+    const wgpu::Device& device,
+    const char* source,
+    wgpu::DawnShaderModuleSPIRVOptionsDescriptor* spirv_options = nullptr);
+#endif
 wgpu::ShaderModule CreateShaderModule(const wgpu::Device& device, const char* source);
+wgpu::ShaderModule CreateShaderModule(const wgpu::Device& device, const std::string& source);
 
 wgpu::Buffer CreateBufferFromData(const wgpu::Device& device,
                                   const void* data,
@@ -57,7 +77,7 @@ wgpu::TextureDataLayout CreateTextureDataLayout(uint64_t offset,
 
 struct ComboRenderPassDescriptor : public wgpu::RenderPassDescriptor {
   public:
-    ComboRenderPassDescriptor(std::initializer_list<wgpu::TextureView> colorAttachmentInfo,
+    ComboRenderPassDescriptor(const std::vector<wgpu::TextureView>& colorAttachmentInfo = {},
                               wgpu::TextureView depthStencil = wgpu::TextureView());
     ~ComboRenderPassDescriptor();
 
@@ -84,7 +104,7 @@ struct BasicRenderPass {
     uint32_t height;
     wgpu::Texture color;
     wgpu::TextureFormat colorFormat;
-    utils::ComboRenderPassDescriptor renderPassInfo;
+    ComboRenderPassDescriptor renderPassInfo;
 };
 BasicRenderPass CreateBasicRenderPass(
     const wgpu::Device& device,
@@ -102,7 +122,7 @@ extern wgpu::ExternalTextureBindingLayout kExternalTextureBindingLayout;
 
 // Helpers to make creating bind group layouts look nicer:
 //
-//   utils::MakeBindGroupLayout(device, {
+//   dawn::utils::MakeBindGroupLayout(device, {
 //       {0, wgpu::ShaderStage::Vertex, wgpu::BufferBindingType::Uniform},
 //       {1, wgpu::ShaderStage::Fragment, wgpu::SamplerBindingType::Filtering},
 //       {3, wgpu::ShaderStage::Fragment, wgpu::TextureSampleType::Float}
@@ -143,7 +163,7 @@ wgpu::BindGroupLayout MakeBindGroupLayout(
 
 // Helpers to make creating bind groups look nicer:
 //
-//   utils::MakeBindGroup(device, layout, {
+//   dawn::utils::MakeBindGroup(device, layout, {
 //       {0, mySampler},
 //       {1, myBuffer, offset, size},
 //       {3, myTextureView}
@@ -178,6 +198,15 @@ wgpu::BindGroup MakeBindGroup(
     const wgpu::BindGroupLayout& layout,
     std::initializer_list<BindingInitializationHelper> entriesInitializer);
 
-}  // namespace utils
+struct ColorSpaceConversionInfo {
+    std::array<float, 12> yuvToRgbConversionMatrix;
+    std::array<float, 9> gamutConversionMatrix;
+    std::array<float, 7> srcTransferFunctionParameters;
+    std::array<float, 7> dstTransferFunctionParameters;
+};
+
+ColorSpaceConversionInfo GetYUVBT709ToRGBSRGBColorSpaceConversionInfo();
+
+}  // namespace dawn::utils
 
 #endif  // SRC_DAWN_UTILS_WGPUHELPERS_H_

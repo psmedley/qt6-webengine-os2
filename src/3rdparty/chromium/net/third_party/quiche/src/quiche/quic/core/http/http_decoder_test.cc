@@ -810,7 +810,6 @@ TEST_F(HttpDecoderTest, PriorityUpdateFrame) {
       "03");      // prioritized element id
 
   PriorityUpdateFrame priority_update1;
-  priority_update1.prioritized_element_type = REQUEST_STREAM;
   priority_update1.prioritized_element_id = 0x03;
 
   // Visitor pauses processing.
@@ -849,7 +848,6 @@ TEST_F(HttpDecoderTest, PriorityUpdateFrame) {
       "666f6f");  // priority field value: "foo"
 
   PriorityUpdateFrame priority_update2;
-  priority_update2.prioritized_element_type = REQUEST_STREAM;
   priority_update2.prioritized_element_id = 0x05;
   priority_update2.priority_field_value = "foo";
 
@@ -997,10 +995,9 @@ TEST_F(HttpDecoderTest, WebTransportStreamDisabled) {
 }
 
 TEST(HttpDecoderTestNoFixture, WebTransportStream) {
-  HttpDecoder::Options options;
-  options.allow_web_transport_stream = true;
   testing::StrictMock<MockHttpDecoderVisitor> visitor;
-  HttpDecoder decoder(&visitor, options);
+  HttpDecoder decoder(&visitor);
+  decoder.EnableWebTransportStreamParsing();
 
   // WebTransport stream for session ID 0x104, with four bytes of extra data.
   std::string input = absl::HexStringToBytes("40414104ffffffff");
@@ -1010,10 +1007,9 @@ TEST(HttpDecoderTestNoFixture, WebTransportStream) {
 }
 
 TEST(HttpDecoderTestNoFixture, WebTransportStreamError) {
-  HttpDecoder::Options options;
-  options.allow_web_transport_stream = true;
   testing::StrictMock<MockHttpDecoderVisitor> visitor;
-  HttpDecoder decoder(&visitor, options);
+  HttpDecoder decoder(&visitor);
+  decoder.EnableWebTransportStreamParsing();
 
   std::string input = absl::HexStringToBytes("404100");
   EXPECT_CALL(visitor, OnWebTransportStreamFrameType(_, _));

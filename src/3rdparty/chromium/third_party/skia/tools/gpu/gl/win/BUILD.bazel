@@ -1,13 +1,22 @@
-load("//bazel:macros.bzl", "exports_files_legacy", "skia_cc_deps")
+load("//bazel:skia_rules.bzl", "exports_files_legacy", "skia_cc_deps", "skia_filegroup")
 
 licenses(["notice"])
 
 exports_files_legacy()
 
-filegroup(
+skia_filegroup(
+    name = "private_hdrs",
+    srcs = [
+        "SkWGL.h",
+    ],
+    visibility = ["//tools/gpu/gl:__pkg__"],
+)
+
+skia_filegroup(
     name = "srcs",
     srcs = [
         "CreatePlatformGLTestContext_win.cpp",
+        "SkWGL_win.cpp",
     ],
     visibility = ["//tools/gpu/gl:__pkg__"],
 )

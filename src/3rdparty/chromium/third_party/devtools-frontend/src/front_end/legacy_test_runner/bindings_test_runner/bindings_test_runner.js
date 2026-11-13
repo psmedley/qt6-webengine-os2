@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import '../test_runner/test_runner.js';
-import '../../models/workspace/workspace-legacy.js';
-import '../../third_party/diff/diff-legacy.js';
-import '../../models/bindings/bindings-legacy.js';
-import '../../models/persistence/persistence-legacy.js';
+import * as AutomappingTestRunner from './AutomappingTestRunner.js';
+import * as BindingsTestRunnerModule from './BindingsTestRunner.js';
+import * as IsolatedFilesystemTestRunner from './IsolatedFilesystemTestRunner.js';
+import * as OverridesTestRunner from './OverridesTestRunner.js';
+import * as PersistenceTestRunner from './PersistenceTestRunner.js';
 
-import './BindingsTestRunner.js';
-import './IsolatedFilesystemTestRunner.js';
-import './AutomappingTestRunner.js';
-import './PersistenceTestRunner.js';
-import './OverridesTestRunner.js';
+export const BindingsTestRunner = {
+  ...BindingsTestRunnerModule,
+  ...IsolatedFilesystemTestRunner,
+  ...AutomappingTestRunner,
+  ...PersistenceTestRunner,
+  ...OverridesTestRunner,
+};

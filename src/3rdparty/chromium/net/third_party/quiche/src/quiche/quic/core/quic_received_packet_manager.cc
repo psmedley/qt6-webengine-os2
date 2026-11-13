@@ -10,8 +10,11 @@
 
 #include "quiche/quic/core/congestion_control/rtt_stats.h"
 #include "quiche/quic/core/crypto/crypto_protocol.h"
+#include "quiche/quic/core/quic_config.h"
 #include "quiche/quic/core/quic_connection_stats.h"
+#include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/platform/api/quic_bug_tracker.h"
+#include "quiche/quic/platform/api/quic_flag_utils.h"
 #include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/quic/platform/api/quic_logging.h"
 
@@ -70,7 +73,8 @@ void QuicReceivedPacketManager::SetFromConfig(const QuicConfig& config,
 }
 
 void QuicReceivedPacketManager::RecordPacketReceived(
-    const QuicPacketHeader& header, QuicTime receipt_time) {
+    const QuicPacketHeader& header, QuicTime receipt_time,
+    const QuicEcnCodepoint ecn) {
   const QuicPacketNumber packet_number = header.packet_number;
   QUICHE_DCHECK(IsAwaitingPacket(packet_number))
       << " packet_number:" << packet_number;
@@ -101,6 +105,7 @@ void QuicReceivedPacketManager::RecordPacketReceived(
     time_largest_observed_ = receipt_time;
   }
   ack_frame_.packets.Add(packet_number);
+  MaybeTrimAckRanges();
 
   if (save_timestamps_) {
     // The timestamp format only handles packets in time order.
@@ -119,11 +124,39 @@ void QuicReceivedPacketManager::RecordPacketReceived(
     }
   }
 
+  if (GetQuicRestartFlag(quic_receive_ecn3) && ecn != ECN_NOT_ECT) {
+    QUIC_RESTART_FLAG_COUNT_N(quic_receive_ecn3, 1, 2);
+    if (!ack_frame_.ecn_counters.has_value()) {
+      ack_frame_.ecn_counters = QuicEcnCounts();
+    }
+    switch (ecn) {
+      case ECN_NOT_ECT:
+        QUICHE_NOTREACHED();
+        break;  // It's impossible to get here, but the compiler complains.
+      case ECN_ECT0:
+        ack_frame_.ecn_counters->ect0++;
+        break;
+      case ECN_ECT1:
+        ack_frame_.ecn_counters->ect1++;
+        break;
+      case ECN_CE:
+        ack_frame_.ecn_counters->ce++;
+        break;
+    }
+  }
+
   if (least_received_packet_number_.IsInitialized()) {
     least_received_packet_number_ =
         std::min(least_received_packet_number_, packet_number);
   } else {
     least_received_packet_number_ = packet_number;
+  }
+}
+
+void QuicReceivedPacketManager::MaybeTrimAckRanges() {
+  while (max_ack_ranges_ > 0 &&
+         ack_frame_.packets.NumIntervals() > max_ack_ranges_) {
+    ack_frame_.packets.RemoveSmallestInterval();
   }
 }
 
@@ -150,8 +183,18 @@ const QuicFrame QuicReceivedPacketManager::GetUpdatedAckFrame(
                                     ? QuicTime::Delta::Zero()
                                     : approximate_now - time_largest_observed_;
   }
+
+  const size_t initial_ack_ranges = ack_frame_.packets.NumIntervals();
+  uint64_t num_iterations = 0;
   while (max_ack_ranges_ > 0 &&
          ack_frame_.packets.NumIntervals() > max_ack_ranges_) {
+    num_iterations++;
+    QUIC_BUG_IF(quic_rpm_too_many_ack_ranges, (num_iterations % 100000) == 0)
+        << "Too many ack ranges to remove, possibly a dead loop. "
+           "initial_ack_ranges:"
+        << initial_ack_ranges << " max_ack_ranges:" << max_ack_ranges_
+        << ", current_ack_ranges:" << ack_frame_.packets.NumIntervals()
+        << " num_iterations:" << num_iterations;
     ack_frame_.packets.RemoveSmallestInterval();
   }
   // Clear all packet times if any are too far from largest observed.

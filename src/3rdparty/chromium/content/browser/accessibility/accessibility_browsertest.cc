@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "content/browser/accessibility/accessibility_browsertest.h"
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/strings/escape.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
@@ -57,6 +57,19 @@ void AccessibilityBrowserTest::LoadInputField() {
                                        base::EscapeForHTML(kInputContents) +
                                        std::string(R"HTML(">
             </form>
+          </body>
+          </html>)HTML"));
+}
+
+void AccessibilityBrowserTest::LoadScrollableInputField(std::string type) {
+  LoadInitialAccessibilityTreeFromHtml(
+      std::string(
+          R"HTML(<!DOCTYPE html>
+          <html>
+          <body>
+            <input type=")HTML") +
+      type + std::string(R"HTML(" style="width: 150px;" value=")HTML") +
+      base::EscapeForHTML(kInputContents) + std::string(R"HTML(">
           </body>
           </html>)HTML"));
 }

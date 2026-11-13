@@ -6,10 +6,12 @@
 
 #include <drm_fourcc.h>
 #include <drm_mode.h>
+
 #include <string>
 
 #include "base/logging.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
 #include "base/trace_event/traced_value.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value.h"
@@ -48,12 +50,13 @@ std::string IdSetToString(const base::flat_set<uint32_t>& ids) {
 }
 
 }  // namespace
+
 HardwareDisplayPlane::Properties::Properties() = default;
 HardwareDisplayPlane::Properties::~Properties() = default;
 
 HardwareDisplayPlane::HardwareDisplayPlane(uint32_t id) : id_(id) {}
 
-HardwareDisplayPlane::~HardwareDisplayPlane() {}
+HardwareDisplayPlane::~HardwareDisplayPlane() = default;
 
 bool HardwareDisplayPlane::CanUseForCrtcId(uint32_t crtc_id) const {
   return possible_crtc_ids_.contains(crtc_id);
@@ -96,7 +99,7 @@ bool HardwareDisplayPlane::Initialize(DrmDevice* drm) {
   if (properties_.in_formats.id) {
     ScopedDrmPropertyBlobPtr blob(
         drm->GetPropertyBlob(properties_.in_formats.value));
-    DCHECK(blob);
+    DCHECK(blob) << "No blob found with id=" << properties_.in_formats.value;
     ParseSupportedFormatsAndModifiers(blob.get(), &supported_formats_,
                                       &supported_format_modifiers_);
   }
@@ -110,11 +113,10 @@ bool HardwareDisplayPlane::Initialize(DrmDevice* drm) {
     type_ = properties_.type.value;
 
   if (properties_.plane_color_encoding.id) {
-    color_encoding_bt601_ =
-        GetEnumValueForName(drm->get_fd(), properties_.plane_color_encoding.id,
-                            "ITU-R BT.601 YCbCr");
+    color_encoding_bt601_ = GetEnumValueForName(
+        *drm, properties_.plane_color_encoding.id, "ITU-R BT.601 YCbCr");
     color_range_limited_ = GetEnumValueForName(
-        drm->get_fd(), properties_.plane_color_range.id, "YCbCr limited range");
+        *drm, properties_.plane_color_range.id, "YCbCr limited range");
   }
 
   VLOG(3) << "Initialized plane=" << id_
@@ -151,8 +153,7 @@ std::vector<uint64_t> HardwareDisplayPlane::ModifiersForFormat(
     uint32_t format) const {
   std::vector<uint64_t> modifiers;
 
-  auto it =
-      std::find(supported_formats_.begin(), supported_formats_.end(), format);
+  auto it = base::ranges::find(supported_formats_, format);
   if (it == supported_formats_.end())
     return modifiers;
 
@@ -192,11 +193,14 @@ void HardwareDisplayPlane::InitializeProperties(DrmDevice* drm) {
                         &properties_.in_formats);
   GetDrmPropertyForName(drm, props.get(), "IN_FENCE_FD",
                         &properties_.in_fence_fd);
-  GetDrmPropertyForName(drm, props.get(), "PLANE_CTM", &properties_.plane_ctm);
   GetDrmPropertyForName(drm, props.get(), "COLOR_ENCODING",
                         &properties_.plane_color_encoding);
   GetDrmPropertyForName(drm, props.get(), "COLOR_RANGE",
                         &properties_.plane_color_range);
+  if (display::features::IsPanelSelfRefresh2Enabled()) {
+    GetDrmPropertyForName(drm, props.get(), "FB_DAMAGE_CLIPS",
+                          &properties_.plane_fb_damage_clips);
+  }
 }
 
 }  // namespace ui

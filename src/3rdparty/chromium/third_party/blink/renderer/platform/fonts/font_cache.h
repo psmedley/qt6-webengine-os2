@@ -38,7 +38,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/renderer/platform/fonts/fallback_list_composite_key.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache_client.h"
 #include "third_party/blink/renderer/platform/fonts/font_data_cache.h"
@@ -46,7 +45,6 @@
 #include "third_party/blink/renderer/platform/fonts/font_fallback_priority.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_cache.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
-#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -59,11 +57,6 @@
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "ui/gfx/font_fallback_linux.h"
-#endif
-
-#if BUILDFLAG(IS_WIN)
-#include "third_party/blink/public/mojom/dwrite_font_proxy/dwrite_font_proxy.mojom-blink.h"
-#include "third_party/blink/renderer/platform/fonts/win/fallback_family_style_cache_win.h"
 #endif
 
 class SkString;
@@ -95,7 +88,6 @@ enum class AlternateFontName {
 
 typedef HashMap<FallbackListCompositeKey,
                 std::unique_ptr<ShapeCache>,
-                FallbackListCompositeKeyHash,
                 FallbackListCompositeKeyTraits>
     FallbackListShaperCache;
 
@@ -108,9 +100,8 @@ extern const char kNotoColorEmojiCompat[];
 #endif
 
 class PLATFORM_EXPORT FontCache final {
+  DISALLOW_NEW();
   friend class FontCachePurgePreventer;
-
-  USING_FAST_MALLOC(FontCache);
 
  public:
   // FontCache initialisation on Windows depends on a global FontMgr being
@@ -118,6 +109,8 @@ class PLATFORM_EXPORT FontCache final {
   // avoid early creation of a font cache when these globals have not yet
   // been set.
   static FontCache& Get();
+
+  void Trace(Visitor*) const;
 
   void ReleaseFontData(const SimpleFontData*);
 
@@ -210,7 +203,6 @@ class PLATFORM_EXPORT FontCache final {
     antialiased_text_enabled_ = enabled;
   }
   static void SetLCDTextEnabled(bool enabled) { lcd_text_enabled_ = enabled; }
-  static void AddSideloadedFontForTesting(sk_sp<SkTypeface>);
   // Functions to cache and retrieve the system font metrics.
   static void SetMenuFontMetrics(const AtomicString& family_name,
                                  int32_t font_height);
@@ -230,13 +222,6 @@ class PLATFORM_EXPORT FontCache final {
   static const AtomicString& StatusFontFamily() {
     return *status_font_family_name_;
   }
-  static void SetUseSkiaFontFallback(bool use_skia_font_fallback) {
-    use_skia_font_fallback_ = use_skia_font_fallback;
-  }
-
-  // On Windows pre 8.1 establish a connection to the DWriteFontProxy service in
-  // order to retrieve family names for fallback lookup.
-  void EnsureServiceConnected();
 
   scoped_refptr<SimpleFontData> GetFallbackFamilyNameFromHardcodedChoices(
       const FontDescription&,
@@ -370,7 +355,6 @@ class PLATFORM_EXPORT FontCache final {
   static WebFontPrewarmer* prewarmer_;
   static bool antialiased_text_enabled_;
   static bool lcd_text_enabled_;
-  static HashMap<String, sk_sp<SkTypeface>, CaseFoldingHash>* sideloaded_fonts_;
   // The system font metrics cache.
   static AtomicString* menu_font_family_name_;
   static int32_t menu_font_height_;
@@ -378,13 +362,10 @@ class PLATFORM_EXPORT FontCache final {
   static int32_t small_caption_font_height_;
   static AtomicString* status_font_family_name_;
   static int32_t status_font_height_;
-  static bool use_skia_font_fallback_;
 
   // Windows creates an SkFontMgr for unit testing automatically. This flag is
   // to ensure it's not happening in the production from the crash log.
   bool is_test_font_mgr_ = false;
-  mojo::Remote<mojom::blink::DWriteFontProxy> service_;
-  std::unique_ptr<FallbackFamilyStyleCache> fallback_params_cache_;
 #endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
@@ -393,13 +374,13 @@ class PLATFORM_EXPORT FontCache final {
 
   uint16_t generation_ = 0;
   bool platform_init_ = false;
-  Persistent<HeapHashSet<WeakMember<FontCacheClient>>> font_cache_clients_;
+  HeapHashSet<WeakMember<FontCacheClient>> font_cache_clients_;
   std::unique_ptr<FontPlatformDataCache> font_platform_data_cache_;
   FallbackListShaperCache fallback_list_shaper_cache_;
 
   std::unique_ptr<FontDataCache> font_data_cache_;
 
-  Persistent<FontFallbackMap> font_fallback_map_;
+  Member<FontFallbackMap> font_fallback_map_;
 
   void PurgePlatformFontDataCache();
   void PurgeFallbackListShaperCache();
@@ -407,6 +388,7 @@ class PLATFORM_EXPORT FontCache final {
   friend class SimpleFontData;  // For fontDataFromFontPlatformData
   friend class FontFallbackList;
   friend class FontPlatformDataCache;
+  friend class FontCacheMacTest;
   FRIEND_TEST_ALL_PREFIXES(FontCacheAndroidTest, LocaleSpecificTypeface);
 };
 

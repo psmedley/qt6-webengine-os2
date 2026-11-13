@@ -29,7 +29,7 @@ ArgsTracker::~ArgsTracker() {
   Flush();
 }
 
-void ArgsTracker::AddArg(Column* arg_set_id,
+void ArgsTracker::AddArg(ColumnLegacy* arg_set_id,
                          uint32_t row,
                          StringId flat_key,
                          StringId key,
@@ -82,7 +82,7 @@ void ArgsTracker::Flush() {
     ArgSetId set_id =
         context_->global_args_tracker->AddArgSet(&args_[0], i, next_rid_idx);
     if (col->IsNullable()) {
-      TypedColumn<base::Optional<uint32_t>>::FromColumn(col)->Set(row, set_id);
+      TypedColumn<std::optional<uint32_t>>::FromColumn(col)->Set(row, set_id);
     } else {
       TypedColumn<uint32_t>::FromColumn(col)->Set(row, set_id);
     }
@@ -93,7 +93,7 @@ void ArgsTracker::Flush() {
 }
 
 ArgsTracker::CompactArgSet ArgsTracker::ToCompactArgSet(
-    const Column& column,
+    const ColumnLegacy& column,
     uint32_t row_number) && {
   CompactArgSet compact_args;
   for (const auto& arg : args_) {
@@ -106,14 +106,14 @@ ArgsTracker::CompactArgSet ArgsTracker::ToCompactArgSet(
 }
 
 bool ArgsTracker::NeedsTranslation(const ArgsTranslationTable& table) const {
-  return std::any_of(args_.begin(), args_.end(),
-                     [&table](const GlobalArgsTracker::Arg& arg) {
-                       return table.NeedsTranslation(arg.key, arg.value.type);
-                     });
+  return std::any_of(
+      args_.begin(), args_.end(), [&table](const GlobalArgsTracker::Arg& arg) {
+        return table.NeedsTranslation(arg.flat_key, arg.key, arg.value.type);
+      });
 }
 
 ArgsTracker::BoundInserter::BoundInserter(ArgsTracker* args_tracker,
-                                          Column* arg_set_id_column,
+                                          ColumnLegacy* arg_set_id_column,
                                           uint32_t row)
     : args_tracker_(args_tracker),
       arg_set_id_column_(arg_set_id_column),

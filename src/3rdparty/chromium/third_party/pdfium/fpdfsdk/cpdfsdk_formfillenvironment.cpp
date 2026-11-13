@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,7 +134,7 @@ CPDFSDK_PageView* CPDFSDK_FormFillEnvironment::GetCurrentView() {
 IPDF_Page* CPDFSDK_FormFillEnvironment::GetCurrentPage() const {
   if (m_pInfo && m_pInfo->FFI_GetCurrentPage) {
     return IPDFPageFromFPDFPage(m_pInfo->FFI_GetCurrentPage(
-        m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc.Get())));
+        m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc)));
   }
   return nullptr;
 }
@@ -154,8 +154,8 @@ WideString CPDFSDK_FormFillEnvironment::GetLanguage() {
   if (nActualLen <= 0 || nActualLen > nRequiredLen)
     return WideString();
 
-  return WideString::FromUTF16LE(reinterpret_cast<uint16_t*>(pBuff.data()),
-                                 nActualLen / sizeof(uint16_t));
+  return WideString::FromUTF16LE(
+      {pBuff.data(), static_cast<size_t>(nActualLen)});
 #else   // PDF_ENABLE_XFA
   return WideString();
 #endif  // PDF_ENABLE_XFA
@@ -176,8 +176,8 @@ WideString CPDFSDK_FormFillEnvironment::GetPlatform() {
   if (nActualLen <= 0 || nActualLen > nRequiredLen)
     return WideString();
 
-  return WideString::FromUTF16LE(reinterpret_cast<uint16_t*>(pBuff.data()),
-                                 nActualLen / sizeof(uint16_t));
+  return WideString::FromUTF16LE(
+      {pBuff.data(), static_cast<size_t>(nActualLen)});
 #else   // PDF_ENABLE_XFA
   return WideString();
 #endif  // PDF_ENABLE_XFA
@@ -465,14 +465,14 @@ int CPDFSDK_FormFillEnvironment::GetCurrentPageIndex() const {
   if (!m_pInfo || m_pInfo->version < 2 || !m_pInfo->FFI_GetCurrentPageIndex)
     return -1;
   return m_pInfo->FFI_GetCurrentPageIndex(
-      m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc.Get()));
+      m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc));
 }
 
 void CPDFSDK_FormFillEnvironment::SetCurrentPage(int iCurPage) {
   if (!m_pInfo || m_pInfo->version < 2 || !m_pInfo->FFI_SetCurrentPage)
     return;
-  m_pInfo->FFI_SetCurrentPage(
-      m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc.Get()), iCurPage);
+  m_pInfo->FFI_SetCurrentPage(m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc),
+                              iCurPage);
 }
 
 void CPDFSDK_FormFillEnvironment::GotoURL(const WideString& wsURL) {
@@ -480,7 +480,7 @@ void CPDFSDK_FormFillEnvironment::GotoURL(const WideString& wsURL) {
     return;
 
   ByteString bsTo = wsURL.ToUTF16LE();
-  m_pInfo->FFI_GotoURL(m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc.Get()),
+  m_pInfo->FFI_GotoURL(m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc),
                        AsFPDFWideString(&bsTo));
 }
 
@@ -571,8 +571,8 @@ WideString CPDFSDK_FormFillEnvironment::PostRequestURL(
       AsFPDFWideString(&bsHeader), &response);
 
   WideString wsRet =
-      WideString::FromUTF16LE(reinterpret_cast<FPDF_WIDESTRING>(response.str),
-                              response.len / sizeof(FPDF_WCHAR));
+      WideString::FromUTF16LE({reinterpret_cast<const uint8_t*>(response.str),
+                               static_cast<size_t>(response.len)});
 
   FPDF_BStr_Clear(&response);
   return wsRet;
@@ -643,7 +643,7 @@ CPDFSDK_PageView* CPDFSDK_FormFillEnvironment::GetPageViewAtIndex(int nIndex) {
 }
 
 void CPDFSDK_FormFillEnvironment::ProcJavascriptAction() {
-  auto name_tree = CPDF_NameTree::Create(m_pCPDFDoc.Get(), "JavaScript");
+  auto name_tree = CPDF_NameTree::Create(m_pCPDFDoc, "JavaScript");
   if (!name_tree)
     return;
 
@@ -707,7 +707,7 @@ IPDF_Page* CPDFSDK_FormFillEnvironment::GetPage(int nIndex) const {
   if (!m_pInfo || !m_pInfo->FFI_GetPage)
     return nullptr;
   return IPDFPageFromFPDFPage(m_pInfo->FFI_GetPage(
-      m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc.Get()), nIndex));
+      m_pInfo, FPDFDocumentFromCPDFDocument(m_pCPDFDoc), nIndex));
 }
 
 CPDFSDK_InteractiveForm* CPDFSDK_FormFillEnvironment::GetInteractiveForm() {
@@ -805,7 +805,7 @@ int CPDFSDK_FormFillEnvironment::GetPageCount() const {
 }
 
 bool CPDFSDK_FormFillEnvironment::HasPermissions(uint32_t flags) const {
-  return !!(m_pCPDFDoc->GetUserPermissions() & flags);
+  return !!(m_pCPDFDoc->GetUserPermissions(/*get_owner_perms=*/true) & flags);
 }
 
 void CPDFSDK_FormFillEnvironment::SendOnFocusChange(
@@ -1042,8 +1042,7 @@ void CPDFSDK_FormFillEnvironment::DoActionNoJs(const CPDF_Action& action,
       DoActionResetForm(action);
       break;
     case CPDF_Action::Type::kJavaScript:
-      NOTREACHED();
-      break;
+      NOTREACHED_NORETURN();
     case CPDF_Action::Type::kSetOCGState:
     case CPDF_Action::Type::kThread:
     case CPDF_Action::Type::kSound:
@@ -1125,8 +1124,7 @@ void CPDFSDK_FormFillEnvironment::RunFieldJavaScript(
                                   pFormField, &data->sValue, &data->bRC);
         break;
       default:
-        NOTREACHED();
-        break;
+        NOTREACHED_NORETURN();
     }
   });
 }
@@ -1172,8 +1170,7 @@ void CPDFSDK_FormFillEnvironment::RunDocumentPageJavaScript(
         context->OnPage_OutView();
         break;
       default:
-        NOTREACHED();
-        break;
+        NOTREACHED_NORETURN();
     }
   });
 }

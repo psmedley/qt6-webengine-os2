@@ -230,10 +230,10 @@ macro(ei_add_failtest testname)
 
   # Add the tests to ctest.
   add_test(NAME ${test_target_ok}
-          COMMAND ${CMAKE_COMMAND} --build . --target ${test_target_ok} --config $<CONFIGURATION>
+          COMMAND ${CMAKE_COMMAND} --build . --target ${test_target_ok} --config $<CONFIG>
           WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
   add_test(NAME ${test_target_ko}
-          COMMAND ${CMAKE_COMMAND} --build . --target ${test_target_ko} --config $<CONFIGURATION>
+          COMMAND ${CMAKE_COMMAND} --build . --target ${test_target_ko} --config $<CONFIG>
           WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
   # Expect the second test to fail
@@ -368,8 +368,10 @@ macro(ei_testing_print_summary)
     if(EIGEN_TEST_SYCL)
       if(EIGEN_SYCL_TRISYCL)
         message(STATUS "SYCL:              ON (using triSYCL)")
-      else()
+      elseif(EIGEN_SYCL_ComputeCpp)
         message(STATUS "SYCL:              ON (using computeCPP)")
+      elseif(EIGEN_SYCL_DPCPP)
+        message(STATUS "SYCL:              ON (using DPCPP)")
       endif()
     else()
       message(STATUS "SYCL:              OFF")

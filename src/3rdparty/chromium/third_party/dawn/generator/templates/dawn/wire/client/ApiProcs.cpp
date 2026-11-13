@@ -1,19 +1,33 @@
-//* Copyright 2019 The Dawn Authors
+//* Copyright 2019 The Dawn & Tint Authors
 //*
-//* Licensed under the Apache License, Version 2.0 (the "License");
-//* you may not use this file except in compliance with the License.
-//* You may obtain a copy of the License at
+//* Redistribution and use in source and binary forms, with or without
+//* modification, are permitted provided that the following conditions are met:
 //*
-//*     http://www.apache.org/licenses/LICENSE-2.0
+//* 1. Redistributions of source code must retain the above copyright notice, this
+//*    list of conditions and the following disclaimer.
 //*
-//* Unless required by applicable law or agreed to in writing, software
-//* distributed under the License is distributed on an "AS IS" BASIS,
-//* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//* See the License for the specific language governing permissions and
-//* limitations under the License.
+//* 2. Redistributions in binary form must reproduce the above copyright notice,
+//*    this list of conditions and the following disclaimer in the documentation
+//*    and/or other materials provided with the distribution.
+//*
+//* 3. Neither the name of the copyright holder nor the names of its
+//*    contributors may be used to endorse or promote products derived from
+//*    this software without specific prior written permission.
+//*
+//* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+//* AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+//* IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//* DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+//* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+//* DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//* SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+//* CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+//* OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+//* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/wire/client/ApiObjects.h"
 #include "dawn/wire/client/Client.h"
+#include "dawn/wire/client/Instance.h"
 
 #include <algorithm>
 #include <cstring>
@@ -21,6 +35,18 @@
 #include <vector>
 
 namespace dawn::wire::client {
+
+    // Template function for constexpr branching when creating new objects.
+    template <typename Parent, typename Child, typename... Args>
+    Child* Create(Parent p, Args... args) {
+        if constexpr (std::is_constructible_v<Child, const ObjectBaseParams&, decltype(args)...>) {
+            return p->GetClient()->template Make<Child>(args...);
+        } else if constexpr (std::is_constructible_v<Child, const ObjectBaseParams&, const ObjectHandle&, decltype(args)...>) {
+            return p->GetClient()->template Make<Child>(p->GetEventManagerHandle(), args...);
+        } else {
+            return p->GetClient()->template Make<Child>();
+        }
+    }
 
     //* Outputs an rvalue that's the number of elements a pointer member points to.
     {% macro member_length(member, accessor) -%}
@@ -42,7 +68,7 @@ namespace dawn::wire::client {
             {% if Suffix in client_handwritten_commands %}
                 static
             {% endif %}
-            {{as_cType(method.return_type.name)}} Client{{Suffix}}(
+            {{as_cReturnType(method.return_type)}} Client{{Suffix}}(
                 {{-cType}} cSelf
                 {%- for arg in method.arguments -%}
                     , {{as_annotated_cType(arg)}}
@@ -58,7 +84,12 @@ namespace dawn::wire::client {
 
                     //* For object creation, store the object ID the client will use for the result.
                     {% if method.return_type.category == "object" %}
-                        auto* returnObject = self->GetClient()->Make<{{method.return_type.name.CamelCase()}}>();
+                        {% set ReturnObj = method.return_type.name.CamelCase() %}
+                        {{ReturnObj}}* returnObject = Create<{{as_wireType(type)}}, {{ReturnObj}}>(self
+                            {%- for arg in method.arguments -%}
+                                    , {{as_varName(arg.name)}}
+                            {%- endfor -%}
+                        );
                         cmd.result = returnObject->GetWireHandle();
                     {% endif %}
 
@@ -106,11 +137,6 @@ namespace dawn::wire::client {
     {% endfor %}
 
     namespace {
-        WGPUInstance ClientCreateInstance(WGPUInstanceDescriptor const* descriptor) {
-            UNREACHABLE();
-            return nullptr;
-        }
-
         struct ProcEntry {
             WGPUProc proc;
             const char* name;
@@ -138,15 +164,14 @@ namespace dawn::wire::client {
             return entry->proc;
         }
 
-        // Special case the two free-standing functions of the API.
-        if (strcmp(procName, "wgpuGetProcAddress") == 0) {
-            return reinterpret_cast<WGPUProc>(ClientGetProcAddress);
-        }
+        // Special case the free-standing functions of the API.
+        // TODO(dawn:1238) Checking string one by one is slow, it needs to be optimized.
+        {% for function in by_category["function"] %}
+            if (strcmp(procName, "{{as_cMethod(None, function.name)}}") == 0) {
+                return reinterpret_cast<WGPUProc>(Client{{as_cppType(function.name)}});
+            }
 
-        if (strcmp(procName, "wgpuCreateInstance") == 0) {
-            return reinterpret_cast<WGPUProc>(ClientCreateInstance);
-        }
-
+        {% endfor %}
         return nullptr;
     }
 
@@ -160,16 +185,27 @@ namespace dawn::wire::client {
     }
 
     {% set Prefix = metadata.proc_table_prefix %}
-    static {{Prefix}}ProcTable gProcTable = {
+
+    template <typename... MemberPtrPairs>
+    constexpr {{Prefix}}ProcTable MakeProcTable(int, MemberPtrPairs... pairs) {
+        {{Prefix}}ProcTable procs = {};
+        ([&](auto& pair){
+            procs.*(pair.first) = pair.second;
+        }(pairs), ...);
+        return procs;
+    }
+
+    static {{Prefix}}ProcTable gProcTable = MakeProcTable(
+        /* unused */ 0
         {% for function in by_category["function"] %}
-            Client{{as_cppType(function.name)}},
+            , std::make_pair(&{{Prefix}}ProcTable::{{as_varName(function.name)}}, Client{{as_cppType(function.name)}})
         {% endfor %}
         {% for type in by_category["object"] %}
             {% for method in c_methods(type) %}
-                Client{{as_MethodSuffix(type.name, method.name)}},
+                , std::make_pair(&{{Prefix}}ProcTable::{{as_varName(type.name, method.name)}}, Client{{as_MethodSuffix(type.name, method.name)}})
             {% endfor %}
         {% endfor %}
-    };
+    );
 
     const {{Prefix}}ProcTable& GetProcs() {
         return gProcTable;

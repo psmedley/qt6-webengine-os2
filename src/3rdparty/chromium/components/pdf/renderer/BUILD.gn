@@ -60,8 +60,12 @@ static_library("renderer") {
     "//ui/gfx/geometry",
   ]
 
-  if (enable_basic_printing) {
+  if (enable_printing) {
     deps += [ "//components/printing/renderer" ]
+  }
+
+  if (enable_screen_ai_service) {
+    deps += [ "//components/language/core/common" ]
   }
 }
 

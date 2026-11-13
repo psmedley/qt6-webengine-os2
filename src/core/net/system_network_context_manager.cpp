@@ -1,5 +1,6 @@
 // Copyright (C) 2021 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // based on chrome/browser/net/system_network_context_manager.cc:
 // Copyright 2017 The Chromium Authors. All rights reserved.
@@ -8,8 +9,8 @@
 
 #include "net/system_network_context_manager.h"
 
-#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
 #include "base/strings/string_split.h"
 #include "chrome/browser/net/chrome_mojo_proxy_resolver_factory.h"
 #include "chrome/common/chrome_switches.h"
@@ -29,17 +30,21 @@
 #include "services/network/public/mojom/cert_verifier_service.mojom.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/proxy_resolver/public/mojom/proxy_resolver.mojom.h"
+#include "api/qwebengineglobalsettings.h"
+#include "api/qwebengineglobalsettings_p.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "chrome/browser/net/chrome_mojo_proxy_resolver_win.h"
-#include "components/os_crypt/os_crypt.h"
-#include "content/public/common/network_service_util.h"
+#include "components/os_crypt/sync/os_crypt.h"
+#include "content/public/browser/network_service_util.h"
 #endif
 
-namespace {
+ASSERT_ENUMS_MATCH(net::SecureDnsMode::kSecure, QWebEngineGlobalSettings::SecureDnsMode::SecureOnly)
+ASSERT_ENUMS_MATCH(net::SecureDnsMode::kAutomatic,
+                   QWebEngineGlobalSettings::SecureDnsMode::SecureWithFallback)
+ASSERT_ENUMS_MATCH(net::SecureDnsMode::kOff, QWebEngineGlobalSettings::SecureDnsMode::SystemOnly)
 
-// The global instance of the SystemNetworkContextmanager.
-SystemNetworkContextManager *g_system_network_context_manager = nullptr;
+namespace {
 
 network::mojom::HttpAuthStaticParamsPtr CreateHttpAuthStaticParams()
 {
@@ -64,6 +69,11 @@ network::mojom::HttpAuthDynamicParamsPtr CreateHttpAuthDynamicParams()
 }
 
 } // namespace
+
+namespace QtWebEngineCore {
+
+// The global instance of the SystemNetworkContextmanager.
+SystemNetworkContextManager *g_system_network_context_manager = nullptr;
 
 // SharedURLLoaderFactory backed by a SystemNetworkContextManager and its
 // network context. Transparently handles crashes.
@@ -227,10 +237,7 @@ void SystemNetworkContextManager::OnNetworkServiceCreated(network::mojom::Networ
 
         log_list_mojo.push_back(std::move(log_info));
     }
-    network_service->UpdateCtLogList(
-            std::move(log_list_mojo),
-            certificate_transparency::GetLogListTimestamp(),
-            base::DoNothing());
+    network_service->UpdateCtLogList(std::move(log_list_mojo), base::DoNothing());
 
     // The system NetworkContext is created first
     network_service_network_context_.reset();
@@ -255,12 +262,13 @@ void SystemNetworkContextManager::OnNetworkServiceCreated(network::mojom::Networ
 
         network_service->SetExplicitlyAllowedPorts(explicitly_allowed_network_ports);
     }
-    // Configure the stub resolver. This must be done after the system
-    // NetworkContext is created, but before anything has the chance to use it.
-    //    bool stub_resolver_enabled;
-    //    absl::optional<std::vector<network::mojom::DnsOverHttpsServerPtr>> dns_over_https_servers;
-    //    GetStubResolverConfig(local_state_, &stub_resolver_enabled, &dns_over_https_servers);
-    //    content::GetNetworkService()->ConfigureStubHostResolver(stub_resolver_enabled, std::move(dns_over_https_servers));
+
+    // The network service is a singleton that can be reinstantiated for different reasons,
+    // e.g., when the network service crashes. Therefore, we configure the stub host
+    // resolver of the network service here, each time it is instantiated, with our global
+    // DNS-Over-HTTPS settings. This ensures that the global settings don't get lost
+    // on reinstantiation and are in effect upon initial instantiation.
+    QWebEngineGlobalSettingsPrivate::instance()->configureStubHostResolver();
 }
 
 void SystemNetworkContextManager::AddSSLConfigToNetworkContextParams(network::mojom::NetworkContextParams *network_context_params)
@@ -320,3 +328,30 @@ network::mojom::NetworkContextParamsPtr SystemNetworkContextManager::CreateNetwo
          content::GetCertVerifierParams(std::move(cert_verifier_creation_params));
     return network_context_params;
 }
+
+bool isValidTemplates(std::string templates)
+{
+    absl::optional<net::DnsOverHttpsConfig> dnsOverHttpsConfig =
+            net::DnsOverHttpsConfig::FromString(templates);
+    return dnsOverHttpsConfig.has_value();
+}
+
+
+void configureStubHostResolver(QWebEngineGlobalSettings::SecureDnsMode dnsMode,
+                               std::string dnsOverHttpsTemplates, bool insecureDnsClientEnabled,
+                               bool additionalInsecureDnsTypesEnabled)
+{
+    if (content::IsNetworkServiceCreated()) {
+        network::mojom::NetworkService *networkService = content::GetNetworkService();
+        if (networkService) {
+            absl::optional<net::DnsOverHttpsConfig> dohConfig = dnsOverHttpsTemplates.empty()
+                    ? net::DnsOverHttpsConfig()
+                    : net::DnsOverHttpsConfig::FromString(dnsOverHttpsTemplates);
+            networkService->ConfigureStubHostResolver(insecureDnsClientEnabled,
+                                                      net::SecureDnsMode(dnsMode), *dohConfig,
+                                                      additionalInsecureDnsTypesEnabled);
+        }
+    }
+}
+
+} // namespace QtWebEngineCore

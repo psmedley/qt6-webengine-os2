@@ -7,11 +7,14 @@
 
 #include "src/gpu/ganesh/vk/GrVkImage.h"
 
+#include "include/gpu/vk/VulkanMutableTextureState.h"
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
 #include "src/gpu/ganesh/vk/GrVkImageView.h"
-#include "src/gpu/ganesh/vk/GrVkMemory.h"
 #include "src/gpu/ganesh/vk/GrVkTexture.h"
 #include "src/gpu/ganesh/vk/GrVkUtil.h"
+#include "src/gpu/vk/VulkanMemory.h"
+#include "src/gpu/vk/VulkanMutableTextureStatePriv.h"
+#include "src/gpu/vk/VulkanUtilsPriv.h"
 
 #define VK_CALL(GPU, X) GR_VK_CALL(GPU->vkInterface(), X)
 
@@ -30,7 +33,7 @@ sk_sp<GrVkImage> GrVkImage::MakeStencil(GrVkGpu* gpu,
                            vkUsageFlags,
                            GrProtected::kNo,
                            GrMemoryless::kNo,
-                           SkBudgeted::kYes);
+                           skgpu::Budgeted::kYes);
 }
 
 sk_sp<GrVkImage> GrVkImage::MakeMSAA(GrVkGpu* gpu,
@@ -56,7 +59,7 @@ sk_sp<GrVkImage> GrVkImage::MakeMSAA(GrVkGpu* gpu,
                            vkUsageFlags,
                            isProtected,
                            memoryless,
-                           SkBudgeted::kYes);
+                           skgpu::Budgeted::kYes);
 }
 
 sk_sp<GrVkImage> GrVkImage::MakeTexture(GrVkGpu* gpu,
@@ -65,7 +68,7 @@ sk_sp<GrVkImage> GrVkImage::MakeTexture(GrVkGpu* gpu,
                                         uint32_t mipLevels,
                                         GrRenderable renderable,
                                         int numSamples,
-                                        SkBudgeted budgeted,
+                                        skgpu::Budgeted budgeted,
                                         GrProtected isProtected) {
     UsageFlags usageFlags = UsageFlags::kTexture;
     VkImageUsageFlags vkUsageFlags = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
@@ -136,7 +139,7 @@ sk_sp<GrVkImage> GrVkImage::Make(GrVkGpu* gpu,
                                  VkImageUsageFlags vkUsageFlags,
                                  GrProtected isProtected,
                                  GrMemoryless memoryless,
-                                 SkBudgeted budgeted) {
+                                 skgpu::Budgeted budgeted) {
     GrVkImage::ImageDesc imageDesc;
     imageDesc.fImageType = VK_IMAGE_TYPE_2D;
     imageDesc.fFormat = format;
@@ -160,8 +163,8 @@ sk_sp<GrVkImage> GrVkImage::Make(GrVkGpu* gpu,
         return nullptr;
     }
 
-    sk_sp<skgpu::MutableTextureStateRef> mutableState(
-            new skgpu::MutableTextureStateRef(info.fImageLayout, info.fCurrentQueueFamily));
+    auto mutableState = sk_make_sp<skgpu::MutableTextureState>(
+            skgpu::MutableTextureStates::MakeVulkan(info.fImageLayout, info.fCurrentQueueFamily));
     return sk_sp<GrVkImage>(new GrVkImage(gpu,
                                           dimensions,
                                           attachmentUsages,
@@ -176,7 +179,7 @@ sk_sp<GrVkImage> GrVkImage::Make(GrVkGpu* gpu,
 sk_sp<GrVkImage> GrVkImage::MakeWrapped(GrVkGpu* gpu,
                                         SkISize dimensions,
                                         const GrVkImageInfo& info,
-                                        sk_sp<skgpu::MutableTextureStateRef> mutableState,
+                                        sk_sp<skgpu::MutableTextureState> mutableState,
                                         UsageFlags attachmentUsages,
                                         GrWrapOwnership ownership,
                                         GrWrapCacheable cacheable,
@@ -211,21 +214,21 @@ GrVkImage::GrVkImage(GrVkGpu* gpu,
                      SkISize dimensions,
                      UsageFlags supportedUsages,
                      const GrVkImageInfo& info,
-                     sk_sp<skgpu::MutableTextureStateRef> mutableState,
+                     sk_sp<skgpu::MutableTextureState> mutableState,
                      sk_sp<const GrVkImageView> framebufferView,
                      sk_sp<const GrVkImageView> textureView,
-                     SkBudgeted budgeted,
+                     skgpu::Budgeted budgeted,
                      std::string_view label)
         : GrAttachment(gpu,
                        dimensions,
                        supportedUsages,
                        info.fSampleCount,
-                       info.fLevelCount > 1 ? GrMipmapped::kYes : GrMipmapped::kNo,
+                       info.fLevelCount > 1 ? skgpu::Mipmapped::kYes : skgpu::Mipmapped::kNo,
                        info.fProtected,
                        label,
-                       info.fAlloc.fFlags &
-                               skgpu::VulkanAlloc::kLazilyAllocated_Flag ? GrMemoryless::kYes
-                                                                         : GrMemoryless::kNo)
+                       info.fAlloc.fFlags & skgpu::VulkanAlloc::kLazilyAllocated_Flag
+                               ? GrMemoryless::kYes
+                               : GrMemoryless::kNo)
         , fInfo(info)
         , fInitialQueueFamily(info.fCurrentQueueFamily)
         , fMutableState(std::move(mutableState))
@@ -240,7 +243,7 @@ GrVkImage::GrVkImage(GrVkGpu* gpu,
                      SkISize dimensions,
                      UsageFlags supportedUsages,
                      const GrVkImageInfo& info,
-                     sk_sp<skgpu::MutableTextureStateRef> mutableState,
+                     sk_sp<skgpu::MutableTextureState> mutableState,
                      sk_sp<const GrVkImageView> framebufferView,
                      sk_sp<const GrVkImageView> textureView,
                      GrBackendObjectOwnership ownership,
@@ -251,7 +254,7 @@ GrVkImage::GrVkImage(GrVkGpu* gpu,
                        dimensions,
                        supportedUsages,
                        info.fSampleCount,
-                       info.fLevelCount > 1 ? GrMipmapped::kYes : GrMipmapped::kNo,
+                       info.fLevelCount > 1 ? skgpu::Mipmapped::kYes : skgpu::Mipmapped::kNo,
                        info.fProtected,
                        label)
         , fInfo(info)
@@ -265,8 +268,8 @@ GrVkImage::GrVkImage(GrVkGpu* gpu,
 }
 
 void GrVkImage::init(GrVkGpu* gpu, bool forSecondaryCB) {
-    SkASSERT(fMutableState->getImageLayout() == fInfo.fImageLayout);
-    SkASSERT(fMutableState->getQueueFamilyIndex() == fInfo.fCurrentQueueFamily);
+    SkASSERT(skgpu::MutableTextureStates::GetVkImageLayout(fMutableState.get()) == fInfo.fImageLayout);
+    SkASSERT(skgpu::MutableTextureStates::GetVkQueueFamilyIndex(fMutableState.get()) == fInfo.fCurrentQueueFamily);
 #ifdef SK_DEBUG
     if (fInfo.fImageUsageFlags & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
         SkASSERT(SkToBool(fInfo.fImageUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT));
@@ -469,7 +472,8 @@ bool GrVkImage::InitImageInfo(GrVkGpu* gpu, const ImageDesc& imageDesc, GrVkImag
     if (0 == imageDesc.fWidth || 0 == imageDesc.fHeight) {
         return false;
     }
-    if ((imageDesc.fIsProtected == GrProtected::kYes) && !gpu->vkCaps().supportsProtectedMemory()) {
+    if ((imageDesc.fIsProtected == GrProtected::kYes) &&
+        !gpu->vkCaps().supportsProtectedContent()) {
         return false;
     }
 
@@ -479,7 +483,7 @@ bool GrVkImage::InitImageInfo(GrVkGpu* gpu, const ImageDesc& imageDesc, GrVkImag
 
     // Create Image
     VkSampleCountFlagBits vkSamples;
-    if (!GrSampleCountToVkSampleCount(imageDesc.fSamples, &vkSamples)) {
+    if (!skgpu::SampleCountToVkSampleCount(imageDesc.fSamples, &vkSamples)) {
         return false;
     }
 
@@ -535,13 +539,42 @@ bool GrVkImage::InitImageInfo(GrVkGpu* gpu, const ImageDesc& imageDesc, GrVkImag
         return false;
     }
 
-    GrMemoryless memoryless = imageDesc.fUsageFlags & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT
-                                      ? GrMemoryless::kYes
-                                      : GrMemoryless::kNo;
+    skgpu::Protected isProtected = gpu->protectedContext() ? skgpu::Protected::kYes
+                                                           : skgpu::Protected::kNo;
+    bool forceDedicatedMemory = gpu->vkCaps().shouldAlwaysUseDedicatedImageMemory();
+    bool useLazyAllocation =
+            SkToBool(imageDesc.fUsageFlags & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
+
+    auto checkResult = [gpu, isProtected, forceDedicatedMemory, useLazyAllocation](
+                               VkResult result) {
+        GR_VK_LOG_IF_NOT_SUCCESS(gpu, result, "skgpu::VulkanMemory::AllocImageMemory"
+                                 " (isProtected:%d, forceDedicatedMemory:%d, useLazyAllocation:%d)",
+                                 (int)isProtected, (int)forceDedicatedMemory,
+                                 (int)useLazyAllocation);
+        return gpu->checkVkResult(result);
+    };
+    auto allocator = gpu->memoryAllocator();
     skgpu::VulkanAlloc alloc;
-    if (!GrVkMemory::AllocAndBindImageMemory(gpu, image, memoryless, &alloc) ||
-        (memoryless == GrMemoryless::kYes &&
+    if (!skgpu::VulkanMemory::AllocImageMemory(allocator,
+                                               image,
+                                               isProtected,
+                                               forceDedicatedMemory,
+                                               useLazyAllocation,
+                                               checkResult,
+                                               &alloc) ||
+        (useLazyAllocation &&
          !SkToBool(alloc.fFlags & skgpu::VulkanAlloc::kLazilyAllocated_Flag))) {
+        VK_CALL(gpu, DestroyImage(gpu->device(), image, nullptr));
+        return false;
+    }
+
+    // Bind buffer
+    GR_VK_CALL_RESULT(gpu, result, BindImageMemory(gpu->device(),
+                                                   image,
+                                                   alloc.fMemory,
+                                                   alloc.fOffset));
+    if (result) {
+        skgpu::VulkanMemory::FreeImageMemory(allocator, alloc);
         VK_CALL(gpu, DestroyImage(gpu->device(), image, nullptr));
         return false;
     }
@@ -563,7 +596,7 @@ bool GrVkImage::InitImageInfo(GrVkGpu* gpu, const ImageDesc& imageDesc, GrVkImag
 
 void GrVkImage::DestroyImageInfo(const GrVkGpu* gpu, GrVkImageInfo* info) {
     VK_CALL(gpu, DestroyImage(gpu->device(), info->fImage, nullptr));
-    GrVkMemory::FreeImageMemory(gpu, info->fAlloc);
+    skgpu::VulkanMemory::FreeImageMemory(gpu->memoryAllocator(), info->fAlloc);
 }
 
 GrVkImage::~GrVkImage() {
@@ -621,7 +654,7 @@ void GrVkImage::setResourceRelease(sk_sp<RefCntedReleaseProc> releaseHelper) {
 void GrVkImage::Resource::freeGPUData() const {
     this->invokeReleaseProc();
     VK_CALL(fGpu, DestroyImage(fGpu->device(), fImage, nullptr));
-    GrVkMemory::FreeImageMemory(fGpu, fAlloc);
+    skgpu::VulkanMemory::FreeImageMemory(fGpu->memoryAllocator(), fAlloc);
 }
 
 void GrVkImage::BorrowedResource::freeGPUData() const {
@@ -701,9 +734,8 @@ GrVkGpu* GrVkImage::getVkGpu() const {
     return static_cast<GrVkGpu*>(this->getGpu());
 }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 void GrVkImage::setCurrentQueueFamilyToGraphicsQueue(GrVkGpu* gpu) {
-    fMutableState->setQueueFamilyIndex(gpu->queueIndex());
+    skgpu::MutableTextureStates::SetVkQueueFamilyIndex(fMutableState.get(), gpu->queueIndex());
 }
 #endif
-

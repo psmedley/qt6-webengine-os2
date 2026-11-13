@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 class JBig2EmbedderTest : public EmbedderTest {};
 
-#if defined(_SKIA_SUPPORT_)
+#if defined(PDF_USE_SKIA)
 // TODO(crbug.com/pdfium/11): Fix this test and enable.
 #define MAYBE_Bug_631912 DISABLED_Bug_631912
 #else

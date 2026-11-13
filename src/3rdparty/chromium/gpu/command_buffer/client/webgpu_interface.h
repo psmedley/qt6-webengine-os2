@@ -8,13 +8,17 @@
 #include <dawn/dawn_proc_table.h>
 #include <dawn/webgpu.h>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
+#include "base/types/cxx23_to_underlying.h"
 #include "gpu/command_buffer/client/interface_base.h"
 #include "gpu/command_buffer/common/webgpu_cmd_enums.h"
 #include "gpu/command_buffer/common/webgpu_cmd_ids.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 
 namespace gpu {
+
+struct Mailbox;
+
 namespace webgpu {
 
 struct ReservedTexture {
@@ -80,22 +84,56 @@ class WebGPUInterface : public InterfaceBase {
 // this file instead of having to edit some template or the code generator.
 #include "gpu/command_buffer/client/webgpu_interface_autogen.h"
 
+  virtual void AssociateMailbox(GLuint device_id,
+                                GLuint device_generation,
+                                GLuint id,
+                                GLuint generation,
+                                GLuint usage,
+                                const WGPUTextureFormat* view_formats,
+                                GLuint view_format_count,
+                                MailboxFlags flags,
+                                const Mailbox& mailbox) = 0;
+
   void AssociateMailbox(GLuint device_id,
                         GLuint device_generation,
                         GLuint id,
                         GLuint generation,
                         GLuint usage,
-                        const GLbyte* mailbox) {
+                        const WGPUTextureFormat* view_formats,
+                        GLuint view_format_count,
+                        const Mailbox& mailbox) {
     AssociateMailbox(device_id, device_generation, id, generation, usage,
-                     WEBGPU_MAILBOX_NONE, mailbox);
+                     view_formats, view_format_count, WEBGPU_MAILBOX_NONE,
+                     mailbox);
+  }
+
+  void AssociateMailbox(GLuint device_id,
+                        GLuint device_generation,
+                        GLuint id,
+                        GLuint generation,
+                        GLuint usage,
+                        MailboxFlags flags,
+                        const Mailbox& mailbox) {
+    AssociateMailbox(device_id, device_generation, id, generation, usage,
+                     nullptr, 0, flags, mailbox);
+  }
+
+  void AssociateMailbox(GLuint device_id,
+                        GLuint device_generation,
+                        GLuint id,
+                        GLuint generation,
+                        GLuint usage,
+                        const Mailbox& mailbox) {
+    AssociateMailbox(device_id, device_generation, id, generation, usage,
+                     nullptr, 0, WEBGPU_MAILBOX_NONE, mailbox);
   }
 
   void SetWebGPUExecutionContextToken(
       const blink::WebGPUExecutionContextToken& token) {
     uint64_t high = token.value().GetHighForSerialization();
     uint64_t low = token.value().GetLowForSerialization();
-    SetWebGPUExecutionContextToken(token.variant_index(), high >> 32,
-                                   high & 0xFFFFFFFF, low >> 32,
+    SetWebGPUExecutionContextToken(base::to_underlying(token.variant_index()),
+                                   high >> 32, high & 0xFFFFFFFF, low >> 32,
                                    low & 0xFFFFFFFF);
   }
 };

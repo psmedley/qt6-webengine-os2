@@ -169,10 +169,11 @@ TEST_F(CorsTest, CheckAccessAndReportMetricsForPermittedSecureOrigin) {
   const GURL response_url("http://example.com/data");
   const url::Origin origin = url::Origin::Create(GURL("https://google.com"));
 
-  CheckAccessAndReportMetrics(response_url,
-                              origin.Serialize() /* allow_origin_header */,
-                              absl::nullopt /* allow_credentials_header */,
-                              network::mojom::CredentialsMode::kOmit, origin);
+  EXPECT_TRUE(CheckAccessAndReportMetrics(
+                  response_url, origin.Serialize() /* allow_origin_header */,
+                  absl::nullopt /* allow_credentials_header */,
+                  network::mojom::CredentialsMode::kOmit, origin)
+                  .has_value());
   histogram_tester.ExpectUniqueSample(kAccessCheckHistogram,
                                       AccessCheckResult::kPermitted, 1);
   histogram_tester.ExpectTotalCount(kAccessCheckHistogramNotSecure, 0);
@@ -183,10 +184,11 @@ TEST_F(CorsTest, CheckAccessAndReportMetricsForPermittedNotSecureOrigin) {
   const GURL response_url("http://example.com/data");
   const url::Origin origin = url::Origin::Create(GURL("http://google.com"));
 
-  CheckAccessAndReportMetrics(response_url,
-                              origin.Serialize() /* allow_origin_header */,
-                              absl::nullopt /* allow_credentials_header */,
-                              network::mojom::CredentialsMode::kOmit, origin);
+  EXPECT_TRUE(CheckAccessAndReportMetrics(
+                  response_url, origin.Serialize() /* allow_origin_header */,
+                  absl::nullopt /* allow_credentials_header */,
+                  network::mojom::CredentialsMode::kOmit, origin)
+                  .has_value());
   histogram_tester.ExpectUniqueSample(kAccessCheckHistogram,
                                       AccessCheckResult::kPermitted, 1);
   histogram_tester.ExpectUniqueSample(kAccessCheckHistogramNotSecure,
@@ -198,10 +200,12 @@ TEST_F(CorsTest, CheckAccessAndReportMetricsForNotPermittedSecureOrigin) {
   const GURL response_url("http://example.com/data");
   const url::Origin origin = url::Origin::Create(GURL("https://google.com"));
 
-  CheckAccessAndReportMetrics(response_url,
-                              absl::nullopt /* allow_origin_header */,
-                              absl::nullopt /* allow_credentials_header */,
-                              network::mojom::CredentialsMode::kOmit, origin);
+  EXPECT_FALSE(CheckAccessAndReportMetrics(
+                   response_url, absl::nullopt /* allow_origin_header */,
+                   absl::nullopt /* allow_credentials_header */,
+                   network::mojom::CredentialsMode::kOmit, origin)
+                   .has_value());
+
   histogram_tester.ExpectUniqueSample(kAccessCheckHistogram,
                                       AccessCheckResult::kNotPermitted, 1);
   histogram_tester.ExpectTotalCount(kAccessCheckHistogramNotSecure, 0);
@@ -287,6 +291,16 @@ TEST_F(CorsTest, SafelistedSecCHPrefersReducedMotion) {
                                      "\"Prefers-Reduced-Motion!\""));
 }
 
+TEST_F(CorsTest, SafelistedSecCHPrefersReducedTransparency) {
+  EXPECT_TRUE(IsCorsSafelistedHeader("Sec-CH-Prefers-Reduced-Transparency",
+                                     "\"Prefers-Reduced-Transparency!\""));
+}
+
+TEST_F(CorsTest, SafelistedSecCHUAFormFactor) {
+  EXPECT_TRUE(
+      IsCorsSafelistedHeader("Sec-CH-UA-Form-Factor", "\"Form Factor!\""));
+}
+
 TEST_F(CorsTest, SafelistedSecCHUA) {
   EXPECT_TRUE(IsCorsSafelistedHeader("Sec-CH-UA", "\"User Agent!\""));
   EXPECT_TRUE(IsCorsSafelistedHeader("Sec-CH-UA-Platform", "\"Platform!\""));
@@ -294,8 +308,6 @@ TEST_F(CorsTest, SafelistedSecCHUA) {
                                      "\"Platform-Version!\""));
   EXPECT_TRUE(IsCorsSafelistedHeader("Sec-CH-UA-Arch", "\"Architecture!\""));
   EXPECT_TRUE(IsCorsSafelistedHeader("Sec-CH-UA-Model", "\"Model!\""));
-  EXPECT_TRUE(IsCorsSafelistedHeader("Sec-CH-UA-Reduced", "\"?1\""));
-  EXPECT_TRUE(IsCorsSafelistedHeader("Sec-CH-UA-Full", "\"?1\""));
 
   // TODO(mkwst): Validate that `Sec-CH-UA-*` is a structured header.
   // https://crbug.com/924969
@@ -433,6 +445,34 @@ TEST_F(CorsTest, CheckCorsClientHintsSafelist) {
   EXPECT_TRUE(IsCorsSafelistedHeader("viewport-Width", "125"));
   EXPECT_FALSE(IsCorsSafelistedHeader("viewport-width", "125.2"));
   EXPECT_TRUE(IsCorsSafelistedHeader("viewport-width", "2147483648"));
+}
+
+TEST_F(CorsTest, CheckCorsClientHintsNetworkQuality) {
+  EXPECT_FALSE(IsCorsSafelistedHeader("rtt", ""));
+  EXPECT_TRUE(IsCorsSafelistedHeader("rtt", "1"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("rtt", "-1"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("rtt", "1.0"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("rtt", "-1.0"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("rtt", "2g"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("rtt", "6g"));
+
+  EXPECT_FALSE(IsCorsSafelistedHeader("downlink", ""));
+  EXPECT_TRUE(IsCorsSafelistedHeader("downlink", "1"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("downlink", "-1"));
+  EXPECT_TRUE(IsCorsSafelistedHeader("downlink", "1.0"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("downlink", "-1.0"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("downlink", "foo"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("downlink", "2g"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("downlink", "6g"));
+
+  EXPECT_FALSE(IsCorsSafelistedHeader("ect", ""));
+  EXPECT_FALSE(IsCorsSafelistedHeader("ect", "1"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("ect", "-1"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("ect", "1.0"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("ect", "-1.0"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("ect", "foo"));
+  EXPECT_TRUE(IsCorsSafelistedHeader("ect", "2g"));
+  EXPECT_FALSE(IsCorsSafelistedHeader("ect", "6g"));
 }
 
 TEST_F(CorsTest, CorsUnsafeRequestHeaderNames) {

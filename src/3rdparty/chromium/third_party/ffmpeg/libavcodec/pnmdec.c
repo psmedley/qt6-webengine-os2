@@ -59,10 +59,13 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
     if ((ret = ff_pnm_decode_header(avctx, s)) < 0)
         return ret;
 
+    if (avctx->skip_frame >= AVDISCARD_ALL)
+        return avpkt->size;
+
     if ((ret = ff_get_buffer(avctx, p, 0)) < 0)
         return ret;
     p->pict_type = AV_PICTURE_TYPE_I;
-    p->key_frame = 1;
+    p->flags |= AV_FRAME_FLAG_KEY;
     avctx->bits_per_raw_sample = av_log2(s->maxval) + 1;
 
     switch (avctx->pix_fmt) {
@@ -134,7 +137,7 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
         if(s->type < 4 || (is_mono && s->type==7)){
             for (i=0; i<avctx->height; i++) {
                 PutBitContext pb;
-                init_put_bits(&pb, ptr, linesize);
+                init_put_bits(&pb, ptr, FFABS(linesize));
                 for(j=0; j<avctx->width * components; j++){
                     unsigned int c=0;
                     unsigned v=0;
@@ -343,6 +346,13 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
                 }
             }
         }
+        /* PFM is encoded from bottom to top */
+        p->data[0] += (avctx->height - 1) * p->linesize[0];
+        p->data[1] += (avctx->height - 1) * p->linesize[1];
+        p->data[2] += (avctx->height - 1) * p->linesize[2];
+        p->linesize[0] = -p->linesize[0];
+        p->linesize[1] = -p->linesize[1];
+        p->linesize[2] = -p->linesize[2];
         break;
     case AV_PIX_FMT_GRAYF32:
         if (!s->half) {
@@ -392,6 +402,9 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
                 }
             }
         }
+        /* PFM is encoded from bottom to top */
+        p->data[0] += (avctx->height - 1) * p->linesize[0];
+        p->linesize[0] = -p->linesize[0];
         break;
     }
     *got_frame = 1;
@@ -408,6 +421,7 @@ const FFCodec ff_pgm_decoder = {
     .p.id           = AV_CODEC_ID_PGM,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PNMContext),
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     FF_CODEC_DECODE_CB(pnm_decode_frame),
 };
 #endif
@@ -420,6 +434,7 @@ const FFCodec ff_pgmyuv_decoder = {
     .p.id           = AV_CODEC_ID_PGMYUV,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PNMContext),
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     FF_CODEC_DECODE_CB(pnm_decode_frame),
 };
 #endif
@@ -432,6 +447,7 @@ const FFCodec ff_ppm_decoder = {
     .p.id           = AV_CODEC_ID_PPM,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PNMContext),
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     FF_CODEC_DECODE_CB(pnm_decode_frame),
 };
 #endif
@@ -444,6 +460,7 @@ const FFCodec ff_pbm_decoder = {
     .p.id           = AV_CODEC_ID_PBM,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PNMContext),
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     FF_CODEC_DECODE_CB(pnm_decode_frame),
 };
 #endif
@@ -456,6 +473,7 @@ const FFCodec ff_pam_decoder = {
     .p.id           = AV_CODEC_ID_PAM,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PNMContext),
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     FF_CODEC_DECODE_CB(pnm_decode_frame),
 };
 #endif
@@ -468,6 +486,7 @@ const FFCodec ff_pfm_decoder = {
     .p.id           = AV_CODEC_ID_PFM,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PNMContext),
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     FF_CODEC_DECODE_CB(pnm_decode_frame),
 };
 #endif
@@ -490,6 +509,7 @@ const FFCodec ff_phm_decoder = {
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PNMContext),
     .init           = phm_dec_init,
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     FF_CODEC_DECODE_CB(pnm_decode_frame),
 };
 #endif

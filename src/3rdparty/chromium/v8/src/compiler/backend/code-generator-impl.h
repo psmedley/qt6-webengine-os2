@@ -90,7 +90,7 @@ class InstructionOperandConverter {
     return ToExternalReference(instr_->InputAt(index));
   }
 
-  Handle<CodeT> InputCode(size_t index) {
+  Handle<Code> InputCode(size_t index) {
     return ToCode(instr_->InputAt(index));
   }
 
@@ -108,12 +108,12 @@ class InstructionOperandConverter {
     return ToRegister(instr_->TempAt(index));
   }
 
-  FloatRegister OutputFloatRegister() {
-    return ToFloatRegister(instr_->Output());
+  FloatRegister OutputFloatRegister(size_t index = 0) {
+    return ToFloatRegister(instr_->OutputAt(index));
   }
 
-  DoubleRegister OutputDoubleRegister() {
-    return ToDoubleRegister(instr_->Output());
+  DoubleRegister OutputDoubleRegister(size_t index = 0) {
+    return ToDoubleRegister(instr_->OutputAt(index));
   }
 
   DoubleRegister TempDoubleRegister(size_t index) {
@@ -127,6 +127,20 @@ class InstructionOperandConverter {
   Simd128Register TempSimd128Register(size_t index) {
     return ToSimd128Register(instr_->TempAt(index));
   }
+
+#if defined(V8_TARGET_ARCH_X64)
+  Simd256Register InputSimd256Register(size_t index) {
+    return ToSimd256Register(instr_->InputAt(index));
+  }
+
+  Simd256Register OutputSimd256Register() {
+    return ToSimd256Register(instr_->Output());
+  }
+
+  Simd256Register TempSimd256Register(size_t index) {
+    return ToSimd256Register(instr_->TempAt(index));
+  }
+#endif
 
   // -- Conversions for operands -----------------------------------------------
 
@@ -154,6 +168,12 @@ class InstructionOperandConverter {
     return LocationOperand::cast(op)->GetSimd128Register();
   }
 
+#if defined(V8_TARGET_ARCH_X64)
+  Simd256Register ToSimd256Register(InstructionOperand* op) {
+    return LocationOperand::cast(op)->GetSimd256Register();
+  }
+#endif
+
   Constant ToConstant(InstructionOperand* op) const {
     if (op->IsImmediate()) {
       return gen_->instructions()->GetImmediate(ImmediateOperand::cast(op));
@@ -172,7 +192,7 @@ class InstructionOperandConverter {
     return ToConstant(op).ToExternalReference();
   }
 
-  Handle<CodeT> ToCode(InstructionOperand* op) {
+  Handle<Code> ToCode(InstructionOperand* op) {
     return ToConstant(op).ToCode();
   }
 
@@ -266,14 +286,14 @@ class OutOfLineCode : public ZoneObject {
   Label* entry() { return &entry_; }
   Label* exit() { return &exit_; }
   const Frame* frame() const { return frame_; }
-  TurboAssembler* tasm() { return tasm_; }
+  MacroAssembler* masm() { return masm_; }
   OutOfLineCode* next() const { return next_; }
 
  private:
   Label entry_;
   Label exit_;
   const Frame* const frame_;
-  TurboAssembler* const tasm_;
+  MacroAssembler* const masm_;
   OutOfLineCode* const next_;
 };
 

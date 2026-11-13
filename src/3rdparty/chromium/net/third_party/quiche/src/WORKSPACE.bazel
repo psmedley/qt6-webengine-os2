@@ -18,9 +18,9 @@ http_archive(
 
 http_archive(
     name = "com_google_absl",
-    sha256 = "44634eae586a7158dceedda7d8fd5cec6d1ebae08c83399f75dd9ce76324de40",  # Last updated 2022-05-18
-    strip_prefix = "abseil-cpp-3e04aade4e7a53aebbbed1a1268117f1f522bfb0",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/3e04aade4e7a53aebbbed1a1268117f1f522bfb0.zip"],
+    sha256 = "0e9cb182c58a2abbd2bfe72cb55d2e1bbe61736232744f0d2b4753bab7a35fc9",  # Last updated 2023-11-15
+    strip_prefix = "abseil-cpp-aa146013a1d8c2d9f567ec23f12927f5d838780f",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/aa146013a1d8c2d9f567ec23f12927f5d838780f.zip"],
 )
 
 http_archive(
@@ -32,9 +32,9 @@ http_archive(
 
 http_archive(
     name = "boringssl",
-    sha256 = "482a59ea63d03fbb4d3cab22e40043fb4eef2cbbdc2eb944cd627675ae8b0cf3",  # Last updated 2022-05-18
-    strip_prefix = "boringssl-02c6711efbb6c9dc6236a1c3779af1bcb0274dfd",
-    urls = ["https://github.com/google/boringssl/archive/02c6711efbb6c9dc6236a1c3779af1bcb0274dfd.tar.gz"],
+    sha256 = "03079cbfe0f1c60cab58961ec45946974d9d89f90ef117b09839ae731697a81a",  # Last updated 2023-06-22
+    strip_prefix = "boringssl-e2fa83865bfcf969f0c71673c1a5eba2814ec447",
+    urls = ["https://github.com/google/boringssl/archive/e2fa83865bfcf969f0c71673c1a5eba2814ec447.tar.gz"],
 )
 
 http_archive(
@@ -46,7 +46,7 @@ http_archive(
 
 http_archive(
     name = "com_google_googleurl",
-    sha256 = "a1bc96169d34dcc1406ffb750deef3bc8718bd1f9069a2878838e1bd905de989",
+    sha256 = "a1bc96169d34dcc1406ffb750deef3bc8718bd1f9069a2878838e1bd905de989",  # Last updated 2022-04-04
     urls = ["https://storage.googleapis.com/quiche-envoy-integration/googleurl_9cdb1f4d1a365ebdbcbf179dadf7f8aa5ee802e7.tar.gz"],
 )
 
@@ -62,18 +62,16 @@ http_archive(
 
 http_archive(
     name = "com_google_googletest",
-    sha256 = "7ee83802222f9392452c57b4757185697a51639b69b64590f2c2188f58618581",  # Last updated 2022-05-18
-    strip_prefix = "googletest-8d51dc50eb7e7698427fed81b85edad0e032112e",
-    urls = ["https://github.com/google/googletest/archive/8d51dc50eb7e7698427fed81b85edad0e032112e.zip"],
+    sha256 = "82808543c49488e712d9bd84c50edf40d692ffdaca552b4b019b8b533d3cf8ef",  # Last updated 2023-04-12
+    strip_prefix = "googletest-12a5852e451baabc79c63a86c634912c563d57bc",
+    urls = ["https://github.com/google/googletest/archive/12a5852e451baabc79c63a86c634912c563d57bc.zip"],
 )
 
-# Note this must use a commit from the `abseil` branch of the RE2 project.
-# https://github.com/google/re2/tree/abseil
 http_archive(
     name = "com_googlesource_code_re2",
-    sha256 = "906d0df8ff48f8d3a00a808827f009a840190f404559f649cb8e4d7143255ef9",
-    strip_prefix = "re2-a276a8c738735a0fe45a6ee590fe2df69bcf4502",
-    urls = ["https://github.com/google/re2/archive/a276a8c738735a0fe45a6ee590fe2df69bcf4502.zip"],  # 2022-04-08
+    sha256 = "1726508efc93a50854c92e3f7ac66eb28f0e57652e413f11d7c1e28f97d997ba",  # Last updated 2023-06-01
+    strip_prefix = "re2-03da4fc0857c285e3a26782f6bc8931c4c950df4",
+    urls = ["https://github.com/google/re2/archive/03da4fc0857c285e3a26782f6bc8931c4c950df4.zip"],
 )
 
 # -------- Load and call dependencies of underlying libraries --------

@@ -6,9 +6,9 @@
 #define QUICHE_QUIC_TOOLS_QUIC_SIMPLE_SERVER_STREAM_H_
 
 #include <cstdint>
+#include <optional>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "quiche/quic/core/http/quic_spdy_server_stream_base.h"
 #include "quiche/quic/core/quic_error_codes.h"
 #include "quiche/quic/core/quic_packets.h"
@@ -44,11 +44,6 @@ class QuicSimpleServerStream : public QuicSpdyServerStreamBase,
 
   void OnInvalidHeaders() override;
 
-  // Make this stream start from as if it just finished parsing an incoming
-  // request whose headers are equivalent to |push_request_headers|.
-  // Doing so will trigger this toy stream to fetch response and send it back.
-  virtual void PushResponse(spdy::Http2HeaderBlock push_request_headers);
-
   // The response body of error responses.
   static const char* const kErrorResponseBody;
   static const char* const kNotFoundResponseBody;
@@ -81,16 +76,16 @@ class QuicSimpleServerStream : public QuicSpdyServerStreamBase,
   // for the body.
   void SendNotFoundResponse();
 
-  // Sends the response header (if not `absl::nullopt`) and body, but not the
+  // Sends the response header (if not `std::nullopt`) and body, but not the
   // fin.
   void SendIncompleteResponse(
-      absl::optional<spdy::Http2HeaderBlock> response_headers,
+      std::optional<spdy::Http2HeaderBlock> response_headers,
       absl::string_view body);
 
   void SendHeadersAndBody(spdy::Http2HeaderBlock response_headers,
                           absl::string_view body);
   void SendHeadersAndBodyAndTrailers(
-      absl::optional<spdy::Http2HeaderBlock> response_headers,
+      std::optional<spdy::Http2HeaderBlock> response_headers,
       absl::string_view body, spdy::Http2HeaderBlock response_trailers);
 
   spdy::Http2HeaderBlock* request_headers() { return &request_headers_; }
@@ -110,7 +105,7 @@ class QuicSimpleServerStream : public QuicSpdyServerStreamBase,
   }
 
   bool response_sent() const { return response_sent_; }
-
+  void set_response_sent() { response_sent_ = true; }
   // The parsed headers received from the client.
   spdy::Http2HeaderBlock request_headers_;
   int64_t content_length_;

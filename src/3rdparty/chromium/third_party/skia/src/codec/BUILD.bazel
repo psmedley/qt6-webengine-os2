@@ -1,11 +1,12 @@
+load("//bazel:flags.bzl", "selects", "string_flag_with_values")
 load(
-    "//bazel:macros.bzl",
+    "//bazel:skia_rules.bzl",
     "exports_files_legacy",
     "select_multi",
-    "selects",
     "skia_cc_deps",
+    "skia_cc_library",
+    "skia_filegroup",
     "split_srcs_and_hdrs",
-    "string_flag_with_values",
 )
 
 licenses(["notice"])
@@ -17,17 +18,21 @@ CORE_FILES = [
     "SkCodecImageGenerator.cpp",
     "SkCodecImageGenerator.h",
     "SkCodecPriv.h",
-    "SkColorTable.cpp",
-    "SkColorTable.h",
+    "SkColorPalette.cpp",
+    "SkColorPalette.h",
+    "SkExif.cpp",
     "SkFrameHolder.h",
+    "SkImageGenerator_FromEncoded.cpp",
     "SkMaskSwizzler.cpp",
     "SkMaskSwizzler.h",
-    "SkMasks.cpp",
-    "SkMasks.h",
+    "SkPixmapUtils.cpp",
+    "SkPixmapUtilsPriv.h",
     "SkSampler.cpp",
     "SkSampler.h",
     "SkSwizzler.cpp",
     "SkSwizzler.h",
+    "SkTiffUtility.cpp",
+    "SkTiffUtility.h",
 ]
 
 split_srcs_and_hdrs(
@@ -71,7 +76,6 @@ split_srcs_and_hdrs(
 DECODE_GIF_FILES = [
     "SkScalingCodec.h",
     "SkWuffsCodec.cpp",
-    "SkWuffsCodec.h",
 ]
 
 split_srcs_and_hdrs(
@@ -85,6 +89,8 @@ DECODE_JPEG_FILES = [
     "SkJpegCodec.h",
     "SkJpegDecoderMgr.cpp",
     "SkJpegDecoderMgr.h",
+    "SkJpegSourceMgr.cpp",
+    "SkJpegSourceMgr.h",
     "SkJpegUtility.cpp",
     "SkJpegUtility.h",
     "SkParseEncodedOrigin.cpp",
@@ -94,6 +100,29 @@ DECODE_JPEG_FILES = [
 split_srcs_and_hdrs(
     name = "decode_jpeg",
     files = DECODE_JPEG_FILES,
+)
+
+filegroup(
+    name = "shared_jpeg_hdrs",  # needed for both encoding and decoding
+    srcs = [
+        "SkJpegConstants.h",
+    ],
+    visibility = ["//src/encode:__pkg__"],
+)
+
+filegroup(
+    name = "xmp_srcs",
+    srcs = [
+        "SkXmp.cpp",
+    ],
+)
+
+split_srcs_and_hdrs(
+    name = "jpeg_xmp",
+    files = [
+        "SkJpegXmp.cpp",
+        "SkJpegXmp.h",
+    ],
 )
 
 DECODE_PNG_FILES = [
@@ -177,7 +206,7 @@ selects.config_setting_group(
     name = "needs_jpeg_priv",
     match_any = [
         ":needs_jpeg",
-        "//src/images:jpeg_encode_codec",
+        "//src/encode:jpeg_encode_codec",
     ],
 )
 
@@ -185,16 +214,17 @@ selects.config_setting_group(
     name = "needs_png_priv",
     match_any = [
         ":png_decode_codec",
-        "//src/images:png_encode_codec",
+        "//src/encode:png_encode_codec",
     ],
 )
 
-filegroup(
+skia_filegroup(
     name = "srcs",
     srcs = [
+        ":core_srcs",
         ":decode_android_srcs",
         ":decode_bmp_srcs",
-        ":core_srcs",
+        ":xmp_srcs",  # TODO: Make this optional
     ] + select_multi(
         {
             ":avif_decode_codec": [":decode_avif_srcs"],
@@ -209,23 +239,26 @@ filegroup(
     visibility = ["//src:__pkg__"],
 )
 
-filegroup(
+skia_filegroup(
     name = "private_hdrs",
     srcs = [
+        ":core_hdrs",
         ":decode_android_hdrs",
         ":decode_bmp_hdrs",
-        ":core_hdrs",
     ] + select({
-        ":needs_jpeg_priv": ["SkJpegPriv.h"],  # used by src/images/SkJPEGWriteUtility
+        ":needs_jpeg_priv": ["SkJpegPriv.h"],  # used by src/encode/SkJPEGWriteUtility
         "//conditions:default": [],
     }) + select({
-        ":needs_png_priv": ["SkPngPriv.h"],  # used by src/images/SkPngEncoder
+        ":needs_png_priv": ["SkPngPriv.h"],  # used by src/encode/SkPngEncoder
         "//conditions:default": [],
     }) + select_multi(
         {
             ":avif_decode_codec": [":decode_avif_hdrs"],
             ":gif_decode_codec": [":decode_gif_hdrs"],
-            ":needs_jpeg": [":decode_jpeg_hdrs"],
+            ":needs_jpeg": [
+                ":decode_jpeg_hdrs",
+                ":shared_jpeg_hdrs",
+            ],
             ":jxl_decode_codec": [":decode_jxl_hdrs"],
             ":png_decode_codec": [":decode_png_hdrs"],
             ":raw_decode_codec": [":decode_raw_hdrs"],
@@ -252,4 +285,74 @@ skia_cc_deps(
             ":webp_decode_codec": ["@libwebp"],
         },
     ),
+)
+
+skia_filegroup(
+    name = "any_decoder_srcs",
+    srcs = [
+        "SkCodecImageGenerator.cpp",
+        "SkCodecImageGenerator.h",
+        "SkImageGenerator_FromEncoded.cpp",
+        "SkPixmapUtils.cpp",
+        "SkPixmapUtilsPriv.h",
+    ],
+)
+
+skia_filegroup(
+    name = "common_jpeg_srcs",
+    srcs = [
+        "SkJpegConstants.h",
+        "SkJpegPriv.h",
+    ],
+    visibility = ["//src/encode:__pkg__"],
+)
+
+skia_filegroup(
+    name = "buffet_png_srcs",
+    srcs = [
+        "SkCodec.cpp",
+        "SkCodecPriv.h",
+        "SkColorPalette.cpp",
+        "SkColorPalette.h",
+        "SkEncodedInfo.cpp",
+        "SkFrameHolder.h",
+        "SkPngCodec.cpp",
+        "SkPngCodec.h",
+        "SkSampler.cpp",
+        "SkSampler.h",
+        "SkSwizzler.cpp",
+        "SkSwizzler.h",
+    ],
+)
+
+skia_filegroup(
+    name = "common_png_srcs",
+    srcs = [
+        "SkPngPriv.h",
+    ],
+    visibility = ["//src/encode:__pkg__"],
+)
+
+skia_cc_library(
+    name = "png_decode",
+    srcs = [
+        ":any_decoder_srcs",
+        ":buffet_png_srcs",
+        ":common_png_srcs",
+        "//include/private:decode_srcs",
+    ],
+    hdrs = [
+        "//include/codec:any_codec_hdrs",
+        "//include/codec:png_public_hdrs",
+    ],
+    features = ["layering_check"],
+    local_defines = ["SK_DISABLE_LEGACY_INIT_DECODERS"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//modules/skcms",
+        "//src/base",
+        "//src/core",
+        "//src/core:core_priv",
+        "@libpng",
+    ],
 )

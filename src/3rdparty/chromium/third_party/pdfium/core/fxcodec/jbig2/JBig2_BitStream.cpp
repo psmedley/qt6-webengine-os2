@@ -1,4 +1,4 @@
-// Copyright 2015 PDFium Authors. All rights reserved.
+// Copyright 2015 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -166,7 +166,7 @@ uint32_t CJBig2_BitStream::getLength() const {
 }
 
 const uint8_t* CJBig2_BitStream::getPointer() const {
-  return getBuf() + m_dwByteIdx;
+  return m_Span.subspan(m_dwByteIdx).data();
 }
 
 void CJBig2_BitStream::offset(uint32_t dwOffset) {

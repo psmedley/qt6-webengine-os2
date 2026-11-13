@@ -1,16 +1,29 @@
-// Copyright 2022 The Dawn Authors
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package expectations_test
 
@@ -60,7 +73,15 @@ func TestParse(t *testing.T) {
 # a comment`,
 			expect: expectations.Content{
 				Chunks: []expectations.Chunk{
-					{},
+					{Comments: []string{`# a comment`}},
+				},
+			},
+		}, /////////////////////////////////////////////////////////////////////
+		{
+			name: "carriage-return line-feed, followed by single line comment",
+			in:   "\r\n# a comment",
+			expect: expectations.Content{
+				Chunks: []expectations.Chunk{
 					{Comments: []string{`# a comment`}},
 				},
 			},
@@ -88,7 +109,6 @@ func TestParse(t *testing.T) {
 			expect: expectations.Content{
 				Chunks: []expectations.Chunk{
 					{Comments: []string{`# comment 1`}},
-					{},
 					{Comments: []string{`# comment 2`}},
 				},
 			},
@@ -103,7 +123,6 @@ func TestParse(t *testing.T) {
 			expect: expectations.Content{
 				Chunks: []expectations.Chunk{
 					{Comments: []string{`# comment 1`}},
-					{},
 					{Comments: []string{`# comment 2`}},
 				},
 			},
@@ -120,6 +139,30 @@ func TestParse(t *testing.T) {
 								Tags:   result.NewTags(),
 								Query:  "abc,def",
 								Status: []string{"FAIL"},
+							},
+						},
+					},
+				},
+			},
+		}, /////////////////////////////////////////////////////////////////////
+		{
+			name: "two expectations, separated with carriage-return line-feed",
+			in:   "abc,def [ FAIL ]\r\nghi,jkl [ PASS ]",
+			expect: expectations.Content{
+				Chunks: []expectations.Chunk{
+					{
+						Expectations: []expectations.Expectation{
+							{
+								Line:   1,
+								Tags:   result.NewTags(),
+								Query:  "abc,def",
+								Status: []string{"FAIL"},
+							},
+							{
+								Line:   2,
+								Tags:   result.NewTags(),
+								Query:  "ghi,jkl",
+								Status: []string{"PASS"},
 							},
 						},
 					},
@@ -300,7 +343,6 @@ crbug.com/123 abc_def [ Skip ]
 							},
 						},
 					},
-					{},
 					{Comments: []string{`### comment 2`}},
 				},
 			},
@@ -324,9 +366,7 @@ crbug.com/456 [ Mac ] ghi_jkl [ PASS ]
 			expect: expectations.Content{
 				Chunks: []expectations.Chunk{
 					{Comments: []string{`# comment 1`}},
-					{},
 					{Comments: []string{`# comment 2`, `# comment 3`}},
-					{},
 					{
 						Expectations: []expectations.Expectation{
 							{
@@ -338,7 +378,6 @@ crbug.com/456 [ Mac ] ghi_jkl [ PASS ]
 							},
 						},
 					},
-					{},
 					{
 						Comments: []string{`# comment 4`, `# comment 5`},
 						Expectations: []expectations.Expectation{
@@ -352,7 +391,6 @@ crbug.com/456 [ Mac ] ghi_jkl [ PASS ]
 						},
 					},
 					{Comments: []string{`# comment 6`}},
-					{},
 					{Comments: []string{`# comment 7`}},
 				},
 			},
@@ -375,7 +413,6 @@ crbug.com/456 [ Mac ] ghi_jkl [ PASS ]
 `,
 			expect: expectations.Content{
 				Chunks: []expectations.Chunk{
-					{},
 					{Comments: []string{
 						`# BEGIN TAG HEADER (autogenerated, see validate_tag_consistency.py)`,
 						`# Devices`,
@@ -432,31 +469,31 @@ crbug.com/456 [ Mac ] ghi_jkl [ PASS ]
 		{
 			name:      "err missing tag ']'",
 			in:        `[`,
-			expectErr: "1:2 error: expected ']' for tags",
+			expectErr: "expectations.txt:1:2 error: expected ']' for tags",
 		}, /////////////////////////////////////////////////////////////////////
 		{
 			name:      "err missing test query",
 			in:        `[ a ]`,
-			expectErr: "1:6 error: expected test query",
+			expectErr: "expectations.txt:1:6 error: expected test query",
 		}, /////////////////////////////////////////////////////////////////////
 		{
 			name:      "err missing status EOL",
 			in:        `[ a ] b`,
-			expectErr: "1:8 error: expected status",
+			expectErr: "expectations.txt:1:8 error: expected status",
 		}, /////////////////////////////////////////////////////////////////////
 		{
 			name:      "err missing status comment",
 			in:        `[ a ] b # c`,
-			expectErr: "1:9 error: expected status",
+			expectErr: "expectations.txt:1:9 error: expected status",
 		}, /////////////////////////////////////////////////////////////////////
 		{
 			name:      "err missing status ']'",
 			in:        `[ a ] b [ c`,
-			expectErr: "1:12 error: expected ']' for status",
+			expectErr: "expectations.txt:1:12 error: expected ']' for status",
 		},
 	} {
 
-		got, err := expectations.Parse(test.in)
+		got, err := expectations.Parse("expectations.txt", test.in)
 		errMsg := ""
 		if err != nil {
 			errMsg = err.Error()

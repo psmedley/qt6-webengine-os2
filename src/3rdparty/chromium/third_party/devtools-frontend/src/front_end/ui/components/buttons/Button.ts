@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import * as LitHtml from '../../lit-html/lit-html.js';
+import * as VisualLogging from '../../visual_logging/visual_logging.js';
 import * as ComponentHelpers from '../helpers/helpers.js';
 import * as IconButton from '../icon_button/icon_button.js';
 
@@ -16,23 +17,20 @@ declare global {
 
 export const enum Variant {
   PRIMARY = 'primary',
+  TONAL = 'tonal',
   SECONDARY = 'secondary',
-  // This is a bit confusing: the TOOLBAR variant is the historical variant
-  // that has been used when adding toolbar icons to legacy DevTools toolbars.
-  // In July 2022 we began work on the new unified toolbar, which will first be
-  // built for Performance Insights and then rolled out across the panels. Once
-  // that work is done, we can remove these two variants and revert back to
-  // having one.
-  // We need to differentiate because the unified toolbar icons are 16px in
-  // size, not 18px (which the toolbar small icons are).
   TOOLBAR = 'toolbar',
-  UNIFIED_TOOLBAR_2022 = 'unified_toolbar_2022',
+  // Just like toolbar but has a style similar to a primary button.
+  PRIMARY_TOOLBAR = 'primary_toolbar',
   ROUND = 'round',
 }
 
 export const enum Size {
   SMALL = 'SMALL',
   MEDIUM = 'MEDIUM',
+  // The 'tiny' size only has an effect on buttons of type 'round', for other
+  // button types 'tiny' buttons look just like 'small' buttons.
+  TINY = 'TINY',
 }
 
 type ButtonType = 'button'|'submit'|'reset';
@@ -47,48 +45,33 @@ interface ButtonState {
   type: ButtonType;
   value?: string;
   title?: string;
-  iconWidth?: string;
-  iconHeight?: string;
+  iconName?: string;
+  jslogContext?: string;
 }
 
-export type ButtonData = {
-  variant: Variant.TOOLBAR|Variant.ROUND,
-  iconUrl: string,
-  size?: Size,
-  disabled?: boolean,
-  active?: boolean,
-  spinner?: boolean,
-  type?: ButtonType,
-  value?: string,
-  title?: string,
-  iconWidth?: string,
-  iconHeight?: string,
-}|{
-  variant: Variant.PRIMARY | Variant.SECONDARY,
-  iconUrl?: string,
-  size?: Size,
-  disabled?: boolean,
-  active?: boolean,
-  spinner?: boolean,
-  type?: ButtonType,
-  value?: string,
-  title?: string,
-}|{
-  variant: Variant.UNIFIED_TOOLBAR_2022,
-  iconUrl: string,
-  disabled?: boolean,
-  active?: boolean,
-  title?: string,
-};
-
-interface ButtonElementInternals extends ElementInternals {
-  readonly form: HTMLFormElement|null;
-  readonly validity: ValidityState;
-  readonly willValidate: boolean;
-  readonly validationMessage: string;
-  checkValidity(): void;
-  reportValidity(): void;
+interface CommonButtonData {
+  variant: Variant;
+  iconUrl?: string;
+  iconName?: string;
+  size?: Size;
+  disabled?: boolean;
+  active?: boolean;
+  spinner?: boolean;
+  type?: ButtonType;
+  value?: string;
+  title?: string;
+  jslogContext?: string;
 }
+
+export type ButtonData = CommonButtonData&(|{
+  variant: Variant.PRIMARY_TOOLBAR | Variant.TOOLBAR | Variant.ROUND,
+  iconUrl: string,
+}|{
+  variant: Variant.PRIMARY_TOOLBAR | Variant.TOOLBAR | Variant.ROUND,
+  iconName: string,
+}|{
+  variant: Variant.PRIMARY | Variant.SECONDARY | Variant.TONAL,
+});
 
 export class Button extends HTMLElement {
   static formAssociated = true;
@@ -104,7 +87,7 @@ export class Button extends HTMLElement {
     type: 'button',
   };
   #isEmpty = true;
-  #internals = this.attachInternals() as ButtonElementInternals;
+  #internals = this.attachInternals();
 
   constructor() {
     super();
@@ -119,16 +102,11 @@ export class Button extends HTMLElement {
   set data(data: ButtonData) {
     this.#props.variant = data.variant;
     this.#props.iconUrl = data.iconUrl;
+    this.#props.iconName = data.iconName;
     this.#props.size = Size.MEDIUM;
 
     if ('size' in data && data.size) {
       this.#props.size = data.size;
-    }
-    if ('iconWidth' in data && data.iconWidth) {
-      this.#props.iconWidth = data.iconWidth;
-    }
-    if ('iconHeight' in data && data.iconHeight) {
-      this.#props.iconHeight = data.iconHeight;
     }
 
     this.#props.active = Boolean(data.active);
@@ -140,11 +118,17 @@ export class Button extends HTMLElement {
     }
     this.#setDisabledProperty(data.disabled || false);
     this.#props.title = data.title;
+    this.#props.jslogContext = data.jslogContext;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
 
   set iconUrl(iconUrl: string|undefined) {
     this.#props.iconUrl = iconUrl;
+    void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
+  }
+
+  set iconName(iconName: string|undefined) {
+    this.#props.iconName = iconName;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
 
@@ -158,22 +142,12 @@ export class Button extends HTMLElement {
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
 
-  set iconWidth(iconWidth: string) {
-    this.#props.iconWidth = iconWidth;
-    void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
-  }
-
-  set iconHeight(iconHeight: string) {
-    this.#props.iconHeight = iconHeight;
-    void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
-  }
-
   set type(type: ButtonType) {
     this.#props.type = type;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
 
-  set title(title: string) {
+  override set title(title: string) {
     this.#props.title = title;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
@@ -188,8 +162,21 @@ export class Button extends HTMLElement {
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
 
+  get active(): boolean {
+    return this.#props.active;
+  }
+
   set spinner(spinner: boolean) {
     this.#props.spinner = spinner;
+    void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
+  }
+
+  get jslogContext(): string|undefined {
+    return this.#props.jslogContext;
+  }
+
+  set jslogContext(jslogContext: string|undefined) {
+    this.#props.jslogContext = jslogContext;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
 
@@ -198,7 +185,7 @@ export class Button extends HTMLElement {
     this.toggleAttribute('disabled', disabled);
   }
 
-  focus(): void {
+  override focus(): void {
     this.#shadow.querySelector('button')?.focus();
   }
 
@@ -232,57 +219,65 @@ export class Button extends HTMLElement {
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
   }
 
+  #isToolbarVariant(): boolean {
+    return this.#props.variant === Variant.TOOLBAR || this.#props.variant === Variant.PRIMARY_TOOLBAR;
+  }
+
   #render(): void {
     if (!this.#props.variant) {
       throw new Error('Button requires a variant to be defined');
     }
-    if (this.#props.variant === Variant.TOOLBAR || this.#props.variant === Variant.UNIFIED_TOOLBAR_2022) {
-      if (!this.#props.iconUrl) {
+    if (this.#isToolbarVariant()) {
+      if (!this.#props.iconUrl && !this.#props.iconName) {
         throw new Error('Toolbar button requires an icon');
       }
       if (!this.#isEmpty) {
-        throw new Error('Tooblar button does not accept children');
+        throw new Error('Toolbar button does not accept children');
       }
     }
     if (this.#props.variant === Variant.ROUND) {
-      if (!this.#props.iconUrl) {
+      if (!this.#props.iconUrl && !this.#props.iconName) {
         throw new Error('Round button requires an icon');
       }
       if (!this.#isEmpty) {
         throw new Error('Round button does not accept children');
       }
     }
+    if (this.#props.iconName && this.#props.iconUrl) {
+      throw new Error('Both iconName and iconUrl are provided.');
+    }
+    const hasIcon = Boolean(this.#props.iconUrl) || Boolean(this.#props.iconName);
     const classes = {
       primary: this.#props.variant === Variant.PRIMARY,
+      tonal: this.#props.variant === Variant.TONAL,
       secondary: this.#props.variant === Variant.SECONDARY,
-      toolbar: this.#props.variant === Variant.TOOLBAR || this.#props.variant === Variant.UNIFIED_TOOLBAR_2022,
-      'unified-toolbar-2022': this.#props.variant === Variant.UNIFIED_TOOLBAR_2022,
+      toolbar: this.#isToolbarVariant(),
+      'primary-toolbar': this.#props.variant === Variant.PRIMARY_TOOLBAR,
       round: this.#props.variant === Variant.ROUND,
-      'text-with-icon': Boolean(this.#props.iconUrl) && !this.#isEmpty,
-      'only-icon': Boolean(this.#props.iconUrl) && this.#isEmpty,
-      small: Boolean(this.#props.size === Size.SMALL),
+      'text-with-icon': hasIcon && !this.#isEmpty,
+      'only-icon': hasIcon && this.#isEmpty,
+      'only-text': !hasIcon && !this.#isEmpty,
+      small: Boolean(this.#props.size === Size.SMALL || this.#props.size === Size.TINY),
+      tiny: Boolean(this.#props.size === Size.TINY),
       active: this.#props.active,
-      'explicit-size': Boolean(this.#props.iconHeight || this.#props.iconWidth),
     };
     const spinnerClasses = {
       primary: this.#props.variant === Variant.PRIMARY,
       secondary: this.#props.variant === Variant.SECONDARY,
       disabled: Boolean(this.#props.disabled),
-      'spinner-component': true,
+      spinner: true,
     };
+    const jslog =
+        this.#props.jslogContext && VisualLogging.action().track({click: true}).context(this.#props.jslogContext);
     // clang-format off
     LitHtml.render(
       LitHtml.html`
-        <button title=${LitHtml.Directives.ifDefined(this.#props.title)} .disabled=${this.#props.disabled} class=${LitHtml.Directives.classMap(classes)}>
-          ${this.#props.iconUrl ? LitHtml.html`<${IconButton.Icon.Icon.litTagName}
-            .data=${{
-              iconPath: this.#props.iconUrl,
-              color: 'var(--color-background)',
-              width: this.#props.iconWidth || undefined,
-              height: this.#props.iconHeight || undefined,
-            } as IconButton.Icon.IconData}
-          >
-          </${IconButton.Icon.Icon.litTagName}>` : ''}
+        <button title=${LitHtml.Directives.ifDefined(this.#props.title)} .disabled=${this.#props.disabled} class=${LitHtml.Directives.classMap(classes)} jslog=${LitHtml.Directives.ifDefined(jslog)}>
+          ${hasIcon
+            ? LitHtml.html`
+                <${IconButton.Icon.Icon.litTagName} name=${this.#props.iconName || this.#props.iconUrl}>
+                </${IconButton.Icon.Icon.litTagName}>`
+            : ''}
           ${this.#props.spinner ? LitHtml.html`<span class=${LitHtml.Directives.classMap(spinnerClasses)}></span>` : ''}
           <slot @slotchange=${this.#onSlotChange}></slot>
         </button>
@@ -320,10 +315,10 @@ export class Button extends HTMLElement {
   get willValidate(): boolean {
     return this.#internals.willValidate;
   }
-  checkValidity(): void {
+  checkValidity(): boolean {
     return this.#internals.checkValidity();
   }
-  reportValidity(): void {
+  reportValidity(): boolean {
     return this.#internals.reportValidity();
   }
 }

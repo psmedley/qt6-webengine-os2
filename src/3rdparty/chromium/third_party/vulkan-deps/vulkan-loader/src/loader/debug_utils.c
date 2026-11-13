@@ -27,9 +27,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef WIN32
+#if !defined(WIN32)
 #include <signal.h>
-#else
 #endif
 
 #include "vulkan/vk_layer.h"
@@ -45,30 +44,32 @@
 
 VkResult util_CreateDebugUtilsMessenger(struct loader_instance *inst, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
                                         const VkAllocationCallbacks *pAllocator, VkDebugUtilsMessengerEXT messenger) {
-    VkLayerDbgFunctionNode *pNewDbgFuncNode = NULL;
+    VkLayerDbgFunctionNode *new_dbg_function_node = NULL;
 
-    pNewDbgFuncNode = (VkLayerDbgFunctionNode *)loader_calloc_with_instance_fallback(
+    new_dbg_function_node = (VkLayerDbgFunctionNode *)loader_calloc_with_instance_fallback(
         pAllocator, inst, sizeof(VkLayerDbgFunctionNode), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
 
-    if (!pNewDbgFuncNode) {
+    if (!new_dbg_function_node) {
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
 
-    pNewDbgFuncNode->is_messenger = true;
-    pNewDbgFuncNode->messenger.messenger = messenger;
-    pNewDbgFuncNode->messenger.pfnUserCallback = pCreateInfo->pfnUserCallback;
-    pNewDbgFuncNode->messenger.messageSeverity = pCreateInfo->messageSeverity;
-    pNewDbgFuncNode->messenger.messageType = pCreateInfo->messageType;
-    pNewDbgFuncNode->pUserData = pCreateInfo->pUserData;
-    pNewDbgFuncNode->pNext = inst->DbgFunctionHead;
-    inst->DbgFunctionHead = pNewDbgFuncNode;
+    new_dbg_function_node->is_messenger = true;
+    new_dbg_function_node->messenger.messenger = messenger;
+    new_dbg_function_node->messenger.pfnUserCallback = pCreateInfo->pfnUserCallback;
+    new_dbg_function_node->messenger.messageSeverity = pCreateInfo->messageSeverity;
+    new_dbg_function_node->messenger.messageType = pCreateInfo->messageType;
+    new_dbg_function_node->pUserData = pCreateInfo->pUserData;
+    new_dbg_function_node->pNext = inst->instance_only_dbg_function_head;
+    inst->instance_only_dbg_function_head = new_dbg_function_node;
+    inst->current_dbg_function_head = inst->instance_only_dbg_function_head;
 
     return VK_SUCCESS;
 }
 
-static VKAPI_ATTR VkResult VKAPI_CALL
-debug_utils_CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
-                                         const VkAllocationCallbacks *pAllocator, VkDebugUtilsMessengerEXT *pMessenger) {
+VKAPI_ATTR VkResult VKAPI_CALL debug_utils_CreateDebugUtilsMessengerEXT(VkInstance instance,
+                                                                        const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
+                                                                        const VkAllocationCallbacks *pAllocator,
+                                                                        VkDebugUtilsMessengerEXT *pMessenger) {
     struct loader_instance *inst = loader_get_instance(instance);
     loader_platform_thread_lock_mutex(&loader_lock);
     VkResult result = inst->disp->layer_inst_disp.CreateDebugUtilsMessengerEXT(inst->instance, pCreateInfo, pAllocator, pMessenger);
@@ -82,7 +83,7 @@ VkBool32 util_SubmitDebugUtilsMessageEXT(const struct loader_instance *inst, VkD
     VkBool32 bail = false;
 
     if (NULL != pCallbackData) {
-        VkLayerDbgFunctionNode *pTrav = inst->DbgFunctionHead;
+        VkLayerDbgFunctionNode *pTrav = inst->current_dbg_function_head;
         VkDebugReportObjectTypeEXT object_type = VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
         VkDebugReportFlagsEXT object_flags = 0;
         uint64_t object_handle = 0;
@@ -115,13 +116,14 @@ VkBool32 util_SubmitDebugUtilsMessageEXT(const struct loader_instance *inst, VkD
 
 void util_DestroyDebugUtilsMessenger(struct loader_instance *inst, VkDebugUtilsMessengerEXT messenger,
                                      const VkAllocationCallbacks *pAllocator) {
-    VkLayerDbgFunctionNode *pTrav = inst->DbgFunctionHead;
+    VkLayerDbgFunctionNode *pTrav = inst->current_dbg_function_head;
     VkLayerDbgFunctionNode *pPrev = pTrav;
 
     while (pTrav) {
         if (pTrav->is_messenger && pTrav->messenger.messenger == messenger) {
             pPrev->pNext = pTrav->pNext;
-            if (inst->DbgFunctionHead == pTrav) inst->DbgFunctionHead = pTrav->pNext;
+            if (inst->current_dbg_function_head == pTrav) inst->current_dbg_function_head = pTrav->pNext;
+            if (inst->instance_only_dbg_function_head == pTrav) inst->instance_only_dbg_function_head = pTrav->pNext;
             loader_free_with_instance_fallback(pAllocator, inst, pTrav);
             break;
         }
@@ -149,16 +151,17 @@ VkResult util_CreateDebugUtilsMessengers(struct loader_instance *inst, const voi
     return VK_SUCCESS;
 }
 
-static VKAPI_ATTR void VKAPI_CALL debug_utils_SubmitDebugUtilsMessageEXT(
-    VkInstance instance, VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes,
-    const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData) {
+VKAPI_ATTR void VKAPI_CALL debug_utils_SubmitDebugUtilsMessageEXT(VkInstance instance,
+                                                                  VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                                                                  VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+                                                                  const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData) {
     struct loader_instance *inst = loader_get_instance(instance);
 
     inst->disp->layer_inst_disp.SubmitDebugUtilsMessageEXT(inst->instance, messageSeverity, messageTypes, pCallbackData);
 }
 
-static VKAPI_ATTR void VKAPI_CALL debug_utils_DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT messenger,
-                                                                            const VkAllocationCallbacks *pAllocator) {
+VKAPI_ATTR void VKAPI_CALL debug_utils_DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT messenger,
+                                                                     const VkAllocationCallbacks *pAllocator) {
     struct loader_instance *inst = loader_get_instance(instance);
     loader_platform_thread_lock_mutex(&loader_lock);
 
@@ -177,7 +180,7 @@ VKAPI_ATTR VkResult VKAPI_CALL terminator_CreateDebugUtilsMessengerEXT(VkInstanc
     struct loader_instance *inst = (struct loader_instance *)instance;
     VkResult res = VK_SUCCESS;
     uint32_t storage_idx;
-    VkLayerDbgFunctionNode *pNewDbgFuncNode = NULL;
+    VkLayerDbgFunctionNode *new_dbg_func_node = NULL;
 
     icd_info = (VkDebugUtilsMessengerEXT *)loader_calloc_with_instance_fallback(
         pAllocator, inst, inst->total_icd_count * sizeof(VkDebugUtilsMessengerEXT), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -204,23 +207,23 @@ VKAPI_ATTR VkResult VKAPI_CALL terminator_CreateDebugUtilsMessengerEXT(VkInstanc
     // Setup the debug report callback in the terminator since a layer may want
     // to grab the information itself (RenderDoc) and then return back to the
     // user callback a sub-set of the messages.
-    pNewDbgFuncNode = (VkLayerDbgFunctionNode *)loader_calloc_with_instance_fallback(
+    new_dbg_func_node = (VkLayerDbgFunctionNode *)loader_calloc_with_instance_fallback(
         pAllocator, inst, sizeof(VkLayerDbgFunctionNode), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-    if (!pNewDbgFuncNode) {
+    if (!new_dbg_func_node) {
         res = VK_ERROR_OUT_OF_HOST_MEMORY;
         goto out;
     }
 
-    pNewDbgFuncNode->is_messenger = true;
-    pNewDbgFuncNode->messenger.pfnUserCallback = pCreateInfo->pfnUserCallback;
-    pNewDbgFuncNode->messenger.messageSeverity = pCreateInfo->messageSeverity;
-    pNewDbgFuncNode->messenger.messageType = pCreateInfo->messageType;
-    pNewDbgFuncNode->pUserData = pCreateInfo->pUserData;
-    pNewDbgFuncNode->pNext = inst->DbgFunctionHead;
-    inst->DbgFunctionHead = pNewDbgFuncNode;
+    new_dbg_func_node->is_messenger = true;
+    new_dbg_func_node->messenger.pfnUserCallback = pCreateInfo->pfnUserCallback;
+    new_dbg_func_node->messenger.messageSeverity = pCreateInfo->messageSeverity;
+    new_dbg_func_node->messenger.messageType = pCreateInfo->messageType;
+    new_dbg_func_node->pUserData = pCreateInfo->pUserData;
+    new_dbg_func_node->pNext = inst->current_dbg_function_head;
+    inst->current_dbg_function_head = new_dbg_func_node;
 
-    *(VkDebugUtilsMessengerEXT **)pMessenger = icd_info;
-    pNewDbgFuncNode->messenger.messenger = *pMessenger;
+    *pMessenger = (VkDebugUtilsMessengerEXT)(uintptr_t)icd_info;
+    new_dbg_func_node->messenger.messenger = *pMessenger;
 
 out:
 
@@ -237,8 +240,8 @@ out:
             }
             storage_idx++;
         }
-        loader_free(pAllocator, pNewDbgFuncNode);
-        loader_free(pAllocator, icd_info);
+        loader_free_with_instance_fallback(pAllocator, inst, new_dbg_func_node);
+        loader_free_with_instance_fallback(pAllocator, inst, icd_info);
     }
 
     return res;
@@ -252,7 +255,7 @@ VKAPI_ATTR void VKAPI_CALL terminator_DestroyDebugUtilsMessengerEXT(VkInstance i
     const struct loader_icd_term *icd_term;
 
     struct loader_instance *inst = (struct loader_instance *)instance;
-    icd_info = *(VkDebugUtilsMessengerEXT **)&messenger;
+    icd_info = (VkDebugUtilsMessengerEXT *)(uintptr_t)messenger;
     storage_idx = 0;
     for (icd_term = inst->icd_terms; icd_term; icd_term = icd_term->next) {
         if (NULL == icd_term->dispatch.DestroyDebugUtilsMessengerEXT) {
@@ -267,7 +270,7 @@ VKAPI_ATTR void VKAPI_CALL terminator_DestroyDebugUtilsMessengerEXT(VkInstance i
 
     util_DestroyDebugUtilsMessenger(inst, messenger, pAllocator);
 
-    loader_free(pAllocator, icd_info);
+    loader_free_with_instance_fallback(pAllocator, inst, icd_info);
 }
 
 // This is the instance chain terminator function for SubmitDebugUtilsMessageEXT
@@ -289,28 +292,30 @@ VKAPI_ATTR void VKAPI_CALL terminator_SubmitDebugUtilsMessageEXT(VkInstance inst
 
 VkResult util_CreateDebugReportCallback(struct loader_instance *inst, const VkDebugReportCallbackCreateInfoEXT *pCreateInfo,
                                         const VkAllocationCallbacks *pAllocator, VkDebugReportCallbackEXT callback) {
-    VkLayerDbgFunctionNode *pNewDbgFuncNode = NULL;
+    VkLayerDbgFunctionNode *new_dbg_func_node = NULL;
 
-    pNewDbgFuncNode = (VkLayerDbgFunctionNode *)loader_calloc_with_instance_fallback(
+    new_dbg_func_node = (VkLayerDbgFunctionNode *)loader_calloc_with_instance_fallback(
         pAllocator, inst, sizeof(VkLayerDbgFunctionNode), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-    if (!pNewDbgFuncNode) {
+    if (!new_dbg_func_node) {
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
 
-    pNewDbgFuncNode->is_messenger = false;
-    pNewDbgFuncNode->report.msgCallback = callback;
-    pNewDbgFuncNode->report.pfnMsgCallback = pCreateInfo->pfnCallback;
-    pNewDbgFuncNode->report.msgFlags = pCreateInfo->flags;
-    pNewDbgFuncNode->pUserData = pCreateInfo->pUserData;
-    pNewDbgFuncNode->pNext = inst->DbgFunctionHead;
-    inst->DbgFunctionHead = pNewDbgFuncNode;
+    new_dbg_func_node->is_messenger = false;
+    new_dbg_func_node->report.msgCallback = callback;
+    new_dbg_func_node->report.pfnMsgCallback = pCreateInfo->pfnCallback;
+    new_dbg_func_node->report.msgFlags = pCreateInfo->flags;
+    new_dbg_func_node->pUserData = pCreateInfo->pUserData;
+    new_dbg_func_node->pNext = inst->instance_only_dbg_function_head;
+    inst->instance_only_dbg_function_head = new_dbg_func_node;
+    inst->current_dbg_function_head = inst->instance_only_dbg_function_head;
 
     return VK_SUCCESS;
 }
 
-static VKAPI_ATTR VkResult VKAPI_CALL
-debug_utils_CreateDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT *pCreateInfo,
-                                         const VkAllocationCallbacks *pAllocator, VkDebugReportCallbackEXT *pCallback) {
+VKAPI_ATTR VkResult VKAPI_CALL debug_utils_CreateDebugReportCallbackEXT(VkInstance instance,
+                                                                        const VkDebugReportCallbackCreateInfoEXT *pCreateInfo,
+                                                                        const VkAllocationCallbacks *pAllocator,
+                                                                        VkDebugReportCallbackEXT *pCallback) {
     struct loader_instance *inst = loader_get_instance(instance);
     loader_platform_thread_lock_mutex(&loader_lock);
     VkResult result = inst->disp->layer_inst_disp.CreateDebugReportCallbackEXT(inst->instance, pCreateInfo, pAllocator, pCallback);
@@ -322,7 +327,7 @@ debug_utils_CreateDebugReportCallbackEXT(VkInstance instance, const VkDebugRepor
 VkBool32 util_DebugReportMessage(const struct loader_instance *inst, VkFlags msgFlags, VkDebugReportObjectTypeEXT objectType,
                                  uint64_t srcObject, size_t location, int32_t msgCode, const char *pLayerPrefix, const char *pMsg) {
     VkBool32 bail = false;
-    VkLayerDbgFunctionNode *pTrav = inst->DbgFunctionHead;
+    VkLayerDbgFunctionNode *pTrav = inst->current_dbg_function_head;
     VkDebugUtilsMessageSeverityFlagBitsEXT severity;
     VkDebugUtilsMessageTypeFlagsEXT types;
     VkDebugUtilsMessengerCallbackDataEXT callback_data;
@@ -365,13 +370,15 @@ VkBool32 util_DebugReportMessage(const struct loader_instance *inst, VkFlags msg
 
 void util_DestroyDebugReportCallback(struct loader_instance *inst, VkDebugReportCallbackEXT callback,
                                      const VkAllocationCallbacks *pAllocator) {
-    VkLayerDbgFunctionNode *pTrav = inst->DbgFunctionHead;
+    VkLayerDbgFunctionNode *pTrav = inst->current_dbg_function_head;
     VkLayerDbgFunctionNode *pPrev = pTrav;
 
     while (pTrav) {
         if (!pTrav->is_messenger && pTrav->report.msgCallback == callback) {
             pPrev->pNext = pTrav->pNext;
-            if (inst->DbgFunctionHead == pTrav) inst->DbgFunctionHead = pTrav->pNext;
+            if (inst->current_dbg_function_head == pTrav) inst->current_dbg_function_head = pTrav->pNext;
+            if (inst->instance_only_dbg_function_head == pTrav) inst->instance_only_dbg_function_head = pTrav->pNext;
+            if (inst->current_dbg_function_head == pTrav) inst->current_dbg_function_head = pTrav->pNext;
             loader_free_with_instance_fallback(pAllocator, inst, pTrav);
             break;
         }
@@ -399,8 +406,8 @@ VkResult util_CreateDebugReportCallbacks(struct loader_instance *inst, const voi
     return VK_SUCCESS;
 }
 
-static VKAPI_ATTR void VKAPI_CALL debug_utils_DestroyDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback,
-                                                                            const VkAllocationCallbacks *pAllocator) {
+VKAPI_ATTR void VKAPI_CALL debug_utils_DestroyDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback,
+                                                                     const VkAllocationCallbacks *pAllocator) {
     struct loader_instance *inst = loader_get_instance(instance);
     loader_platform_thread_lock_mutex(&loader_lock);
 
@@ -409,10 +416,9 @@ static VKAPI_ATTR void VKAPI_CALL debug_utils_DestroyDebugReportCallbackEXT(VkIn
     loader_platform_thread_unlock_mutex(&loader_lock);
 }
 
-static VKAPI_ATTR void VKAPI_CALL debug_utils_DebugReportMessageEXT(VkInstance instance, VkDebugReportFlagsEXT flags,
-                                                                    VkDebugReportObjectTypeEXT objType, uint64_t object,
-                                                                    size_t location, int32_t msgCode, const char *pLayerPrefix,
-                                                                    const char *pMsg) {
+VKAPI_ATTR void VKAPI_CALL debug_utils_DebugReportMessageEXT(VkInstance instance, VkDebugReportFlagsEXT flags,
+                                                             VkDebugReportObjectTypeEXT objType, uint64_t object, size_t location,
+                                                             int32_t msgCode, const char *pLayerPrefix, const char *pMsg) {
     struct loader_instance *inst = loader_get_instance(instance);
 
     inst->disp->layer_inst_disp.DebugReportMessageEXT(inst->instance, flags, objType, object, location, msgCode, pLayerPrefix,
@@ -430,10 +436,10 @@ VKAPI_ATTR VkResult VKAPI_CALL terminator_CreateDebugReportCallbackEXT(VkInstanc
     struct loader_instance *inst = (struct loader_instance *)instance;
     VkResult res = VK_SUCCESS;
     uint32_t storage_idx;
-    VkLayerDbgFunctionNode *pNewDbgFuncNode = NULL;
+    VkLayerDbgFunctionNode *new_dbg_func_node = NULL;
 
-    icd_info = ((VkDebugReportCallbackEXT *)loader_calloc(pAllocator, inst->total_icd_count * sizeof(VkDebugReportCallbackEXT),
-                                                          VK_SYSTEM_ALLOCATION_SCOPE_OBJECT));
+    icd_info = ((VkDebugReportCallbackEXT *)loader_calloc_with_instance_fallback(
+        pAllocator, inst, inst->total_icd_count * sizeof(VkDebugReportCallbackEXT), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT));
     if (!icd_info) {
         res = VK_ERROR_OUT_OF_HOST_MEMORY;
         goto out;
@@ -456,23 +462,23 @@ VKAPI_ATTR VkResult VKAPI_CALL terminator_CreateDebugReportCallbackEXT(VkInstanc
     // Setup the debug report callback in the terminator since a layer may want
     // to grab the information itself (RenderDoc) and then return back to the
     // user callback a sub-set of the messages.
-    pNewDbgFuncNode = (VkLayerDbgFunctionNode *)loader_calloc_with_instance_fallback(
+    new_dbg_func_node = (VkLayerDbgFunctionNode *)loader_calloc_with_instance_fallback(
         pAllocator, inst, sizeof(VkLayerDbgFunctionNode), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
 
-    if (!pNewDbgFuncNode) {
+    if (!new_dbg_func_node) {
         res = VK_ERROR_OUT_OF_HOST_MEMORY;
         goto out;
     }
 
-    pNewDbgFuncNode->is_messenger = false;
-    pNewDbgFuncNode->report.pfnMsgCallback = pCreateInfo->pfnCallback;
-    pNewDbgFuncNode->report.msgFlags = pCreateInfo->flags;
-    pNewDbgFuncNode->pUserData = pCreateInfo->pUserData;
-    pNewDbgFuncNode->pNext = inst->DbgFunctionHead;
-    inst->DbgFunctionHead = pNewDbgFuncNode;
+    new_dbg_func_node->is_messenger = false;
+    new_dbg_func_node->report.pfnMsgCallback = pCreateInfo->pfnCallback;
+    new_dbg_func_node->report.msgFlags = pCreateInfo->flags;
+    new_dbg_func_node->pUserData = pCreateInfo->pUserData;
+    new_dbg_func_node->pNext = inst->current_dbg_function_head;
+    inst->current_dbg_function_head = new_dbg_func_node;
 
-    *(VkDebugReportCallbackEXT **)pCallback = icd_info;
-    pNewDbgFuncNode->report.msgCallback = *pCallback;
+    *pCallback = (VkDebugReportCallbackEXT)(uintptr_t)icd_info;
+    new_dbg_func_node->report.msgCallback = *pCallback;
 
 out:
 
@@ -489,8 +495,8 @@ out:
             }
             storage_idx++;
         }
-        loader_free(pAllocator, pNewDbgFuncNode);
-        loader_free(pAllocator, icd_info);
+        loader_free_with_instance_fallback(pAllocator, inst, new_dbg_func_node);
+        loader_free_with_instance_fallback(pAllocator, inst, icd_info);
     }
 
     return res;
@@ -504,7 +510,7 @@ VKAPI_ATTR void VKAPI_CALL terminator_DestroyDebugReportCallbackEXT(VkInstance i
     const struct loader_icd_term *icd_term;
 
     struct loader_instance *inst = (struct loader_instance *)instance;
-    icd_info = *(VkDebugReportCallbackEXT **)&callback;
+    icd_info = (VkDebugReportCallbackEXT *)(uintptr_t)callback;
     storage_idx = 0;
     for (icd_term = inst->icd_terms; icd_term; icd_term = icd_term->next) {
         if (NULL == icd_term->dispatch.DestroyDebugReportCallbackEXT) {
@@ -519,7 +525,7 @@ VKAPI_ATTR void VKAPI_CALL terminator_DestroyDebugReportCallbackEXT(VkInstance i
 
     util_DestroyDebugReportCallback(inst, callback, pAllocator);
 
-    loader_free(pAllocator, icd_info);
+    loader_free_with_instance_fallback(pAllocator, inst, icd_info);
 }
 
 // This is the instance chain terminator function for DebugReportMessage
@@ -548,25 +554,25 @@ VKAPI_ATTR void VKAPI_CALL terminator_DebugReportMessageEXT(VkInstance instance,
 
 // General utilities
 
-static const VkExtensionProperties debug_utils_extension_info[] = {
+const VkExtensionProperties debug_utils_extension_info[] = {
     {VK_EXT_DEBUG_REPORT_EXTENSION_NAME, VK_EXT_DEBUG_REPORT_SPEC_VERSION},
     {VK_EXT_DEBUG_UTILS_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_SPEC_VERSION},
 };
 
 void destroy_debug_callbacks_chain(struct loader_instance *inst, const VkAllocationCallbacks *pAllocator) {
-    VkLayerDbgFunctionNode *pTrav = inst->DbgFunctionHead;
+    VkLayerDbgFunctionNode *pTrav = inst->current_dbg_function_head;
     VkLayerDbgFunctionNode *pNext = NULL;
     while (pTrav) {
         pNext = pTrav->pNext;
         loader_free_with_instance_fallback(pAllocator, inst, pTrav);
         pTrav = pNext;
     }
-    inst->DbgFunctionHead = NULL;
+    inst->current_dbg_function_head = NULL;
 }
 
-void add_debug_extensions_to_ext_list(const struct loader_instance *inst, struct loader_extension_list *ext_list) {
-    loader_add_to_ext_list(inst, ext_list, sizeof(debug_utils_extension_info) / sizeof(VkExtensionProperties),
-                           debug_utils_extension_info);
+VkResult add_debug_extensions_to_ext_list(const struct loader_instance *inst, struct loader_extension_list *ext_list) {
+    return loader_add_to_ext_list(inst, ext_list, sizeof(debug_utils_extension_info) / sizeof(VkExtensionProperties),
+                                  debug_utils_extension_info);
 }
 
 void check_for_enabled_debug_extensions(struct loader_instance *ptr_instance, const VkInstanceCreateInfo *pCreateInfo) {

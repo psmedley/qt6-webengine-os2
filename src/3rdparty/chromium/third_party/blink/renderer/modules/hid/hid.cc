@@ -8,6 +8,7 @@
 
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_hid_device_filter.h"
@@ -21,6 +22,7 @@
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/hid/hid_connection_event.h"
 #include "third_party/blink/renderer/modules/hid/hid_device.h"
+#include "third_party/blink/renderer/modules/service_worker/service_worker_global_scope.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
@@ -96,9 +98,9 @@ HID* HID::hid(NavigatorBase& navigator) {
 }
 
 HID::HID(NavigatorBase& navigator)
-    : ExecutionContextLifecycleObserver(navigator.GetExecutionContext()),
-      Supplement<NavigatorBase>(navigator),
-      service_(navigator.GetExecutionContext()) {
+    : Supplement<NavigatorBase>(navigator),
+      service_(navigator.GetExecutionContext()),
+      receiver_(this, navigator.GetExecutionContext()) {
   auto* context = GetExecutionContext();
   if (context) {
     feature_handle_for_scheduler_ = context->GetScheduler()->RegisterFeature(
@@ -120,22 +122,35 @@ const AtomicString& HID::InterfaceName() const {
   return event_target_names::kHID;
 }
 
-void HID::ContextDestroyed() {
-  CloseServiceConnection();
-}
-
 void HID::AddedEventListener(const AtomicString& event_type,
                              RegisteredEventListener& listener) {
-  EventTargetWithInlineData::AddedEventListener(event_type, listener);
+  EventTarget::AddedEventListener(event_type, listener);
 
   if (event_type != event_type_names::kConnect &&
       event_type != event_type_names::kDisconnect) {
     return;
   }
 
-  if (ShouldBlockHidServiceCall(GetSupplementable()->DomWindow(),
-                                GetExecutionContext(), nullptr)) {
+  auto* context = GetExecutionContext();
+  if (ShouldBlockHidServiceCall(GetSupplementable()->DomWindow(), context,
+                                nullptr)) {
     return;
+  }
+
+  if (context->IsServiceWorkerGlobalScope()) {
+    auto* service_worker_global_scope =
+        static_cast<ServiceWorkerGlobalScope*>(context);
+    if (service_worker_global_scope->did_evaluate_script()) {
+      String message = String::Format(
+          "Event handler of '%s' event must be added on the initial evaluation "
+          "of worker script. More info: "
+          "https://developer.chrome.com/docs/extensions/mv3/service_workers/"
+          "events/",
+          event_type.Utf8().c_str());
+      GetExecutionContext()->AddConsoleMessage(
+          mojom::blink::ConsoleMessageSource::kJavaScript,
+          mojom::blink::ConsoleMessageLevel::kWarning, message);
+    }
   }
 
   EnsureServiceConnection();
@@ -174,7 +189,8 @@ ScriptPromise HID::getDevices(ScriptState* script_state,
     return ScriptPromise();
   }
 
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+      script_state, exception_state.GetContext());
   get_devices_promises_.insert(resolver);
 
   EnsureServiceConnection();
@@ -206,7 +222,8 @@ ScriptPromise HID::requestDevice(ScriptState* script_state,
     return ScriptPromise();
   }
 
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+      script_state, exception_state.GetContext());
   ScriptPromise promise = resolver->Promise();
   request_device_promises_.insert(resolver);
 
@@ -269,7 +286,7 @@ void HID::Forget(device::mojom::blink::HidDeviceInfoPtr device_info,
 HIDDevice* HID::GetOrCreateDevice(device::mojom::blink::HidDeviceInfoPtr info) {
   auto it = device_cache_.find(info->guid);
   if (it != device_cache_.end()) {
-    return it->value;
+    return it->value.Get();
   }
 
   const String guid = info->guid;
@@ -321,7 +338,7 @@ void HID::EnsureServiceConnection() {
   service_.set_disconnect_handler(
       WTF::BindOnce(&HID::CloseServiceConnection, WrapWeakPersistent(this)));
   DCHECK(!receiver_.is_bound());
-  service_->RegisterClient(receiver_.BindNewEndpointAndPassRemote());
+  service_->RegisterClient(receiver_.BindNewEndpointAndPassRemote(task_runner));
 }
 
 void HID::CloseServiceConnection() {
@@ -392,8 +409,8 @@ void HID::Trace(Visitor* visitor) const {
   visitor->Trace(get_devices_promises_);
   visitor->Trace(request_device_promises_);
   visitor->Trace(device_cache_);
-  EventTargetWithInlineData::Trace(visitor);
-  ExecutionContextLifecycleObserver::Trace(visitor);
+  visitor->Trace(receiver_);
+  EventTarget::Trace(visitor);
   Supplement<NavigatorBase>::Trace(visitor);
 }
 

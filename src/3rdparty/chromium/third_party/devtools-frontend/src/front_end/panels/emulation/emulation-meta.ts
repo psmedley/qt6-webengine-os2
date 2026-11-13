@@ -3,61 +3,61 @@
 // found in the LICENSE file.
 
 import * as Common from '../../core/common/common.js';
+import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
 import type * as Emulation from './emulation.js';
 
-import * as i18n from '../../core/i18n/i18n.js';
 const UIStrings = {
   /**
-  *@description Title of an action in the emulation tool to toggle device mode
-  */
+   *@description Title of an action in the emulation tool to toggle device mode
+   */
   toggleDeviceToolbar: 'Toggle device toolbar',
   /**
-  *@description Title of an action in the emulation tool to capture screenshot
-  */
+   *@description Title of an action in the emulation tool to capture screenshot
+   */
   captureScreenshot: 'Capture screenshot',
   /**
-  * @description Title of an action in the emulation tool to capture full height screenshot. This
-  * action captures a screenshot of the entire website, not just the visible portion.
-  */
+   * @description Title of an action in the emulation tool to capture full height screenshot. This
+   * action captures a screenshot of the entire website, not just the visible portion.
+   */
   captureFullSizeScreenshot: 'Capture full size screenshot',
   /**
-  * @description Title of an action in the emulation tool to capture a screenshot of just this node.
-  * Node refers to a HTML element/node.
-  */
+   * @description Title of an action in the emulation tool to capture a screenshot of just this node.
+   * Node refers to a HTML element/node.
+   */
   captureNodeScreenshot: 'Capture node screenshot',
   /**
-  * @description Command in the Device Mode Toolbar, to show media query boundaries in the UI.
-  * https://developer.mozilla.org/en-US/docs/Web/CSS/Media_Queries/Using_media_queries
-  */
+   * @description Command in the Device Mode Toolbar, to show media query boundaries in the UI.
+   * https://developer.mozilla.org/en-US/docs/Web/CSS/Media_Queries/Using_media_queries
+   */
   showMediaQueries: 'Show media queries',
   /**
-  * @description A tag of Mobile related settings that can be searched in the command menu if the
-  * user doesn't know the exact name of the tool. Device refers to e.g. phone/tablet.
-  */
+   * @description A tag of Mobile related settings that can be searched in the command menu if the
+   * user doesn't know the exact name of the tool. Device refers to e.g. phone/tablet.
+   */
   device: 'device',
   /**
-  *@description Command in the Device Mode Toolbar, to hide media query boundaries in the UI.
-  * https://developer.mozilla.org/en-US/docs/Web/CSS/Media_Queries/Using_media_queries
-  */
+   *@description Command in the Device Mode Toolbar, to hide media query boundaries in the UI.
+   * https://developer.mozilla.org/en-US/docs/Web/CSS/Media_Queries/Using_media_queries
+   */
   hideMediaQueries: 'Hide media queries',
   /**
-  *@description Command that shows measuring rulers next to the emulated device.
-  */
+   *@description Command that shows measuring rulers next to the emulated device.
+   */
   showRulers: 'Show rulers in the Device Mode toolbar',
   /**
-  *@description Command that hides measuring rulers next to the emulated device.
-  */
+   *@description Command that hides measuring rulers next to the emulated device.
+   */
   hideRulers: 'Hide rulers in the Device Mode toolbar',
   /**
-  *@description Command that shows a frame (like a picture frame) around the emulated device.
-  */
+   *@description Command that shows a frame (like a picture frame) around the emulated device.
+   */
   showDeviceFrame: 'Show device frame',
   /**
-  *@description Command that hides a frame (like a picture frame) around the emulated device.
-  */
+   *@description Command that hides a frame (like a picture frame) around the emulated device.
+   */
   hideDeviceFrame: 'Hide device frame',
 
 };
@@ -79,7 +79,7 @@ UI.ActionRegistration.registerActionExtension({
   toggleable: true,
   async loadActionDelegate() {
     const Emulation = await loadEmulationModule();
-    return Emulation.DeviceModeWrapper.ActionDelegate.instance();
+    return new Emulation.DeviceModeWrapper.ActionDelegate();
   },
   condition: Root.Runtime.ConditionName.CAN_DOCK,
   title: i18nLazyString(UIStrings.toggleDeviceToolbar),
@@ -101,7 +101,7 @@ UI.ActionRegistration.registerActionExtension({
   category: UI.ActionRegistration.ActionCategory.SCREENSHOT,
   async loadActionDelegate() {
     const Emulation = await loadEmulationModule();
-    return Emulation.DeviceModeWrapper.ActionDelegate.instance();
+    return new Emulation.DeviceModeWrapper.ActionDelegate();
   },
   condition: Root.Runtime.ConditionName.CAN_DOCK,
   title: i18nLazyString(UIStrings.captureScreenshot),
@@ -112,7 +112,7 @@ UI.ActionRegistration.registerActionExtension({
   category: UI.ActionRegistration.ActionCategory.SCREENSHOT,
   async loadActionDelegate() {
     const Emulation = await loadEmulationModule();
-    return Emulation.DeviceModeWrapper.ActionDelegate.instance();
+    return new Emulation.DeviceModeWrapper.ActionDelegate();
   },
   condition: Root.Runtime.ConditionName.CAN_DOCK,
   title: i18nLazyString(UIStrings.captureFullSizeScreenshot),
@@ -123,7 +123,7 @@ UI.ActionRegistration.registerActionExtension({
   category: UI.ActionRegistration.ActionCategory.SCREENSHOT,
   async loadActionDelegate() {
     const Emulation = await loadEmulationModule();
-    return Emulation.DeviceModeWrapper.ActionDelegate.instance();
+    return new Emulation.DeviceModeWrapper.ActionDelegate();
   },
   condition: Root.Runtime.ConditionName.CAN_DOCK,
   title: i18nLazyString(UIStrings.captureNodeScreenshot),

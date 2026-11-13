@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,7 +56,7 @@ class CXFA_ContentLayoutProcessor
   ~CXFA_ContentLayoutProcessor();
 
   void Trace(cppgc::Visitor* visitor) const;
-  cppgc::Heap* GetHeap() const { return m_pHeap.Get(); }
+  cppgc::Heap* GetHeap() const { return m_pHeap; }
 
   Result DoLayout(bool bUseBreakControl, float fHeightLimit, float fRealHeight);
   void DoLayoutPageArea(CXFA_ViewLayoutItem* pPageAreaLayoutItem);
@@ -234,11 +234,11 @@ class CXFA_ContentLayoutProcessor
   cppgc::Member<CXFA_ContentLayoutItem> m_pLayoutItem;
   cppgc::Member<CXFA_ContentLayoutItem> m_pOldLayoutItem;
   cppgc::Member<CXFA_ViewLayoutProcessor> m_pViewLayoutProcessor;
+  cppgc::Member<CXFA_ContentLayoutProcessor> m_pCurChildPreprocessor;
   std::vector<float> m_rgSpecifiedColumnWidths;
   std::vector<cppgc::Member<CXFA_ContentLayoutItem>> m_ArrayKeepItems;
   std::list<cppgc::Member<CXFA_Node>> m_PendingNodes;
-  std::map<CXFA_Node*, int32_t> m_PendingNodesCount;
-  cppgc::Member<CXFA_ContentLayoutProcessor> m_pCurChildPreprocessor;
+  std::map<cppgc::Member<CXFA_Node>, int32_t> m_PendingNodesCount;
 };
 
 #endif  // XFA_FXFA_LAYOUT_CXFA_CONTENTLAYOUTPROCESSOR_H_

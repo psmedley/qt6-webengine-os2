@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include <stack>
 #include <utility>
 
+#include "core/fxcrt/autorestorer.h"
 #include "core/fxcrt/cfx_seekablestreamproxy.h"
 #include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_codepage.h"
@@ -84,8 +85,8 @@ CFX_XMLParser::~CFX_XMLParser() = default;
 
 std::unique_ptr<CFX_XMLDocument> CFX_XMLParser::Parse() {
   auto doc = std::make_unique<CFX_XMLDocument>();
+  AutoRestorer<UnownedPtr<CFX_XMLNode>> restorer(&current_node_);
   current_node_ = doc->GetRoot();
-
   return DoSyntaxParse(doc.get()) ? std::move(doc) : nullptr;
 }
 
@@ -458,14 +459,11 @@ bool CFX_XMLParser::DoSyntaxParse(CFX_XMLDocument* doc) {
             current_buffer_idx++;
           }
           break;
-        default:
-          break;
       }
     }
   }
 
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 void CFX_XMLParser::ProcessTextChar(wchar_t character) {

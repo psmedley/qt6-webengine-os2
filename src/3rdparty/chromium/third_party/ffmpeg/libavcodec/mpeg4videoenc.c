@@ -175,7 +175,7 @@ static inline int decide_ac_pred(MpegEncContext *s, int16_t block[6][64],
                     ac_val1[i + 8] = level;
                 }
             }
-            st[n] = s->intra_h_scantable.permutated;
+            st[n] = s->permutated_intra_h_scantable;
         } else {
             const int xy = s->mb_x - 1 + s->mb_y * s->mb_stride;
             /* left prediction */
@@ -197,7 +197,7 @@ static inline int decide_ac_pred(MpegEncContext *s, int16_t block[6][64],
                     ac_val1[i + 8] = block[n][s->idsp.idct_permutation[i]];
                 }
             }
-            st[n] = s->intra_v_scantable.permutated;
+            st[n] = s->permutated_intra_v_scantable;
         }
 
         for (i = 63; i > 0; i--)  // FIXME optimize
@@ -916,7 +916,7 @@ static void mpeg4_encode_visual_object_header(MpegEncContext *s)
     int profile_and_level_indication;
     int vo_ver_id;
 
-    if (s->avctx->profile != FF_PROFILE_UNKNOWN) {
+    if (s->avctx->profile != AV_PROFILE_UNKNOWN) {
         profile_and_level_indication = s->avctx->profile << 4;
     } else if (s->max_b_frames || s->quarter_sample) {
         profile_and_level_indication = 0xF0;  // adv simple
@@ -924,7 +924,7 @@ static void mpeg4_encode_visual_object_header(MpegEncContext *s)
         profile_and_level_indication = 0x00;  // simple
     }
 
-    if (s->avctx->level != FF_LEVEL_UNKNOWN)
+    if (s->avctx->level != AV_LEVEL_UNKNOWN)
         profile_and_level_indication |= s->avctx->level;
     else
         profile_and_level_indication |= 1;   // level 1
@@ -1056,7 +1056,7 @@ static void mpeg4_encode_vol_header(MpegEncContext *s,
 }
 
 /* write MPEG-4 VOP header */
-int ff_mpeg4_encode_picture_header(MpegEncContext *s, int picture_number)
+int ff_mpeg4_encode_picture_header(MpegEncContext *s)
 {
     uint64_t time_incr;
     int64_t time_div, time_mod;
@@ -1065,7 +1065,7 @@ int ff_mpeg4_encode_picture_header(MpegEncContext *s, int picture_number)
         if (!(s->avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER)) {
             if (s->avctx->strict_std_compliance < FF_COMPLIANCE_VERY_STRICT)  // HACK, the reference sw is buggy
                 mpeg4_encode_visual_object_header(s);
-            if (s->avctx->strict_std_compliance < FF_COMPLIANCE_VERY_STRICT || picture_number == 0)  // HACK, the reference sw is buggy
+            if (s->avctx->strict_std_compliance < FF_COMPLIANCE_VERY_STRICT || s->picture_number == 0)  // HACK, the reference sw is buggy
                 mpeg4_encode_vol_header(s, 0, 0);
         }
         if (!(s->workaround_bugs & FF_BUG_MS))
@@ -1101,7 +1101,7 @@ int ff_mpeg4_encode_picture_header(MpegEncContext *s, int picture_number)
     }
     put_bits(&s->pb, 3, 0);     /* intra dc VLC threshold */
     if (!s->progressive_sequence) {
-        put_bits(&s->pb, 1, s->current_picture_ptr->f->top_field_first);
+        put_bits(&s->pb, 1, !!(s->current_picture_ptr->f->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST));
         put_bits(&s->pb, 1, s->alternate_scan);
     }
     // FIXME sprite stuff
@@ -1287,6 +1287,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
+    ff_qpeldsp_init(&s->qdsp);
     if ((ret = ff_mpv_encode_init(avctx)) < 0)
         return ret;
 
@@ -1402,7 +1403,8 @@ const FFCodec ff_mpeg4_encoder = {
     FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close          = ff_mpv_encode_end,
     .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
-    .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
+    .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .p.priv_class   = &mpeg4enc_class,
 };

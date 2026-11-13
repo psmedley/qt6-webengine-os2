@@ -11,13 +11,12 @@ import nodeStackTraceWidgetStyles from './nodeStackTraceWidget.css.js';
 
 const UIStrings = {
   /**
-  *@description Message displayed when no JavaScript stack trace is available for the DOM node in the Stack Trace widget of the Elements panel
-  */
+   *@description Message displayed when no JavaScript stack trace is available for the DOM node in the Stack Trace widget of the Elements panel
+   */
   noStackTraceAvailable: 'No stack trace available',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/elements/NodeStackTraceWidget.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
-let nodeStackTraceWidgetInstance: NodeStackTraceWidget;
 
 export class NodeStackTraceWidget extends UI.ThrottledWidget.ThrottledWidget {
   private readonly noStackTraceElement: HTMLElement;
@@ -34,29 +33,18 @@ export class NodeStackTraceWidget extends UI.ThrottledWidget.ThrottledWidget {
     this.linkifier = new Components.Linkifier.Linkifier(MaxLengthForLinks);
   }
 
-  static instance(opts: {
-    forceNew: boolean|null,
-  }|undefined = {forceNew: null}): NodeStackTraceWidget {
-    const {forceNew} = opts;
-    if (!nodeStackTraceWidgetInstance || forceNew) {
-      nodeStackTraceWidgetInstance = new NodeStackTraceWidget();
-    }
-
-    return nodeStackTraceWidgetInstance;
-  }
-
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     UI.Context.Context.instance().addFlavorChangeListener(SDK.DOMModel.DOMNode, this.update, this);
     this.registerCSSFiles([nodeStackTraceWidgetStyles]);
     this.update();
   }
 
-  willHide(): void {
+  override willHide(): void {
     UI.Context.Context.instance().removeFlavorChangeListener(SDK.DOMModel.DOMNode, this.update, this);
   }
 
-  async doUpdate(): Promise<void> {
+  override async doUpdate(): Promise<void> {
     const node = UI.Context.Context.instance().flavor(SDK.DOMModel.DOMNode);
 
     if (!node) {

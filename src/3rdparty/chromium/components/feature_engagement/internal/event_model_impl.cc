@@ -9,12 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "components/feature_engagement/internal/event_model.h"
 #include "components/feature_engagement/internal/event_storage_validator.h"
 #include "components/feature_engagement/internal/event_store.h"
@@ -88,6 +87,14 @@ void EventModelImpl::IncrementEvent(const std::string& event_name,
   Event_Count* event_count = event.add_events();
   event_count->set_day(current_day);
   event_count->set_count(1u);
+  store_->WriteEvent(event);
+}
+
+void EventModelImpl::ClearEvent(const std::string& event_name) {
+  DCHECK(ready_);
+
+  Event& event = GetNonConstEvent(event_name);
+  event.clear_events();
   store_->WriteEvent(event);
 }
 

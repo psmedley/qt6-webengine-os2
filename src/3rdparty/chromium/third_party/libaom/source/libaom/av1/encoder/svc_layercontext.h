@@ -11,6 +11,7 @@
 #ifndef AOM_AV1_ENCODER_SVC_LAYERCONTEXT_H_
 #define AOM_AV1_ENCODER_SVC_LAYERCONTEXT_H_
 
+#include "aom_scale/yv12config.h"
 #include "av1/encoder/aq_cyclicrefresh.h"
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/ratectrl.h"
@@ -28,7 +29,7 @@ typedef struct {
   RATE_CONTROL rc;
   PRIMARY_RATE_CONTROL p_rc;
   int framerate_factor;
-  int64_t layer_target_bitrate;
+  int64_t layer_target_bitrate;  // In bits per second.
   int scaling_factor_num;
   int scaling_factor_den;
   int64_t target_bandwidth;
@@ -90,6 +91,7 @@ typedef struct SVC {
   int temporal_layer_id;
   int number_spatial_layers;
   int number_temporal_layers;
+  int prev_number_spatial_layers;
   int use_flexible_mode;
   int ksvc_fixed_mode;
   /*!\endcond */
@@ -97,8 +99,6 @@ typedef struct SVC {
   /*!\cond */
   double base_framerate;
   unsigned int current_superframe;
-  unsigned int buffer_time_index[REF_FRAMES];
-  unsigned char buffer_spatial_layer[REF_FRAMES];
   int skip_mvsearch_last;
   int skip_mvsearch_gf;
   int skip_mvsearch_altref;
@@ -106,16 +106,21 @@ typedef struct SVC {
   int temporal_layer_fb[REF_FRAMES];
   int num_encoded_top_layer;
   int first_layer_denoise;
-  int high_source_sad_superframe;
+  YV12_BUFFER_CONFIG source_last_TL0;
+  int mi_cols_full_resoln;
+  int mi_rows_full_resoln;
   /*!\endcond */
 
   /*!
    * Layer context used for rate control in CBR mode.
+   * An array. The index for spatial layer `sl` and temporal layer `tl` is
+   * sl * number_temporal_layers + tl.
    */
   LAYER_CONTEXT *layer_context;
 
   /*!
-   * Number of layers allocated for layer_context.
+   * Number of layers allocated for layer_context. If nonzero, must be greater
+   * than or equal to number_spatial_layers * number_temporal_layers.
    */
   int num_allocated_layers;
 
@@ -134,9 +139,35 @@ typedef struct SVC {
    * Force zero-mv in mode search for the spatial/inter-layer reference.
    */
   int force_zero_mode_spatial_ref;
+
+  /*!
+   * Flag to indicate that current spatial layer has a lower quality layer
+   * (at the same timestamp) that can be used as a reference.
+   * Lower quality layer refers to the same resolution but encoded at
+   * different/lower bitrate.
+   */
+  int has_lower_quality_layer;
+
+  /*!
+   * Flag to indicate the frame drop mode for SVC: one of the two settings:
+   * AOM_LAYER_DROP (default) or AOM_FULL_SUPERFRAME_DROP.
+   */
+  AOM_SVC_FRAME_DROP_MODE framedrop_mode;
+
+  /*!
+   * Flag to indicate if frame was dropped for a given spatial_layer_id on
+   * previous superframe.
+   */
+  bool last_layer_dropped[AOM_MAX_SS_LAYERS];
+
+  /*!
+   * Flag to indicate if a previous spatial was dropped for the same superframe.
+   */
+  bool drop_spatial_layer[AOM_MAX_SS_LAYERS];
 } SVC;
 
 struct AV1_COMP;
+struct EncodeFrameInput;
 
 /*!\brief Initialize layer context data from init_config().
  *
@@ -159,9 +190,10 @@ void av1_init_layer_context(struct AV1_COMP *const cpi);
  * \param[in]       cpi  Top level encoder structure
  * \param[in]       num_layers  Number of layers to be allocated
  *
- * \remark  Nothing returned. Allocates memory for cpi->svc.layer_context.
+ * \remark  Allocates memory for cpi->svc.layer_context.
+ * \return  True on success, false on allocation failure.
  */
-void av1_alloc_layer_context(struct AV1_COMP *cpi, int num_layers);
+bool av1_alloc_layer_context(struct AV1_COMP *cpi, int num_layers);
 
 /*!\brief Update the layer context from a change_config() call.
  *
@@ -277,6 +309,15 @@ void av1_set_svc_fixed_mode(struct AV1_COMP *const cpi);
 
 void av1_svc_check_reset_layer_rc_flag(struct AV1_COMP *const cpi);
 
+void av1_svc_set_last_source(struct AV1_COMP *const cpi,
+                             struct EncodeFrameInput *frame_input,
+                             YV12_BUFFER_CONFIG *prev_source);
+
+void av1_svc_update_buffer_slot_refreshed(struct AV1_COMP *const cpi);
+
+int av1_svc_get_min_ref_dist(const struct AV1_COMP *cpi);
+
+void av1_svc_set_reference_was_previous(struct AV1_COMP *cpi);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

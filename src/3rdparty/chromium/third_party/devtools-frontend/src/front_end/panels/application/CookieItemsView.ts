@@ -37,43 +37,44 @@ import * as SDK from '../../core/sdk/sdk.js';
 import * as IssuesManager from '../../models/issues_manager/issues_manager.js';
 import * as CookieTable from '../../ui/legacy/components/cookie_table/cookie_table.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import cookieItemsViewStyles from './cookieItemsView.css.js';
 import {StorageItemsView} from './StorageItemsView.js';
 
 const UIStrings = {
   /**
-  *@description Label for checkbox to show url decoded cookie values
-  */
-  showUrlDecoded: 'Show URL decoded',
+   *@description Label for checkbox to show URL-decoded cookie values
+   */
+  showUrlDecoded: 'Show URL-decoded',
   /**
-  *@description Text for web cookies
-  */
+   *@description Text for web cookies
+   */
   cookies: 'Cookies',
   /**
-  *@description Text in Cookie Items View of the Application panel
-  */
+   *@description Text in Cookie Items View of the Application panel
+   */
   selectACookieToPreviewItsValue: 'Select a cookie to preview its value',
   /**
-  *@description Text for filter in Cookies View of the Application panel
-  */
+   *@description Text for filter in Cookies View of the Application panel
+   */
   onlyShowCookiesWithAnIssue: 'Only show cookies with an issue',
   /**
-  *@description Title for filter in the Cookies View of the Application panel
-  */
-  onlyShowCookiesWhichHaveAn: 'Only show cookies which have an associated issue',
+   *@description Title for filter in the Cookies View of the Application panel
+   */
+  onlyShowCookiesWhichHaveAn: 'Only show cookies that have an associated issue',
   /**
-  *@description Label to only delete the cookies that are visible after filtering
-  */
+   *@description Label to only delete the cookies that are visible after filtering
+   */
   clearFilteredCookies: 'Clear filtered cookies',
   /**
-  *@description Label to delete all cookies
-  */
+   *@description Label to delete all cookies
+   */
   clearAllCookies: 'Clear all cookies',
   /**
-  *@description Alert message for screen reader to announce # of cookies in the table
-  *@example {5} PH1
-  */
+   *@description Alert message for screen reader to announce # of cookies in the table
+   *@example {5} PH1
+   */
   numberOfCookiesShownInTableS: 'Number of cookies shown in table: {PH1}',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/CookieItemsView.ts', UIStrings);
@@ -98,7 +99,8 @@ class CookiePreviewWidget extends UI.Widget.VBox {
     header.appendChild(span);
     this.contentElement.appendChild(header);
 
-    const toggle = UI.UIUtils.CheckboxLabel.create(i18nString(UIStrings.showUrlDecoded), this.showDecodedSetting.get());
+    const toggle = UI.UIUtils.CheckboxLabel.create(
+        i18nString(UIStrings.showUrlDecoded), this.showDecodedSetting.get(), undefined, 'show-url-decoded');
     toggle.classList.add('cookie-preview-widget-toggle');
     toggle.checkboxElement.addEventListener('click', () => this.showDecoded(!this.showDecodedSetting.get()));
     header.appendChild(toggle);
@@ -111,6 +113,7 @@ class CookiePreviewWidget extends UI.Widget.VBox {
     this.value = value;
 
     this.contentElement.classList.add('cookie-preview-widget');
+    this.contentElement.setAttribute('jslog', `${VisualLogging.section().context('cookie-preview')}`);
     this.contentElement.appendChild(value);
   }
 
@@ -172,6 +175,7 @@ export class CookieItemsView extends StorageItemsView {
     super(i18nString(UIStrings.cookies), 'cookiesPanel');
 
     this.element.classList.add('storage-view');
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('cookies-data')}`);
 
     this.model = model;
     this.cookieDomain = cookieDomain;
@@ -201,7 +205,7 @@ export class CookieItemsView extends StorageItemsView {
     this.onlyIssuesFilterUI = new UI.Toolbar.ToolbarCheckbox(
         i18nString(UIStrings.onlyShowCookiesWithAnIssue), i18nString(UIStrings.onlyShowCookiesWhichHaveAn), () => {
           this.updateWithCookies(this.allCookies);
-        });
+        }, 'only-show-cookies-with-issues');
     this.appendToolbarItem(this.onlyIssuesFilterUI);
 
     this.refreshThrottler = new Common.Throttler.Throttler(300);
@@ -273,10 +277,10 @@ export class CookieItemsView extends StorageItemsView {
     this.shownCookies = this.filter(allCookies, cookie => `${cookie.name()} ${cookie.value()} ${cookie.domain()}`);
     if (this.hasFilter()) {
       this.setDeleteAllTitle(i18nString(UIStrings.clearFilteredCookies));
-      this.setDeleteAllGlyph('largeicon-delete-filter');
+      this.setDeleteAllGlyph('filter-clear');
     } else {
       this.setDeleteAllTitle(i18nString(UIStrings.clearAllCookies));
-      this.setDeleteAllGlyph('largeicon-delete-list');
+      this.setDeleteAllGlyph('clear-list');
     }
     this.cookiesTable.setCookies(this.shownCookies, this.model.getCookieToBlockedReasonsMap());
     UI.ARIAUtils.alert(i18nString(UIStrings.numberOfCookiesShownInTableS, {PH1: this.shownCookies.length}));
@@ -289,7 +293,7 @@ export class CookieItemsView extends StorageItemsView {
     }
   }
 
-  filter<T>(items: T[], keyFunction: (arg0: T) => string): T[] {
+  override filter<T>(items: T[], keyFunction: (arg0: T) => string): T[] {
     const predicate = (object: T|null): boolean => {
       if (!this.onlyIssuesFilterUI.checked()) {
         return true;
@@ -305,12 +309,12 @@ export class CookieItemsView extends StorageItemsView {
   /**
    * This will only delete the currently visible cookies.
    */
-  deleteAllItems(): void {
+  override deleteAllItems(): void {
     this.showPreview(null);
     void this.model.deleteCookies(this.shownCookies).then(() => this.refreshItems());
   }
 
-  deleteSelectedItem(): void {
+  override deleteSelectedItem(): void {
     const selectedCookie = this.cookiesTable.selectedCookie();
     if (selectedCookie) {
       this.showPreview(null);
@@ -318,7 +322,7 @@ export class CookieItemsView extends StorageItemsView {
     }
   }
 
-  refreshItems(): void {
+  override refreshItems(): void {
     void this.model.getCookiesForDomain(this.cookieDomain).then(this.updateWithCookies.bind(this));
   }
 
@@ -333,7 +337,7 @@ export class CookieItemsView extends StorageItemsView {
   private onLoadingFinished(): void {
     this.refreshItemsThrottled();
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([cookieItemsViewStyles]);
   }

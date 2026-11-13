@@ -1,27 +1,66 @@
 "use strict";
+/**
+ * @license
+ * Copyright 2023 Google Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ChromeLauncher = void 0;
-const fs_1 = __importDefault(require("fs"));
+exports.removeMatchingFlags = exports.getFeatures = exports.ChromeLauncher = void 0;
+const promises_1 = require("fs/promises");
+const os_1 = __importDefault(require("os"));
 const path_1 = __importDefault(require("path"));
+const browsers_1 = require("@puppeteer/browsers");
+const util_js_1 = require("../common/util.js");
 const assert_js_1 = require("../util/assert.js");
-const Browser_js_1 = require("../common/Browser.js");
-const BrowserRunner_js_1 = require("./BrowserRunner.js");
 const ProductLauncher_js_1 = require("./ProductLauncher.js");
-const util_js_1 = require("./util.js");
+const fs_js_1 = require("./util/fs.js");
 /**
  * @internal
  */
-class ChromeLauncher {
-    constructor(projectRoot, preferredRevision, isPuppeteerCore) {
-        this._projectRoot = projectRoot;
-        this._preferredRevision = preferredRevision;
-        this._isPuppeteerCore = isPuppeteerCore;
+class ChromeLauncher extends ProductLauncher_js_1.ProductLauncher {
+    constructor(puppeteer) {
+        super(puppeteer, 'chrome');
     }
-    async launch(options = {}) {
-        const { ignoreDefaultArgs = false, args = [], dumpio = false, channel, executablePath, pipe = false, env = process.env, handleSIGINT = true, handleSIGTERM = true, handleSIGHUP = true, ignoreHTTPSErrors = false, defaultViewport = { width: 800, height: 600 }, slowMo = 0, timeout = 30000, waitForInitialPage = true, debuggingPort, } = options;
+    launch(options = {}) {
+        const headless = options.headless ?? true;
+        if (headless === true &&
+            this.puppeteer.configuration.logLevel === 'warn' &&
+            !Boolean(process.env['PUPPETEER_DISABLE_HEADLESS_WARNING'])) {
+            console.warn([
+                '\x1B[1m\x1B[43m\x1B[30m',
+                'Puppeteer old Headless deprecation warning:\x1B[0m\x1B[33m',
+                '  In the near future `headless: true` will default to the new Headless mode',
+                '  for Chrome instead of the old Headless implementation. For more',
+                '  information, please see https://developer.chrome.com/articles/new-headless/.',
+                '  Consider opting in early by passing `headless: "new"` to `puppeteer.launch()`',
+                '  If you encounter any bugs, please report them to https://github.com/puppeteer/puppeteer/issues/new/choose.\x1B[0m\n',
+            ].join('\n  '));
+        }
+        if (this.puppeteer.configuration.logLevel === 'warn' &&
+            process.platform === 'darwin' &&
+            process.arch === 'x64') {
+            const cpus = os_1.default.cpus();
+            if (cpus[0]?.model.includes('Apple')) {
+                console.warn([
+                    '\x1B[1m\x1B[43m\x1B[30m',
+                    'Degraded performance warning:\x1B[0m\x1B[33m',
+                    'Launching Chrome on Mac Silicon (arm64) from an x64 Node installation results in',
+                    'Rosetta translating the Chrome binary, even if Chrome is already arm64. This would',
+                    'result in huge performance issues. To resolve this, you must run Puppeteer with',
+                    'a version of Node built for arm64.',
+                ].join('\n  '));
+            }
+        }
+        return super.launch(options);
+    }
+    /**
+     * @internal
+     */
+    async computeLaunchArguments(options = {}) {
+        const { ignoreDefaultArgs = false, args = [], pipe = false, debuggingPort, channel, executablePath, } = options;
         const chromeArguments = [];
         if (!ignoreDefaultArgs) {
             chromeArguments.push(...this.defaultArgs(options));
@@ -53,94 +92,93 @@ class ChromeLauncher {
         });
         if (userDataDirIndex < 0) {
             isTempUserDataDir = true;
-            chromeArguments.push(`--user-data-dir=${await fs_1.default.promises.mkdtemp(path_1.default.join((0, util_js_1.tmpdir)(), 'puppeteer_dev_chrome_profile-'))}`);
+            chromeArguments.push(`--user-data-dir=${await (0, promises_1.mkdtemp)(this.getProfilePath())}`);
             userDataDirIndex = chromeArguments.length - 1;
         }
         const userDataDir = chromeArguments[userDataDirIndex].split('=', 2)[1];
         (0, assert_js_1.assert)(typeof userDataDir === 'string', '`--user-data-dir` is malformed');
         let chromeExecutable = executablePath;
-        if (channel) {
-            // executablePath is detected by channel, so it should not be specified by user.
-            (0, assert_js_1.assert)(!chromeExecutable, '`executablePath` must not be specified when `channel` is given.');
-            chromeExecutable = (0, ProductLauncher_js_1.executablePathForChannel)(channel);
+        if (!chromeExecutable) {
+            (0, assert_js_1.assert)(channel || !this.puppeteer._isPuppeteerCore, `An \`executablePath\` or \`channel\` must be specified for \`puppeteer-core\``);
+            chromeExecutable = this.executablePath(channel);
         }
-        else if (!chromeExecutable) {
-            const { missingText, executablePath } = (0, ProductLauncher_js_1.resolveExecutablePath)(this);
-            if (missingText) {
-                throw new Error(missingText);
-            }
-            chromeExecutable = executablePath;
-        }
-        const usePipe = chromeArguments.includes('--remote-debugging-pipe');
-        const runner = new BrowserRunner_js_1.BrowserRunner(this.product, chromeExecutable, chromeArguments, userDataDir, isTempUserDataDir);
-        runner.start({
-            handleSIGHUP,
-            handleSIGTERM,
-            handleSIGINT,
-            dumpio,
-            env,
-            pipe: usePipe,
-        });
-        let browser;
-        try {
-            const connection = await runner.setupConnection({
-                usePipe,
-                timeout,
-                slowMo,
-                preferredRevision: this._preferredRevision,
-            });
-            browser = await Browser_js_1.CDPBrowser._create(this.product, connection, [], ignoreHTTPSErrors, defaultViewport, runner.proc, runner.close.bind(runner), options.targetFilter);
-        }
-        catch (error) {
-            runner.kill();
-            throw error;
-        }
-        if (waitForInitialPage) {
+        return {
+            executablePath: chromeExecutable,
+            args: chromeArguments,
+            isTempUserDataDir,
+            userDataDir,
+        };
+    }
+    /**
+     * @internal
+     */
+    async cleanUserDataDir(path, opts) {
+        if (opts.isTemp) {
             try {
-                await browser.waitForTarget(t => {
-                    return t.type() === 'page';
-                }, { timeout });
+                await (0, fs_js_1.rm)(path);
             }
             catch (error) {
-                await browser.close();
+                (0, util_js_1.debugError)(error);
                 throw error;
             }
         }
-        return browser;
     }
     defaultArgs(options = {}) {
+        // See https://github.com/GoogleChrome/chrome-launcher/blob/main/docs/chrome-flags-for-tools.md
+        const userDisabledFeatures = getFeatures('--disable-features', options.args);
+        if (options.args && userDisabledFeatures.length > 0) {
+            removeMatchingFlags(options.args, '--disable-features');
+        }
+        // Merge default disabled features with user-provided ones, if any.
+        const disabledFeatures = [
+            'Translate',
+            // AcceptCHFrame disabled because of crbug.com/1348106.
+            'AcceptCHFrame',
+            'MediaRouter',
+            'OptimizationHints',
+            // https://crbug.com/1492053
+            'ProcessPerSiteUpToMainFrameThreshold',
+            ...userDisabledFeatures,
+        ];
+        const userEnabledFeatures = getFeatures('--enable-features', options.args);
+        if (options.args && userEnabledFeatures.length > 0) {
+            removeMatchingFlags(options.args, '--enable-features');
+        }
+        // Merge default enabled features with user-provided ones, if any.
+        const enabledFeatures = [
+            'NetworkServiceInProcess2',
+            ...userEnabledFeatures,
+        ];
         const chromeArguments = [
             '--allow-pre-commit-input',
             '--disable-background-networking',
-            '--enable-features=NetworkServiceInProcess2',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
             '--disable-breakpad',
             '--disable-client-side-phishing-detection',
             '--disable-component-extensions-with-background-pages',
+            '--disable-component-update',
             '--disable-default-apps',
             '--disable-dev-shm-usage',
             '--disable-extensions',
-            // TODO: remove AvoidUnnecessaryBeforeUnloadCheckSync below
-            // once crbug.com/1324138 is fixed and released.
-            // AcceptCHFrame disabled because of crbug.com/1348106.
-            '--disable-features=Translate,BackForwardCache,AcceptCHFrame,AvoidUnnecessaryBeforeUnloadCheckSync',
+            '--disable-field-trial-config', // https://source.chromium.org/chromium/chromium/src/+/main:testing/variations/README.md
             '--disable-hang-monitor',
+            '--disable-infobars',
             '--disable-ipc-flooding-protection',
             '--disable-popup-blocking',
             '--disable-prompt-on-repost',
             '--disable-renderer-backgrounding',
+            '--disable-search-engine-choice-screen',
             '--disable-sync',
+            '--enable-automation',
+            '--export-tagged-pdf',
             '--force-color-profile=srgb',
             '--metrics-recording-only',
             '--no-first-run',
-            '--enable-automation',
             '--password-store=basic',
             '--use-mock-keychain',
-            // TODO(sadym): remove '--enable-blink-features=IdleDetection'
-            // once IdleDetection is turned on by default.
-            '--enable-blink-features=IdleDetection',
-            '--export-tagged-pdf',
+            `--disable-features=${disabledFeatures.join(',')}`,
+            `--enable-features=${enabledFeatures.join(',')}`,
         ];
         const { devtools = false, headless = !devtools, args = [], userDataDir, } = options;
         if (userDataDir) {
@@ -150,7 +188,7 @@ class ChromeLauncher {
             chromeArguments.push('--auto-open-devtools-for-tabs');
         }
         if (headless) {
-            chromeArguments.push(headless === 'chrome' ? '--headless=chrome' : '--headless', '--hide-scrollbars', '--mute-audio');
+            chromeArguments.push(headless === 'new' ? '--headless=new' : '--headless', '--hide-scrollbars', '--mute-audio');
         }
         if (args.every(arg => {
             return arg.startsWith('-');
@@ -162,16 +200,72 @@ class ChromeLauncher {
     }
     executablePath(channel) {
         if (channel) {
-            return (0, ProductLauncher_js_1.executablePathForChannel)(channel);
+            return (0, browsers_1.computeSystemExecutablePath)({
+                browser: browsers_1.Browser.CHROME,
+                channel: convertPuppeteerChannelToBrowsersChannel(channel),
+            });
         }
         else {
-            const results = (0, ProductLauncher_js_1.resolveExecutablePath)(this);
-            return results.executablePath;
+            return this.resolveExecutablePath();
         }
-    }
-    get product() {
-        return 'chrome';
     }
 }
 exports.ChromeLauncher = ChromeLauncher;
+function convertPuppeteerChannelToBrowsersChannel(channel) {
+    switch (channel) {
+        case 'chrome':
+            return browsers_1.ChromeReleaseChannel.STABLE;
+        case 'chrome-dev':
+            return browsers_1.ChromeReleaseChannel.DEV;
+        case 'chrome-beta':
+            return browsers_1.ChromeReleaseChannel.BETA;
+        case 'chrome-canary':
+            return browsers_1.ChromeReleaseChannel.CANARY;
+    }
+}
+/**
+ * Extracts all features from the given command-line flag
+ * (e.g. `--enable-features`, `--enable-features=`).
+ *
+ * Example input:
+ * ["--enable-features=NetworkService,NetworkServiceInProcess", "--enable-features=Foo"]
+ *
+ * Example output:
+ * ["NetworkService", "NetworkServiceInProcess", "Foo"]
+ *
+ * @internal
+ */
+function getFeatures(flag, options = []) {
+    return options
+        .filter(s => {
+        return s.startsWith(flag.endsWith('=') ? flag : `${flag}=`);
+    })
+        .map(s => {
+        return s.split(new RegExp(`${flag}=\\s*`))[1]?.trim();
+    })
+        .filter(s => {
+        return s;
+    });
+}
+exports.getFeatures = getFeatures;
+/**
+ * Removes all elements in-place from the given string array
+ * that match the given command-line flag.
+ *
+ * @internal
+ */
+function removeMatchingFlags(array, flag) {
+    const regex = new RegExp(`^${flag}=.*`);
+    let i = 0;
+    while (i < array.length) {
+        if (regex.test(array[i])) {
+            array.splice(i, 1);
+        }
+        else {
+            i++;
+        }
+    }
+    return array;
+}
+exports.removeMatchingFlags = removeMatchingFlags;
 //# sourceMappingURL=ChromeLauncher.js.map

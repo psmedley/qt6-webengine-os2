@@ -67,12 +67,72 @@ printer::TypedValueVendorCapability::ValueType ToCloudValueType(
 
 printer::Media ConvertPaperToMedia(
     const printing::PrinterSemanticCapsAndDefaults::Paper& paper) {
-  gfx::Size paper_size = paper.size_um;
-  if (paper_size.width() > paper_size.height())
+  if (paper.SupportsCustomSize()) {
+    return printer::MediaBuilder()
+        .WithCustomName(paper.display_name(), paper.vendor_id())
+        .WithSizeAndDefaultPrintableArea(paper.size_um())
+        .WithMaxHeight(paper.max_height_um())
+        .Build();
+  }
+
+  gfx::Size paper_size = paper.size_um();
+  gfx::Rect paper_printable_area = paper.printable_area_um();
+  // When converting to Media, the size and printable area should have a larger
+  // height than width.
+  if (paper_size.width() > paper_size.height()) {
+    // When swapping the printable_area, we can't simply transpose the rect
+    // since the margins may not be the same on all sides.  A visualization may
+    // help.  Suppose we have a page with width of 127000 and height of 76200.
+    // Additionally, the left margin is 1000, right margin is 700, bottom margin
+    // is 500, and top margin is 200.
+    //
+    //        +---------- 127000 ---------+
+    //        |        200                |
+    //      76200      +-----------+      |
+    //        |        |           |      |
+    //        |  1000  |           |  700 |
+    //        |        |           |      |
+    //        |        +-----------+      |
+    //        |         500               |
+    //        +---------------------------+
+    //
+    // After swapping the page size and printable area (rotating 90 degrees
+    // clockwise), this should be the resulting sizes:
+    //
+    //        +---- 76200 ---+
+    //        |              |
+    //        |      1000    |
+    //        |             127000
+    //        |    +-----+   |
+    //        |    |     |   |
+    //        |    |     |   |
+    //        |500 |     |200|
+    //        |    |     |   |
+    //        |    |     |   |
+    //        |    +-----+   |
+    //        |              |
+    //        |      700     |
+    //        +--------------+
+    //
+    // Namely, the new x value for the printable area is: the old printable area
+    // y value.  The new y value for the printable area is: (the old width) -
+    // (the old printable area width) - (the old printable areay x value).  Note
+    // that if the top/bottom margins are equal and the left/right margins are
+    // equal, then a simple transpose does indeed work.
+
+    // Rotate clockwise by 90 degrees.
+    int new_x = paper_printable_area.y();
+    int new_y = paper_size.width() - paper_printable_area.width() -
+                paper_printable_area.x();
+    paper_printable_area.SetRect(new_x, new_y, paper_printable_area.height(),
+                                 paper_printable_area.width());
     paper_size.SetSize(paper_size.height(), paper_size.width());
-  printer::Media new_media(paper.display_name, paper.vendor_id, paper_size);
-  new_media.MatchBySize();
-  return new_media;
+  }
+  return printer::MediaBuilder()
+      .WithSizeAndPrintableArea(paper_size, paper_printable_area)
+      .WithNameMaybeBasedOnSize(paper.display_name(), paper.vendor_id())
+      .WithBorderlessVariant(paper.has_borderless_variant())
+      .Build();
 }
 
 printer::MediaCapability GetMediaCapabilities(
@@ -80,10 +140,16 @@ printer::MediaCapability GetMediaCapabilities(
   printer::MediaCapability media_capabilities;
   bool is_default_set = false;
 
-  printer::Media default_media(semantic_info.default_paper.display_name,
-                               semantic_info.default_paper.vendor_id,
-                               semantic_info.default_paper.size_um);
-  default_media.MatchBySize();
+  const printing::PrinterSemanticCapsAndDefaults::Paper& default_paper =
+      semantic_info.default_paper;
+  printer::Media default_media =
+      printer::MediaBuilder()
+          .WithSizeAndPrintableArea(default_paper.size_um(),
+                                    default_paper.printable_area_um())
+          .WithNameMaybeBasedOnSize(default_paper.display_name(),
+                                    default_paper.vendor_id())
+          .WithBorderlessVariant(default_paper.has_borderless_variant())
+          .Build();
 
   for (const auto& paper : semantic_info.papers) {
     printer::Media new_media = ConvertPaperToMedia(paper);
@@ -112,6 +178,29 @@ printer::MediaCapability GetMediaCapabilities(
     media_capabilities.AddOption(new_media);
   }
   return media_capabilities;
+}
+
+printer::MediaTypeCapability GetMediaTypeCapabilities(
+    const printing::PrinterSemanticCapsAndDefaults& semantic_info) {
+  printer::MediaTypeCapability media_type_capabilities;
+
+  for (const auto& media_type : semantic_info.media_types) {
+    printer::MediaType new_media_type(media_type.vendor_id,
+                                      media_type.display_name);
+    if (!new_media_type.IsValid()) {
+      continue;
+    }
+
+    if (media_type_capabilities.Contains(new_media_type)) {
+      continue;
+    }
+
+    media_type_capabilities.AddDefaultOption(
+        new_media_type,
+        media_type.vendor_id == semantic_info.default_media_type.vendor_id);
+  }
+
+  return media_type_capabilities;
 }
 
 printer::DpiCapability GetDpiCapabilities(
@@ -239,6 +328,14 @@ base::Value PrinterSemanticCapsAndDefaultsToCdd(
     printer::MediaCapability media = GetMediaCapabilities(semantic_info);
     DCHECK(media.IsValid());
     media.SaveTo(&description);
+  }
+
+  // Only create this capability if more than one media type is supported.
+  if (semantic_info.media_types.size() > 1) {
+    printer::MediaTypeCapability media_type =
+        GetMediaTypeCapabilities(semantic_info);
+    DCHECK(media_type.IsValid());
+    media_type.SaveTo(&description);
   }
 
   if (!semantic_info.dpis.empty()) {

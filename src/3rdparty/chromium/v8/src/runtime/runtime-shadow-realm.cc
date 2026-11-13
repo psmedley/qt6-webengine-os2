@@ -33,11 +33,22 @@ RUNTIME_FUNCTION(Runtime_ShadowRealmImportValue) {
       isolate->RunHostImportModuleDynamicallyCallback(referrer, specifier,
                                                       import_assertions));
   // Check that the promise is created in the eval_context.
-  DCHECK(
-      inner_capability->GetCreationContext().ToHandleChecked().is_identical_to(
-          isolate->native_context()));
+  DCHECK_EQ(inner_capability->GetCreationContext().value(),
+            isolate->raw_native_context());
 
   return *inner_capability;
+}
+
+RUNTIME_FUNCTION(Runtime_ShadowRealmThrow) {
+  DCHECK_EQ(2, args.length());
+  HandleScope scope(isolate);
+  int message_id_smi = args.smi_value_at(0);
+  Handle<Object> value = args.at(1);
+
+  MessageTemplate message_id = MessageTemplateFromInt(message_id_smi);
+
+  Handle<String> string = Object::NoSideEffectsToString(isolate, value);
+  THROW_NEW_ERROR_RETURN_FAILURE(isolate, NewTypeError(message_id, string));
 }
 
 }  // namespace internal

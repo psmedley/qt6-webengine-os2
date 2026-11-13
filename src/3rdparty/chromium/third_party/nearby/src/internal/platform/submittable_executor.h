@@ -16,24 +16,23 @@
 #define PLATFORM_PUBLIC_SUBMITTABLE_EXECUTOR_H_
 
 #include <cstddef>
-#include <functional>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
+#include "internal/platform/callable.h"
+#include "internal/platform/future.h"
 #include "internal/platform/implementation/executor.h"
 #include "internal/platform/implementation/submittable_executor.h"
-#include "internal/platform/callable.h"
-#include "internal/platform/runnable.h"
-#include "internal/platform/future.h"
 #include "internal/platform/lockable.h"
 #include "internal/platform/monitored_runnable.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/mutex_lock.h"
+#include "internal/platform/runnable.h"
 #include "internal/platform/thread_check_callable.h"
 #include "internal/platform/thread_check_runnable.h"
 
-namespace location {
 namespace nearby {
 
 inline int GetCurrentTid() { return api::GetCurrentTid(); }
@@ -44,10 +43,7 @@ inline int GetCurrentTid() { return api::GetCurrentTid(); }
 class ABSL_LOCKABLE SubmittableExecutor : public api::SubmittableExecutor,
                                           public Lockable {
  public:
-  ~SubmittableExecutor() override {
-    MutexLock lock(&mutex_);
-    DoShutdown();
-  }
+  ~SubmittableExecutor() override { DoShutdown(); }
   SubmittableExecutor(SubmittableExecutor&& other) { *this = std::move(other); }
   SubmittableExecutor& operator=(SubmittableExecutor&& other)
       ABSL_LOCKS_EXCLUDED(mutex_) {
@@ -58,7 +54,7 @@ class ABSL_LOCKABLE SubmittableExecutor : public api::SubmittableExecutor,
     }
     return *this;
   }
-  void Execute(const std::string& name, Runnable&& runnable)
+  virtual void Execute(const std::string& name, Runnable&& runnable)
       ABSL_LOCKS_EXCLUDED(mutex_) {
     MutexLock lock(&mutex_);
     if (impl_)
@@ -73,10 +69,7 @@ class ABSL_LOCKABLE SubmittableExecutor : public api::SubmittableExecutor,
           MonitoredRunnable(ThreadCheckRunnable(this, std::move(runnable))));
   }
 
-  void Shutdown() ABSL_LOCKS_EXCLUDED(mutex_) override {
-    MutexLock lock(&mutex_);
-    DoShutdown();
-  }
+  void Shutdown() ABSL_LOCKS_EXCLUDED(mutex_) override { DoShutdown(); }
 
   // Submits a callable for execution.
   // When execution completes, return value is assigned to the passed future.
@@ -87,7 +80,7 @@ class ABSL_LOCKABLE SubmittableExecutor : public api::SubmittableExecutor,
     MutexLock lock(&mutex_);
     bool submitted =
         DoSubmit([callable = ThreadCheckCallable<T>(this, std::move(callable)),
-                  future]() {
+                  future]() mutable {
           ExceptionOr<T> result = callable();
           if (result.ok()) {
             future->Set(result.result());
@@ -107,12 +100,19 @@ class ABSL_LOCKABLE SubmittableExecutor : public api::SubmittableExecutor,
       : impl_(std::move(impl)) {}
 
  private:
-  void DoShutdown() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    if (impl_) {
-      impl_->Shutdown();
-      impl_.reset();
+  void DoShutdown() ABSL_LOCKS_EXCLUDED(mutex_) {
+    std::unique_ptr<api::SubmittableExecutor> executor = ReleaseExecutor();
+    if (executor) {
+      executor->Shutdown();
     }
   }
+
+  std::unique_ptr<api::SubmittableExecutor> ReleaseExecutor()
+      ABSL_LOCKS_EXCLUDED(mutex_) {
+    MutexLock lock(&mutex_);
+    return std::move(impl_);
+  }
+
   // Submit a callable (with no delay).
   // Returns true, if callable was submitted, false otherwise.
   // Callable is not submitted if shutdown is in progress.
@@ -125,6 +125,5 @@ class ABSL_LOCKABLE SubmittableExecutor : public api::SubmittableExecutor,
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_PUBLIC_SUBMITTABLE_EXECUTOR_H_

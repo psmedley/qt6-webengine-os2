@@ -17,7 +17,7 @@
 -- Table to map any of the various chrome process names to a type (e.g. Browser,
 -- Renderer, GPU Process, etc).
 DROP VIEW IF EXISTS all_chrome_processes;
-CREATE VIEW all_chrome_processes AS
+CREATE PERFETTO VIEW all_chrome_processes AS
 SELECT upid, IFNULL(pt.string_value, '') AS process_type
 FROM process
 -- A process is a Chrome process if it has a chrome.process_type arg.
@@ -28,42 +28,42 @@ FROM process
 -- in system traces.
 JOIN
   (SELECT arg_set_id, string_value FROM args WHERE key = 'chrome.process_type')
-    pt
+  pt
   ON process.arg_set_id = pt.arg_set_id;
 
 -- A view of all Chrome threads.
 DROP VIEW IF EXISTS all_chrome_threads;
-CREATE VIEW all_chrome_threads AS
-  SELECT utid, thread.upid, thread.name
-  FROM thread, all_chrome_processes
-  WHERE thread.upid = all_chrome_processes.upid;
+CREATE PERFETTO VIEW all_chrome_threads AS
+SELECT utid, thread.upid, thread.name
+FROM thread, all_chrome_processes
+WHERE thread.upid = all_chrome_processes.upid;
 
 -- For sandboxed and privileged processes (found in Android system traces), use
 -- the main thread name to type of process.
 DROP VIEW IF EXISTS chrome_subprocess_types;
-CREATE VIEW chrome_subprocess_types AS
+CREATE PERFETTO VIEW chrome_subprocess_types AS
 -- Sometimes you can get multiple threads in a trace marked main_thread, but
 -- they appear to have the same name so just use one of them.
 SELECT DISTINCT p.upid,
   SUBSTR(t.name, 3, LENGTH(t.name) - 6) AS sandbox_type
 FROM all_chrome_processes p
-  JOIN all_chrome_threads t ON p.upid = t.upid
+JOIN all_chrome_threads t ON p.upid = t.upid
 WHERE process_type IN ("Sandboxed", "Privileged")
   AND t.name GLOB "Cr*Main";
 
 -- Contains all the chrome processes from process with an extra column,
 -- process_type.
 DROP VIEW IF EXISTS chrome_process;
-CREATE VIEW chrome_process AS
+CREATE PERFETTO VIEW chrome_process AS
 SELECT PROCESS.*,
   IIF(sandbox_type IS NULL, process_type, sandbox_type) AS process_type
 FROM PROCESS
-  JOIN (
+JOIN (
     SELECT a.upid,
       sandbox_type,
       process_type
     FROM all_chrome_processes a
-      LEFT JOIN chrome_subprocess_types s ON a.upid = s.upid
+    LEFT JOIN chrome_subprocess_types s ON a.upid = s.upid
   ) c ON PROCESS.upid = c.upid;
 
 -- Contains all the chrome threads from thread with an extra column,
@@ -71,7 +71,7 @@ FROM PROCESS
 -- and system traces.
 DROP VIEW IF EXISTS chrome_thread;
 
-CREATE VIEW chrome_thread AS
+CREATE PERFETTO VIEW chrome_thread AS
 SELECT thread.*,
   CASE
     WHEN thread.name GLOB "Cr*Main" THEN "CrProcessMain"
@@ -82,6 +82,6 @@ FROM (
     SELECT t.utid,
       p.*
     FROM all_chrome_threads t
-      JOIN chrome_process p ON t.upid = p.upid
+    JOIN chrome_process p ON t.upid = p.upid
   ) c
-  JOIN thread ON thread.utid = c.utid;
+JOIN thread ON thread.utid = c.utid;

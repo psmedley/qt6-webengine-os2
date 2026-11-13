@@ -7,10 +7,10 @@
 
 #include "src/gpu/ganesh/mtl/GrMtlUniformHandler.h"
 
-#include "include/private/gpu/ganesh/GrMtlTypesPriv.h"
 #include "src/gpu/ganesh/GrTexture.h"
 #include "src/gpu/ganesh/GrUtil.h"
 #include "src/gpu/ganesh/glsl/GrGLSLProgramBuilder.h"
+#include "src/gpu/ganesh/mtl/GrMtlTypesPriv.h"
 
 #if !__has_feature(objc_arc)
 #error This file must be compiled with Arc. Use -fobjc-arc flag
@@ -242,12 +242,12 @@ GrGLSLUniformHandler::SamplerHandle GrMtlUniformHandler::addSampler(
     GrTextureType type = backendFormat.textureType();
 
     SkString layoutQualifier;
-    layoutQualifier.appendf("binding=%d", binding);
+    layoutQualifier.appendf("metal, binding=%d", binding);
 
     MtlUniformInfo tempInfo;
     tempInfo.fVariable = GrShaderVar{std::move(mangleName),
                                      SkSLCombinedSamplerTypeForTextureType(type),
-                                     GrShaderVar::TypeModifier::Uniform,
+                                     GrShaderVar::TypeModifier::None,
                                      GrShaderVar::kNonArray,
                                      std::move(layoutQualifier),
                                      SkString()};
@@ -260,7 +260,7 @@ GrGLSLUniformHandler::SamplerHandle GrMtlUniformHandler::addSampler(
     fSamplers.push_back(tempInfo);
 
     fSamplerSwizzles.push_back(swizzle);
-    SkASSERT(fSamplerSwizzles.count() == fSamplers.count());
+    SkASSERT(fSamplerSwizzles.size() == fSamplers.count());
     return GrGLSLUniformHandler::SamplerHandle(fSamplers.count() - 1);
 }
 
@@ -296,7 +296,7 @@ void GrMtlUniformHandler::appendUniformDecls(GrShaderFlags visibility, SkString*
     }
 
     if (!uniformsString.isEmpty()) {
-        out->appendf("layout (binding=%d) uniform uniformBuffer\n{\n", kUniformBinding);
+        out->appendf("layout (metal, binding=%d) uniform uniformBuffer\n{\n", kUniformBinding);
         out->appendf("%s\n};\n", uniformsString.c_str());
     }
 }

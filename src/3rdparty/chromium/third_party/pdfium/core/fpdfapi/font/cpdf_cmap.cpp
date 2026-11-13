@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -280,8 +280,8 @@ size_t GetFourByteCharSizeImpl(
   return 1;
 }
 
-const FXCMAP_CMap* FindEmbeddedCMap(pdfium::span<const FXCMAP_CMap> pCMaps,
-                                    ByteStringView bsName) {
+const fxcmap::CMap* FindEmbeddedCMap(pdfium::span<const fxcmap::CMap> pCMaps,
+                                     ByteStringView bsName) {
   for (size_t i = 0; i < pCMaps.size(); i++) {
     if (bsName == pCMaps[i].m_Name)
       return &pCMaps[i];
@@ -318,14 +318,15 @@ CPDF_CMap::CPDF_CMap(ByteStringView bsPredefinedName)
 }
 
 CPDF_CMap::CPDF_CMap(pdfium::span<const uint8_t> spEmbeddedData)
-    : m_DirectCharcodeToCIDTable(kDirectMapTableSize) {
+    : m_DirectCharcodeToCIDTable(
+          FixedSizeDataVector<uint16_t>::Zeroed(kDirectMapTableSize)) {
   CPDF_CMapParser parser(this);
   CPDF_SimpleParser syntax(spEmbeddedData);
   while (true) {
     ByteStringView word = syntax.GetWord();
-    if (word.IsEmpty())
+    if (word.IsEmpty()) {
       break;
-
+    }
     parser.ParseWord(word);
   }
 }
@@ -337,7 +338,7 @@ uint16_t CPDF_CMap::CIDFromCharCode(uint32_t charcode) const {
     return static_cast<uint16_t>(charcode);
 
   if (m_pEmbedMap)
-    return ::CIDFromCharCode(m_pEmbedMap.Get(), charcode);
+    return fxcmap::CIDFromCharCode(m_pEmbedMap, charcode);
 
   if (m_DirectCharcodeToCIDTable.empty())
     return static_cast<uint16_t>(charcode);
@@ -514,4 +515,13 @@ void CPDF_CMap::SetAdditionalMappings(std::vector<CIDRange> mappings) {
 
 void CPDF_CMap::SetMixedFourByteLeadingRanges(std::vector<CodeRange> ranges) {
   m_MixedFourByteLeadingRanges = std::move(ranges);
+}
+
+void CPDF_CMap::SetDirectCharcodeToCIDTableRange(uint32_t start_code,
+                                                 uint32_t end_code,
+                                                 uint16_t start_cid) {
+  pdfium::span<uint16_t> span = m_DirectCharcodeToCIDTable.span();
+  for (uint32_t code = start_code; code <= end_code; ++code) {
+    span[code] = static_cast<uint16_t>(start_cid + code - start_code);
+  }
 }

@@ -9,7 +9,9 @@
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "services/device/public/mojom/serial.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
+#include "third_party/blink/renderer/core/dom/abort_signal.h"
 #include "third_party/blink/renderer/core/streams/underlying_sink_base.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 
 namespace blink {
 
@@ -19,6 +21,8 @@ class SerialPort;
 class WritableStreamDefaultController;
 
 class SerialPortUnderlyingSink final : public UnderlyingSinkBase {
+  USING_PRE_FINALIZER(SerialPortUnderlyingSink, Dispose);
+
  public:
   SerialPortUnderlyingSink(SerialPort*, mojo::ScopedDataPipeProducerHandle);
 
@@ -45,12 +49,14 @@ class SerialPortUnderlyingSink final : public UnderlyingSinkBase {
   void OnFlushOrDrain();
   void WriteData();
   void PipeClosed();
+  void Dispose();
 
   mojo::ScopedDataPipeProducerHandle data_pipe_;
   mojo::SimpleWatcher watcher_;
   Member<SerialPort> serial_port_;
   Member<ScriptState> script_state_;
   Member<WritableStreamDefaultController> controller_;
+  Member<AbortSignal::AlgorithmHandle> abort_handle_;
 
   Member<V8BufferSource> buffer_source_;
   size_t offset_ = 0;

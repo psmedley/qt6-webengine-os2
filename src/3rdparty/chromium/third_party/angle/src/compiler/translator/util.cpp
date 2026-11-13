@@ -74,6 +74,8 @@ bool IsInterpolationIn(TQualifier qualifier)
         case EvqNoPerspectiveIn:
         case EvqCentroidIn:
         case EvqSampleIn:
+        case EvqNoPerspectiveCentroidIn:
+        case EvqNoPerspectiveSampleIn:
             return true;
         default:
             return false;
@@ -89,6 +91,8 @@ bool IsInterpolationOut(TQualifier qualifier)
         case EvqNoPerspectiveOut:
         case EvqCentroidOut:
         case EvqSampleOut:
+        case EvqNoPerspectiveCentroidOut:
+        case EvqNoPerspectiveSampleOut:
             return true;
         default:
             return false;
@@ -213,7 +217,15 @@ float NumericLexFloat32OutOfRangeToInfinity(const std::string &str)
     {
         return std::numeric_limits<float>::infinity();
     }
-    else if (exponentLong < std::numeric_limits<float>::min_exponent10)
+    // In 32-bit float, min_exponent10 is -37 but min() is
+    // 1.1754943E-38. 10^-37 may be the "minimum negative integer such
+    // that 10 raised to that power is a normalized float", but being
+    // constrained to powers of ten it's above min() (which is 2^-126).
+    // Values below min() are flushed to zero near the end of this
+    // function anyway so (AFAICT) this comparison is only done to ensure
+    // that the exponent will not make the pow() call (below) overflow.
+    // Comparing against -38 (min_exponent10 - 1) will do the trick.
+    else if (exponentLong < std::numeric_limits<float>::min_exponent10 - 1)
     {
         return 0.0f;
     }
@@ -229,7 +241,7 @@ float NumericLexFloat32OutOfRangeToInfinity(const std::string &str)
     {
         return std::numeric_limits<float>::infinity();
     }
-    if (value < static_cast<double>(std::numeric_limits<float>::min()))
+    if (static_cast<float>(value) < std::numeric_limits<float>::min())
     {
         return 0.0f;
     }
@@ -470,15 +482,10 @@ bool IsVaryingOut(TQualifier qualifier)
     switch (qualifier)
     {
         case EvqVaryingOut:
-        case EvqSmoothOut:
-        case EvqFlatOut:
-        case EvqNoPerspectiveOut:
-        case EvqCentroidOut:
         case EvqVertexOut:
         case EvqGeometryOut:
         case EvqTessControlOut:
         case EvqTessEvaluationOut:
-        case EvqSampleOut:
         case EvqPatchOut:
             return true;
 
@@ -486,7 +493,7 @@ bool IsVaryingOut(TQualifier qualifier)
             break;
     }
 
-    return false;
+    return IsInterpolationOut(qualifier);
 }
 
 bool IsVaryingIn(TQualifier qualifier)
@@ -494,15 +501,10 @@ bool IsVaryingIn(TQualifier qualifier)
     switch (qualifier)
     {
         case EvqVaryingIn:
-        case EvqSmoothIn:
-        case EvqFlatIn:
-        case EvqNoPerspectiveIn:
-        case EvqCentroidIn:
         case EvqFragmentIn:
         case EvqGeometryIn:
         case EvqTessControlIn:
         case EvqTessEvaluationIn:
-        case EvqSampleIn:
         case EvqPatchIn:
             return true;
 
@@ -510,7 +512,7 @@ bool IsVaryingIn(TQualifier qualifier)
             break;
     }
 
-    return false;
+    return IsInterpolationIn(qualifier);
 }
 
 bool IsVarying(TQualifier qualifier)
@@ -577,6 +579,14 @@ InterpolationType GetInterpolationType(TQualifier qualifier)
         case EvqNoPerspectiveOut:
             return INTERPOLATION_NOPERSPECTIVE;
 
+        case EvqNoPerspectiveCentroidIn:
+        case EvqNoPerspectiveCentroidOut:
+            return INTERPOLATION_NOPERSPECTIVE_CENTROID;
+
+        case EvqNoPerspectiveSampleIn:
+        case EvqNoPerspectiveSampleOut:
+            return INTERPOLATION_NOPERSPECTIVE_SAMPLE;
+
         case EvqSmoothIn:
         case EvqSmoothOut:
         case EvqVertexOut:
@@ -609,14 +619,20 @@ InterpolationType GetFieldInterpolationType(TQualifier qualifier)
 {
     switch (qualifier)
     {
+        case EvqSmooth:
+            return INTERPOLATION_SMOOTH;
         case EvqFlat:
             return INTERPOLATION_FLAT;
         case EvqNoPerspective:
             return INTERPOLATION_NOPERSPECTIVE;
-        case EvqSmooth:
-            return INTERPOLATION_SMOOTH;
         case EvqCentroid:
             return INTERPOLATION_CENTROID;
+        case EvqSample:
+            return INTERPOLATION_SAMPLE;
+        case EvqNoPerspectiveCentroid:
+            return INTERPOLATION_NOPERSPECTIVE_CENTROID;
+        case EvqNoPerspectiveSample:
+            return INTERPOLATION_NOPERSPECTIVE_SAMPLE;
         default:
             return GetInterpolationType(qualifier);
     }
@@ -721,6 +737,7 @@ bool IsBuiltinOutputVariable(TQualifier qualifier)
         case EvqClipDistance:
         case EvqCullDistance:
         case EvqLastFragData:
+        case EvqLastFragColor:
         case EvqSampleMask:
             return true;
         default:
@@ -738,6 +755,7 @@ bool IsBuiltinFragmentInputVariable(TQualifier qualifier)
         case EvqFrontFacing:
         case EvqHelperInvocation:
         case EvqLastFragData:
+        case EvqLastFragColor:
             return true;
         default:
             break;
@@ -801,15 +819,11 @@ bool IsOutputHLSL(ShShaderOutput output)
     }
     return false;
 }
-bool IsOutputVulkan(ShShaderOutput output)
+bool IsOutputSPIRV(ShShaderOutput output)
 {
     return output == SH_SPIRV_VULKAN_OUTPUT;
 }
-bool IsOutputMetal(ShShaderOutput output)
-{
-    return output == SH_SPIRV_METAL_OUTPUT;
-}
-bool IsOutputMetalDirect(ShShaderOutput output)
+bool IsOutputMSL(ShShaderOutput output)
 {
     return output == SH_MSL_METAL_OUTPUT;
 }
@@ -1006,8 +1020,9 @@ bool IsPrecisionApplicableToType(TBasicType type)
 
 bool IsRedeclarableBuiltIn(const ImmutableString &name)
 {
-    return name == "gl_ClipDistance" || name == "gl_CullDistance" || name == "gl_LastFragData" ||
-           name == "gl_PerVertex" || name == "gl_Position" || name == "gl_PointSize";
+    return name == "gl_ClipDistance" || name == "gl_CullDistance" || name == "gl_FragDepth" ||
+           name == "gl_LastFragData" || name == "gl_LastFragColorARM" || name == "gl_PerVertex" ||
+           name == "gl_Position" || name == "gl_PointSize";
 }
 
 size_t FindFieldIndex(const TFieldList &fieldList, const char *fieldName)
@@ -1021,6 +1036,27 @@ size_t FindFieldIndex(const TFieldList &fieldList, const char *fieldName)
     }
     UNREACHABLE();
     return 0;
+}
+
+Declaration ViewDeclaration(TIntermDeclaration &declNode)
+{
+    ASSERT(declNode.getChildCount() == 1);
+    TIntermNode *childNode = declNode.getChildNode(0);
+    ASSERT(childNode);
+    TIntermSymbol *symbolNode;
+    if ((symbolNode = childNode->getAsSymbolNode()))
+    {
+        return {*symbolNode, nullptr};
+    }
+    else
+    {
+        TIntermBinary *initNode = childNode->getAsBinaryNode();
+        ASSERT(initNode);
+        ASSERT(initNode->getOp() == TOperator::EOpInitialize);
+        symbolNode = initNode->getLeft()->getAsSymbolNode();
+        ASSERT(symbolNode);
+        return {*symbolNode, initNode->getRight()};
+    }
 }
 
 }  // namespace sh

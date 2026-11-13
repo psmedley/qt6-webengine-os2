@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 
 #include <string>
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -49,4 +48,3 @@ AdvertisingOptions AdvertisingOptions::CompatibleOptions() const {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

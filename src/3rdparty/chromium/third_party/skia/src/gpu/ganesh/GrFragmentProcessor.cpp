@@ -7,6 +7,8 @@
 
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
 
+#include "include/core/SkM44.h"
+#include "src/base/SkVx.h"
 #include "src/core/SkRuntimeEffectPriv.h"
 #include "src/gpu/KeyBuilder.h"
 #include "src/gpu/ganesh/GrPipeline.h"
@@ -90,7 +92,7 @@ const GrTextureEffect* GrFragmentProcessor::asTextureEffect() const {
     return nullptr;
 }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 static void recursive_dump_tree_info(const GrFragmentProcessor& fp,
                                      SkString indent,
                                      SkString* text) {
@@ -116,8 +118,8 @@ SkString GrFragmentProcessor::dumpTreeInfo() const {
 
 std::unique_ptr<GrFragmentProcessor::ProgramImpl> GrFragmentProcessor::makeProgramImpl() const {
     std::unique_ptr<ProgramImpl> impl = this->onMakeProgramImpl();
-    impl->fChildProcessors.push_back_n(fChildProcessors.count());
-    for (int i = 0; i < fChildProcessors.count(); ++i) {
+    impl->fChildProcessors.push_back_n(fChildProcessors.size());
+    for (int i = 0; i < fChildProcessors.size(); ++i) {
         impl->fChildProcessors[i] = fChildProcessors[i] ? fChildProcessors[i]->makeProgramImpl()
                                                         : nullptr;
     }
@@ -326,7 +328,6 @@ std::unique_ptr<GrFragmentProcessor> GrFragmentProcessor::OverrideInput(
             "return fp.eval(color);"
         "}"
     );
-    SkASSERT(SkRuntimeEffectPriv::SupportsConstantOutputForConstantInput(effect));
     return GrSkSLFP::Make(effect, "OverrideInput", /*inputFP=*/nullptr,
                           color.isOpaque() ? GrSkSLFP::OptFlags::kPreservesOpaqueInput
                                            : GrSkSLFP::OptFlags::kNone,

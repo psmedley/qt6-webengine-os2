@@ -8,7 +8,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/layer.h"
@@ -115,12 +115,14 @@ float CalculateCircleLayerRadius(const gfx::Rect& clip_bounds) {
 
 namespace views {
 
-FloodFillInkDropRipple::FloodFillInkDropRipple(const gfx::Size& host_size,
+FloodFillInkDropRipple::FloodFillInkDropRipple(InkDropHost* ink_drop_host,
+                                               const gfx::Size& host_size,
                                                const gfx::Insets& clip_insets,
                                                const gfx::Point& center_point,
                                                SkColor color,
                                                float visible_opacity)
-    : clip_insets_(clip_insets),
+    : InkDropRipple(ink_drop_host),
+      clip_insets_(clip_insets),
       center_point_(center_point),
       visible_opacity_(visible_opacity),
       use_hide_transform_duration_for_hide_fade_out_(false),
@@ -160,11 +162,13 @@ FloodFillInkDropRipple::FloodFillInkDropRipple(const gfx::Size& host_size,
   SetStateToHidden();
 }
 
-FloodFillInkDropRipple::FloodFillInkDropRipple(const gfx::Size& host_size,
+FloodFillInkDropRipple::FloodFillInkDropRipple(InkDropHost* ink_drop_host,
+                                               const gfx::Size& host_size,
                                                const gfx::Point& center_point,
                                                SkColor color,
                                                float visible_opacity)
-    : FloodFillInkDropRipple(host_size,
+    : FloodFillInkDropRipple(ink_drop_host,
+                             host_size,
                              gfx::Insets(),
                              center_point,
                              color,
@@ -174,12 +178,6 @@ FloodFillInkDropRipple::~FloodFillInkDropRipple() {
   // Explicitly aborting all the animations ensures all callbacks are invoked
   // while this instance still exists.
   AbortAllAnimations();
-}
-
-void FloodFillInkDropRipple::SnapToActivated() {
-  InkDropRipple::SnapToActivated();
-  SetOpacity(visible_opacity_);
-  painted_layer_.SetTransform(GetMaxSizeTargetTransform());
 }
 
 ui::Layer* FloodFillInkDropRipple::GetRootLayer() {
@@ -295,6 +293,12 @@ void FloodFillInkDropRipple::AnimateStateChange(
   }
 }
 
+void FloodFillInkDropRipple::SetStateToActivated() {
+  root_layer_.SetVisible(true);
+  SetOpacity(visible_opacity_);
+  painted_layer_.SetTransform(GetMaxSizeTargetTransform());
+}
+
 void FloodFillInkDropRipple::SetStateToHidden() {
   painted_layer_.SetTransform(CalculateTransform(kMinRadius));
   root_layer_.SetOpacity(kHiddenOpacity);
@@ -353,7 +357,9 @@ float FloodFillInkDropRipple::MaxDistanceToCorners(
 // Returns the InkDropState sub animation duration for the given |state|.
 base::TimeDelta FloodFillInkDropRipple::GetAnimationDuration(int state) {
   if (!PlatformStyle::kUseRipples ||
-      !gfx::Animation::ShouldRenderRichAnimation()) {
+      !gfx::Animation::ShouldRenderRichAnimation() ||
+      (GetInkDropHost() && GetInkDropHost()->GetMode() ==
+                               InkDropHost::InkDropMode::ON_NO_ANIMATE)) {
     return base::TimeDelta();
   }
 

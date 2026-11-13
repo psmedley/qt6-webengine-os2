@@ -1,16 +1,29 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/vulkan/ResourceMemoryAllocatorVk.h"
 
@@ -19,6 +32,7 @@
 
 #include "dawn/common/Math.h"
 #include "dawn/native/BuddyMemoryAllocator.h"
+#include "dawn/native/Queue.h"
 #include "dawn/native/ResourceHeapAllocator.h"
 #include "dawn/native/vulkan/DeviceVk.h"
 #include "dawn/native/vulkan/FencedDeleter.h"
@@ -37,6 +51,22 @@ constexpr uint64_t kMaxSizeForSubAllocation = 4ull * 1024ull * 1024ull;  // 4MiB
 // Have each bucket of the buddy system allocate at least some resource of the maximum
 // size
 constexpr uint64_t kBuddyHeapsSize = 2 * kMaxSizeForSubAllocation;
+
+bool IsMemoryKindMappable(MemoryKind memoryKind) {
+    switch (memoryKind) {
+        case MemoryKind::LinearReadMappable:
+        case MemoryKind::LinearWriteMappable:
+            return true;
+
+        case MemoryKind::LazilyAllocated:
+        case MemoryKind::Linear:
+        case MemoryKind::Opaque:
+            return false;
+
+        default:
+            DAWN_UNREACHABLE();
+    }
+}
 
 }  // anonymous namespace
 
@@ -57,7 +87,7 @@ class ResourceMemoryAllocator::SingleTypeAllocator : public ResourceHeapAllocato
               // Take the min in the very unlikely case the memory heap is tiny.
               std::min(uint64_t(1) << Log2(mMemoryHeapSize), kBuddyHeapsSize),
               &mPooledMemoryAllocator) {
-        ASSERT(IsPowerOfTwo(kBuddyHeapsSize));
+        DAWN_ASSERT(IsPowerOfTwo(kBuddyHeapsSize));
     }
     ~SingleTypeAllocator() override = default;
 
@@ -92,7 +122,7 @@ class ResourceMemoryAllocator::SingleTypeAllocator : public ResourceHeapAllocato
                                                              nullptr, &*allocatedMemory),
                                   "vkAllocateMemory"));
 
-        ASSERT(allocatedMemory != VK_NULL_HANDLE);
+        DAWN_ASSERT(allocatedMemory != VK_NULL_HANDLE);
         return {std::make_unique<ResourceHeap>(allocatedMemory, mMemoryTypeIndex)};
     }
 
@@ -124,17 +154,19 @@ ResourceMemoryAllocator::~ResourceMemoryAllocator() = default;
 
 ResultOrError<ResourceMemoryAllocation> ResourceMemoryAllocator::Allocate(
     const VkMemoryRequirements& requirements,
-    MemoryKind kind) {
+    MemoryKind kind,
+    bool forceDisableSubAllocation) {
     // The Vulkan spec guarantees at least on memory type is valid.
     int memoryType = FindBestTypeIndex(requirements, kind);
-    ASSERT(memoryType >= 0);
+    DAWN_ASSERT(memoryType >= 0);
 
     VkDeviceSize size = requirements.size;
 
     // Sub-allocate non-mappable resources because at the moment the mapped pointer
     // is part of the resource and not the heap, which doesn't match the Vulkan model.
     // TODO(crbug.com/dawn/849): allow sub-allocating mappable resources, maybe.
-    if (requirements.size < kMaxSizeForSubAllocation && kind != MemoryKind::LinearMappable &&
+    if (!forceDisableSubAllocation && requirements.size < kMaxSizeForSubAllocation &&
+        !IsMemoryKindMappable(kind) &&
         !mDevice->IsToggleEnabled(Toggle::DisableResourceSuballocation)) {
         // When sub-allocating, Vulkan requires that we respect bufferImageGranularity. Some
         // hardware puts information on the memory's page table entry and allocating a linear
@@ -164,7 +196,7 @@ ResultOrError<ResourceMemoryAllocation> ResourceMemoryAllocator::Allocate(
     DAWN_TRY_ASSIGN(resourceHeap, mAllocatorsPerType[memoryType]->AllocateResourceHeap(size));
 
     void* mappedPointer = nullptr;
-    if (kind == MemoryKind::LinearMappable) {
+    if (IsMemoryKindMappable(kind)) {
         DAWN_TRY_WITH_CLEANUP(
             CheckVkSuccess(mDevice->fn.MapMemory(mDevice->GetVkDevice(),
                                                  ToBackend(resourceHeap.get())->GetMemory(), 0,
@@ -201,11 +233,12 @@ void ResourceMemoryAllocator::Deallocate(ResourceMemoryAllocation* allocation) {
         // TODO(crbug.com/dawn/851): Maybe we can produce the correct barriers to reduce the
         // latency to reclaim memory.
         case AllocationMethod::kSubAllocated:
-            mSubAllocationsToDelete.Enqueue(*allocation, mDevice->GetPendingCommandSerial());
+            mSubAllocationsToDelete.Enqueue(*allocation,
+                                            mDevice->GetQueue()->GetPendingCommandSerial());
             break;
 
         default:
-            UNREACHABLE();
+            DAWN_UNREACHABLE();
             break;
     }
 
@@ -217,7 +250,7 @@ void ResourceMemoryAllocator::Deallocate(ResourceMemoryAllocation* allocation) {
 void ResourceMemoryAllocator::Tick(ExecutionSerial completedSerial) {
     for (const ResourceMemoryAllocation& allocation :
          mSubAllocationsToDelete.IterateUpTo(completedSerial)) {
-        ASSERT(allocation.GetInfo().mMethod == AllocationMethod::kSubAllocated);
+        DAWN_ASSERT(allocation.GetInfo().mMethod == AllocationMethod::kSubAllocated);
         size_t memoryType = ToBackend(allocation.GetResourceHeap())->GetMemoryType();
 
         mAllocatorsPerType[memoryType]->DeallocateMemory(allocation);
@@ -228,7 +261,7 @@ void ResourceMemoryAllocator::Tick(ExecutionSerial completedSerial) {
 
 int ResourceMemoryAllocator::FindBestTypeIndex(VkMemoryRequirements requirements, MemoryKind kind) {
     const VulkanDeviceInfo& info = mDevice->GetDeviceInfo();
-    bool mappable = kind == MemoryKind::LinearMappable;
+    bool mappable = IsMemoryKindMappable(kind);
 
     // Find a suitable memory type for this allocation
     int bestType = -1;
@@ -256,13 +289,42 @@ int ResourceMemoryAllocator::FindBestTypeIndex(VkMemoryRequirements requirements
             continue;
         }
 
-        // For non-mappable resources, favor device local memory.
+        // For non-mappable resources that can be lazily allocated, favor lazy
+        // allocation (note: this is a more important property than that of
+        // device local memory and hence is checked first).
+        bool currentLazilyAllocated =
+            info.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+        bool bestLazilyAllocated =
+            info.memoryTypes[bestType].propertyFlags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+        if ((kind == MemoryKind::LazilyAllocated) &&
+            (currentLazilyAllocated != bestLazilyAllocated)) {
+            if (currentLazilyAllocated) {
+                bestType = static_cast<int>(i);
+            }
+            continue;
+        }
+
+        // For non-mappable, non-lazily-allocated resources, favor device local
+        // memory.
         bool currentDeviceLocal =
             info.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         bool bestDeviceLocal =
             info.memoryTypes[bestType].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         if (!mappable && (currentDeviceLocal != bestDeviceLocal)) {
             if (currentDeviceLocal) {
+                bestType = static_cast<int>(i);
+            }
+            continue;
+        }
+
+        // Cached memory is optimal for read-only access from CPU as host memory accesses to
+        // uncached memory are slower than to cached memory.
+        bool currentHostCached =
+            info.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+        bool bestHostCached =
+            info.memoryTypes[bestType].propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+        if (kind == MemoryKind::LinearReadMappable && currentHostCached != bestHostCached) {
+            if (currentHostCached) {
                 bestType = static_cast<int>(i);
             }
             continue;

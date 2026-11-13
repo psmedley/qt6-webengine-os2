@@ -12,8 +12,8 @@ import {
   TypedArrayBufferView,
   TypedArrayBufferViewConstructor,
 } from '../../common/util/util.js';
+import { Float16Array } from '../../external/petamoriken/float16/float16.js';
 
-import { float16BitsToFloat32 } from './conversion.js';
 import { generatePrettyTable } from './pretty_diff_tables.js';
 
 /** Generate an expected value at `index`, to test for equality with the actual value. */
@@ -44,7 +44,28 @@ export function checkElementsEqual(
 ): ErrorWithExtra | undefined {
   assert(actual.constructor === expected.constructor, 'TypedArray type mismatch');
   assert(actual.length === expected.length, 'size mismatch');
-  return checkElementsEqualGenerated(actual, i => expected[i]);
+
+  let failedElementsFirstMaybe: number | undefined = undefined;
+  /** Sparse array with `true` for elements that failed. */
+  const failedElements: (true | undefined)[] = [];
+  for (let i = 0; i < actual.length; ++i) {
+    if (actual[i] !== expected[i]) {
+      failedElementsFirstMaybe ??= i;
+      failedElements[i] = true;
+    }
+  }
+
+  if (failedElementsFirstMaybe === undefined) {
+    return undefined;
+  }
+
+  const failedElementsFirst = failedElementsFirstMaybe;
+  return failCheckElements({
+    actual,
+    failedElements,
+    failedElementsFirst,
+    predicatePrinter: [{ leftHeader: 'expected ==', getValueForCell: index => expected[index] }],
+  });
 }
 
 /**
@@ -69,42 +90,6 @@ export function checkElementsBetween(
   );
   // If there was an error, extend it with additional extras.
   return error ? new ErrorWithExtra(error, () => ({ expected })) : undefined;
-}
-
-/**
- * Equivalent to {@link checkElementsBetween} but interpret values as float16 and convert to JS number before comparison.
- */
-export function checkElementsFloat16Between(
-  actual: TypedArrayBufferView,
-  expected: readonly [TypedArrayBufferView, TypedArrayBufferView]
-): ErrorWithExtra | undefined {
-  assert(actual.BYTES_PER_ELEMENT === 2, 'bytes per element need to be 2 (16bit)');
-  const actualF32 = new Float32Array(actual.length);
-  actual.forEach((v: number, i: number) => {
-    actualF32[i] = float16BitsToFloat32(v);
-  });
-  const expectedF32 = [new Float32Array(expected[0].length), new Float32Array(expected[1].length)];
-  expected[0].forEach((v: number, i: number) => {
-    expectedF32[0][i] = float16BitsToFloat32(v);
-  });
-  expected[1].forEach((v: number, i: number) => {
-    expectedF32[1][i] = float16BitsToFloat32(v);
-  });
-
-  const error = checkElementsPassPredicate(
-    actualF32,
-    (index, value) =>
-      value >= Math.min(expectedF32[0][index], expectedF32[1][index]) &&
-      value <= Math.max(expectedF32[0][index], expectedF32[1][index]),
-    {
-      predicatePrinter: [
-        { leftHeader: 'between', getValueForCell: index => expectedF32[0][index] },
-        { leftHeader: 'and', getValueForCell: index => expectedF32[1][index] },
-      ],
-    }
-  );
-  // If there was an error, extend it with additional extras.
-  return error ? new ErrorWithExtra(error, () => ({ expectedF32 })) : undefined;
 }
 
 /**
@@ -153,11 +138,29 @@ export function checkElementsEqualGenerated(
   actual: TypedArrayBufferView,
   generator: CheckElementsGenerator
 ): ErrorWithExtra | undefined {
-  const error = checkElementsPassPredicate(actual, (index, value) => value === generator(index), {
+  let failedElementsFirstMaybe: number | undefined = undefined;
+  /** Sparse array with `true` for elements that failed. */
+  const failedElements: (true | undefined)[] = [];
+  for (let i = 0; i < actual.length; ++i) {
+    if (actual[i] !== generator(i)) {
+      failedElementsFirstMaybe ??= i;
+      failedElements[i] = true;
+    }
+  }
+
+  if (failedElementsFirstMaybe === undefined) {
+    return undefined;
+  }
+
+  const failedElementsFirst = failedElementsFirstMaybe;
+  const error = failCheckElements({
+    actual,
+    failedElements,
+    failedElementsFirst,
     predicatePrinter: [{ leftHeader: 'expected ==', getValueForCell: index => generator(index) }],
   });
-  // If there was an error, extend it with additional extras.
-  return error ? new ErrorWithExtra(error, () => ({ generator })) : undefined;
+  // Add more extras to the error.
+  return new ErrorWithExtra(error, () => ({ generator }));
 }
 
 /**
@@ -169,14 +172,10 @@ export function checkElementsPassPredicate(
   predicate: CheckElementsPredicate,
   { predicatePrinter }: { predicatePrinter?: CheckElementsSupplementalTableRows }
 ): ErrorWithExtra | undefined {
-  const size = actual.length;
-  const ctor = actual.constructor as TypedArrayBufferViewConstructor;
-  const printAsFloat = ctor === Float32Array || ctor === Float64Array;
-
   let failedElementsFirstMaybe: number | undefined = undefined;
   /** Sparse array with `true` for elements that failed. */
   const failedElements: (true | undefined)[] = [];
-  for (let i = 0; i < size; ++i) {
+  for (let i = 0; i < actual.length; ++i) {
     if (!predicate(i, actual[i])) {
       failedElementsFirstMaybe ??= i;
       failedElements[i] = true;
@@ -186,7 +185,35 @@ export function checkElementsPassPredicate(
   if (failedElementsFirstMaybe === undefined) {
     return undefined;
   }
+
   const failedElementsFirst = failedElementsFirstMaybe;
+  return failCheckElements({ actual, failedElements, failedElementsFirst, predicatePrinter });
+}
+
+interface CheckElementsFailOpts {
+  actual: TypedArrayBufferView;
+  failedElements: (true | undefined)[];
+  failedElementsFirst: number;
+  predicatePrinter?: CheckElementsSupplementalTableRows;
+}
+
+/**
+ * Implements the failure case of some checkElementsX helpers above. This allows those functions to
+ * implement their checks directly without too many function indirections in between.
+ *
+ * Note: Separating this into its own function significantly speeds up the non-error case in
+ * Chromium (though this may be V8-specific behavior).
+ */
+function failCheckElements({
+  actual,
+  failedElements,
+  failedElementsFirst,
+  predicatePrinter,
+}: CheckElementsFailOpts): ErrorWithExtra {
+  const size = actual.length;
+  const ctor = actual.constructor as TypedArrayBufferViewConstructor;
+  const printAsFloat = ctor === Float16Array || ctor === Float32Array || ctor === Float64Array;
+
   const failedElementsLast = failedElements.length - 1;
 
   // Include one extra non-failed element at the beginning and end (if they exist), for context.

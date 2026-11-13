@@ -1,16 +1,29 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/RenderEncoderBase.h"
 
@@ -47,8 +60,9 @@ RenderEncoderBase::RenderEncoderBase(DeviceBase* device,
 
 RenderEncoderBase::RenderEncoderBase(DeviceBase* device,
                                      EncodingContext* encodingContext,
-                                     ErrorTag errorTag)
-    : ProgrammableEncoder(device, encodingContext, errorTag),
+                                     ErrorTag errorTag,
+                                     const char* label)
+    : ProgrammableEncoder(device, encodingContext, errorTag, label),
       mIndirectDrawMetadata(device->GetLimits()),
       mDisableBaseVertex(device->IsToggleEnabled(Toggle::DisableBaseVertex)),
       mDisableBaseInstance(device->IsToggleEnabled(Toggle::DisableBaseInstance)) {}
@@ -60,23 +74,23 @@ void RenderEncoderBase::DestroyImpl() {
 }
 
 const AttachmentState* RenderEncoderBase::GetAttachmentState() const {
-    ASSERT(!IsError());
-    ASSERT(mAttachmentState != nullptr);
+    DAWN_ASSERT(!IsError());
+    DAWN_ASSERT(mAttachmentState != nullptr);
     return mAttachmentState.Get();
 }
 
 bool RenderEncoderBase::IsDepthReadOnly() const {
-    ASSERT(!IsError());
+    DAWN_ASSERT(!IsError());
     return mDepthReadOnly;
 }
 
 bool RenderEncoderBase::IsStencilReadOnly() const {
-    ASSERT(!IsError());
+    DAWN_ASSERT(!IsError());
     return mStencilReadOnly;
 }
 
 uint64_t RenderEncoderBase::GetDrawCount() const {
-    ASSERT(!IsError());
+    DAWN_ASSERT(!IsError());
     return mDrawCount;
 }
 
@@ -92,7 +106,20 @@ void RenderEncoderBase::APIDraw(uint32_t vertexCount,
         this,
         [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
+                if (vertexCount == 0) {
+                    GetDevice()->EmitWarningOnce(absl::StrFormat(
+                        "Calling %s.Draw with a vertex count of 0 is unusual.", this));
+                }
+                if (instanceCount == 0) {
+                    GetDevice()->EmitWarningOnce(absl::StrFormat(
+                        "Calling %s.Draw with an instance count of 0 is unusual.", this));
+                }
+
                 DAWN_TRY(mCommandBufferState.ValidateCanDraw());
+
+                if (GetDevice()->IsCompatibilityMode()) {
+                    DAWN_TRY(mCommandBufferState.ValidateNoDifferentTextureViewsOnSameTexture());
+                }
 
                 DAWN_INVALID_IF(mDisableBaseInstance && firstInstance != 0,
                                 "First instance (%u) must be zero.", firstInstance);
@@ -126,7 +153,20 @@ void RenderEncoderBase::APIDrawIndexed(uint32_t indexCount,
         this,
         [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
+                if (indexCount == 0) {
+                    GetDevice()->EmitWarningOnce(absl::StrFormat(
+                        "Calling %s.Draw with an index count of 0 is unusual.", this));
+                }
+                if (instanceCount == 0) {
+                    GetDevice()->EmitWarningOnce(absl::StrFormat(
+                        "Calling %s.Draw with an instance count of 0 is unusual.", this));
+                }
+
                 DAWN_TRY(mCommandBufferState.ValidateCanDrawIndexed());
+
+                if (GetDevice()->IsCompatibilityMode()) {
+                    DAWN_TRY(mCommandBufferState.ValidateNoDifferentTextureViewsOnSameTexture());
+                }
 
                 DAWN_INVALID_IF(mDisableBaseInstance && firstInstance != 0,
                                 "First instance (%u) must be zero.", firstInstance);
@@ -164,6 +204,9 @@ void RenderEncoderBase::APIDrawIndirect(BufferBase* indirectBuffer, uint64_t ind
                 DAWN_TRY(GetDevice()->ValidateObject(indirectBuffer));
                 DAWN_TRY(ValidateCanUseAs(indirectBuffer, wgpu::BufferUsage::Indirect));
                 DAWN_TRY(mCommandBufferState.ValidateCanDraw());
+                if (GetDevice()->IsCompatibilityMode()) {
+                    DAWN_TRY(mCommandBufferState.ValidateNoDifferentTextureViewsOnSameTexture());
+                }
 
                 DAWN_INVALID_IF(indirectOffset % 4 != 0,
                                 "Indirect offset (%u) is not a multiple of 4.", indirectOffset);
@@ -216,6 +259,9 @@ void RenderEncoderBase::APIDrawIndexedIndirect(BufferBase* indirectBuffer,
                 DAWN_TRY(GetDevice()->ValidateObject(indirectBuffer));
                 DAWN_TRY(ValidateCanUseAs(indirectBuffer, wgpu::BufferUsage::Indirect));
                 DAWN_TRY(mCommandBufferState.ValidateCanDrawIndexed());
+                if (GetDevice()->IsCompatibilityMode()) {
+                    DAWN_TRY(mCommandBufferState.ValidateNoDifferentTextureViewsOnSameTexture());
+                }
 
                 DAWN_INVALID_IF(indirectOffset % 4 != 0,
                                 "Indirect offset (%u) is not a multiple of 4.", indirectOffset);
@@ -362,50 +408,60 @@ void RenderEncoderBase::APISetVertexBuffer(uint32_t slot,
         this,
         [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
-                DAWN_TRY(GetDevice()->ValidateObject(buffer));
-                DAWN_TRY(ValidateCanUseAs(buffer, wgpu::BufferUsage::Vertex));
-
                 DAWN_INVALID_IF(slot >= kMaxVertexBuffers,
                                 "Vertex buffer slot (%u) is larger the maximum (%u)", slot,
                                 kMaxVertexBuffers - 1);
 
-                DAWN_INVALID_IF(offset % 4 != 0, "Vertex buffer offset (%u) is not a multiple of 4",
-                                offset);
-
-                uint64_t bufferSize = buffer->GetSize();
-                DAWN_INVALID_IF(offset > bufferSize,
-                                "Vertex buffer offset (%u) is larger than the size (%u) of %s.",
-                                offset, bufferSize, buffer);
-
-                uint64_t remainingSize = bufferSize - offset;
-
-                if (size == wgpu::kWholeSize) {
-                    size = remainingSize;
+                if (buffer == nullptr) {
+                    DAWN_INVALID_IF(offset != 0, "Offset (%u) must be 0 if buffer is null", offset);
+                    DAWN_INVALID_IF(
+                        size != 0 && size != wgpu::kWholeSize,
+                        "Size (%u) must be either 0 or wgpu::kWholeSize if buffer is null", size);
                 } else {
-                    DAWN_INVALID_IF(size > remainingSize,
-                                    "Vertex buffer range (offset: %u, size: %u) doesn't fit in "
-                                    "the size (%u) "
-                                    "of %s.",
-                                    offset, size, bufferSize, buffer);
+                    DAWN_TRY(GetDevice()->ValidateObject(buffer));
+                    DAWN_TRY(ValidateCanUseAs(buffer, wgpu::BufferUsage::Vertex));
+                    DAWN_INVALID_IF(offset % 4 != 0,
+                                    "Vertex buffer offset (%u) is not a multiple of 4", offset);
+
+                    uint64_t bufferSize = buffer->GetSize();
+                    DAWN_INVALID_IF(offset > bufferSize,
+                                    "Vertex buffer offset (%u) is larger than the size (%u) of %s.",
+                                    offset, bufferSize, buffer);
+
+                    uint64_t remainingSize = bufferSize - offset;
+
+                    if (size == wgpu::kWholeSize) {
+                        size = remainingSize;
+                    } else {
+                        DAWN_INVALID_IF(size > remainingSize,
+                                        "Vertex buffer range (offset: %u, size: %u) doesn't fit in "
+                                        "the size (%u) "
+                                        "of %s.",
+                                        offset, size, bufferSize, buffer);
+                    }
                 }
             } else {
-                if (size == wgpu::kWholeSize) {
+                if (size == wgpu::kWholeSize && buffer != nullptr) {
                     DAWN_ASSERT(buffer->GetSize() >= offset);
                     size = buffer->GetSize() - offset;
                 }
             }
 
-            mCommandBufferState.SetVertexBuffer(VertexBufferSlot(uint8_t(slot)), size);
+            VertexBufferSlot vbSlot = VertexBufferSlot(static_cast<uint8_t>(slot));
+            if (buffer == nullptr) {
+                mCommandBufferState.UnsetVertexBuffer(vbSlot);
+            } else {
+                mCommandBufferState.SetVertexBuffer(vbSlot, size);
 
-            SetVertexBufferCmd* cmd =
-                allocator->Allocate<SetVertexBufferCmd>(Command::SetVertexBuffer);
-            cmd->slot = VertexBufferSlot(static_cast<uint8_t>(slot));
-            cmd->buffer = buffer;
-            cmd->offset = offset;
-            cmd->size = size;
+                SetVertexBufferCmd* cmd =
+                    allocator->Allocate<SetVertexBufferCmd>(Command::SetVertexBuffer);
+                cmd->slot = vbSlot;
+                cmd->buffer = buffer;
+                cmd->offset = offset;
+                cmd->size = size;
 
-            mUsageTracker.BufferUsedAs(buffer, wgpu::BufferUsage::Vertex);
-
+                mUsageTracker.BufferUsedAs(buffer, wgpu::BufferUsage::Vertex);
+            }
             return {};
         },
         "encoding %s.SetVertexBuffer(%u, %s, %u, %u).", this, slot, buffer, offset, size);
@@ -425,9 +481,15 @@ void RenderEncoderBase::APISetBindGroup(uint32_t groupIndexIn,
                     ValidateSetBindGroup(groupIndex, group, dynamicOffsetCount, dynamicOffsets));
             }
 
-            RecordSetBindGroup(allocator, groupIndex, group, dynamicOffsetCount, dynamicOffsets);
-            mCommandBufferState.SetBindGroup(groupIndex, group, dynamicOffsetCount, dynamicOffsets);
-            mUsageTracker.AddBindGroup(group);
+            if (group == nullptr) {
+                mCommandBufferState.UnsetBindGroup(groupIndex);
+            } else {
+                RecordSetBindGroup(allocator, groupIndex, group, dynamicOffsetCount,
+                                   dynamicOffsets);
+                mCommandBufferState.SetBindGroup(groupIndex, group, dynamicOffsetCount,
+                                                 dynamicOffsets);
+                mUsageTracker.AddBindGroup(group);
+            }
 
             return {};
         },

@@ -29,7 +29,7 @@ public:
                                                            SkISize,
                                                            int sampleCnt,
                                                            const GrVkImageInfo&,
-                                                           sk_sp<skgpu::MutableTextureStateRef>);
+                                                           sk_sp<skgpu::MutableTextureState>);
 
     static sk_sp<GrVkRenderTarget> MakeSecondaryCBRenderTarget(GrVkGpu*,
                                                                SkISize,
@@ -101,7 +101,7 @@ public:
 
     GrBackendRenderTarget getBackendRenderTarget() const override;
 
-    void getAttachmentsDescriptor(GrVkRenderPass::AttachmentsDescriptor* desc,
+    bool getAttachmentsDescriptor(GrVkRenderPass::AttachmentsDescriptor* desc,
                                   GrVkRenderPass::AttachmentFlags* flags,
                                   bool withResolve,
                                   bool withStencil);
@@ -164,7 +164,7 @@ private:
     // In Vulkan we call the release proc after we are finished with the underlying
     // GrVkImage::Resource object (which occurs after the GPU has finished all work on it).
     void onSetRelease(sk_sp<RefCntedReleaseProc> releaseHelper) override {
-        // Forward the release proc on to the GrVkImage of the release attachment if we have one,
+        // Forward the release proc on to the GrVkImage of the resolve attachment if we have one,
         // otherwise the color attachment.
         GrVkImage* attachment =
                 fResolveAttachment ? fResolveAttachment.get() : fColorAttachment.get();

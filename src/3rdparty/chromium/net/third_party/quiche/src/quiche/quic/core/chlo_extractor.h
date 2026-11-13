@@ -11,10 +11,10 @@
 namespace quic {
 
 // A utility for extracting QUIC Client Hello messages from packets,
-// without needs to spin up a full QuicSession.
-class QUIC_NO_EXPORT ChloExtractor {
+// without needing to spin up a full QuicSession.
+class QUICHE_EXPORT ChloExtractor {
  public:
-  class QUIC_NO_EXPORT Delegate {
+  class QUICHE_EXPORT Delegate {
    public:
     virtual ~Delegate() {}
 

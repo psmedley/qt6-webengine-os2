@@ -1,19 +1,33 @@
-// Copyright 2018 The Dawn Authors
+// Copyright 2018 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/ComputePassEncoder.h"
 
+#include "dawn/common/Range.h"
 #include "dawn/native/BindGroup.h"
 #include "dawn/native/BindGroupLayout.h"
 #include "dawn/native/Buffer.h"
@@ -128,15 +142,18 @@ Ref<ComputePassEncoder> ComputePassEncoder::Create(DeviceBase* device,
 ComputePassEncoder::ComputePassEncoder(DeviceBase* device,
                                        CommandEncoder* commandEncoder,
                                        EncodingContext* encodingContext,
-                                       ErrorTag errorTag)
-    : ProgrammableEncoder(device, encodingContext, errorTag), mCommandEncoder(commandEncoder) {}
+                                       ErrorTag errorTag,
+                                       const char* label)
+    : ProgrammableEncoder(device, encodingContext, errorTag, label),
+      mCommandEncoder(commandEncoder) {}
 
 // static
 Ref<ComputePassEncoder> ComputePassEncoder::MakeError(DeviceBase* device,
                                                       CommandEncoder* commandEncoder,
-                                                      EncodingContext* encodingContext) {
+                                                      EncodingContext* encodingContext,
+                                                      const char* label) {
     return AcquireRef(
-        new ComputePassEncoder(device, commandEncoder, encodingContext, ObjectBase::kError));
+        new ComputePassEncoder(device, commandEncoder, encodingContext, ObjectBase::kError, label));
 }
 
 void ComputePassEncoder::DestroyImpl() {
@@ -150,6 +167,13 @@ ObjectType ComputePassEncoder::GetType() const {
 }
 
 void ComputePassEncoder::APIEnd() {
+    if (mEnded && IsValidationEnabled()) {
+        GetDevice()->HandleError(DAWN_VALIDATION_ERROR("%s was already ended.", this));
+        return;
+    }
+
+    mEnded = true;
+
     if (mEncodingContext->TryEncode(
             this,
             [&](CommandAllocator* allocator) -> MaybeError {
@@ -166,19 +190,6 @@ void ComputePassEncoder::APIEnd() {
     }
 }
 
-void ComputePassEncoder::APIEndPass() {
-    GetDevice()->EmitDeprecationWarning("endPass() has been deprecated. Use end() instead.");
-    APIEnd();
-}
-
-void ComputePassEncoder::APIDispatch(uint32_t workgroupCountX,
-                                     uint32_t workgroupCountY,
-                                     uint32_t workgroupCountZ) {
-    GetDevice()->EmitDeprecationWarning(
-        "dispatch() has been deprecated. Use dispatchWorkgroups() instead.");
-    APIDispatchWorkgroups(workgroupCountX, workgroupCountY, workgroupCountZ);
-}
-
 void ComputePassEncoder::APIDispatchWorkgroups(uint32_t workgroupCountX,
                                                uint32_t workgroupCountY,
                                                uint32_t workgroupCountZ) {
@@ -186,6 +197,12 @@ void ComputePassEncoder::APIDispatchWorkgroups(uint32_t workgroupCountX,
         this,
         [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
+                if (workgroupCountX == 0 || workgroupCountY == 0 || workgroupCountZ == 0) {
+                    GetDevice()->EmitWarningOnce(absl::StrFormat(
+                        "Calling %s.DispatchWorkgroups with a workgroup count of 0 is unusual.",
+                        this));
+                }
+
                 DAWN_TRY(mCommandBufferState.ValidateCanDispatch());
 
                 uint32_t workgroupsPerDimension =
@@ -205,6 +222,10 @@ void ComputePassEncoder::APIDispatchWorkgroups(uint32_t workgroupCountX,
                                 "Dispatch workgroup count Z (%u) exceeds max compute "
                                 "workgroups per dimension (%u).",
                                 workgroupCountZ, workgroupsPerDimension);
+
+                if (GetDevice()->IsCompatibilityMode()) {
+                    DAWN_TRY(mCommandBufferState.ValidateNoDifferentTextureViewsOnSameTexture());
+                }
             }
 
             // Record the synchronization scope for Dispatch, which is just the current
@@ -226,6 +247,10 @@ ResultOrError<std::pair<Ref<BufferBase>, uint64_t>>
 ComputePassEncoder::TransformIndirectDispatchBuffer(Ref<BufferBase> indirectBuffer,
                                                     uint64_t indirectOffset) {
     DeviceBase* device = GetDevice();
+    // This function creates new resources, need to lock the Device.
+    // TODO(crbug.com/dawn/1618): In future, all temp resources should be created at Command Submit
+    // time, so the locking would be removed from here at that point.
+    auto deviceLock(GetDevice()->GetScopedLock());
 
     const bool shouldDuplicateNumWorkgroups =
         device->ShouldDuplicateNumWorkgroupsForDispatchIndirect(
@@ -289,7 +314,7 @@ ComputePassEncoder::TransformIndirectDispatchBuffer(Ref<BufferBase> indirectBuff
     Ref<BufferBase> validatedIndirectBuffer = scratchBuffer.GetBuffer();
 
     Ref<BindGroupBase> validationBindGroup;
-    ASSERT(indirectBuffer->GetUsage() & kInternalStorageBuffer);
+    DAWN_ASSERT(indirectBuffer->GetUsage() & kInternalStorageBuffer);
     DAWN_TRY_ASSIGN(validationBindGroup,
                     utils::MakeBindGroup(device, layout,
                                          {
@@ -312,12 +337,6 @@ ComputePassEncoder::TransformIndirectDispatchBuffer(Ref<BufferBase> indirectBuff
     return std::make_pair(std::move(validatedIndirectBuffer), uint64_t(0));
 }
 
-void ComputePassEncoder::APIDispatchIndirect(BufferBase* indirectBuffer, uint64_t indirectOffset) {
-    GetDevice()->EmitDeprecationWarning(
-        "dispatchIndirect() has been deprecated. Use dispatchWorkgroupsIndirect() instead.");
-    APIDispatchWorkgroupsIndirect(indirectBuffer, indirectOffset);
-}
-
 void ComputePassEncoder::APIDispatchWorkgroupsIndirect(BufferBase* indirectBuffer,
                                                        uint64_t indirectOffset) {
     mEncodingContext->TryEncode(
@@ -337,6 +356,10 @@ void ComputePassEncoder::APIDispatchWorkgroupsIndirect(BufferBase* indirectBuffe
                     "Indirect offset (%u) and dispatch size (%u) exceeds the indirect buffer "
                     "size (%u).",
                     indirectOffset, kDispatchIndirectSize, indirectBuffer->GetSize());
+
+                if (GetDevice()->IsCompatibilityMode()) {
+                    DAWN_TRY(mCommandBufferState.ValidateNoDifferentTextureViewsOnSameTexture());
+                }
             }
 
             SyncScopeUsageTracker scope;
@@ -418,9 +441,15 @@ void ComputePassEncoder::APISetBindGroup(uint32_t groupIndexIn,
                     ValidateSetBindGroup(groupIndex, group, dynamicOffsetCount, dynamicOffsets));
             }
 
-            mUsageTracker.AddResourcesReferencedByBindGroup(group);
-            RecordSetBindGroup(allocator, groupIndex, group, dynamicOffsetCount, dynamicOffsets);
-            mCommandBufferState.SetBindGroup(groupIndex, group, dynamicOffsetCount, dynamicOffsets);
+            if (group == nullptr) {
+                mCommandBufferState.UnsetBindGroup(groupIndex);
+            } else {
+                mUsageTracker.AddResourcesReferencedByBindGroup(group);
+                RecordSetBindGroup(allocator, groupIndex, group, dynamicOffsetCount,
+                                   dynamicOffsets);
+                mCommandBufferState.SetBindGroup(groupIndex, group, dynamicOffsetCount,
+                                                 dynamicOffsets);
+            }
 
             return {};
         },
@@ -433,7 +462,9 @@ void ComputePassEncoder::APIWriteTimestamp(QuerySetBase* querySet, uint32_t quer
         this,
         [&](CommandAllocator* allocator) -> MaybeError {
             if (IsValidationEnabled()) {
-                DAWN_TRY(ValidateTimestampQuery(GetDevice(), querySet, queryIndex));
+                DAWN_TRY(ValidateTimestampQuery(
+                    GetDevice(), querySet, queryIndex,
+                    Feature::ChromiumExperimentalTimestampQueryInsidePasses));
             }
 
             mCommandEncoder->TrackQueryAvailability(querySet, queryIndex);
@@ -461,7 +492,7 @@ void ComputePassEncoder::RestoreCommandBufferState(CommandBufferStateTracker sta
     if (state.HasPipeline()) {
         APISetPipeline(state.GetComputePipeline());
     }
-    for (BindGroupIndex i(0); i < kMaxBindGroupsTyped; ++i) {
+    for (auto i : Range(kMaxBindGroupsTyped)) {
         BindGroupBase* bg = state.GetBindGroup(i);
         if (bg != nullptr) {
             const std::vector<uint32_t>& offsets = state.GetDynamicOffsets(i);

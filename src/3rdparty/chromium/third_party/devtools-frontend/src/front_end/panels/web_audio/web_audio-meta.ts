@@ -9,8 +9,8 @@ import type * as WebAudio from './web_audio.js';
 
 const UIStrings = {
   /**
-  *@description Title of the WebAudio tool
-  */
+   *@description Title of the WebAudio tool
+   */
   webaudio: 'WebAudio',
   /**
    *@description A tags of WebAudio tool that can be searched in the command menu
@@ -42,7 +42,7 @@ UI.ViewManager.registerViewExtension({
   order: 100,
   async loadView() {
     const WebAudio = await loadWebAudioModule();
-    return WebAudio.WebAudioView.WebAudioView.instance();
+    return new WebAudio.WebAudioView.WebAudioView();
   },
   tags: [i18nLazyString(UIStrings.audio)],
 });

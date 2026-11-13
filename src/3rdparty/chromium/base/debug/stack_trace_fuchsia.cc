@@ -29,7 +29,7 @@ namespace debug {
 namespace {
 
 struct BacktraceData {
-  void** trace_array;
+  const void** trace_array;
   size_t* count;
   size_t max;
 };
@@ -201,6 +201,22 @@ void SymbolMap::Populate() {
   valid_ = true;
 }
 
+// Returns true if |address| is contained by any of the memory regions
+// mapped for |module_entry|.
+bool ModuleContainsFrameAddress(const void* address,
+                                const SymbolMap::Module& module_entry) {
+  for (size_t i = 0; i < module_entry.segment_count; ++i) {
+    const SymbolMap::Segment& segment = module_entry.segments[i];
+    const void* segment_end = reinterpret_cast<const void*>(
+        reinterpret_cast<const char*>(segment.addr) + segment.size - 1);
+
+    if (address >= segment.addr && address <= segment_end) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 // static
@@ -213,7 +229,7 @@ bool EnableInProcessStackDumping() {
   return true;
 }
 
-size_t CollectStackTrace(void** trace, size_t count) {
+size_t CollectStackTrace(const void** trace, size_t count) {
   size_t frame_count = 0;
   BacktraceData data = {trace, &frame_count, count};
   _Unwind_Backtrace(&UnwindStore, &data);
@@ -231,12 +247,22 @@ void StackTrace::OutputToStreamWithPrefix(std::ostream* os,
   SymbolMap map;
 
   int module_id = 0;
-  for (const SymbolMap::Module& entry : map.GetModules()) {
-    *os << "{{{module:" << module_id << ":" << entry.name
-        << ":elf:" << entry.build_id << "}}}\n";
+  for (const SymbolMap::Module& module_entry : map.GetModules()) {
+    // Don't emit information on modules that aren't useful for the actual
+    // stack trace, so as to reduce the load on the symbolizer and syslog.
+    bool should_emit_module = false;
+    for (size_t i = 0; i < count_ && !should_emit_module; ++i) {
+      should_emit_module = ModuleContainsFrameAddress(trace_[i], module_entry);
+    }
+    if (!should_emit_module) {
+      continue;
+    }
 
-    for (size_t i = 0; i < entry.segment_count; ++i) {
-      const SymbolMap::Segment& segment = entry.segments[i];
+    *os << "{{{module:" << module_id << ":" << module_entry.name
+        << ":elf:" << module_entry.build_id << "}}}\n";
+
+    for (size_t i = 0; i < module_entry.segment_count; ++i) {
+      const SymbolMap::Segment& segment = module_entry.segments[i];
 
       char permission_string[4] = {};
       *os << "{{{mmap:" << segment.addr << ":0x" << std::hex << segment.size

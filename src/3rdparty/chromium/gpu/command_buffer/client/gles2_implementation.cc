@@ -22,15 +22,15 @@
 #include <string>
 
 #include "base/atomic_sequence_num.h"
-#include "base/bind.h"
+#include "base/bits.h"
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/numerics/ostream_operators.h"
 #include "base/numerics/safe_math.h"
 #include "base/strings/string_split.h"
 #include "base/system/sys_info.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
@@ -206,6 +206,7 @@ GLES2Implementation::GLES2Implementation(
     : ImplementationBase(helper, transfer_buffer, gpu_control),
       helper_(helper),
       chromium_framebuffer_multisample_(kUnknownExtensionStatus),
+      gl_capabilities_(gpu_control->GetGLCapabilities()),
       pack_alignment_(4),
       pack_row_length_(0),
       pack_skip_pixels_(0),
@@ -271,9 +272,9 @@ gpu::ContextResult GLES2Implementation::Initialize(
 
   GLStaticState::ShaderPrecisionMap* shader_precisions =
       &static_state_.shader_precisions;
-  capabilities_.VisitPrecisions(
+  gl_capabilities_.VisitPrecisions(
       [shader_precisions](GLenum shader, GLenum type,
-                          Capabilities::ShaderPrecision* result) {
+                          GLCapabilities::ShaderPrecision* result) {
         const GLStaticState::ShaderPrecisionKey key(shader, type);
         cmds::GetShaderPrecisionFormat::Result cached_result = {
             true, result->min_range, result->max_range, result->precision};
@@ -281,11 +282,12 @@ gpu::ContextResult GLES2Implementation::Initialize(
       });
 
   util_.set_num_compressed_texture_formats(
-      capabilities_.num_compressed_texture_formats);
-  util_.set_num_shader_binary_formats(capabilities_.num_shader_binary_formats);
+      gl_capabilities_.num_compressed_texture_formats);
+  util_.set_num_shader_binary_formats(
+      gl_capabilities_.num_shader_binary_formats);
 
   texture_units_ = std::make_unique<TextureUnit[]>(
-      capabilities_.max_combined_texture_image_units);
+      gl_capabilities_.max_combined_texture_image_units);
 
   buffer_tracker_ = std::make_unique<BufferTracker>(mapped_memory_.get());
   readback_buffer_shadow_tracker_ =
@@ -302,12 +304,12 @@ gpu::ContextResult GLES2Implementation::Initialize(
   }
 
   vertex_array_object_manager_ = std::make_unique<VertexArrayObjectManager>(
-      capabilities_.max_vertex_attribs, reserved_ids_[0], reserved_ids_[1],
+      gl_capabilities_.max_vertex_attribs, reserved_ids_[0], reserved_ids_[1],
       support_client_side_arrays_);
 
   // GL_BIND_GENERATES_RESOURCE_CHROMIUM state must be the same
   // on Client & Service.
-  if (capabilities_.bind_generates_resource_chromium !=
+  if (gl_capabilities_.bind_generates_resource_chromium !=
       (share_group_->bind_generates_resource() ? 1 : 0)) {
     SetGLError(GL_INVALID_OPERATION, "Initialize",
                "Service bind_generates_resource mismatch.");
@@ -593,7 +595,9 @@ GLenum GLES2Implementation::GetGLError() {
   }
   *result = GL_NO_ERROR;
   helper_->GetError(GetResultShmId(), result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return GL_NO_ERROR;
+  }
   GLenum error = *result;
   if (error == GL_NO_ERROR) {
     error = GetClientSideGLError();
@@ -718,7 +722,9 @@ GLboolean GLES2Implementation::IsEnabled(GLenum cap) {
     }
     *result = 0;
     helper_->IsEnabled(cap, GetResultShmId(), result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return GL_FALSE;
+    }
     state = (*result) != 0;
   }
 
@@ -739,7 +745,9 @@ GLboolean GLES2Implementation::IsEnablediOES(GLenum target, GLuint index) {
     auto result = GetResultAs<Result>();
     *result = 0;
     helper_->IsEnablediOES(target, index, GetResultShmId(), result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return GL_FALSE;
+    }
     state = (*result) != 0;
   }
 
@@ -770,49 +778,49 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
       *params = bound_framebuffer_;
       return true;
     case GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS:
-      *params = capabilities_.max_combined_texture_image_units;
+      *params = gl_capabilities_.max_combined_texture_image_units;
       return true;
     case GL_MAX_CUBE_MAP_TEXTURE_SIZE:
-      *params = capabilities_.max_cube_map_texture_size;
+      *params = gl_capabilities_.max_cube_map_texture_size;
       return true;
     case GL_MAX_FRAGMENT_UNIFORM_VECTORS:
-      *params = capabilities_.max_fragment_uniform_vectors;
+      *params = gl_capabilities_.max_fragment_uniform_vectors;
       return true;
     case GL_MAX_RENDERBUFFER_SIZE:
-      *params = capabilities_.max_renderbuffer_size;
+      *params = gl_capabilities_.max_renderbuffer_size;
       return true;
     case GL_MAX_TEXTURE_IMAGE_UNITS:
-      *params = capabilities_.max_texture_image_units;
+      *params = gl_capabilities_.max_texture_image_units;
       return true;
     case GL_MAX_TEXTURE_SIZE:
       *params = capabilities_.max_texture_size;
       return true;
     case GL_MAX_VARYING_VECTORS:
-      *params = capabilities_.max_varying_vectors;
+      *params = gl_capabilities_.max_varying_vectors;
       return true;
     case GL_MAX_VERTEX_ATTRIBS:
-      *params = capabilities_.max_vertex_attribs;
+      *params = gl_capabilities_.max_vertex_attribs;
       return true;
     case GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS:
-      *params = capabilities_.max_vertex_texture_image_units;
+      *params = gl_capabilities_.max_vertex_texture_image_units;
       return true;
     case GL_MAX_VERTEX_UNIFORM_VECTORS:
-      *params = capabilities_.max_vertex_uniform_vectors;
+      *params = gl_capabilities_.max_vertex_uniform_vectors;
       return true;
     case GL_MAX_VIEWPORT_DIMS:
-      if (capabilities_.max_viewport_width > 0 &&
-          capabilities_.max_viewport_height > 0) {
-        params[0] = capabilities_.max_viewport_width;
-        params[1] = capabilities_.max_viewport_height;
+      if (gl_capabilities_.max_viewport_width > 0 &&
+          gl_capabilities_.max_viewport_height > 0) {
+        params[0] = gl_capabilities_.max_viewport_width;
+        params[1] = gl_capabilities_.max_viewport_height;
         return true;
       }
       // If they are not cached on the client side yet, query the service side.
       return false;
     case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
-      *params = capabilities_.num_compressed_texture_formats;
+      *params = gl_capabilities_.num_compressed_texture_formats;
       return true;
     case GL_NUM_SHADER_BINARY_FORMATS:
-      *params = capabilities_.num_shader_binary_formats;
+      *params = gl_capabilities_.num_shader_binary_formats;
       return true;
     case GL_RENDERBUFFER_BINDING:
       *params = bound_renderbuffer_;
@@ -859,14 +867,14 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
       return true;
     case GL_VIEWPORT:
       if (state_.viewport_width > 0 && state_.viewport_height > 0 &&
-          capabilities_.max_viewport_width > 0 &&
-          capabilities_.max_viewport_height > 0) {
+          gl_capabilities_.max_viewport_width > 0 &&
+          gl_capabilities_.max_viewport_height > 0) {
         params[0] = state_.viewport_x;
         params[1] = state_.viewport_y;
-        params[2] =
-            std::min(state_.viewport_width, capabilities_.max_viewport_width);
-        params[3] =
-            std::min(state_.viewport_height, capabilities_.max_viewport_height);
+        params[2] = std::min(state_.viewport_width,
+                             gl_capabilities_.max_viewport_width);
+        params[3] = std::min(state_.viewport_height,
+                             gl_capabilities_.max_viewport_height);
         return true;
       }
       // If they haven't been cached on the client side, go to service side
@@ -959,87 +967,87 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
       *params = capabilities_.major_version;
       return true;
     case GL_MAX_3D_TEXTURE_SIZE:
-      *params = capabilities_.max_3d_texture_size;
+      *params = gl_capabilities_.max_3d_texture_size;
       return true;
     case GL_MAX_ARRAY_TEXTURE_LAYERS:
-      *params = capabilities_.max_array_texture_layers;
+      *params = gl_capabilities_.max_array_texture_layers;
       return true;
     case GL_MAX_COLOR_ATTACHMENTS:
-      *params = capabilities_.max_color_attachments;
+      *params = gl_capabilities_.max_color_attachments;
       return true;
     case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
       *params = static_cast<GLint>(
-          capabilities_.max_combined_fragment_uniform_components);
+          gl_capabilities_.max_combined_fragment_uniform_components);
       return true;
     case GL_MAX_COMBINED_UNIFORM_BLOCKS:
-      *params = capabilities_.max_combined_uniform_blocks;
+      *params = gl_capabilities_.max_combined_uniform_blocks;
       return true;
     case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
       *params = static_cast<GLint>(
-          capabilities_.max_combined_vertex_uniform_components);
+          gl_capabilities_.max_combined_vertex_uniform_components);
       return true;
     case GL_MAX_DRAW_BUFFERS:
-      *params = capabilities_.max_draw_buffers;
+      *params = gl_capabilities_.max_draw_buffers;
       return true;
     case GL_MAX_ELEMENT_INDEX:
-      *params = static_cast<GLint>(capabilities_.max_element_index);
+      *params = static_cast<GLint>(gl_capabilities_.max_element_index);
       return true;
     case GL_MAX_ELEMENTS_INDICES:
-      *params = capabilities_.max_elements_indices;
+      *params = gl_capabilities_.max_elements_indices;
       return true;
     case GL_MAX_ELEMENTS_VERTICES:
-      *params = capabilities_.max_elements_vertices;
+      *params = gl_capabilities_.max_elements_vertices;
       return true;
     case GL_MAX_FRAGMENT_INPUT_COMPONENTS:
-      *params = capabilities_.max_fragment_input_components;
+      *params = gl_capabilities_.max_fragment_input_components;
       return true;
     case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
-      *params = capabilities_.max_fragment_uniform_blocks;
+      *params = gl_capabilities_.max_fragment_uniform_blocks;
       return true;
     case GL_MAX_FRAGMENT_UNIFORM_COMPONENTS:
-      *params = capabilities_.max_fragment_uniform_components;
+      *params = gl_capabilities_.max_fragment_uniform_components;
       return true;
     case GL_MAX_PROGRAM_TEXEL_OFFSET:
-      *params = capabilities_.max_program_texel_offset;
+      *params = gl_capabilities_.max_program_texel_offset;
       return true;
     case GL_MAX_SAMPLES:
-      *params = capabilities_.max_samples;
+      *params = gl_capabilities_.max_samples;
       return true;
     case GL_MAX_SERVER_WAIT_TIMEOUT:
-      *params = static_cast<GLint>(capabilities_.max_server_wait_timeout);
+      *params = static_cast<GLint>(gl_capabilities_.max_server_wait_timeout);
       return true;
     case GL_MAX_TEXTURE_LOD_BIAS:
-      *params = static_cast<GLint>(capabilities_.max_texture_lod_bias);
+      *params = static_cast<GLint>(gl_capabilities_.max_texture_lod_bias);
       return true;
     case GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS:
-      *params = capabilities_.max_transform_feedback_interleaved_components;
+      *params = gl_capabilities_.max_transform_feedback_interleaved_components;
       return true;
     case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:
-      *params = capabilities_.max_transform_feedback_separate_attribs;
+      *params = gl_capabilities_.max_transform_feedback_separate_attribs;
       return true;
     case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS:
-      *params = capabilities_.max_transform_feedback_separate_components;
+      *params = gl_capabilities_.max_transform_feedback_separate_components;
       return true;
     case GL_MAX_UNIFORM_BLOCK_SIZE:
-      *params = static_cast<GLint>(capabilities_.max_uniform_block_size);
+      *params = static_cast<GLint>(gl_capabilities_.max_uniform_block_size);
       return true;
     case GL_MAX_UNIFORM_BUFFER_BINDINGS:
-      *params = capabilities_.max_uniform_buffer_bindings;
+      *params = gl_capabilities_.max_uniform_buffer_bindings;
       return true;
     case GL_MAX_VARYING_COMPONENTS:
-      *params = capabilities_.max_varying_components;
+      *params = gl_capabilities_.max_varying_components;
       return true;
     case GL_MAX_VERTEX_OUTPUT_COMPONENTS:
-      *params = capabilities_.max_vertex_output_components;
+      *params = gl_capabilities_.max_vertex_output_components;
       return true;
     case GL_MAX_VERTEX_UNIFORM_BLOCKS:
-      *params = capabilities_.max_vertex_uniform_blocks;
+      *params = gl_capabilities_.max_vertex_uniform_blocks;
       return true;
     case GL_MAX_VERTEX_UNIFORM_COMPONENTS:
-      *params = capabilities_.max_vertex_uniform_components;
+      *params = gl_capabilities_.max_vertex_uniform_components;
       return true;
     case GL_MIN_PROGRAM_TEXEL_OFFSET:
-      *params = capabilities_.min_program_texel_offset;
+      *params = gl_capabilities_.min_program_texel_offset;
       return true;
     case GL_MINOR_VERSION:
       *params = capabilities_.minor_version;
@@ -1049,7 +1057,7 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
       *params = cached_extensions_.size();
       return true;
     case GL_NUM_PROGRAM_BINARY_FORMATS:
-      *params = capabilities_.num_program_binary_formats;
+      *params = gl_capabilities_.num_program_binary_formats;
       return true;
     case GL_PACK_SKIP_PIXELS:
       *params = pack_skip_pixels_;
@@ -1070,7 +1078,7 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
       *params = bound_uniform_buffer_;
       return true;
     case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
-      *params = capabilities_.uniform_buffer_offset_alignment;
+      *params = gl_capabilities_.uniform_buffer_offset_alignment;
       return true;
     case GL_UNPACK_SKIP_IMAGES:
       *params = unpack_skip_images_;
@@ -1132,10 +1140,10 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
   // ES31 parameters.
   switch (pname) {
     case GL_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS:
-      *params = capabilities_.max_atomic_counter_buffer_bindings;
+      *params = gl_capabilities_.max_atomic_counter_buffer_bindings;
       return true;
     case GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS:
-      *params = capabilities_.max_shader_storage_buffer_bindings;
+      *params = gl_capabilities_.max_shader_storage_buffer_bindings;
       return true;
     case GL_ATOMIC_COUNTER_BUFFER_BINDING:
       *params = bound_atomic_counter_buffer_;
@@ -1150,7 +1158,7 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
       *params = bound_shader_storage_buffer_;
       return true;
     case GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT:
-      *params = capabilities_.shader_storage_buffer_offset_alignment;
+      *params = gl_capabilities_.shader_storage_buffer_offset_alignment;
       return true;
 
     // Non-cached ES31 parameters.
@@ -1185,7 +1193,7 @@ bool GLES2Implementation::GetFloatvHelper(GLenum pname, GLfloat* params) {
   // TODO(gman): Make this handle pnames that return more than 1 value.
   switch (pname) {
     case GL_MAX_TEXTURE_LOD_BIAS:
-      *params = capabilities_.max_texture_lod_bias;
+      *params = gl_capabilities_.max_texture_lod_bias;
       return true;
     default:
       break;
@@ -1201,19 +1209,19 @@ bool GLES2Implementation::GetFloatvHelper(GLenum pname, GLfloat* params) {
 bool GLES2Implementation::GetInteger64vHelper(GLenum pname, GLint64* params) {
   switch (pname) {
     case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
-      *params = capabilities_.max_combined_fragment_uniform_components;
+      *params = gl_capabilities_.max_combined_fragment_uniform_components;
       return true;
     case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
-      *params = capabilities_.max_combined_vertex_uniform_components;
+      *params = gl_capabilities_.max_combined_vertex_uniform_components;
       return true;
     case GL_MAX_ELEMENT_INDEX:
-      *params = capabilities_.max_element_index;
+      *params = gl_capabilities_.max_element_index;
       return true;
     case GL_MAX_SERVER_WAIT_TIMEOUT:
-      *params = capabilities_.max_server_wait_timeout;
+      *params = gl_capabilities_.max_server_wait_timeout;
       return true;
     case GL_MAX_UNIFORM_BLOCK_SIZE:
-      *params = capabilities_.max_uniform_block_size;
+      *params = gl_capabilities_.max_uniform_block_size;
       return true;
     case GL_TIMESTAMP_EXT:
       // We convert all GPU timestamps to CPU time.
@@ -1358,7 +1366,9 @@ GLuint GLES2Implementation::GetMaxValueInBufferCHROMIUMHelper(GLuint buffer_id,
   *result = 0;
   helper_->GetMaxValueInBufferCHROMIUM(buffer_id, count, type, offset,
                                        GetResultShmId(), result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return 0;
+  }
   return *result;
 }
 
@@ -1516,7 +1526,6 @@ void GLES2Implementation::IssueShallowFlush() {
   FlushHelper();
 }
 
-
 void GLES2Implementation::FlushHelper() {
   // Flush our command buffer
   // (tell the service to execute up to the flush cmd.)
@@ -1662,7 +1671,9 @@ void GLES2Implementation::GetVertexAttribPointerv(GLuint index,
     result->SetNumResults(0);
     helper_->GetVertexAttribPointerv(index, pname, GetResultShmId(),
                                      result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     result->CopyResult(ptr);
     GPU_CLIENT_LOG_CODE_BLOCK(num_results = result->GetNumResults());
   }
@@ -1737,7 +1748,9 @@ GLint GLES2Implementation::GetAttribLocationHelper(GLuint program,
   *result = -1;
   helper_->GetAttribLocation(program, kResultBucketId, GetResultShmId(),
                              result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return -1;
+  }
   helper_->SetBucketSize(kResultBucketId, 0);
   return *result;
 }
@@ -1765,7 +1778,9 @@ GLint GLES2Implementation::GetUniformLocationHelper(GLuint program,
   *result = -1;
   helper_->GetUniformLocation(program, kResultBucketId, GetResultShmId(),
                               result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return -1;
+  }
   helper_->SetBucketSize(kResultBucketId, 0);
   return *result;
 }
@@ -1798,7 +1813,9 @@ bool GLES2Implementation::GetUniformIndicesHelper(GLuint program,
   result->SetNumResults(0);
   helper_->GetUniformIndices(program, kResultBucketId, GetResultShmId(),
                              result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   if (result->GetNumResults() != count) {
     return false;
   }
@@ -1858,7 +1875,9 @@ GLint GLES2Implementation::GetFragDataIndexEXTHelper(GLuint program,
   *result = -1;
   helper_->GetFragDataIndexEXT(program, kResultBucketId, GetResultShmId(),
                                result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return -1;
+  }
   helper_->SetBucketSize(kResultBucketId, 0);
   return *result;
 }
@@ -1887,7 +1906,9 @@ GLint GLES2Implementation::GetFragDataLocationHelper(GLuint program,
   *result = -1;
   helper_->GetFragDataLocation(program, kResultBucketId, GetResultShmId(),
                                result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return -1;
+  }
   helper_->SetBucketSize(kResultBucketId, 0);
   return *result;
 }
@@ -1916,7 +1937,9 @@ GLuint GLES2Implementation::GetUniformBlockIndexHelper(GLuint program,
   *result = GL_INVALID_INDEX;
   helper_->GetUniformBlockIndex(program, kResultBucketId, GetResultShmId(),
                                 result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return GL_INVALID_INDEX;
+  }
   helper_->SetBucketSize(kResultBucketId, 0);
   return *result;
 }
@@ -1961,7 +1984,9 @@ GLuint GLES2Implementation::GetProgramResourceIndexHelper(
   *result = GL_INVALID_INDEX;
   helper_->GetProgramResourceIndex(program, program_interface, kResultBucketId,
                                    GetResultShmId(), result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return GL_INVALID_INDEX;
+  }
   helper_->SetBucketSize(kResultBucketId, 0);
   return *result;
 }
@@ -2006,7 +2031,9 @@ bool GLES2Implementation::GetProgramResourceNameHelper(GLuint program,
     helper_->GetProgramResourceName(program, program_interface, index,
                                     kResultBucketId, GetResultShmId(),
                                     result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return false;
+    }
     success = !!*result;
   }
   if (success) {
@@ -2065,7 +2092,9 @@ bool GLES2Implementation::GetProgramResourceivHelper(GLuint program,
   helper_->GetProgramResourceiv(program, program_interface, index,
                                 kResultBucketId, GetResultShmId(),
                                 result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   if (length) {
     *length = result->GetNumResults();
   }
@@ -2137,7 +2166,9 @@ GLint GLES2Implementation::GetProgramResourceLocationHelper(
   helper_->GetProgramResourceLocation(program, program_interface,
                                       kResultBucketId, GetResultShmId(),
                                       result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return -1;
+  }
   helper_->SetBucketSize(kResultBucketId, 0);
   return *result;
 }
@@ -4014,7 +4045,9 @@ bool GLES2Implementation::GetActiveAttribHelper(GLuint program,
   result->success = false;
   helper_->GetActiveAttrib(program, index, kResultBucketId, GetResultShmId(),
                            result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   bool success = !!result->success;
   if (success) {
     if (size) {
@@ -4082,7 +4115,9 @@ bool GLES2Implementation::GetActiveUniformHelper(GLuint program,
   result->success = false;
   helper_->GetActiveUniform(program, index, kResultBucketId, GetResultShmId(),
                             result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   bool success = !!result->success;
   if (success) {
     if (size) {
@@ -4149,7 +4184,9 @@ bool GLES2Implementation::GetActiveUniformBlockNameHelper(GLuint program,
   *result = 0;
   helper_->GetActiveUniformBlockName(program, index, kResultBucketId,
                                      GetResultShmId(), result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   bool success = !!result;
   if (success) {
     // Note: this can invalidate |result|.
@@ -4196,7 +4233,9 @@ bool GLES2Implementation::GetActiveUniformBlockivHelper(GLuint program,
   result->SetNumResults(0);
   helper_->GetActiveUniformBlockiv(program, index, pname, GetResultShmId(),
                                    result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   if (result->GetNumResults() > 0) {
     if (params) {
       result->CopyResult(params);
@@ -4253,7 +4292,9 @@ bool GLES2Implementation::GetActiveUniformsivHelper(GLuint program,
   result->SetNumResults(0);
   helper_->GetActiveUniformsiv(program, kResultBucketId, pname,
                                GetResultShmId(), result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   bool success = result->GetNumResults() == count;
   if (success) {
     if (params) {
@@ -4329,7 +4370,9 @@ void GLES2Implementation::GetAttachedShaders(GLuint program,
                               transfer_buffer_->GetOffset(result),
                               checked_size);
   int32_t token = helper_->InsertToken();
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return;
+  }
   if (count) {
     *count = result->GetNumResults();
   }
@@ -4371,7 +4414,9 @@ void GLES2Implementation::GetShaderPrecisionFormat(GLenum shadertype,
       result->success = false;
       helper_->GetShaderPrecisionFormat(shadertype, precisiontype,
                                         GetResultShmId(), result.offset());
-      WaitForCmd();
+      if (!WaitForCmd()) {
+        return;
+      }
       if (result->success)
         static_state_.shader_precisions[key] = *result;
     }
@@ -4484,7 +4529,9 @@ bool GLES2Implementation::GetTransformFeedbackVaryingHelper(GLuint program,
   result->success = false;
   helper_->GetTransformFeedbackVarying(program, index, kResultBucketId,
                                        GetResultShmId(), result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   if (result->success) {
     if (size) {
       *size = result->size;
@@ -4552,7 +4599,9 @@ void GLES2Implementation::GetUniformfv(GLuint program,
     }
     result->SetNumResults(0);
     helper_->GetUniformfv(program, location, GetResultShmId(), result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     result->CopyResult(params);
     GPU_CLIENT_LOG_CODE_BLOCK({
       for (int32_t i = 0; i < result->GetNumResults(); ++i) {
@@ -4580,7 +4629,9 @@ void GLES2Implementation::GetUniformiv(GLuint program,
     }
     result->SetNumResults(0);
     helper_->GetUniformiv(program, location, GetResultShmId(), result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     result->CopyResult(params);
     GPU_CLIENT_LOG_CODE_BLOCK({
       for (int32_t i = 0; i < result->GetNumResults(); ++i) {
@@ -4609,7 +4660,9 @@ void GLES2Implementation::GetUniformuiv(GLuint program,
     result->SetNumResults(0);
     helper_->GetUniformuiv(program, location, GetResultShmId(),
                            result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     result->CopyResult(params);
     GPU_CLIENT_LOG_CODE_BLOCK({
       for (int32_t i = 0; i < result->GetNumResults(); ++i) {
@@ -4618,6 +4671,183 @@ void GLES2Implementation::GetUniformuiv(GLuint program,
     });
   }
   CheckGLError();
+}
+
+void GLES2Implementation::WritePixelsYUVINTERNAL(
+    const GLbyte* mailbox,
+    GLuint src_size_plane1,
+    GLuint src_size_plane2,
+    GLuint src_size_plane3,
+    GLuint src_size_plane4,
+    GLuint src_width,
+    GLuint src_height,
+    GLuint src_plane_config,
+    GLuint src_subsampling,
+    GLuint src_datatype,
+    GLuint src_row_bytes_plane1,
+    GLuint src_row_bytes_plane2,
+    GLuint src_row_bytes_plane3,
+    GLuint src_row_bytes_plane4,
+    const void* src_pixels_plane1,
+    const void* src_pixels_plane2,
+    const void* src_pixels_plane3,
+    const void* src_pixels_plane4) {
+  CHECK(mailbox);
+  // We have the following stored at offsets from `shm_address`:
+  // 0: stores the destination mailbox,
+  // pixels_offset_plane1: stores source pixels for plane 1,
+  // pixels_offset_plane2: stores source pixels for plane 2,
+  // pixels_offset_plane3: stores source pixels for plane 3,
+  // pixels_offset_plane4: stores source pixels for plane 4
+
+  const int kMaxPlanes = 4;
+  GLuint src_sizes[kMaxPlanes] = {src_size_plane1, src_size_plane2,
+                                  src_size_plane3, src_size_plane4};
+  const void* src_pixels[kMaxPlanes] = {src_pixels_plane1, src_pixels_plane2,
+                                        src_pixels_plane3, src_pixels_plane4};
+
+  GLuint total_size =
+      base::bits::AlignUp(sizeof(gpu::Mailbox), sizeof(uint64_t));
+  for (int plane = 0; plane < kMaxPlanes; plane++) {
+    if (!src_pixels[plane]) {
+      // If pixels don't exist for a plane, we've copied all planes of src
+      // image.
+      CHECK_EQ(src_sizes[plane], 0u);
+      break;
+    }
+    total_size += base::bits::AlignUp(src_sizes[plane],
+                                      static_cast<GLuint>(sizeof(uint64_t)));
+  }
+
+  ScopedMappedMemoryPtr scoped_shared_memory(total_size, helper(),
+                                             mapped_memory_.get());
+  if (!scoped_shared_memory.valid()) {
+    SetGLError(GL_INVALID_OPERATION, "WritePixelsYUV", "size too big");
+    return;
+  }
+
+  GLint shm_id = scoped_shared_memory.shm_id();
+  GLuint shm_offset = scoped_shared_memory.offset();
+  void* address = scoped_shared_memory.address();
+
+  // Copy the mailbox at `address`.
+  GLuint mailbox_offset = 0;
+  memcpy(static_cast<uint8_t*>(address), mailbox, sizeof(gpu::Mailbox));
+
+  GLuint pixel_offsets[kMaxPlanes] = {};
+  // Calculate first plane offset based on mailbox.
+  pixel_offsets[0] =
+      mailbox_offset + static_cast<GLuint>(base::bits::AlignUp(
+                           sizeof(gpu::Mailbox), sizeof(uint64_t)));
+  CHECK(src_pixels[0]);
+  memcpy(static_cast<uint8_t*>(address) + pixel_offsets[0], src_pixels[0],
+         src_sizes[0]);
+
+  for (int plane = 1; plane < kMaxPlanes; plane++) {
+    if (!src_pixels[plane]) {
+      // If pixels don't exist for a plane, we've copied all planes of src
+      // image.
+      break;
+    }
+    // Calculate the offset based on previous plane offset and previous plane
+    // size, and copy pixels for current plane starting at current plane
+    // offset.
+    pixel_offsets[plane] =
+        pixel_offsets[plane - 1] +
+        base::bits::AlignUp(src_sizes[plane - 1],
+                            static_cast<GLuint>(sizeof(uint64_t)));
+    memcpy(static_cast<uint8_t*>(address) + pixel_offsets[plane],
+           src_pixels[plane], src_sizes[plane]);
+  }
+
+  helper_->WritePixelsYUVINTERNAL(
+      src_width, src_height, src_row_bytes_plane1, src_row_bytes_plane2,
+      src_row_bytes_plane3, src_row_bytes_plane4, src_plane_config,
+      src_subsampling, src_datatype, shm_id, shm_offset, pixel_offsets[0],
+      pixel_offsets[1], pixel_offsets[2], pixel_offsets[3]);
+}
+
+GLboolean GLES2Implementation::ReadbackARGBImagePixelsINTERNAL(
+    const GLbyte* mailbox,
+    const void* dst_sk_color_space,
+    GLuint dst_color_space_size,
+    GLuint dst_size,
+    GLuint dst_width,
+    GLuint dst_height,
+    GLuint dst_sk_color_type,
+    GLuint dst_sk_alpha_type,
+    GLuint dst_row_bytes,
+    GLint src_x,
+    GLint src_y,
+    GLint plane_index,
+    void* pixels) {
+  DCHECK(mailbox);
+  // We can't use GetResultAs<>() to store our result because it uses
+  // TransferBuffer under the hood and this function is potentially
+  // asynchronous. Instead, store the result at the beginning of the shared
+  // memory we allocate to transfer pixels.
+  // We have the following stored at offsets from `shm_address`:
+  // 0: stores ReadbackARGBImagePixelsINTERNAL::Result,
+  // color_space_offset: stores destination SkColorSpace,
+  // mailbox_offset: stores the gpu::Mailbox,
+  // pixels_offset: stores the pixels
+  GLuint color_space_offset = base::bits::AlignUp(
+      sizeof(cmds::ReadbackARGBImagePixelsINTERNAL::Result), sizeof(uint64_t));
+
+  // Add the size of the SkColorSpace while maintaining 8-byte alignment.
+  GLuint mailbox_offset = color_space_offset;
+  if (dst_sk_color_space) {
+    mailbox_offset =
+        base::bits::AlignUp(color_space_offset + dst_color_space_size,
+                            static_cast<GLuint>(sizeof(uint64_t)));
+  }
+
+  // Add the size of the mailbox while maintaining 8-byte alignment.
+  GLuint pixels_offset = base::bits::AlignUp(
+      mailbox_offset + sizeof(gpu::Mailbox), sizeof(uint64_t));
+
+  GLuint total_size =
+      pixels_offset +
+      base::bits::AlignUp(dst_size, static_cast<GLuint>(sizeof(uint64_t)));
+
+  ScopedMappedMemoryPtr scoped_shared_memory(total_size, helper(),
+                                             mapped_memory_.get());
+  if (!scoped_shared_memory.valid()) {
+    return GL_FALSE;
+  }
+
+  GLint shm_id = scoped_shared_memory.shm_id();
+  GLuint shm_offset = scoped_shared_memory.offset();
+  void* shm_address = scoped_shared_memory.address();
+
+  // Readback success/failure result is stored at the beginning of the shared
+  // memory region. Client is responsible for initialization so we do so here.
+  auto* readback_result =
+      static_cast<cmds::ReadbackARGBImagePixelsINTERNAL::Result*>(shm_address);
+  *readback_result = 0;
+
+  if (dst_sk_color_space) {
+    // Copy destination color space to the destination color space offset.
+    memcpy(static_cast<uint8_t*>(shm_address) + color_space_offset,
+           dst_sk_color_space, dst_color_space_size);
+  }
+  // Copy shared image mailbox to the mailbox offset.
+  memcpy(static_cast<uint8_t*>(shm_address) + mailbox_offset, mailbox,
+         sizeof(gpu::Mailbox));
+
+  helper_->ReadbackARGBImagePixelsINTERNAL(
+      plane_index, src_x, src_y, dst_width, dst_height, dst_row_bytes,
+      dst_sk_color_type, dst_sk_alpha_type, shm_id, shm_offset,
+      color_space_offset, pixels_offset, mailbox_offset);
+
+  if (!WaitForCmd()) {
+    return GL_FALSE;
+  }
+  if (!*readback_result) {
+    return GL_FALSE;
+  }
+  memcpy(pixels, static_cast<uint8_t*>(shm_address) + pixels_offset, dst_size);
+  return GL_FALSE;
 }
 
 void GLES2Implementation::ReadPixels(GLint xoffset,
@@ -4761,7 +4991,9 @@ void GLES2Implementation::ReadPixels(GLint xoffset,
     helper_->ReadPixels(xoffset, y_index, width, num_rows, format, type,
                         buffer.shm_id(), buffer.offset(), GetResultShmId(),
                         result.offset(), false);
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      break;
+    }
     // If it was not marked as successful exit.
     if (!result->success) {
       break;
@@ -4814,7 +5046,7 @@ void GLES2Implementation::ActiveTexture(GLenum texture) {
                      << GLES2Util::GetStringEnum(texture) << ")");
   GLuint texture_index = texture - GL_TEXTURE0;
   if (texture_index >=
-      static_cast<GLuint>(capabilities_.max_combined_texture_image_units)) {
+      static_cast<GLuint>(gl_capabilities_.max_combined_texture_image_units)) {
     SetGLErrorInvalidEnum("glActiveTexture", texture, "texture");
     return;
   }
@@ -4968,15 +5200,16 @@ bool GLES2Implementation::UpdateIndexedBufferState(GLenum target,
   switch (target) {
     case GL_ATOMIC_COUNTER_BUFFER:
       if (index >= static_cast<GLuint>(
-                       capabilities_.max_atomic_counter_buffer_bindings)) {
+                       gl_capabilities_.max_atomic_counter_buffer_bindings)) {
         SetGLError(GL_INVALID_VALUE, function_name, "index out of range");
         return false;
       }
       bound_atomic_counter_buffer_ = buffer_id;
       break;
     case GL_TRANSFORM_FEEDBACK_BUFFER:
-      if (index >= static_cast<GLuint>(
-                       capabilities_.max_transform_feedback_separate_attribs)) {
+      if (index >=
+          static_cast<GLuint>(
+              gl_capabilities_.max_transform_feedback_separate_attribs)) {
         SetGLError(GL_INVALID_VALUE, function_name, "index out of range");
         return false;
       }
@@ -4984,7 +5217,7 @@ bool GLES2Implementation::UpdateIndexedBufferState(GLenum target,
       break;
     case GL_SHADER_STORAGE_BUFFER:
       if (index >= static_cast<GLuint>(
-                       capabilities_.max_shader_storage_buffer_bindings)) {
+                       gl_capabilities_.max_shader_storage_buffer_bindings)) {
         SetGLError(GL_INVALID_VALUE, function_name, "index out of range");
         return false;
       }
@@ -4992,7 +5225,7 @@ bool GLES2Implementation::UpdateIndexedBufferState(GLenum target,
       break;
     case GL_UNIFORM_BUFFER:
       if (index >=
-          static_cast<GLuint>(capabilities_.max_uniform_buffer_bindings)) {
+          static_cast<GLuint>(gl_capabilities_.max_uniform_buffer_bindings)) {
         SetGLError(GL_INVALID_VALUE, function_name, "index out of range");
         return false;
       }
@@ -5326,7 +5559,7 @@ void GLES2Implementation::DeleteTexturesHelper(GLsizei n,
 void GLES2Implementation::UnbindTexturesHelper(GLsizei n,
                                                const GLuint* textures) {
   for (GLsizei ii = 0; ii < n; ++ii) {
-    for (GLint tt = 0; tt < capabilities_.max_combined_texture_image_units;
+    for (GLint tt = 0; tt < gl_capabilities_.max_combined_texture_image_units;
          ++tt) {
       TextureUnit& unit = texture_units_[tt];
       if (textures[ii] == unit.bound_texture_2d) {
@@ -5469,7 +5702,9 @@ void GLES2Implementation::GetVertexAttribfv(GLuint index,
     }
     result->SetNumResults(0);
     helper_->GetVertexAttribfv(index, pname, GetResultShmId(), result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     result->CopyResult(params);
     GPU_CLIENT_LOG_CODE_BLOCK({
       for (int32_t i = 0; i < result->GetNumResults(); ++i) {
@@ -5502,7 +5737,9 @@ void GLES2Implementation::GetVertexAttribiv(GLuint index,
     }
     result->SetNumResults(0);
     helper_->GetVertexAttribiv(index, pname, GetResultShmId(), result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     result->CopyResult(params);
     GPU_CLIENT_LOG_CODE_BLOCK({
       for (int32_t i = 0; i < result->GetNumResults(); ++i) {
@@ -5536,7 +5773,9 @@ void GLES2Implementation::GetVertexAttribIiv(GLuint index,
     result->SetNumResults(0);
     helper_->GetVertexAttribIiv(index, pname, GetResultShmId(),
                                 result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     result->CopyResult(params);
     GPU_CLIENT_LOG_CODE_BLOCK({
       for (int32_t i = 0; i < result->GetNumResults(); ++i) {
@@ -5570,7 +5809,9 @@ void GLES2Implementation::GetVertexAttribIuiv(GLuint index,
     result->SetNumResults(0);
     helper_->GetVertexAttribIuiv(index, pname, GetResultShmId(),
                                  result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     result->CopyResult(params);
     GPU_CLIENT_LOG_CODE_BLOCK({
       for (int32_t i = 0; i < result->GetNumResults(); ++i) {
@@ -5605,7 +5846,9 @@ GLboolean GLES2Implementation::EnableFeatureCHROMIUM(const char* feature) {
   *result = 0;
   helper_->EnableFeatureCHROMIUM(kResultBucketId, GetResultShmId(),
                                  result.offset());
-  WaitForCmd();
+  if (!WaitForCmd()) {
+    return false;
+  }
   helper_->SetBucketSize(kResultBucketId, 0);
   GPU_CLIENT_LOG("   returned " << GLES2Util::GetStringBool(*result));
   return *result != 0;
@@ -5749,19 +5992,20 @@ void* GLES2Implementation::MapBufferRange(GLenum target,
   unsigned int shm_offset = 0;
   if (!mem) {
     mem = mapped_memory_->Alloc(size, &shm_id, &shm_offset);
-    if (!mem) {
+    auto result = GetResultAs<cmds::MapBufferRange::Result>();
+    if (!mem || !result) {
       SetGLError(GL_OUT_OF_MEMORY, "glMapBufferRange", "out of memory");
       return nullptr;
     }
 
-    typedef cmds::MapBufferRange::Result Result;
-    auto result = GetResultAs<Result>();
     *result = 0;
     helper_->MapBufferRange(target, offset, size, access, shm_id, shm_offset,
                             GetResultShmId(), result.offset());
     // TODO(zmo): For write only mode with MAP_INVALID_*_BIT, we should
     // consider an early return without WaitForCmd(). crbug.com/465804.
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return nullptr;
+    }
     if (*result) {
       const GLbitfield kInvalidateBits =
           GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_INVALIDATE_RANGE_BIT;
@@ -6211,7 +6455,6 @@ void GLES2Implementation::BeginQueryEXT(GLenum target, GLuint id) {
 
   switch (target) {
     case GL_COMMANDS_ISSUED_CHROMIUM:
-    case GL_LATENCY_QUERY_CHROMIUM:
     case GL_ASYNC_PIXEL_PACK_COMPLETED_CHROMIUM:
     case GL_GET_ERROR_QUERY_CHROMIUM:
     case GL_PROGRAM_COMPLETION_QUERY_CHROMIUM:
@@ -6225,7 +6468,7 @@ void GLES2Implementation::BeginQueryEXT(GLenum target, GLuint id) {
       }
       break;
     case GL_SAMPLES_PASSED_ARB:
-      if (!capabilities_.occlusion_query) {
+      if (!gl_capabilities_.occlusion_query) {
         SetGLError(GL_INVALID_OPERATION, "glBeginQueryEXT",
                    "not enabled for occlusion queries");
         return;
@@ -6233,14 +6476,14 @@ void GLES2Implementation::BeginQueryEXT(GLenum target, GLuint id) {
       break;
     case GL_ANY_SAMPLES_PASSED:
     case GL_ANY_SAMPLES_PASSED_CONSERVATIVE:
-      if (!capabilities_.occlusion_query_boolean) {
+      if (!gl_capabilities_.occlusion_query_boolean) {
         SetGLError(GL_INVALID_OPERATION, "glBeginQueryEXT",
                    "not enabled for boolean occlusion queries");
         return;
       }
       break;
     case GL_TIME_ELAPSED_EXT:
-      if (!capabilities_.timer_queries) {
+      if (!gl_capabilities_.timer_queries) {
         SetGLError(GL_INVALID_OPERATION, "glBeginQueryEXT",
                    "not enabled for timing queries");
         return;
@@ -6338,7 +6581,6 @@ void GLES2Implementation::EndQueryEXT(GLenum target) {
   }  // GPU_CLIENT_SINGLE_THREAD_CHECK ends here
 
   if (target == GL_READBACK_SHADOW_COPIES_UPDATED_CHROMIUM) {
-    DCHECK(capabilities_.chromium_nonblocking_readback);
     DCHECK(query);
     auto serial = readback_buffer_shadow_tracker_->buffer_shadow_serial();
     readback_buffer_shadow_tracker_->IncrementSerial();
@@ -6358,7 +6600,7 @@ void GLES2Implementation::QueryCounterEXT(GLuint id, GLenum target) {
     case GL_COMMANDS_ISSUED_TIMESTAMP_CHROMIUM:
       break;
     case GL_TIMESTAMP_EXT:
-      if (!capabilities_.timer_queries) {
+      if (!gl_capabilities_.timer_queries) {
         SetGLError(GL_INVALID_OPERATION, "glQueryCounterEXT",
                    "not enabled for timing queries");
         return;
@@ -6410,6 +6652,8 @@ void GLES2Implementation::GetQueryivEXT(GLenum target,
         // Overall reliable driver support for timestamps is limited, so we
         // disable the timestamp portion of this extension to encourage use of
         // the better supported time elapsed queries.
+        // TODO(crbug.com/1411579): Check the underlying driver's capability
+        // instead of disabling it directly.
         *params = 0;
         break;
       case GL_COMMANDS_ISSUED_TIMESTAMP_CHROMIUM:
@@ -6646,7 +6890,7 @@ void GLES2Implementation::ProduceTextureDirectCHROMIUM(GLuint texture,
                      << static_cast<const void*>(data) << ")");
   static_assert(std::is_trivially_copyable<Mailbox>::value,
                 "gpu::Mailbox is not trivially copyable");
-  Mailbox result = Mailbox::Generate();
+  Mailbox result = Mailbox::GenerateLegacyMailbox();
   memcpy(data, result.name, sizeof(result.name));
   helper_->ProduceTextureDirectCHROMIUMImmediate(texture, data);
   CheckGLError();
@@ -6682,33 +6926,8 @@ GLuint GLES2Implementation::CreateAndTexStorage2DSharedImageCHROMIUM(
   DCHECK(mailbox.IsSharedImage());
   GLuint client_id;
   GetIdHandler(SharedIdNamespaces::kTextures)->MakeIds(this, 0, 1, &client_id);
-  helper_->CreateAndTexStorage2DSharedImageINTERNALImmediate(client_id, GL_NONE,
+  helper_->CreateAndTexStorage2DSharedImageINTERNALImmediate(client_id,
                                                              mailbox_data);
-  if (share_group_->bind_generates_resource())
-    helper_->CommandBufferHelper::OrderingBarrier();
-  CheckGLError();
-  return client_id;
-}
-
-GLuint
-GLES2Implementation::CreateAndTexStorage2DSharedImageWithInternalFormatCHROMIUM(
-    const GLbyte* mailbox_data,
-    GLenum internalformat) {
-  GPU_CLIENT_SINGLE_THREAD_CHECK();
-  GPU_CLIENT_LOG(
-      "[" << GetLogPrefix()
-          << "] CreateAndTexStorage2DSharedImageWithInternalFormatCHROMIUM("
-          << static_cast<const void*>(mailbox_data) << ", " << internalformat
-          << ")");
-  const Mailbox& mailbox = *reinterpret_cast<const Mailbox*>(mailbox_data);
-  DCHECK(mailbox.Verify())
-      << "CreateAndTexStorage2DSharedImageWithInternalFormatCHROMIUM was "
-         "passed an invalid mailbox.";
-  DCHECK(mailbox.IsSharedImage());
-  GLuint client_id;
-  GetIdHandler(SharedIdNamespaces::kTextures)->MakeIds(this, 0, 1, &client_id);
-  helper_->CreateAndTexStorage2DSharedImageINTERNALImmediate(
-      client_id, internalformat, mailbox_data);
   if (share_group_->bind_generates_resource())
     helper_->CommandBufferHelper::OrderingBarrier();
   CheckGLError();
@@ -7061,7 +7280,9 @@ GLenum GLES2Implementation::ClientWaitSync(GLsync sync,
     *result = GL_WAIT_FAILED;
     helper_->ClientWaitSync(ToGLuint(sync), flags, timeout, GetResultShmId(),
                             result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return GL_WAIT_FAILED;
+    }
     localResult = *result;
     GPU_CLIENT_LOG("returned " << localResult);
   }
@@ -7139,7 +7360,9 @@ void GLES2Implementation::GetInternalformativ(GLenum target,
     result->SetNumResults(0);
     helper_->GetInternalformativ(target, format, pname, GetResultShmId(),
                                  result.offset());
-    WaitForCmd();
+    if (!WaitForCmd()) {
+      return;
+    }
     GPU_CLIENT_LOG_CODE_BLOCK({
       for (int32_t i = 0; i < result->GetNumResults(); ++i) {
         GPU_CLIENT_LOG("  " << i << ": " << result->GetData()[i]);

@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <memory>
 
 #include "core/fxcodec/fx_codec_def.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 #if defined(USE_SYSTEM_LCMS2)
 #include <lcms2.h>
@@ -37,6 +37,8 @@ class IccTransform {
 
   int components() const { return m_nSrcComponents; }
   bool IsNormal() const { return m_bNormal; }
+
+  static bool IsValidIccComponents(int components);
 
  private:
   IccTransform(cmsHTRANSFORM transform,

@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/stl_util.h"
 #include "third_party/base/check.h"
-#include "third_party/base/cxx17_backports.h"
 
 namespace {
 
@@ -528,7 +527,7 @@ CPVT_WordPlace CPVT_VariableText::AddSection(const CPVT_WordPlace& place) {
   if (IsValid() && !m_bMultiLine)
     return place;
 
-  int32_t nSecIndex = pdfium::clamp(
+  int32_t nSecIndex = std::clamp(
       place.nSecIndex, 0, fxcrt::CollectionSize<int32_t>(m_SectionArray));
 
   auto pSection = std::make_unique<CPVT_Section>(this);
@@ -554,8 +553,8 @@ CPVT_WordPlace CPVT_VariableText::AddWord(const CPVT_WordPlace& place,
 
   CPVT_WordPlace newplace = place;
   newplace.nSecIndex =
-      pdfium::clamp(newplace.nSecIndex, 0,
-                    fxcrt::CollectionSize<int32_t>(m_SectionArray) - 1);
+      std::clamp(newplace.nSecIndex, 0,
+                 fxcrt::CollectionSize<int32_t>(m_SectionArray) - 1);
   return m_SectionArray[newplace.nSecIndex]->AddWord(newplace, wordinfo);
 }
 

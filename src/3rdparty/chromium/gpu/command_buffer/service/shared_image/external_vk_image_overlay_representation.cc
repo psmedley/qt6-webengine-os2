@@ -61,11 +61,6 @@ void ExternalVkImageOverlayImageRepresentation::EndReadAccess(
   read_begin_semaphores_.clear();
 }
 
-gl::GLImage* ExternalVkImageOverlayImageRepresentation::GetGLImage() {
-  NOTREACHED();
-  return nullptr;
-}
-
 void ExternalVkImageOverlayImageRepresentation::GetAcquireFence(
     gfx::GpuFenceHandle& fence) {
   const VkDevice& device = vk_image_backing_->context_provider()

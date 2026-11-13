@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <mutex>  // NOLINT
 #include <string>
 
+#include "absl/strings/str_join.h"
 #include "cast/protocol/castv2/receiver_schema_data.h"
 #include "cast/protocol/castv2/streaming_schema_data.h"
 #include "third_party/valijson/src/include/valijson/adapters/jsoncpp_adapter.hpp"
@@ -19,8 +20,7 @@
 #include "util/std_util.h"
 #include "util/stringprintf.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 namespace {
 
@@ -28,7 +28,7 @@ std::vector<Error> MapErrors(const valijson::ValidationResults& results) {
   std::vector<Error> errors;
   errors.reserve(results.numErrors());
   for (const auto& result : results) {
-    const std::string context = Join(result.context, ", ");
+    const std::string context = absl::StrJoin(result.context, ", ");
     errors.emplace_back(Error::Code::kJsonParseError,
                         StringPrintf("Node: %s, Message: %s", context.c_str(),
                                      result.description.c_str()));
@@ -79,5 +79,4 @@ std::vector<Error> ValidateReceiverMessage(const Json::Value& message) {
   return Validate(message, schema);
 }
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

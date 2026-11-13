@@ -44,12 +44,16 @@ void MergeAllDependentConfigsFrom(const Target* from_target,
 }
 
 Err MakeTestOnlyError(const Item* from, const Item* to) {
+  bool with_toolchain = from->settings()->ShouldShowToolchain({
+      &from->label(),
+      &to->label(),
+  });
   return Err(
       from->defined_from(), "Test-only dependency not allowed.",
-      from->label().GetUserVisibleName(false) +
+      from->label().GetUserVisibleName(with_toolchain) +
           "\n"
           "which is NOT marked testonly can't depend on\n" +
-          to->label().GetUserVisibleName(false) +
+          to->label().GetUserVisibleName(with_toolchain) +
           "\n"
           "which is marked testonly. Only targets with \"testonly = true\"\n"
           "can depend on other test-only targets.\n"
@@ -128,7 +132,7 @@ bool EnsureFileIsGeneratedByDependency(const Target* target,
         return true;  // Found a path.
     }
     if (target->output_type() == Target::CREATE_BUNDLE) {
-      for (auto* dep : target->bundle_data().bundle_deps()) {
+      for (const auto* dep : target->bundle_data().bundle_deps()) {
         if (EnsureFileIsGeneratedByDependency(dep, file, false,
                                               consider_object_files,
                                               check_data_deps, seen_targets))
@@ -479,29 +483,7 @@ bool Target::OnResolved(Err* err) {
                              dep.ptr->public_configs().end());
   }
 
-  // Copy our own libs and lib_dirs to the final set. This will be from our
-  // target and all of our configs. We do this specially since these must be
-  // inherited through the dependency tree (other flags don't work this way).
-  //
-  // This needs to happen after we pull dependent target configs for the
-  // public config's libs to be included here. And it needs to happen
-  // before pulling the dependent target libs so the libs are in the correct
-  // order (local ones first, then the dependency's).
-  for (ConfigValuesIterator iter(this); !iter.done(); iter.Next()) {
-    const ConfigValues& cur = iter.cur();
-    all_lib_dirs_.Append(cur.lib_dirs().begin(), cur.lib_dirs().end());
-    all_libs_.Append(cur.libs().begin(), cur.libs().end());
-
-    all_framework_dirs_.Append(cur.framework_dirs().begin(),
-                               cur.framework_dirs().end());
-    all_frameworks_.Append(cur.frameworks().begin(), cur.frameworks().end());
-    all_weak_frameworks_.Append(cur.weak_frameworks().begin(),
-                                cur.weak_frameworks().end());
-  }
-
   PullRecursiveBundleData();
-  PullDependentTargetLibs();
-  PullRecursiveHardDeps();
   if (!ResolvePrecompiledHeaders(err))
     return false;
 
@@ -562,6 +544,15 @@ bool Target::IsDataOnly() const {
   return output_type_ == BUNDLE_DATA;
 }
 
+bool Target::ShouldGenerate() const {
+  const auto& root_patterns = settings()->build_settings()->root_patterns();
+  if (root_patterns.empty()) {
+    // By default, generate all targets that belong to the default toolchain.
+    return settings()->is_default();
+  }
+  return LabelPattern::VectorMatches(root_patterns, label());
+}
+
 DepsIteratorRange Target::GetDeps(DepsIterationType type) const {
   if (type == DEPS_LINKED) {
     return DepsIteratorRange(
@@ -584,9 +575,7 @@ std::string Target::GetComputedOutputName() const {
   if (tool) {
     // Only add the prefix if the name doesn't already have it and it's not
     // being overridden.
-    if (!output_prefix_override_ &&
-        !base::StartsWith(name, tool->output_prefix(),
-                          base::CompareCase::SENSITIVE))
+    if (!output_prefix_override_ && !name.starts_with(tool->output_prefix()))
       result = tool->output_prefix();
   }
   result.append(name);
@@ -755,159 +744,28 @@ void Target::PullDependentTargetConfigs() {
   }
 }
 
-void Target::PullDependentTargetLibsFrom(const Target* dep, bool is_public) {
-  // Direct dependent libraries.
-  if (dep->output_type() == STATIC_LIBRARY ||
-      dep->output_type() == SHARED_LIBRARY ||
-      dep->output_type() == RUST_LIBRARY ||
-      dep->output_type() == RUST_PROC_MACRO ||
-      dep->output_type() == SOURCE_SET ||
-      (dep->output_type() == CREATE_BUNDLE &&
-       dep->bundle_data().is_framework())) {
-    inherited_libraries_.Append(dep, is_public);
-  }
-
-  if (dep->output_type() == STATIC_LIBRARY ||
-      dep->output_type() == SHARED_LIBRARY ||
-      dep->output_type() == RUST_LIBRARY) {
-    rust_transitive_libs_.Append(dep, is_public);
-
-    // Propagate public dependent libraries.
-    for (const auto& transitive :
-         dep->rust_transitive_libs_.GetOrderedAndPublicFlag()) {
-      if (transitive.second) {
-        rust_transitive_libs_.Append(transitive.first, is_public);
-      }
-    }
-  }
-
-  // Rust libraries (those meant for consumption by another Rust target) are
-  // handled the same way, whether static or dynamic.
-  if (dep->output_type() == RUST_LIBRARY ||
-      RustValues::InferredCrateType(dep) == RustValues::CRATE_DYLIB) {
-    rust_transitive_libs_.AppendInherited(dep->rust_transitive_libs_,
-                                          is_public);
-
-    // If there is a transitive dependency that is not a rust library, place it
-    // in the normal location
-    for (const auto& inherited :
-         rust_transitive_libs_.GetOrderedAndPublicFlag()) {
-      if (!RustValues::IsRustLibrary(inherited.first)) {
-        inherited_libraries_.Append(inherited.first, inherited.second);
-      }
-    }
-  } else if (dep->output_type() == RUST_PROC_MACRO) {
-    // We will need to specify the path to find a procedural macro,
-    // but have no need to specify the paths to find its dependencies
-    // as the procedural macro is now a complete .so.
-    rust_transitive_libs_.Append(dep, is_public);
-  } else if (dep->output_type() == SHARED_LIBRARY) {
-    // Shared library dependendencies are inherited across public shared
-    // library boundaries.
-    //
-    // In this case:
-    //   EXE -> INTERMEDIATE_SHLIB --[public]--> FINAL_SHLIB
-    // The EXE will also link to to FINAL_SHLIB. The public dependency means
-    // that the EXE can use the headers in FINAL_SHLIB so the FINAL_SHLIB
-    // will need to appear on EXE's link line.
-    //
-    // However, if the dependency is private:
-    //   EXE -> INTERMEDIATE_SHLIB --[private]--> FINAL_SHLIB
-    // the dependency will not be propagated because INTERMEDIATE_SHLIB is
-    // not granting permission to call functions from FINAL_SHLIB. If EXE
-    // wants to use functions (and link to) FINAL_SHLIB, it will need to do
-    // so explicitly.
-    //
-    // Static libraries and source sets aren't inherited across shared
-    // library boundaries because they will be linked into the shared
-    // library. Rust dylib deps are handled above and transitive deps are
-    // resolved by the compiler.
-    inherited_libraries_.AppendPublicSharedLibraries(dep->inherited_libraries(),
-                                                     is_public);
-  } else if (!dep->IsFinal()) {
-    // The current target isn't linked, so propagate linked deps and
-    // libraries up the dependency tree.
-    inherited_libraries_.AppendInherited(dep->inherited_libraries(), is_public);
-    rust_transitive_libs_.AppendInherited(dep->rust_transitive_libs_,
-                                          is_public);
-  } else if (dep->complete_static_lib()) {
-    // Inherit only final targets through _complete_ static libraries.
-    //
-    // Inherited final libraries aren't linked into complete static libraries.
-    // They are forwarded here so that targets that depend on complete
-    // static libraries can link them in. Conversely, since complete static
-    // libraries link in non-final targets they shouldn't be inherited.
-    for (const auto& inherited :
-         dep->inherited_libraries().GetOrderedAndPublicFlag()) {
-      if (inherited.first->IsFinal()) {
-        inherited_libraries_.Append(inherited.first,
-                                    is_public && inherited.second);
-      }
-    }
-  }
-
-  // Library settings are always inherited across static library boundaries.
-  if (!dep->IsFinal() || dep->output_type() == STATIC_LIBRARY) {
-    all_lib_dirs_.Append(dep->all_lib_dirs());
-    all_libs_.Append(dep->all_libs());
-
-    all_framework_dirs_.Append(dep->all_framework_dirs());
-    all_frameworks_.Append(dep->all_frameworks());
-    all_weak_frameworks_.Append(dep->all_weak_frameworks());
-  }
-}
-
-void Target::PullDependentTargetLibs() {
-  for (const auto& dep : public_deps_)
-    PullDependentTargetLibsFrom(dep.ptr, true);
-  for (const auto& dep : private_deps_)
-    PullDependentTargetLibsFrom(dep.ptr, false);
-}
-
-void Target::PullRecursiveHardDeps() {
-  for (const auto& pair : GetDeps(DEPS_LINKED)) {
-    // Direct hard dependencies.
-    if (hard_dep() || pair.ptr->hard_dep()) {
-      recursive_hard_deps_.insert(pair.ptr);
-      continue;
-    }
-
-    // If |pair.ptr| is binary target and |pair.ptr| has no public header,
-    // |this| target does not need to have |pair.ptr|'s hard_deps as its
-    // hard_deps to start compiles earlier. Unless the target compiles a
-    // Swift module (since they also generate a header that can be used
-    // by the current target).
-    if (pair.ptr->IsBinary() && !pair.ptr->all_headers_public() &&
-        pair.ptr->public_headers().empty() &&
-        !pair.ptr->swift_values().builds_module()) {
-      continue;
-    }
-
-    // Recursive hard dependencies of all dependencies.
-    recursive_hard_deps_.insert(pair.ptr->recursive_hard_deps().begin(),
-                                pair.ptr->recursive_hard_deps().end());
-  }
-}
-
 void Target::PullRecursiveBundleData() {
+  const bool is_create_bundle = output_type_ == CREATE_BUNDLE;
   for (const auto& pair : GetDeps(DEPS_LINKED)) {
-    // Don't propagate bundle_data once they are added to a bundle.
-    if (pair.ptr->output_type() == CREATE_BUNDLE)
-      continue;
-
     // Don't propagate across toolchain.
     if (pair.ptr->toolchain() != toolchain())
       continue;
 
+    // Don't propagete through create_bundle, unless it is transparent.
+    if (pair.ptr->output_type() == CREATE_BUNDLE &&
+        !pair.ptr->bundle_data().transparent()) {
+      continue;
+    }
+
     // Direct dependency on a bundle_data target.
     if (pair.ptr->output_type() == BUNDLE_DATA) {
-      bundle_data().AddBundleData(pair.ptr);
+      bundle_data().AddBundleData(pair.ptr, is_create_bundle);
     }
 
     // Recursive bundle_data informations from all dependencies.
     if (pair.ptr->has_bundle_data()) {
-      for (auto* target : pair.ptr->bundle_data().bundle_deps())
-        bundle_data().AddBundleData(target);
+      for (const auto* target : pair.ptr->bundle_data().forwarded_bundle_deps())
+        bundle_data().AddBundleData(target, is_create_bundle);
     }
   }
 
@@ -1078,19 +936,24 @@ bool Target::ResolvePrecompiledHeaders(Err* err) {
       // Already have a precompiled header values, the settings must match.
       if (config_values_->precompiled_header() != cur.precompiled_header() ||
           config_values_->precompiled_source() != cur.precompiled_source()) {
+        bool with_toolchain = settings()->ShouldShowToolchain({
+            &label(),
+            pch_header_settings_from,
+            &config->label(),
+        });
         *err = Err(
             defined_from(), "Precompiled header setting conflict.",
-            "The target " + label().GetUserVisibleName(false) +
+            "The target " + label().GetUserVisibleName(with_toolchain) +
                 "\n"
                 "has conflicting precompiled header settings.\n"
                 "\n"
                 "From " +
-                pch_header_settings_from->GetUserVisibleName(false) +
+                pch_header_settings_from->GetUserVisibleName(with_toolchain) +
                 "\n  header: " + config_values_->precompiled_header() +
                 "\n  source: " + config_values_->precompiled_source().value() +
                 "\n\n"
                 "From " +
-                config->label().GetUserVisibleName(false) +
+                config->label().GetUserVisibleName(with_toolchain) +
                 "\n  header: " + cur.precompiled_header() +
                 "\n  source: " + cur.precompiled_source().value());
         return false;
@@ -1127,7 +990,7 @@ bool Target::CheckSourceSetLanguages(Err* err) const {
   if (output_type() == Target::SOURCE_SET &&
       source_types_used().RustSourceUsed()) {
     *err = Err(defined_from(), "source_set contained Rust code.",
-               label().GetUserVisibleName(false) +
+               label().GetUserVisibleName(!settings()->is_default()) +
                    " has Rust code. Only C/C++ source_sets are supported.");
     return false;
   }
@@ -1173,7 +1036,7 @@ bool Target::CheckAssertNoDeps(Err* err) const {
                                   &failure_path_str, &failure_pattern)) {
     *err = Err(
         defined_from(), "assert_no_deps failed.",
-        label().GetUserVisibleName(false) +
+        label().GetUserVisibleName(!settings()->is_default()) +
             " has an assert_no_deps entry:\n  " + failure_pattern->Describe() +
             "\nwhich fails for the dependency path:\n" + failure_path_str);
     return false;

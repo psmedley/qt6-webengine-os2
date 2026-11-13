@@ -7,14 +7,19 @@
 
 #include "include/private/SkPathRef.h"
 
+#include "include/core/SkMatrix.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkRRect.h"
-#include "include/private/SkOnce.h"
-#include "include/private/SkTo.h"
-#include "include/private/SkVx.h"
-#include "src/core/SkBuffer.h"
-#include "src/core/SkPathPriv.h"
-#include "src/core/SkSafeMath.h"
+#include "include/private/base/SkOnce.h"
+#include "src/base/SkVx.h"
+
+#include <cstring>
+
+#ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
+    static constexpr int kPathRefGenIDBitCnt = 30; // leave room for the fill type (skbug.com/1762)
+#else
+    static constexpr int kPathRefGenIDBitCnt = 32;
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 SkPathRef::Editor::Editor(sk_sp<SkPathRef>* pathRef,
@@ -27,8 +32,18 @@ SkPathRef::Editor::Editor(sk_sp<SkPathRef>* pathRef,
     if ((*pathRef)->unique()) {
         (*pathRef)->incReserve(incReserveVerbs, incReservePoints);
     } else {
-        SkPathRef* copy = new SkPathRef;
-        copy->copy(**pathRef, incReserveVerbs, incReservePoints);
+        SkPathRef* copy;
+        // No need to copy if the existing ref is the empty ref (because it doesn't contain
+        // anything).
+        if (!(*pathRef)->isInitialEmptyPathRef()) {
+            copy = new SkPathRef;
+            copy->copy(**pathRef, incReserveVerbs, incReservePoints);
+        } else {
+            // Size previously empty paths to exactly fit the supplied hints. The assumpion is
+            // the caller knows the exact size they want (as happens in chrome when deserializing
+            // paths).
+            copy = new SkPathRef(incReserveVerbs, incReservePoints);
+        }
         pathRef->reset(copy);
     }
     fPathRef = pathRef->get();
@@ -36,24 +51,6 @@ SkPathRef::Editor::Editor(sk_sp<SkPathRef>* pathRef,
     fPathRef->fGenerationID = 0;
     fPathRef->fBoundsIsDirty = true;
     SkDEBUGCODE(fPathRef->fEditorsAttached++;)
-}
-
-// Sort of like makeSpace(0) but the the additional requirement that we actively shrink the
-// allocations to just fit the current needs. makeSpace() will only grow, but never shrinks.
-//
-void SkPath::shrinkToFit() {
-    // Since this can relocate the allocated arrays, we have to defensively copy ourselves if
-    // we're not the only owner of the pathref... since relocating the arrays will invalidate
-    // any existing iterators.
-    if (!fPathRef->unique()) {
-        SkPathRef* pr = new SkPathRef;
-        pr->copy(*fPathRef, 0, 0);
-        fPathRef.reset(pr);
-    }
-    fPathRef->fPoints.shrink_to_fit();
-    fPathRef->fVerbs.shrink_to_fit();
-    fPathRef->fConicWeights.shrink_to_fit();
-    SkDEBUGCODE(fPathRef->validate();)
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -270,40 +267,6 @@ bool SkPathRef::operator== (const SkPathRef& ref) const {
     return true;
 }
 
-void SkPathRef::writeToBuffer(SkWBuffer* buffer) const {
-    SkDEBUGCODE(this->validate();)
-    SkDEBUGCODE(size_t beforePos = buffer->pos();)
-
-    // Call getBounds() to ensure (as a side-effect) that fBounds
-    // and fIsFinite are computed.
-    const SkRect& bounds = this->getBounds();
-
-    // We store fSegmentMask for older readers, but current readers can't trust it, so they
-    // don't read it.
-    int32_t packed = ((fIsFinite & 1) << kIsFinite_SerializationShift) |
-                     (fSegmentMask << kSegmentMask_SerializationShift);
-    buffer->write32(packed);
-
-    // TODO: write gen ID here. Problem: We don't know if we're cross process or not from
-    // SkWBuffer. Until this is fixed we write 0.
-    buffer->write32(0);
-    buffer->write32(fVerbs.size());
-    buffer->write32(fPoints.size());
-    buffer->write32(fConicWeights.size());
-    buffer->write(fVerbs.begin(), fVerbs.size_bytes());
-    buffer->write(fPoints.begin(), fVerbs.size_bytes());
-    buffer->write(fConicWeights.begin(), fConicWeights.size_bytes());
-    buffer->write(&bounds, sizeof(bounds));
-
-    SkASSERT(buffer->pos() - beforePos == (size_t) this->writeSize());
-}
-
-uint32_t SkPathRef::writeSize() const {
-    return uint32_t(5 * sizeof(uint32_t) +
-                    fVerbs.size_bytes() + fPoints.size_bytes() + fConicWeights.size_bytes() +
-                    sizeof(SkRect));
-}
-
 void SkPathRef::copy(const SkPathRef& ref,
                      int additionalReserveVerbs,
                      int additionalReservePoints) {
@@ -347,17 +310,17 @@ std::tuple<SkPoint*, SkScalar*> SkPathRef::growForVerbsInPath(const SkPathRef& p
     fIsRRect = false;
 
     if (int numVerbs = path.countVerbs()) {
-        memcpy(fVerbs.append(numVerbs), path.fVerbs.begin(), numVerbs * sizeof(fVerbs[0]));
+        memcpy(fVerbs.push_back_n(numVerbs), path.fVerbs.begin(), numVerbs * sizeof(fVerbs[0]));
     }
 
     SkPoint* pts = nullptr;
     if (int numPts = path.countPoints()) {
-        pts = fPoints.append(numPts);
+        pts = fPoints.push_back_n(numPts);
     }
 
     SkScalar* weights = nullptr;
     if (int numConics = path.countWeights()) {
-        weights = fConicWeights.append(numConics);
+        weights = fConicWeights.push_back_n(numConics);
     }
 
     SkDEBUGCODE(this->validate();)
@@ -407,12 +370,12 @@ SkPoint* SkPathRef::growForRepeatedVerb(int /*SkPath::Verb*/ verb,
     fIsOval = false;
     fIsRRect = false;
 
-    memset(fVerbs.append(numVbs), verb, numVbs);
+    memset(fVerbs.push_back_n(numVbs), verb, numVbs);
     if (SkPath::kConic_Verb == verb) {
         SkASSERT(weights);
-        *weights = fConicWeights.append(numVbs);
+        *weights = fConicWeights.push_back_n(numVbs);
     }
-    SkPoint* pts = fPoints.append(pCnt);
+    SkPoint* pts = fPoints.push_back_n(pCnt);
 
     SkDEBUGCODE(this->validate();)
     return pts;
@@ -460,19 +423,19 @@ SkPoint* SkPathRef::growForVerb(int /* SkPath::Verb*/ verb, SkScalar weight) {
     fIsOval = false;
     fIsRRect = false;
 
-    *fVerbs.append() = verb;
+    fVerbs.push_back(verb);
     if (SkPath::kConic_Verb == verb) {
-        *fConicWeights.append() = weight;
+        fConicWeights.push_back(weight);
     }
-    SkPoint* pts = fPoints.append(pCnt);
+    SkPoint* pts = fPoints.push_back_n(pCnt);
 
     SkDEBUGCODE(this->validate();)
     return pts;
 }
 
-uint32_t SkPathRef::genID() const {
+uint32_t SkPathRef::genID(uint8_t fillType) const {
     SkASSERT(fEditorsAttached.load() == 0);
-    static const uint32_t kMask = (static_cast<int64_t>(1) << SkPathPriv::kPathRefGenIDBitCnt) - 1;
+    static const uint32_t kMask = (static_cast<int64_t>(1) << kPathRefGenIDBitCnt) - 1;
 
     if (fGenerationID == 0) {
         if (fPoints.empty() && fVerbs.empty()) {
@@ -484,6 +447,10 @@ uint32_t SkPathRef::genID() const {
             } while (fGenerationID == 0 || fGenerationID == kEmptyGenID);
         }
     }
+    #if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK)
+        SkASSERT((unsigned)fillType < (1 << (32 - kPathRefGenIDBitCnt)));
+        fGenerationID |= static_cast<uint32_t>(fillType) << kPathRefGenIDBitCnt;
+    #endif
     return fGenerationID;
 }
 
@@ -694,25 +661,18 @@ bool SkPathRef::isValid() const {
     return true;
 }
 
+void SkPathRef::reset() {
+    commonReset();
+    fPoints.clear();
+    fVerbs.clear();
+    fConicWeights.clear();
+    SkDEBUGCODE(validate();)
+}
+
 bool SkPathRef::dataMatchesVerbs() const {
     const auto info = sk_path_analyze_verbs(fVerbs.begin(), fVerbs.size());
     return info.valid                          &&
            info.segmentMask == fSegmentMask    &&
            info.points      == fPoints.size()  &&
            info.weights     == fConicWeights.size();
-}
-//////////////////////////////////////////////////////////////////////////////////////////////////
-
-SkPathEdgeIter::SkPathEdgeIter(const SkPath& path) {
-    fMoveToPtr = fPts = path.fPathRef->points();
-    fVerbs = path.fPathRef->verbsBegin();
-    fVerbsStop = path.fPathRef->verbsEnd();
-    fConicWeights = path.fPathRef->conicWeights();
-    if (fConicWeights) {
-        fConicWeights -= 1;  // begin one behind
-    }
-
-    fNeedsCloseLine = false;
-    fNextIsNewContour = false;
-    SkDEBUGCODE(fIsConic = false;)
 }

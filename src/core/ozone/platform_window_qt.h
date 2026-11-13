@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef PLATFORM_WINDOW_QT_H
 #define PLATFORM_WINDOW_QT_H
@@ -33,7 +34,7 @@ public:
     void SetCapture() override { }
     void ReleaseCapture() override { }
     bool HasCapture() const override { return false; }
-    void ToggleFullscreen() override { }
+    void SetFullscreen(bool, int64_t) override { }
     void Maximize() override { }
     void Minimize() override { }
     void Restore() override { }

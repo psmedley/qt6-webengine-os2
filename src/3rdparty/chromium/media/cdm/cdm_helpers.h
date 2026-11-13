@@ -9,7 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "media/base/media_export.h"
 #include "media/base/video_color_space.h"
 #include "media/cdm/api/content_decryption_module.h"
@@ -18,6 +18,10 @@
 namespace media {
 
 class VideoFrame;
+
+// File size limit is 512KB. Licenses saved by the CDM are typically several
+// hundreds of bytes.
+constexpr int64_t kMaxFileSizeBytes = 512 * 1024;
 
 class DecryptedBlockImpl final : public cdm::DecryptedBlock {
  public:

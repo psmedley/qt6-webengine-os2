@@ -42,12 +42,15 @@ struct PairPosFormat1 : public OT::Layout::GPOS_impl::PairPosFormat1_3<SmallType
     int64_t vertex_len = vertex.obj.tail - vertex.obj.head;
     unsigned min_size = OT::Layout::GPOS_impl::PairPosFormat1_3<SmallTypes>::min_size;
     if (vertex_len < min_size) return false;
+    hb_barrier ();
 
     return vertex_len >=
         min_size + pairSet.get_size () - pairSet.len.get_size();
   }
 
-  hb_vector_t<unsigned> split_subtables (gsubgpos_graph_context_t& c, unsigned this_index)
+  hb_vector_t<unsigned> split_subtables (gsubgpos_graph_context_t& c,
+                                         unsigned parent_index,
+                                         unsigned this_index)
   {
     hb_set_t visited;
 
@@ -81,7 +84,7 @@ struct PairPosFormat1 : public OT::Layout::GPOS_impl::PairPosFormat1_3<SmallType
     split_context_t split_context {
       c,
       this,
-      this_index,
+      c.graph.duplicate_if_shared (parent_index, this_index),
     };
 
     return actuate_subtable_split<split_context_t> (split_context, split_points);
@@ -125,23 +128,19 @@ struct PairPosFormat1 : public OT::Layout::GPOS_impl::PairPosFormat1_3<SmallType
     pairSet.len = count;
     c.graph.vertices_[this_index].obj.tail -= (old_count - count) * SmallTypes::size;
 
-    unsigned coverage_id = c.graph.mutable_index_for_offset (this_index, &coverage);
-    unsigned coverage_size = c.graph.vertices_[coverage_id].table_size ();
-    auto& coverage_v = c.graph.vertices_[coverage_id];
+    auto coverage = c.graph.as_mutable_table<Coverage> (this_index, &this->coverage);
+    if (!coverage) return false;
 
-    Coverage* coverage_table = (Coverage*) coverage_v.obj.head;
-    if (!coverage_table || !coverage_table->sanitize (coverage_v))
-      return false;
-
+    unsigned coverage_size = coverage.vertex->table_size ();
     auto new_coverage =
-        + hb_zip (coverage_table->iter (), hb_range ())
+        + hb_zip (coverage.table->iter (), hb_range ())
         | hb_filter ([&] (hb_pair_t<unsigned, unsigned> p) {
           return p.second < count;
         })
         | hb_map_retains_sorting (hb_first)
         ;
 
-    return Coverage::make_coverage (c, new_coverage, coverage_id, coverage_size);
+    return Coverage::make_coverage (c, new_coverage, coverage.index, coverage_size);
   }
 
   // Create a new PairPos including PairSet's from start (inclusive) to end (exclusive).
@@ -200,13 +199,16 @@ struct PairPosFormat2 : public OT::Layout::GPOS_impl::PairPosFormat2_4<SmallType
     size_t vertex_len = vertex.table_size ();
     unsigned min_size = OT::Layout::GPOS_impl::PairPosFormat2_4<SmallTypes>::min_size;
     if (vertex_len < min_size) return false;
+    hb_barrier ();
 
     const unsigned class1_count = class1Count;
     return vertex_len >=
         min_size + class1_count * get_class1_record_size ();
   }
 
-  hb_vector_t<unsigned> split_subtables (gsubgpos_graph_context_t& c, unsigned this_index)
+  hb_vector_t<unsigned> split_subtables (gsubgpos_graph_context_t& c,
+                                         unsigned parent_index,
+                                         unsigned this_index)
   {
     const unsigned base_size = OT::Layout::GPOS_impl::PairPosFormat2_4<SmallTypes>::min_size;
     const unsigned class_def_2_size = size_of (c, this_index, &classDef2);
@@ -215,7 +217,7 @@ struct PairPosFormat2 : public OT::Layout::GPOS_impl::PairPosFormat2_4<SmallType
     auto gid_and_class =
         + coverage->iter ()
         | hb_map_retains_sorting ([&] (hb_codepoint_t gid) {
-          return hb_pair_t<hb_codepoint_t, hb_codepoint_t> (gid, class_def_1->get_class (gid));
+          return hb_codepoint_pair_t (gid, class_def_1->get_class (gid));
         })
         ;
     class_def_size_estimator_t estimator (gid_and_class);
@@ -287,7 +289,7 @@ struct PairPosFormat2 : public OT::Layout::GPOS_impl::PairPosFormat2_4<SmallType
     split_context_t split_context {
       c,
       this,
-      this_index,
+      c.graph.duplicate_if_shared (parent_index, this_index),
       class1_record_size,
       total_value_len,
       value_1_len,
@@ -386,14 +388,14 @@ struct PairPosFormat2 : public OT::Layout::GPOS_impl::PairPosFormat2_4<SmallType
     auto klass_map =
     + coverage_table->iter ()
     | hb_map_retains_sorting ([&] (hb_codepoint_t gid) {
-      return hb_pair_t<hb_codepoint_t, hb_codepoint_t> (gid, class_def_1_table->get_class (gid));
+      return hb_codepoint_pair_t (gid, class_def_1_table->get_class (gid));
     })
     | hb_filter ([&] (hb_codepoint_t klass) {
       return klass >= start && klass < end;
     }, hb_second)
-    | hb_map_retains_sorting ([&] (hb_pair_t<hb_codepoint_t, hb_codepoint_t> gid_and_class) {
+    | hb_map_retains_sorting ([&] (hb_codepoint_pair_t gid_and_class) {
       // Classes must be from 0...N so subtract start
-      return hb_pair_t<hb_codepoint_t, hb_codepoint_t> (gid_and_class.first, gid_and_class.second - start);
+      return hb_codepoint_pair_t (gid_and_class.first, gid_and_class.second - start);
     })
     ;
 
@@ -419,7 +421,7 @@ struct PairPosFormat2 : public OT::Layout::GPOS_impl::PairPosFormat2_4<SmallType
     class_def_link->width = SmallTypes::size;
     class_def_link->objidx = class_def_2_id;
     class_def_link->position = 10;
-    graph.vertices_[class_def_2_id].parents.push (pair_pos_prime_id);
+    graph.vertices_[class_def_2_id].add_parent (pair_pos_prime_id);
     graph.duplicate (pair_pos_prime_id, class_def_2_id);
 
     return pair_pos_prime_id;
@@ -434,7 +436,7 @@ struct PairPosFormat2 : public OT::Layout::GPOS_impl::PairPosFormat2_4<SmallType
 
     char* start_addr = ((char*)&values[0]) + start * split_context.class1_record_size;
     unsigned num_records = end - start;
-    memcpy (&pair_pos_prime->values[0],
+    hb_memcpy (&pair_pos_prime->values[0],
             start_addr,
             num_records * split_context.class1_record_size);
 
@@ -508,40 +510,37 @@ struct PairPosFormat2 : public OT::Layout::GPOS_impl::PairPosFormat2_4<SmallType
     graph.vertices_[split_context.this_index].obj.tail -=
         (old_count - count) * split_context.class1_record_size;
 
-    unsigned coverage_id =
-        graph.mutable_index_for_offset (split_context.this_index, &coverage);
-    unsigned class_def_1_id =
-        graph.mutable_index_for_offset (split_context.this_index, &classDef1);
-    auto& coverage_v = graph.vertices_[coverage_id];
-    auto& class_def_1_v = graph.vertices_[class_def_1_id];
-    Coverage* coverage_table = (Coverage*) coverage_v.obj.head;
-    ClassDef* class_def_1_table = (ClassDef*) class_def_1_v.obj.head;
-    if (!coverage_table
-        || !coverage_table->sanitize (coverage_v)
-        || !class_def_1_table
-        || !class_def_1_table->sanitize (class_def_1_v))
-      return false;
+    auto coverage =
+        graph.as_mutable_table<Coverage> (split_context.this_index, &this->coverage);
+    if (!coverage) return false;
+
+    auto class_def_1 =
+        graph.as_mutable_table<ClassDef> (split_context.this_index, &classDef1);
+    if (!class_def_1) return false;
 
     auto klass_map =
-    + coverage_table->iter ()
+    + coverage.table->iter ()
     | hb_map_retains_sorting ([&] (hb_codepoint_t gid) {
-      return hb_pair_t<hb_codepoint_t, hb_codepoint_t> (gid, class_def_1_table->get_class (gid));
+      return hb_codepoint_pair_t (gid, class_def_1.table->get_class (gid));
     })
     | hb_filter ([&] (hb_codepoint_t klass) {
       return klass < count;
     }, hb_second)
     ;
 
+    auto new_coverage = + klass_map | hb_map_retains_sorting (hb_first);
     if (!Coverage::make_coverage (split_context.c,
-                                  + klass_map | hb_map_retains_sorting (hb_first),
-                                  coverage_id,
-                                  coverage_v.table_size ()))
+                                  + new_coverage,
+                                  coverage.index,
+                                  // existing ranges my not be kept, worst case size is a format 1
+                                  // coverage table.
+                                  4 + new_coverage.len() * 2))
       return false;
 
     return ClassDef::make_class_def (split_context.c,
                                      + klass_map,
-                                     class_def_1_id,
-                                     class_def_1_v.table_size ());
+                                     class_def_1.index,
+                                     class_def_1.vertex->table_size ());
   }
 
   hb_hashmap_t<unsigned, unsigned>
@@ -605,14 +604,16 @@ struct PairPosFormat2 : public OT::Layout::GPOS_impl::PairPosFormat2_4<SmallType
 
 struct PairPos : public OT::Layout::GPOS_impl::PairPos
 {
-  hb_vector_t<unsigned> split_subtables (gsubgpos_graph_context_t& c, unsigned this_index)
+  hb_vector_t<unsigned> split_subtables (gsubgpos_graph_context_t& c,
+                                         unsigned parent_index,
+                                         unsigned this_index)
   {
     switch (u.format) {
     case 1:
-      return ((PairPosFormat1*)(&u.format1))->split_subtables (c, this_index);
+      return ((PairPosFormat1*)(&u.format1))->split_subtables (c, parent_index, this_index);
     case 2:
-      return ((PairPosFormat2*)(&u.format2))->split_subtables (c, this_index);
-#ifndef HB_NO_BORING_EXPANSION
+      return ((PairPosFormat2*)(&u.format2))->split_subtables (c, parent_index, this_index);
+#ifndef HB_NO_BEYOND_64K
     case 3: HB_FALLTHROUGH;
     case 4: HB_FALLTHROUGH;
       // Don't split 24bit PairPos's.
@@ -626,13 +627,14 @@ struct PairPos : public OT::Layout::GPOS_impl::PairPos
   {
     int64_t vertex_len = vertex.obj.tail - vertex.obj.head;
     if (vertex_len < u.format.get_size ()) return false;
+    hb_barrier ();
 
     switch (u.format) {
     case 1:
       return ((PairPosFormat1*)(&u.format1))->sanitize (vertex);
     case 2:
       return ((PairPosFormat2*)(&u.format2))->sanitize (vertex);
-#ifndef HB_NO_BORING_EXPANSION
+#ifndef HB_NO_BEYOND_64K
     case 3: HB_FALLTHROUGH;
     case 4: HB_FALLTHROUGH;
 #endif

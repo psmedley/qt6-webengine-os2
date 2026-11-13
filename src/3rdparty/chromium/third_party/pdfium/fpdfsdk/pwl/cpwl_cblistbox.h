@@ -1,4 +1,4 @@
-// Copyright 2020 PDFium Authors. All rights reserved.
+// Copyright 2020 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ class CPWL_CBListBox final : public CPWL_ListBox {
   bool OnLButtonUp(Mask<FWL_EVENTFLAG> nFlag, const CFX_PointF& point) override;
 
   bool IsMovementKey(FWL_VKEYCODE nKeyCode) const;
-  bool OnMovementKeyDown(FWL_VKEYCODE nKyeCode, Mask<FWL_EVENTFLAG> nFlag);
+  bool OnMovementKeyDown(FWL_VKEYCODE nKeyCode, Mask<FWL_EVENTFLAG> nFlag);
   bool IsChar(uint16_t nChar, Mask<FWL_EVENTFLAG> nFlag) const;
   bool OnCharNotify(uint16_t nChar, Mask<FWL_EVENTFLAG> nFlag);
 };

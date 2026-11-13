@@ -185,7 +185,7 @@ static YuvPixel mp_get_yuv_from_rgb(MotionPixelsContext *mp, int x, int y)
     int color;
 
     color = *(uint16_t *)&mp->frame->data[0][y * mp->frame->linesize[0] + x * 2];
-    return mp_rgb_yuv_table[color];
+    return mp_rgb_yuv_table[color & 0x7FFF];
 }
 
 static void mp_set_rgb_from_yuv(MotionPixelsContext *mp, int x, int y, const YuvPixel *p)
@@ -328,7 +328,7 @@ static int mp_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     if (mp->codes_count > 1) {
         /* The entries of the mp->codes array are sorted from right to left
          * in the Huffman tree, hence -(int)sizeof(HuffCode). */
-        ret = ff_init_vlc_from_lengths(&mp->vlc, mp->max_codes_bits, mp->codes_count,
+        ret = ff_vlc_init_from_lengths(&mp->vlc, mp->max_codes_bits, mp->codes_count,
                                        &mp->codes[mp->codes_count - 1].size,  -(int)sizeof(HuffCode),
                                        &mp->codes[mp->codes_count - 1].delta, -(int)sizeof(HuffCode), 1,
                                        0, 0, avctx);
@@ -336,7 +336,7 @@ static int mp_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
             goto end;
     }
     mp_decode_frame_helper(mp, &gb);
-    ff_free_vlc(&mp->vlc);
+    ff_vlc_free(&mp->vlc);
 
 end:
     if ((ret = av_frame_ref(rframe, mp->frame)) < 0)

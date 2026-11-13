@@ -8,49 +8,30 @@
 #ifndef SkGlyphRun_DEFINED
 #define SkGlyphRun_DEFINED
 
-#include <functional>
+#include "include/core/SkFont.h"
+#include "include/core/SkFontTypes.h"
+#include "include/core/SkPoint.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSpan.h"
+#include "include/core/SkTextBlob.h"
+#include "include/core/SkTypes.h"
+#include "include/private/base/SkTemplates.h"
+#include "src/base/SkZip.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <optional>
+#include <tuple>
 #include <vector>
 
-#include "include/core/SkFont.h"
-#include "include/core/SkPaint.h"
-#include "include/core/SkPoint.h"
-#include "include/core/SkRSXform.h"
-#include "include/core/SkSpan.h"
-#include "include/core/SkTypes.h"
-#include "include/private/SkTemplates.h"
-#include "src/core/SkGlyphBuffer.h"
-#include "src/core/SkZip.h"
-
-class SkBaseDevice;
-class SkCanvas;
-class SkGlyph;
-class SkTextBlob;
-class SkTextBlobRunIterator;
+class SkPaint;
+struct SkRSXform;
 
 namespace sktext {
 class GlyphRunBuilder;
-class GlyphRunList;
-
-class SkSubRunBuffers {
-public:
-    class ScopedBuffers {
-    public:
-        ScopedBuffers(SkSubRunBuffers* painter, size_t size);
-        ~ScopedBuffers();
-        std::tuple<SkDrawableGlyphBuffer*, SkSourceGlyphBuffer*> buffers() {
-            return {&fBuffers->fAccepted, &fBuffers->fRejected};
-        }
-
-    private:
-        SkSubRunBuffers* const fBuffers;
-    };
-    static ScopedBuffers SK_WARN_UNUSED_RESULT EnsureBuffers(const GlyphRunList& glyphRunList);
-
-private:
-    SkDrawableGlyphBuffer fAccepted;
-    SkSourceGlyphBuffer fRejected;
-};
 
 class GlyphRun {
 public:
@@ -102,7 +83,7 @@ public:
                  GlyphRunBuilder* builder);
     uint64_t uniqueID() const;
     bool anyRunsLCD() const;
-    void temporaryShuntBlobNotifyAddedToCache(uint32_t cacheID) const;
+    void temporaryShuntBlobNotifyAddedToCache(uint32_t cacheID, SkTextBlob::PurgeDelegate) const;
 
     bool canCache() const { return fOriginalTextBlob != nullptr; }
     size_t runCount() const { return fGlyphRuns.size(); }
@@ -112,6 +93,13 @@ public:
             glyphCount += run.runSize();
         }
         return glyphCount;
+    }
+    size_t maxGlyphRunSize() const {
+        size_t size = 0;
+        for (const GlyphRun& run : *this) {
+            size = std::max(run.runSize(), size);
+        }
+        return size;
     }
 
     bool hasRSXForm() const {
@@ -128,7 +116,6 @@ public:
     SkRect sourceBoundsWithOrigin() const { return fSourceBounds.makeOffset(fOrigin); }
     const SkTextBlob* blob() const { return fOriginalTextBlob; }
     GlyphRunBuilder* builder() const { return fBuilder; }
-    SkSubRunBuffers* buffers() const;
 
     auto begin() -> decltype(fGlyphRuns.begin())               { return fGlyphRuns.begin();      }
     auto end()   -> decltype(fGlyphRuns.end())                 { return fGlyphRuns.end();        }
@@ -161,7 +148,6 @@ public:
             convertRSXForm(SkSpan<const SkRSXform> xforms);
 
     bool empty() const { return fGlyphRunListStorage.empty(); }
-    SkSubRunBuffers* buffers() { return &fSubRunBuffers; }
 
 private:
     void initialize(const SkTextBlob& blob);
@@ -182,9 +168,9 @@ private:
             const SkTextBlob* blob, const SkRect& bounds, SkPoint origin);
 
     int fMaxTotalRunSize{0};
-    SkAutoTMalloc<SkPoint> fPositions;
+    skia_private::AutoTMalloc<SkPoint> fPositions;
     int fMaxScaledRotations{0};
-    SkAutoTMalloc<SkVector> fScaledRotations;
+    skia_private::AutoTMalloc<SkVector> fScaledRotations;
 
     std::vector<GlyphRun> fGlyphRunListStorage;
     std::optional<GlyphRunList> fGlyphRunList;  // Defaults to no value;
@@ -193,9 +179,7 @@ private:
     // glyph ids will ever be needed because blobs are already glyph based.
     std::vector<SkGlyphID> fScratchGlyphIDs;
 
-    SkSubRunBuffers fSubRunBuffers;
 };
-inline SkSubRunBuffers* GlyphRunList::buffers() const { return fBuilder->buffers(); }
 }  // namespace sktext
 
 #endif  // SkGlyphRun_DEFINED

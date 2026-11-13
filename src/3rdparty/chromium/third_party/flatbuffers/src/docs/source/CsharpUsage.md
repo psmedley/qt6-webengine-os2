@@ -82,7 +82,7 @@ pass to the `GetRootAsMyRootType` function:
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~{.cs}
     using MyGame.Example;
-    using FlatBuffers;
+    using Google.FlatBuffers;
 
     // This snippet ignores exceptions for brevity.
     byte[] data = File.ReadAllBytes("monsterdata_test.mon");
@@ -141,6 +141,47 @@ To use it:
     speed to `Dictionary`, though may be faster because of better caching.
     `ByKey` only works if the vector has been sorted, it will
     likely not find elements if it hasn't been sorted.
+
+## Buffer verification 
+
+As mentioned in [C++ Usage](@ref flatbuffers_guide_use_cpp) buffer
+accessor functions do not verify buffer offsets at run-time. 
+If it is necessary, you can optionally use a buffer verifier before you
+access the data. This verifier will check all offsets, all sizes of
+fields, and null termination of strings to ensure that when a buffer
+is accessed, all reads will end up inside the buffer.
+
+Each root type will have a verification function generated for it,
+e.g. `Monster.VerifyMonster`. This can be called as shown:
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~{.cs}
+    var ok = Monster.VerifyMonster(buf);
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+if `ok` is true, the buffer is safe to read.
+
+For a more detailed control of verification `MonsterVerify.Verify` 
+for `Monster` type can be used: 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~{.cs}
+    # Sequence of calls
+    FlatBuffers.Verifier verifier = new FlatBuffers.Verifier(buf);
+    var ok = verifier.VerifyBuffer("MONS", false, MonsterVerify.Verify);
+    
+    # Or single line call 
+    var ok = new FlatBuffers.Verifier(bb).setStringCheck(true).\
+             VerifyBuffer("MONS", false, MonsterVerify.Verify);
+       
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+if `ok` is true, the buffer is safe to read.
+
+A second parameter of `verifyBuffer` specifies whether buffer content is
+size prefixed or not. In the example above, the buffer is assumed to not include
+size prefix (`false`).
+
+Verifier supports options that can be set using appropriate fluent methods:
+* SetMaxDepth - limit the nesting depth. Default: 1000000
+* SetMaxTables - total amount of tables the verifier may encounter. Default: 64
+* SetAlignmentCheck - check content alignment. Default: True
+* SetStringCheck - check if strings contain termination '0' character. Default: true
+ 
 
 ## Text parsing
 

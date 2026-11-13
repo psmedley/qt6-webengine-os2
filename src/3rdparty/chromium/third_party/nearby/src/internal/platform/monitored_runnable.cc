@@ -14,29 +14,31 @@
 
 #include "internal/platform/monitored_runnable.h"
 
+#include <utility>
+
+// TODO: Support thread status
 #include "internal/platform/logging.h"
 #include "internal/platform/pending_job_registry.h"
 
-namespace location {
-namespace nearby {
+#define SET_THREAD_STATUS(NAME)
 
+namespace nearby {
 namespace {
 absl::Duration kMinReportedStartDelay = absl::Seconds(5);
 absl::Duration kMinReportedTaskDuration = absl::Seconds(10);
 }  // namespace
 
 MonitoredRunnable::MonitoredRunnable(Runnable&& runnable)
-    : runnable_{runnable} {}
+    : runnable_{std::move(runnable)} {}
 
 MonitoredRunnable::MonitoredRunnable(const std::string& name,
                                      Runnable&& runnable)
-    : name_{name}, runnable_{runnable} {
+    : name_{name}, runnable_{std::move(runnable)} {
   PendingJobRegistry::GetInstance().AddPendingJob(name_, post_time_);
 }
 
-MonitoredRunnable::~MonitoredRunnable() = default;
-
-void MonitoredRunnable::operator()() const {
+void MonitoredRunnable::operator()() {
+  SET_THREAD_STATUS(name_.c_str());
   auto start_time = SystemClock::ElapsedRealtime();
   auto start_delay = start_time - post_time_;
   if (start_delay >= kMinReportedStartDelay) {
@@ -56,4 +58,3 @@ void MonitoredRunnable::operator()() const {
 }
 
 }  // namespace nearby
-}  // namespace location

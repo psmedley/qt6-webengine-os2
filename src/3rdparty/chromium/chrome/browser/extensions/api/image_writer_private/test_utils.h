@@ -39,9 +39,9 @@ const char kDummyExtensionId[] = "DummyExtension";
 // Default file size to use in tests.  Currently 32kB.
 const int kTestFileSize = 32 * 1024;
 // Pattern to use in the image file.
-const int kImagePattern = 0x55555555; // 01010101
+const uint8_t kImagePattern = 0x55;  // 01010101
 // Pattern to use in the device file.
-const int kDevicePattern = 0xAAAAAAAA; // 10101010
+const uint8_t kDevicePattern = 0xAA;  // 10101010
 // Disk file system type
 const char kTestFileSystemType[] = "vfat";
 
@@ -140,8 +140,8 @@ class FakeImageWriterClient : public ImageWriterUtilityClient {
   ErrorCallback error_callback_;
   CancelCallback cancel_callback_;
 
-  absl::optional<SimulateProgressInfo> simulate_on_write_;
-  absl::optional<SimulateProgressInfo> simulate_on_verify_;
+  std::optional<SimulateProgressInfo> simulate_on_write_;
+  std::optional<SimulateProgressInfo> simulate_on_verify_;
 };
 
 class ImageWriterTestUtils {
@@ -165,9 +165,7 @@ class ImageWriterTestUtils {
 
   // Fills |file| with |length| bytes of |pattern|, overwriting any existing
   // data.
-  bool FillFile(const base::FilePath& file,
-                const int pattern,
-                const int length);
+  bool FillFile(const base::FilePath& file, uint8_t pattern, size_t length);
 
   // Set up the test utils, creating temporary folders and such.
   virtual void SetUp();

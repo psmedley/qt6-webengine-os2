@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "core/fxcrt/widestring.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 #include "xfa/fgas/crt/locale_iface.h"
 
 class CFX_DateTime;

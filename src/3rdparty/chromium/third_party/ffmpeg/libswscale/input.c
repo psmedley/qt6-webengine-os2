@@ -65,9 +65,9 @@ rgb64ToUV_c_template(uint16_t *dstU, uint16_t *dstV,
     int32_t rv = rgb2yuv[RV_IDX], gv = rgb2yuv[GV_IDX], bv = rgb2yuv[BV_IDX];
     av_assert1(src1==src2);
     for (i = 0; i < width; i++) {
-        int r_b = input_pixel(&src1[i*4+0]);
-        int   g = input_pixel(&src1[i*4+1]);
-        int b_r = input_pixel(&src1[i*4+2]);
+        unsigned int r_b = input_pixel(&src1[i*4+0]);
+        unsigned int   g = input_pixel(&src1[i*4+1]);
+        unsigned int b_r = input_pixel(&src1[i*4+2]);
 
         dstU[i] = (ru*r + gu*g + bu*b + (0x10001<<(RGB2YUV_SHIFT-1))) >> RGB2YUV_SHIFT;
         dstV[i] = (rv*r + gv*g + bv*b + (0x10001<<(RGB2YUV_SHIFT-1))) >> RGB2YUV_SHIFT;
@@ -84,9 +84,9 @@ rgb64ToUV_half_c_template(uint16_t *dstU, uint16_t *dstV,
     int32_t rv = rgb2yuv[RV_IDX], gv = rgb2yuv[GV_IDX], bv = rgb2yuv[BV_IDX];
     av_assert1(src1==src2);
     for (i = 0; i < width; i++) {
-        int r_b = (input_pixel(&src1[8 * i + 0]) + input_pixel(&src1[8 * i + 4]) + 1) >> 1;
-        int   g = (input_pixel(&src1[8 * i + 1]) + input_pixel(&src1[8 * i + 5]) + 1) >> 1;
-        int b_r = (input_pixel(&src1[8 * i + 2]) + input_pixel(&src1[8 * i + 6]) + 1) >> 1;
+        unsigned r_b = (input_pixel(&src1[8 * i + 0]) + input_pixel(&src1[8 * i + 4]) + 1) >> 1;
+        unsigned   g = (input_pixel(&src1[8 * i + 1]) + input_pixel(&src1[8 * i + 5]) + 1) >> 1;
+        unsigned b_r = (input_pixel(&src1[8 * i + 2]) + input_pixel(&src1[8 * i + 6]) + 1) >> 1;
 
         dstU[i]= (ru*r + gu*g + bu*b + (0x10001<<(RGB2YUV_SHIFT-1))) >> RGB2YUV_SHIFT;
         dstV[i]= (rv*r + gv*g + bv*b + (0x10001<<(RGB2YUV_SHIFT-1))) >> RGB2YUV_SHIFT;
@@ -158,9 +158,9 @@ static av_always_inline void rgb48ToUV_c_template(uint16_t *dstU,
     int32_t rv = rgb2yuv[RV_IDX], gv = rgb2yuv[GV_IDX], bv = rgb2yuv[BV_IDX];
     av_assert1(src1 == src2);
     for (i = 0; i < width; i++) {
-        int r_b = input_pixel(&src1[i * 3 + 0]);
-        int g   = input_pixel(&src1[i * 3 + 1]);
-        int b_r = input_pixel(&src1[i * 3 + 2]);
+        unsigned r_b = input_pixel(&src1[i * 3 + 0]);
+        unsigned g   = input_pixel(&src1[i * 3 + 1]);
+        unsigned b_r = input_pixel(&src1[i * 3 + 2]);
 
         dstU[i] = (ru*r + gu*g + bu*b + (0x10001 << (RGB2YUV_SHIFT - 1))) >> RGB2YUV_SHIFT;
         dstV[i] = (rv*r + gv*g + bv*b + (0x10001 << (RGB2YUV_SHIFT - 1))) >> RGB2YUV_SHIFT;
@@ -180,12 +180,12 @@ static av_always_inline void rgb48ToUV_half_c_template(uint16_t *dstU,
     int32_t rv = rgb2yuv[RV_IDX], gv = rgb2yuv[GV_IDX], bv = rgb2yuv[BV_IDX];
     av_assert1(src1 == src2);
     for (i = 0; i < width; i++) {
-        int r_b = (input_pixel(&src1[6 * i + 0]) +
-                   input_pixel(&src1[6 * i + 3]) + 1) >> 1;
-        int g   = (input_pixel(&src1[6 * i + 1]) +
-                   input_pixel(&src1[6 * i + 4]) + 1) >> 1;
-        int b_r = (input_pixel(&src1[6 * i + 2]) +
-                   input_pixel(&src1[6 * i + 5]) + 1) >> 1;
+        unsigned r_b = (input_pixel(&src1[6 * i + 0]) +
+                        input_pixel(&src1[6 * i + 3]) + 1) >> 1;
+        unsigned g   = (input_pixel(&src1[6 * i + 1]) +
+                        input_pixel(&src1[6 * i + 4]) + 1) >> 1;
+        unsigned b_r = (input_pixel(&src1[6 * i + 2]) +
+                        input_pixel(&src1[6 * i + 5]) + 1) >> 1;
 
         dstU[i] = (ru*r + gu*g + bu*b + (0x10001 << (RGB2YUV_SHIFT - 1))) >> RGB2YUV_SHIFT;
         dstV[i] = (rv*r + gv*g + bv*b + (0x10001 << (RGB2YUV_SHIFT - 1))) >> RGB2YUV_SHIFT;
@@ -1149,6 +1149,7 @@ rgb9plus_planar_funcs(16)
 
 rgb9plus_planar_transparency_funcs(10)
 rgb9plus_planar_transparency_funcs(12)
+rgb9plus_planar_transparency_funcs(14)
 rgb9plus_planar_transparency_funcs(16)
 
 #define rgbf32_planar_funcs_endian(endian_name, endian)                                             \
@@ -1326,6 +1327,7 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
     case AV_PIX_FMT_GBRP12LE:
         c->readChrPlanar = planar_rgb12le_to_uv;
         break;
+    case AV_PIX_FMT_GBRAP14LE:
     case AV_PIX_FMT_GBRP14LE:
         c->readChrPlanar = planar_rgb14le_to_uv;
         break;
@@ -1348,6 +1350,7 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
     case AV_PIX_FMT_GBRP12BE:
         c->readChrPlanar = planar_rgb12be_to_uv;
         break;
+    case AV_PIX_FMT_GBRAP14BE:
     case AV_PIX_FMT_GBRP14BE:
         c->readChrPlanar = planar_rgb14be_to_uv;
         break;
@@ -1452,9 +1455,13 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
         c->chrToYV12 = p010BEToUV_c;
         break;
     case AV_PIX_FMT_P012LE:
+    case AV_PIX_FMT_P212LE:
+    case AV_PIX_FMT_P412LE:
         c->chrToYV12 = p012LEToUV_c;
         break;
     case AV_PIX_FMT_P012BE:
+    case AV_PIX_FMT_P212BE:
+    case AV_PIX_FMT_P412BE:
         c->chrToYV12 = p012BEToUV_c;
         break;
     case AV_PIX_FMT_P016LE:
@@ -1682,6 +1689,8 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
     case AV_PIX_FMT_GBRP12LE:
         c->readLumPlanar = planar_rgb12le_to_y;
         break;
+    case AV_PIX_FMT_GBRAP14LE:
+        c->readAlpPlanar = planar_rgb14le_to_a;
     case AV_PIX_FMT_GBRP14LE:
         c->readLumPlanar = planar_rgb14le_to_y;
         break;
@@ -1708,6 +1717,8 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
     case AV_PIX_FMT_GBRP12BE:
         c->readLumPlanar = planar_rgb12be_to_y;
         break;
+    case AV_PIX_FMT_GBRAP14BE:
+        c->readAlpPlanar = planar_rgb14be_to_a;
     case AV_PIX_FMT_GBRP14BE:
         c->readLumPlanar = planar_rgb14be_to_y;
         break;
@@ -1944,9 +1955,13 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
         c->lumToYV12 = p010BEToY_c;
         break;
     case AV_PIX_FMT_P012LE:
+    case AV_PIX_FMT_P212LE:
+    case AV_PIX_FMT_P412LE:
         c->lumToYV12 = p012LEToY_c;
         break;
     case AV_PIX_FMT_P012BE:
+    case AV_PIX_FMT_P212BE:
+    case AV_PIX_FMT_P412BE:
         c->lumToYV12 = p012BEToY_c;
         break;
     case AV_PIX_FMT_GRAYF32LE:

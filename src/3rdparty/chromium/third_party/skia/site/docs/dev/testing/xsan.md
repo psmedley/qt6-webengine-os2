@@ -30,6 +30,7 @@ This requires gsutil, part of the [gcloud sdk](https://cloud.google.com/sdk/down
 
 <!--?prettify lang=sh?-->
 
+    gcloud auth application-default login
     CLANGDIR="${HOME}/clang"
     ./bin/sk asset download clang_linux $CLANGDIR
 
@@ -77,7 +78,7 @@ Configure and Compile Skia with ASAN
         cc = "${CLANGDIR}/bin/clang"
         cxx = "${CLANGDIR}/bin/clang++"
         sanitize = "ASAN"
-        extra_ldflags = [ "-fuse-ld=lld", "-Wl,-rpath,${CLANGDIR}/lib" ]
+        extra_ldflags = [ "-fuse-ld=lld", "-Wl,-rpath,${CLANGDIR}/lib/x86_64-unknown-linux-gnu" ]
     EOF
     python3 tools/git-sync-deps
     bin/gn gen out/asan

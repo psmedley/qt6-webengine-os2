@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -727,8 +727,7 @@ CFGAS_StringFormatter::DateTimeType AddDateToDatelessType(
     case CFGAS_StringFormatter::DateTimeType::kTime:
       return CFGAS_StringFormatter::DateTimeType::kTimeDate;
     default:
-      NOTREACHED();
-      return type;
+      NOTREACHED_NORETURN();
   }
 }
 
@@ -740,8 +739,7 @@ CFGAS_StringFormatter::DateTimeType AddTimeToTimelessType(
     case CFGAS_StringFormatter::DateTimeType::kDate:
       return CFGAS_StringFormatter::DateTimeType::kDateTime;
     default:
-      NOTREACHED();
-      return type;
+      NOTREACHED_NORETURN();
   }
 }
 
@@ -1735,7 +1733,6 @@ bool CFGAS_StringFormatter::ParseDateTime(LocaleMgrIface* pLocaleMgr,
              ParseLocaleDate(wsSrcDateTime, wsDatePattern, pLocale, dtValue,
                              &iStart);
     case DateTimeType::kUnknown:
-    default:
       return false;
   }
 }

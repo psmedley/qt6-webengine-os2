@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,20 +71,20 @@ bool RenderDeviceDriverIface::DrawShading(const CPDF_ShadingPattern* pPattern,
   return false;
 }
 
-#if defined(_SKIA_SUPPORT_)
+#if defined(PDF_USE_SKIA)
 bool RenderDeviceDriverIface::SetBitsWithMask(
-    const RetainPtr<CFX_DIBBase>& pBitmap,
-    const RetainPtr<CFX_DIBBase>& pMask,
+    RetainPtr<const CFX_DIBBase> bitmap,
+    RetainPtr<const CFX_DIBBase> mask,
     int left,
     int top,
-    int bitmap_alpha,
+    float alpha,
     BlendMode blend_type) {
   return false;
 }
 
 void RenderDeviceDriverIface::SetGroupKnockout(bool group_knockout) {}
-#endif
 
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-void RenderDeviceDriverIface::Flush() {}
+bool RenderDeviceDriverIface::SyncInternalBitmaps() {
+  return true;
+}
 #endif

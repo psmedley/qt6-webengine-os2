@@ -14,6 +14,8 @@
 #include "include/core/SkTypes.h"
 #include "src/core/SkWriteBuffer.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <string_view>
 
 class SkFlattenable;
@@ -35,7 +37,7 @@ struct SkRect;
 class JsonWriteBuffer final : public SkWriteBuffer {
 public:
     JsonWriteBuffer(SkJSONWriter* writer, UrlDataManager* urlDataManager)
-            : fUrlDataManager(urlDataManager), fWriter(writer), fCount(0) {}
+            : SkWriteBuffer({}), fUrlDataManager(urlDataManager), fWriter(writer), fCount(0) {}
 
     void writePad32(const void* buffer, size_t bytes) override;
     void writeByteArray(const void* data, size_t size) override;

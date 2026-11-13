@@ -17,10 +17,10 @@
 #ifndef SRC_TRACED_PROBES_FTRACE_FTRACE_PRINT_FILTER_H_
 #define SRC_TRACED_PROBES_FTRACE_FTRACE_PRINT_FILTER_H_
 
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "perfetto/ext/base/optional.h"
 #include "src/traced/probes/ftrace/proto_translation_table.h"
 
 namespace perfetto {
@@ -36,7 +36,7 @@ class FtraceConfig_PrintFilter;
 class FtracePrintFilter {
  public:
   // Builds a filter from a proto config.
-  explicit FtracePrintFilter(const protos::gen::FtraceConfig_PrintFilter&);
+  explicit FtracePrintFilter(const protos::gen::FtraceConfig::PrintFilter&);
 
   // Returns true if a string is allowed by this filter, false otherwise.
   // The string begins at `start` and terminates after `size` bytes, or at the
@@ -45,15 +45,24 @@ class FtracePrintFilter {
 
  private:
   struct Rule {
+    enum class Type {
+      kPrefixMatch,
+      kAtraceMessage,
+    };
+    Type type;
+    std::string before_pid_part;
     std::string prefix;
     bool allow;
   };
+
+  static bool RuleMatches(const Rule&, const char* start, size_t size);
+
   std::vector<Rule> rules_;
 };
 
 class FtracePrintFilterConfig {
  public:
-  static base::Optional<FtracePrintFilterConfig> Create(
+  static std::optional<FtracePrintFilterConfig> Create(
       const protos::gen::FtraceConfig_PrintFilter&,
       ProtoTranslationTable* table);
 

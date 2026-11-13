@@ -16,6 +16,9 @@ syntax = "proto2";
 
 package location.nearby.errorcode.proto;
 
+// import "logs/proto/logs_annotations/logs_annotations.proto";
+
+// option (logs_proto.file_not_used_for_logging_except_enums) = true;
 option optimize_for = LITE_RUNTIME;
 option java_package = "com.google.location.nearby.errorcode.proto";
 option java_outer_classname = "ErrorCodeEnums";
@@ -69,6 +72,7 @@ enum Event {
   SEND_PAYLOAD = 11;
   CANCEL_PAYLOAD = 12;
   RECEIVE_PAYLOAD = 13;
+  UPGRADE = 14;
 }
 
 // The error to identify the common failure for all mediums. The range between 0
@@ -83,7 +87,7 @@ enum CommonError {
   // Device error, the medium not available on this device.
   MEDIUM_NOT_AVAILABLE = 2;
   // System error, the medium in the unexpected state, e.g. we have check the
-  // medium is on, after then it suddently off and cause Nearby
+  // medium is on, after then it suddenly off and cause Nearby
   // Connection failed.
   UNEXPECTED_MEDIUM_STATE = 3;
   // System error, the medim not available because the resource ran out. e.g.
@@ -327,6 +331,60 @@ enum DisconnectError {
   // Next ID :33
 }
 
+// The error for event SEND_PAYLOAD. The range between 31 and 99.
+enum SendPayloadError {
+  // The default value for clearcut
+  UNKNOWN_SEND_PAYLOAD_ERROR = 31;
+
+  // Network error, failed to send payload.
+  SEND_PAYLOAD_FAILED = 32;
+
+  // Next ID :33
+}
+
+// The error for event SEND_PAYLOAD. The range between 31 and 99.
+enum ReceivePayloadError {
+  // The default value for clearcut
+  UNKNOWN_RECEIVE_PAYLOAD_ERROR = 31;
+
+  // Network error, failed to send payload.
+  RECEIVE_PAYLOAD_FAILED = 32;
+
+  // Next ID :33
+}
+
+// The error for event UPGRADE. The range between 31 and 99.
+enum UpgradeError {
+  // The default value for clearcut
+  UNKNOWN_UPGRADE_ERROR = 31;
+  // System error, failed to create a wifi p2p group.
+  CREATE_P2P_GROUP_FAILED = 32;
+
+  // Next ID :33
+}
+
+// The error for event ACCEPT_CONNECTION. The range between 31 and 99.
+enum AcceptConnectionError {
+  // The default value for clearcut
+  UNKNOWN_ACCEPT_CONNECTION_ERROR = 31;
+
+  // Network error, failed to send accept connection.
+  RESPOND_ACCEPT_CONNECTION_FAILED = 32;
+
+  // Next ID :33
+}
+
+// The error for event REJECT_CONNECTION. The range between 31 and 99.
+enum RejectConnectionError {
+  // The default value for clearcut
+  UNKNOWN_REJECT_CONNECTION_ERROR = 31;
+
+  // Network error, failed to send reject connection.
+  RESPOND_REJECT_CONNECTION_FAILED = 32;
+
+  // Next ID :33
+}
+
 enum Description {
   reserved 28, 29;
 
@@ -503,4 +561,17 @@ enum Description {
   USER_RESTRICTION_DISALLOWED = 172;
   UNSUPPORTED_DEVICE_TYPE_PHONE = 173;
   UNSUPPORTED_DEVICE_TYPE_TABLET = 174;
+  BROKEN_PIPE = 175;
+  CONNECTION_ABORT = 176;
+  FEATURE_USB_HOST_NOT_SUPPORTED = 177;
+  FEATURE_USB_ACCESSORY_NOT_SUPPORTED = 178;
+  FEATURE_USB_PORTS_NOT_FOUND = 179;
+  MULTIPLEX_SOCKET_UNKNOWN_ERROR = 180;
+  MULTIPLEX_SOCKET_NOT_LISTENING = 181;
+  MULTIPLEX_SOCKET_DISABLED = 182;
+  MULTIPLEX_SOCKET_TIMEOUT = 183;
+  MULTIPLEX_SOCKET_IOEXCEPTION = 184;
+  MULTIPLEX_SOCKET_UNKNOWN_RESPONSE_CODE = 185;
+  MULTIPLEX_SOCKET_EXECUTION_EXCEPTION = 186;
+  MULTIPLEX_SOCKET_INTERRUPTED_EXCEPTION = 187;
 }

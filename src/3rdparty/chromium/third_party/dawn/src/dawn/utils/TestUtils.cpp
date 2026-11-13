@@ -1,19 +1,34 @@
-// Copyright 2020 The Dawn Authors
+// Copyright 2020 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <algorithm>
+#include <memory>
 #include <ostream>
+#include <thread>
 #include <vector>
 
 #include "dawn/common/Assert.h"
@@ -23,7 +38,7 @@
 #include "dawn/utils/TextureUtils.h"
 #include "dawn/utils/WGPUHelpers.h"
 
-namespace utils {
+namespace dawn::utils {
 
 const RGBA8 RGBA8::kZero = RGBA8(0, 0, 0, 0);
 const RGBA8 RGBA8::kBlack = RGBA8(0, 0, 0, 255);
@@ -39,9 +54,9 @@ std::ostream& operator<<(std::ostream& stream, const RGBA8& color) {
 }
 
 uint32_t GetMinimumBytesPerRow(wgpu::TextureFormat format, uint32_t width) {
-    const uint32_t bytesPerBlock = utils::GetTexelBlockSizeInBytes(format);
-    const uint32_t blockWidth = utils::GetTextureFormatBlockWidth(format);
-    ASSERT(width % blockWidth == 0);
+    const uint32_t bytesPerBlock = dawn::utils::GetTexelBlockSizeInBytes(format);
+    const uint32_t blockWidth = dawn::utils::GetTextureFormatBlockWidth(format);
+    DAWN_ASSERT(width % blockWidth == 0);
     return Align(bytesPerBlock * (width / blockWidth), kTextureBytesPerRowAlignment);
 }
 
@@ -51,7 +66,7 @@ TextureDataCopyLayout GetTextureDataCopyLayoutForTextureAtLevel(wgpu::TextureFor
                                                                 wgpu::TextureDimension dimension,
                                                                 uint32_t rowsPerImage) {
     // Compressed texture formats not supported in this function yet.
-    ASSERT(utils::GetTextureFormatBlockWidth(format) == 1);
+    DAWN_ASSERT(dawn::utils::GetTextureFormatBlockWidth(format) == 1);
 
     TextureDataCopyLayout layout;
 
@@ -77,7 +92,7 @@ TextureDataCopyLayout GetTextureDataCopyLayoutForTextureAtLevel(wgpu::TextureFor
     layout.byteLength =
         RequiredBytesInCopy(layout.bytesPerRow, appliedRowsPerImage, layout.mipSize, format);
 
-    const uint32_t bytesPerTexel = utils::GetTexelBlockSizeInBytes(format);
+    const uint32_t bytesPerTexel = dawn::utils::GetTexelBlockSizeInBytes(format);
     layout.texelBlocksPerRow = layout.bytesPerRow / bytesPerTexel;
     layout.texelBlocksPerImage = layout.bytesPerImage / bytesPerTexel;
     layout.texelBlockCount = layout.byteLength / bytesPerTexel;
@@ -89,12 +104,12 @@ uint64_t RequiredBytesInCopy(uint64_t bytesPerRow,
                              uint64_t rowsPerImage,
                              wgpu::Extent3D copyExtent,
                              wgpu::TextureFormat textureFormat) {
-    uint32_t blockSize = utils::GetTexelBlockSizeInBytes(textureFormat);
-    uint32_t blockWidth = utils::GetTextureFormatBlockWidth(textureFormat);
-    uint32_t blockHeight = utils::GetTextureFormatBlockHeight(textureFormat);
-    ASSERT(copyExtent.width % blockWidth == 0);
+    uint32_t blockSize = dawn::utils::GetTexelBlockSizeInBytes(textureFormat);
+    uint32_t blockWidth = dawn::utils::GetTextureFormatBlockWidth(textureFormat);
+    uint32_t blockHeight = dawn::utils::GetTextureFormatBlockHeight(textureFormat);
+    DAWN_ASSERT(copyExtent.width % blockWidth == 0);
     uint32_t widthInBlocks = copyExtent.width / blockWidth;
-    ASSERT(copyExtent.height % blockHeight == 0);
+    DAWN_ASSERT(copyExtent.height % blockHeight == 0);
     uint32_t heightInBlocks = copyExtent.height / blockHeight;
     return RequiredBytesInCopy(bytesPerRow, rowsPerImage, widthInBlocks, heightInBlocks,
                                copyExtent.depthOrArrayLayers, blockSize);
@@ -125,7 +140,7 @@ uint64_t GetTexelCountInCopyRegion(uint64_t bytesPerRow,
                                    wgpu::Extent3D copyExtent,
                                    wgpu::TextureFormat textureFormat) {
     return RequiredBytesInCopy(bytesPerRow, rowsPerImage, copyExtent, textureFormat) /
-           utils::GetTexelBlockSizeInBytes(textureFormat);
+           dawn::utils::GetTexelBlockSizeInBytes(textureFormat);
 }
 
 void UnalignDynamicUploader(wgpu::Device device) {
@@ -137,9 +152,10 @@ void UnalignDynamicUploader(wgpu::Device device) {
     descriptor.usage = wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::CopySrc;
     wgpu::Texture texture = device.CreateTexture(&descriptor);
 
-    wgpu::ImageCopyTexture imageCopyTexture = utils::CreateImageCopyTexture(texture, 0, {0, 0, 0});
+    wgpu::ImageCopyTexture imageCopyTexture =
+        dawn::utils::CreateImageCopyTexture(texture, 0, {0, 0, 0});
     wgpu::TextureDataLayout textureDataLayout =
-        utils::CreateTextureDataLayout(0, wgpu::kCopyStrideUndefined);
+        dawn::utils::CreateTextureDataLayout(0, wgpu::kCopyStrideUndefined);
     wgpu::Extent3D copyExtent = {1, 1, 1};
 
     // WriteTexture with exactly 1 byte of data.
@@ -166,6 +182,7 @@ uint32_t VertexFormatSize(wgpu::VertexFormat format) {
         case wgpu::VertexFormat::Float32:
         case wgpu::VertexFormat::Uint32:
         case wgpu::VertexFormat::Sint32:
+        case wgpu::VertexFormat::Unorm10_10_10_2:
             return 4;
         case wgpu::VertexFormat::Uint16x4:
         case wgpu::VertexFormat::Sint16x4:
@@ -187,7 +204,25 @@ uint32_t VertexFormatSize(wgpu::VertexFormat format) {
         case wgpu::VertexFormat::Undefined:
             break;
     }
-    UNREACHABLE();
+    DAWN_UNREACHABLE();
 }
 
-}  // namespace utils
+void RunInParallel(uint32_t numThreads,
+                   const std::function<void(uint32_t)>& workerFunc,
+                   const std::function<void()>& mainThreadFunc) {
+    std::vector<std::unique_ptr<std::thread>> threads(numThreads);
+
+    for (uint32_t i = 0; i < threads.size(); ++i) {
+        threads[i] = std::make_unique<std::thread>([i, workerFunc] { workerFunc(i); });
+    }
+
+    if (mainThreadFunc != nullptr) {
+        mainThreadFunc();
+    }
+
+    for (auto& thread : threads) {
+        thread->join();
+    }
+}
+
+}  // namespace dawn::utils

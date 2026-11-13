@@ -9,7 +9,7 @@
 
 #include "libANGLE/renderer/ContextImpl.h"
 
-#include "common/third_party/base/anglebase/no_destructor.h"
+#include "common/base/anglebase/no_destructor.h"
 #include "libANGLE/Context.h"
 
 namespace rx
@@ -66,6 +66,10 @@ egl::Error ContextImpl::reacquireHighPowerGPU(gl::Context *)
     return egl::NoError();
 }
 
+void ContextImpl::acquireExternalContext(const gl::Context *context) {}
+
+void ContextImpl::releaseExternalContext(const gl::Context *context) {}
+
 angle::Result ContextImpl::acquireTextures(const gl::Context *context,
                                            const gl::TextureBarrierVector &textureBarriers)
 {
@@ -84,5 +88,26 @@ const angle::PerfMonitorCounterGroups &ContextImpl::getPerfMonitorCounters()
 {
     static angle::base::NoDestructor<angle::PerfMonitorCounterGroups> sCounters;
     return *sCounters;
+}
+
+angle::Result ContextImpl::drawPixelLocalStorageEXTEnable(gl::Context *,
+                                                          GLsizei n,
+                                                          const gl::PixelLocalStoragePlane[],
+                                                          const GLenum loadops[])
+{
+    ASSERT(getNativePixelLocalStorageOptions().type ==
+           ShPixelLocalStorageType::PixelLocalStorageEXT);
+    UNREACHABLE();
+    return angle::Result::Stop;
+}
+
+angle::Result ContextImpl::drawPixelLocalStorageEXTDisable(gl::Context *,
+                                                           const gl::PixelLocalStoragePlane[],
+                                                           const GLenum storeops[])
+{
+    ASSERT(getNativePixelLocalStorageOptions().type ==
+           ShPixelLocalStorageType::PixelLocalStorageEXT);
+    UNREACHABLE();
+    return angle::Result::Stop;
 }
 }  // namespace rx

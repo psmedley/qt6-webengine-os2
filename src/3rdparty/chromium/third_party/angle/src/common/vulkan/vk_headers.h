@@ -11,7 +11,7 @@
 #define LIBANGLE_RENDERER_VULKAN_VK_HEADERS_H_
 
 #if ANGLE_SHARED_LIBVULKAN
-#    include "third_party/volk/volk.h"
+#    include <volk.h>
 #else
 #    include <vulkan/vulkan.h>
 #endif
@@ -155,6 +155,13 @@ extern PFN_vkCmdSetFragmentShadingRateKHR vkCmdSetFragmentShadingRateKHR;
 
 // VK_GOOGLE_display_timing
 extern PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE;
+
+// VK_EXT_host_image_copy
+extern PFN_vkCopyImageToImageEXT vkCopyImageToImageEXT;
+extern PFN_vkCopyImageToMemoryEXT vkCopyImageToMemoryEXT;
+extern PFN_vkCopyMemoryToImageEXT vkCopyMemoryToImageEXT;
+extern PFN_vkTransitionImageLayoutEXT vkTransitionImageLayoutEXT;
+extern PFN_vkGetImageSubresourceLayout2EXT vkGetImageSubresourceLayout2EXT;
 
 }  // namespace rx
 

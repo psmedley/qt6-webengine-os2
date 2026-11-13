@@ -18,12 +18,12 @@ qt_internal_add_qml_module(WebEngineQuick
         api/qquickwebengineaction_p_p.h
         api/qquickwebengineclientcertificateselection.cpp api/qquickwebengineclientcertificateselection_p.h
         api/qquickwebenginedialogrequests.cpp api/qquickwebenginedialogrequests_p.h
-        api/qquickwebenginedownloadrequest.cpp api/qquickwebenginedownloadrequest_p.h
+        api/qquickwebenginedownloadrequest.cpp api/qquickwebenginedownloadrequest.h
         api/qquickwebenginefaviconprovider.cpp
         api/qquickwebenginefaviconprovider_p_p.h
         api/qquickwebenginenewwindowrequest.cpp api/qquickwebenginenewwindowrequest_p.h
         api/qquickwebengineprofile.cpp api/qquickwebengineprofile.h api/qquickwebengineprofile_p.h
-        api/qquickwebenginescriptcollection.cpp api/qquickwebenginescriptcollection_p.h api/qquickwebenginescriptcollection_p_p.h
+        api/qquickwebenginescriptcollection.cpp api/qquickwebenginescriptcollection_p.h
         api/qquickwebenginesettings.cpp api/qquickwebenginesettings_p.h
         api/qquickwebenginesingleton.cpp api/qquickwebenginesingleton_p.h
         api/qquickwebenginetouchhandleprovider.cpp
@@ -37,8 +37,8 @@ qt_internal_add_qml_module(WebEngineQuick
         api/qquickwebengineforeigntypes_p.h
         api/qtwebenginequickglobal.cpp api/qtwebenginequickglobal.h
         api/qtwebenginequickglobal_p.h
-        render_widget_host_view_qt_delegate_quickwindow.cpp render_widget_host_view_qt_delegate_quickwindow.h
-        ui_delegates_manager.cpp ui_delegates_manager.h
+        render_widget_host_view_qt_delegate_quickwindow.cpp render_widget_host_view_qt_delegate_quickwindow_p.h
+        ui_delegates_manager.cpp ui_delegates_manager_p.h
     DEFINES
         QT_BUILD_WEBENGINE_LIB
     INCLUDE_DIRECTORIES
@@ -55,11 +55,17 @@ qt_internal_add_qml_module(WebEngineQuick
         Qt::Qml
         Qt::Quick
         Qt::WebEngineCore
+    NO_GENERATE_CPP_EXPORTS
+)
+
+qt_internal_extend_target(WebEngineQuick CONDITION QT_FEATURE_webengine_webchannel
+    PUBLIC_LIBRARIES
+        Qt::WebChannelQuick
 )
 
 qt_internal_extend_target(WebEngineQuick CONDITION QT_FEATURE_accessibility
     SOURCES
-        qquickwebengine_accessible.cpp qquickwebengine_accessible.h
+        qquickwebengine_accessible.cpp qquickwebengine_accessible_p.h
 )
 
 qt_internal_extend_target(qtwebenginequickplugin

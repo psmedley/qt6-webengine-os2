@@ -19,10 +19,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <condition_variable>
+#include <mutex>
+
 #include <unwindstack/MachineArm.h>
 #include <unwindstack/MachineArm64.h>
-#include <unwindstack/MachineMips.h>
-#include <unwindstack/MachineMips64.h>
+#include <unwindstack/MachineRiscv64.h>
 #include <unwindstack/MachineX86.h>
 #include <unwindstack/MachineX86_64.h>
 #include <unwindstack/Maps.h>
@@ -30,15 +32,13 @@
 #include <unwindstack/Regs.h>
 #include <unwindstack/RegsArm.h>
 #include <unwindstack/RegsArm64.h>
-#include <unwindstack/RegsMips.h>
-#include <unwindstack/RegsMips64.h>
+#include <unwindstack/RegsRiscv64.h>
 #include <unwindstack/RegsX86.h>
 #include <unwindstack/RegsX86_64.h>
 #include <unwindstack/Unwinder.h>
 #include <unwindstack/UserArm.h>
 #include <unwindstack/UserArm64.h>
-#include <unwindstack/UserMips.h>
-#include <unwindstack/UserMips64.h>
+#include <unwindstack/UserRiscv64.h>
 #include <unwindstack/UserX86.h>
 #include <unwindstack/UserX86_64.h>
 
@@ -107,11 +107,8 @@ std::unique_ptr<unwindstack::Regs> CreateRegsFromRawData(
     case unwindstack::ARCH_ARM64:
       ret.reset(new unwindstack::RegsArm64());
       break;
-    case unwindstack::ARCH_MIPS:
-      ret.reset(new unwindstack::RegsMips());
-      break;
-    case unwindstack::ARCH_MIPS64:
-      ret.reset(new unwindstack::RegsMips64());
+    case unwindstack::ARCH_RISCV64:
+      ret.reset(new unwindstack::RegsRiscv64());
       break;
     case unwindstack::ARCH_UNKNOWN:
       break;
@@ -196,6 +193,29 @@ bool DoUnwind(WireMessage* msg, UnwindingMetadata* metadata, AllocRecord* out) {
     out->error = true;
   }
   return true;
+}
+
+UnwindingWorker::~UnwindingWorker() {
+  if (thread_task_runner_.get() == nullptr) {
+    return;
+  }
+  std::mutex mutex;
+  std::condition_variable cv;
+
+  std::unique_lock<std::mutex> lock(mutex);
+  bool done = false;
+  thread_task_runner_.PostTask([&mutex, &cv, &done, this] {
+    for (auto& it : client_data_) {
+      auto& client_data = it.second;
+      client_data.sock->Shutdown(false);
+    }
+    client_data_.clear();
+
+    std::lock_guard<std::mutex> inner_lock(mutex);
+    done = true;
+    cv.notify_one();
+  });
+  cv.wait(lock, [&done] { return done; });
 }
 
 void UnwindingWorker::OnDisconnect(base::UnixSocket* self) {
@@ -456,6 +476,20 @@ void UnwindingWorker::HandleHandoffSocket(HandoffData handoff_data) {
   alloc_record_arena_.Enable();
 }
 
+void UnwindingWorker::HandleDrainFree(DataSourceInstanceID ds_id, pid_t pid) {
+  auto it = client_data_.find(pid);
+  if (it != client_data_.end()) {
+    ClientData& client_data = it->second;
+
+    if (!client_data.free_records.empty()) {
+      delegate_->PostFreeRecord(this, std::move(client_data.free_records));
+      client_data.free_records.clear();
+      client_data.free_records.reserve(kRecordBatchSize);
+    }
+  }
+  delegate_->PostDrainDone(this, ds_id);
+}
+
 void UnwindingWorker::PostDisconnectSocket(pid_t pid) {
   // We do not need to use a WeakPtr here because the task runner will not
   // outlive its UnwindingWorker.
@@ -473,6 +507,13 @@ void UnwindingWorker::PostPurgeProcess(pid_t pid) {
     }
     RemoveClientData(it);
   });
+}
+
+void UnwindingWorker::PostDrainFree(DataSourceInstanceID ds_id, pid_t pid) {
+  // We do not need to use a WeakPtr here because the task runner will not
+  // outlive its UnwindingWorker.
+  thread_task_runner_.get()->PostTask(
+      [this, ds_id, pid] { HandleDrainFree(ds_id, pid); });
 }
 
 void UnwindingWorker::HandleDisconnectSocket(pid_t pid) {

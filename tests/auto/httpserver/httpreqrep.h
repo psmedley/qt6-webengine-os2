@@ -1,5 +1,5 @@
 // Copyright (C) 2017 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 #ifndef HTTPREQREP_H
 #define HTTPREQREP_H
 
@@ -25,6 +25,7 @@ public:
     QByteArray requestMethod() const { return m_requestMethod; }
     QByteArray requestPath() const { return m_requestPath; }
     QByteArray requestHeader(const QByteArray &key) const;
+    bool hasRequestHeader(const QByteArray &key) const;
 
     // Response parameters (can be set until sendResponse()/close()).
 

@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -171,9 +171,8 @@ void CPDFSDK_PageView::DeleteAnnotForFFWidget(CXFA_FFWidget* pWidget) {
     m_pFormFillEnv->KillFocusAnnot({});  // May invoke JS, invalidating pAnnot.
 
   if (pObserved) {
-    fxcrt::FakeUniquePtr<const CPDFSDK_Annot> fake_unique_annot(pAnnot);
     auto it = std::find(m_SDKAnnotArray.begin(), m_SDKAnnotArray.end(),
-                        fake_unique_annot);
+                        fxcrt::MakeFakeUniquePtr(pAnnot));
     if (it != m_SDKAnnotArray.end())
       m_SDKAnnotArray.erase(it);
   }
@@ -285,6 +284,12 @@ WideString CPDFSDK_PageView::GetSelectedText() {
   if (!annot)
     return WideString();
   return annot->GetSelectedText();
+}
+
+void CPDFSDK_PageView::ReplaceAndKeepSelection(const WideString& text) {
+  CPDFSDK_Annot* annot = GetFocusAnnot();
+  if (annot)
+    annot->ReplaceAndKeepSelection(text);
 }
 
 void CPDFSDK_PageView::ReplaceSelection(const WideString& text) {
@@ -538,11 +543,11 @@ void CPDFSDK_PageView::LoadFXAnnots() {
   CPDF_Document::Extension* pContext = m_pFormFillEnv->GetDocExtension();
   if (pContext && pContext->ContainsExtensionFullForm()) {
     CXFA_FFPageView* pageView = protector->GetXFAPageView();
-    CXFA_FFWidget::IteratorIface* pWidgetHandler =
-        pageView->CreateGCedFormWidgetIterator(Mask<XFA_WidgetStatus>{
-            XFA_WidgetStatus::kVisible, XFA_WidgetStatus::kViewable});
+    CXFA_FFPageWidgetIterator pWidgetHandler(
+        pageView, Mask<XFA_WidgetStatus>{XFA_WidgetStatus::kVisible,
+                                         XFA_WidgetStatus::kViewable});
 
-    while (CXFA_FFWidget* pXFAAnnot = pWidgetHandler->MoveToNext()) {
+    while (CXFA_FFWidget* pXFAAnnot = pWidgetHandler.MoveToNext()) {
       m_SDKAnnotArray.push_back(
           std::make_unique<CPDFXFA_Widget>(pXFAAnnot, this));
       m_SDKAnnotArray.back()->OnLoad();
@@ -597,10 +602,7 @@ bool CPDFSDK_PageView::IsValidAnnot(const CPDF_Annot* p) const {
 }
 
 bool CPDFSDK_PageView::IsValidSDKAnnot(const CPDFSDK_Annot* p) const {
-  if (!p)
-    return false;
-  fxcrt::FakeUniquePtr<const CPDFSDK_Annot> fake_unique_p(p);
-  return pdfium::Contains(m_SDKAnnotArray, fake_unique_p);
+  return p && pdfium::Contains(m_SDKAnnotArray, fxcrt::MakeFakeUniquePtr(p));
 }
 
 CPDFSDK_Annot* CPDFSDK_PageView::GetFocusAnnot() {

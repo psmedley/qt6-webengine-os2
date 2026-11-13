@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_BACK_FORWARD_CACHE_BROWSERTEST_H_
 
 #include <memory>
+#include <optional>
 
 #include "base/compiler_specific.h"
 #include "base/feature_list.h"
@@ -31,6 +32,13 @@ using NotRestoredReasons =
     BackForwardCacheCanStoreDocumentResult::NotRestoredReasons;
 using NotRestoredReason = BackForwardCacheMetrics::NotRestoredReason;
 
+using ReasonsMatcher = testing::Matcher<
+    const blink::mojom::BackForwardCacheNotRestoredReasonsPtr&>;
+using SameOriginMatcher = testing::Matcher<
+    const blink::mojom::SameOriginBfcacheNotRestoredDetailsPtr&>;
+using BlockingDetailsMatcher =
+    testing::Matcher<const blink::mojom::BlockingDetailsPtr&>;
+
 // Match RenderFrameHostImpl* that are in the BackForwardCache.
 MATCHER(InBackForwardCache, "") {
   return arg->IsInBackForwardCache();
@@ -45,6 +53,12 @@ MATCHER(Deleted, "") {
 // indeed the identity function.
 std::initializer_list<RenderFrameHostImpl*> Elements(
     std::initializer_list<RenderFrameHostImpl*> t);
+
+enum class TestFrameType {
+  kMainFrame,
+  kSubFrame,
+  kSubFrameOfSubframe,
+};
 
 // Test about the BackForwardCache.
 class BackForwardCacheBrowserTest
@@ -125,20 +139,21 @@ class BackForwardCacheBrowserTest
   MatchesDocumentResult(testing::Matcher<NotRestoredReasons> not_stored,
                         BlockListedFeatures block_listed);
 
-  using ReasonsMatcher = testing::Matcher<
-      const blink::mojom::BackForwardCacheNotRestoredReasonsPtr&>;
-  using SameOriginMatcher = testing::Matcher<
-      const blink::mojom::SameOriginBfcacheNotRestoredDetailsPtr&>;
   ReasonsMatcher MatchesNotRestoredReasons(
-      const testing::Matcher<bool>& blocked,
-      const SameOriginMatcher* same_origin_details);
-  SameOriginMatcher MatchesSameOriginDetails(
-      const testing::Matcher<std::string>& id,
-      const testing::Matcher<std::string>& name,
-      const testing::Matcher<std::string>& src,
-      const testing::Matcher<std::string>& url,
+      const std::optional<testing::Matcher<std::string>>& id,
+      const std::optional<testing::Matcher<std::string>>& name,
+      const std::optional<testing::Matcher<std::string>>& src,
       const std::vector<testing::Matcher<std::string>>& reasons,
+      const std::optional<SameOriginMatcher>& same_origin_details);
+  SameOriginMatcher MatchesSameOriginDetails(
+      const testing::Matcher<std::string>& url,
       const std::vector<ReasonsMatcher>& children);
+
+  BlockingDetailsMatcher MatchesBlockingDetails(
+      const std::optional<testing::Matcher<std::string>>& url,
+      const std::optional<testing::Matcher<std::string>>& function_name,
+      const testing::Matcher<uint64_t>& line,
+      const testing::Matcher<uint64_t>& column);
 
   // Access the tree result of NotRestoredReason for the last main frame
   // navigation.
@@ -149,8 +164,6 @@ class BackForwardCacheBrowserTest
   void InstallUnloadHandlerOnMainFrame();
   void InstallUnloadHandlerOnSubFrame();
   EvalJsResult GetUnloadRunCount();
-
-  bool IsUnloadAllowedToEnterBackForwardCache();
 
   // Adds a blocklisted feature to the document to prevent caching. Currently
   // this means adding a plugin. We expect that plugins will never become
@@ -165,9 +178,6 @@ class BackForwardCacheBrowserTest
 
   const ukm::TestAutoSetUkmRecorder& ukm_recorder() override;
   const base::HistogramTester& histogram_tester() override;
-
-  const int kMaxBufferedBytesPerProcess = 10000;
-  const base::TimeDelta kGracePeriodToFinishLoading = base::Seconds(5);
 
  private:
   content::ContentMockCertVerifier mock_cert_verifier_;
@@ -206,6 +216,15 @@ class HighCacheSizeBackForwardCacheBrowserTest
   const size_t kBackForwardCacheSize = 5;
 };
 
+// Test that enables the BackForwardCacheAllowUnload flag.
+class BackForwardCacheUnloadBrowserTest : public BackForwardCacheBrowserTest {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
 // An implementation of PageLifecycleStateManager::TestDelegate for testing.
 class PageLifecycleStateManagerTestDelegate
     : public PageLifecycleStateManager::TestDelegate {
@@ -217,7 +236,7 @@ class PageLifecycleStateManagerTestDelegate
 
   // Waits for the renderer finishing to set the state of being in back/forward
   // cache.
-  void WaitForInBackForwardCacheAck();
+  [[nodiscard]] bool WaitForInBackForwardCacheAck();
 
   void OnStoreInBackForwardCacheSent(base::OnceClosure cb);
   void OnDisableJsEvictionSent(base::OnceClosure cb);
@@ -239,8 +258,17 @@ class PageLifecycleStateManagerTestDelegate
   base::OnceClosure disable_eviction_sent_;
 };
 
-// Gets the value of a key in local storage by evaluating JS.
+// Gets the value of a key in local storage by evaluating JS. Use
+// `WaitForLocalStorage` if you are dealing with multiple renderer processes.
 EvalJsResult GetLocalStorage(RenderFrameHostImpl* rfh, std::string key);
+
+// Because we are dealing with multiple renderer processes and the storage
+// service, we sometimes need to wait for the storage changes to show up the
+// renderer. See https://crbug.com/1494646.
+// Returns whether the expected value was found (so timeouts can be recognized).
+[[nodiscard]] bool WaitForLocalStorage(RenderFrameHostImpl* rfh,
+                                       std::string key,
+                                       std::string expected_value);
 
 }  // namespace content
 

@@ -8,10 +8,12 @@
 #include "src/codec/SkCodecImageGenerator.h"
 
 #include "include/codec/SkEncodedOrigin.h"
+#include "include/codec/SkPixmapUtils.h"
+#include "include/core/SkAlphaType.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkTypes.h"
-#include "src/core/SkPixmapPriv.h"
+#include "src/codec/SkPixmapUtilsPriv.h"
 
 #include <utility>
 
@@ -44,7 +46,7 @@ static SkImageInfo adjust_info(SkCodec* codec, std::optional<SkAlphaType> at) {
         info = info.makeAlphaType(kPremul_SkAlphaType);
     }
     if (SkEncodedOriginSwapsWidthHeight(codec->getOrigin())) {
-        info = SkPixmapPriv::SwapWidthHeight(info);
+        info = SkPixmapUtils::SwapWidthHeight(info);
     }
     return info;
 }
@@ -75,7 +77,7 @@ bool SkCodecImageGenerator::getPixels(const SkImageInfo& info, void* pixels, siz
         }
     };
 
-    return SkPixmapPriv::Orient(dst, fCodec->getOrigin(), decode);
+    return SkPixmapUtils::Orient(dst, fCodec->getOrigin(), decode);
 }
 
 bool SkCodecImageGenerator::onGetPixels(const SkImageInfo& requestInfo, void* requestPixels,

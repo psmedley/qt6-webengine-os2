@@ -8,10 +8,10 @@
 #include <memory>
 #include <utility>
 
-#include "base/callback.h"
 #include "base/component_export.h"
 #include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_multi_source_observation.h"
 #include "base/scoped_observation.h"
@@ -30,13 +30,11 @@ class RestoreData;
 struct WindowInfo;
 }  // namespace app_restore
 
-namespace ash {
-namespace full_restore {
+namespace ash::full_restore {
+class AppLaunchInfoSaveWaiter;
 class FullRestoreAppLaunchHandlerBrowserTest;
-class FullRestoreAppLaunchHandlerSystemWebAppsBrowserTest;
 class FullRestoreServiceTestHavingFullRestoreFile;
-}  // namespace full_restore
-}  // namespace ash
+}  // namespace ash::full_restore
 
 namespace full_restore {
 
@@ -171,9 +169,8 @@ class COMPONENT_EXPORT(APP_RESTORE) FullRestoreReadHandler
   void AddChromeBrowserLaunchInfoForTesting(const base::FilePath& profile_path);
 
  private:
+  friend class ash::full_restore::AppLaunchInfoSaveWaiter;
   friend class ash::full_restore::FullRestoreAppLaunchHandlerBrowserTest;
-  friend class ash::full_restore::
-      FullRestoreAppLaunchHandlerSystemWebAppsBrowserTest;
   friend class ash::full_restore::FullRestoreServiceTestHavingFullRestoreFile;
   friend class FullRestoreReadHandlerTestApi;
 

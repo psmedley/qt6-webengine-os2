@@ -28,6 +28,7 @@
 
 // No perfetto headers (other than tracing/api and protozero) should be here.
 #include "perfetto/tracing/buffer_exhausted_policy.h"
+#include "perfetto/tracing/core/data_source_config.h"
 #include "perfetto/tracing/internal/basic_types.h"
 #include "perfetto/tracing/trace_writer_base.h"
 
@@ -59,7 +60,7 @@ struct DataSourceState {
   // Keep this flag as the first field. This allows the compiler to directly
   // dereference the DataSourceState* pointer in the trace fast-path without
   // doing extra pointr arithmetic.
-  bool trace_lambda_enabled = false;
+  std::atomic<bool> trace_lambda_enabled{false};
 
   // The overall TracingMuxerImpl instance id, which gets incremented by
   // ResetForTesting.
@@ -93,16 +94,11 @@ struct DataSourceState {
   // to the startup session's ID.
   uint64_t startup_session_id = 0;
 
-  // A hash of the trace config used by this instance. This is used to
-  // de-duplicate instances for data sources with identical names (e.g., track
-  // event).
-  uint64_t config_hash = 0;
-
-  // Similar to config_hash, but excludes target buffers and service-set fields
-  // for matching of startup-tracing data source instances to sessions later
-  // started by the service.
-  // Learn more: ComputeStartupConfigHash
-  uint64_t startup_config_hash = 0;
+  // The trace config used by this instance. This is used to de-duplicate
+  // instances for data sources with identical names (e.g., track event).
+  // We store it as a pointer to be able to free memory after the datasource
+  // is stopped.
+  std::unique_ptr<DataSourceConfig> config;
 
   // If this data source is being intercepted (see Interceptor), this field
   // contains the non-zero id of a registered interceptor which should receive
@@ -110,6 +106,11 @@ struct DataSourceState {
   // element of TracingMuxerImpl::interceptors_ with successive numbers using
   // the following slots.
   uint32_t interceptor_id = 0;
+
+  // This is set to true when the datasource is in the process of async stop.
+  // The flag is checked by the tracing muxer to avoid calling OnStop for the
+  // second time.
+  bool async_stop_in_progress = false;
 
   // This lock is not held to implement Trace() and it's used only if the trace
   // code wants to access its own data source state.
@@ -162,6 +163,14 @@ struct DataSourceStaticState {
     static_assert(sizeof(valid_instances.load()) * 8 >= kMaxDataSourceInstances,
                   "kMaxDataSourceInstances too high");
   }
+
+  void ResetForTesting() {
+    id = 0;
+    index = kMaxDataSources;
+    valid_instances.store(0, std::memory_order_release);
+    instances = {};
+    incremental_state_generation.store(0, std::memory_order_release);
+  }
 };
 
 // Per-DataSource-instance thread-local state.
@@ -179,7 +188,7 @@ struct DataSourceInstanceThreadLocalState {
   BufferId buffer_id = 0;
   uint64_t data_source_instance_id = 0;
   bool is_intercepted = false;
-  bool last_packet_was_empty = false;
+  uint64_t last_empty_packet_position = 0;
   uint16_t startup_target_buffer_reservation = 0;
 };
 

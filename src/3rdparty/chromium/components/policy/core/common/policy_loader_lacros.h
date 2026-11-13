@@ -46,7 +46,7 @@ class POLICY_EXPORT PolicyLoaderLacros
   void InitOnBackgroundThread() override;
   // Loads the policy data from LacrosInitParams and populates it in the bundle
   // that is returned.
-  std::unique_ptr<PolicyBundle> Load() override;
+  PolicyBundle Load() override;
 
   // Return the policy data object as received from Ash. Returns nullptr if
   // initial load was not done yet.
@@ -86,6 +86,9 @@ class POLICY_EXPORT PolicyLoaderLacros
   static const enterprise_management::PolicyData* main_user_policy_data();
   static void set_main_user_policy_data_for_testing(
       const enterprise_management::PolicyData& policy_data);
+
+  static const std::vector<std::string> device_affiliation_ids();
+  static const std::string device_dm_token();
 
   base::Time last_fetch_timestamp() { return last_fetch_timestamp_; }
 

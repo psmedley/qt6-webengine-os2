@@ -11,7 +11,6 @@
 #include "base/i18n/icu_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_piece.h"
-#include "base/strings/string_piece_forward.h"
 #include "media/formats/hls/media_playlist.h"
 #include "media/formats/hls/multivariant_playlist.h"
 #include "media/formats/hls/playlist.h"
@@ -31,7 +30,7 @@ IcuEnvironment* env = new IcuEnvironment();
 // on a failure here, return `kDefaultVersion` on error.
 media::hls::types::DecimalInteger GetPlaylistVersion(base::StringPiece source) {
   auto ident_result = media::hls::Playlist::IdentifyPlaylist(source);
-  if (ident_result.has_error()) {
+  if (!ident_result.has_value()) {
     return media::hls::Playlist::kDefaultVersion;
   }
 
@@ -53,7 +52,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     auto multivariant_playlist_result = media::hls::MultivariantPlaylist::Parse(
         multivariant_playlist_source,
         GURL("http://localhost/multi_playlist.m3u8"), version);
-    if (multivariant_playlist_result.has_error()) {
+    if (!multivariant_playlist_result.has_value()) {
       return 0;
     }
 

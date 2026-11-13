@@ -34,14 +34,14 @@ private:
     ExpectedOutcome onMakeClosed(GrRecordingContext*, SkIRect* targetUpdateBounds) override;
     bool onExecute(GrOpFlushState*) override;
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     const char* name() const final { return "WritePixels"; }
 #endif
 #ifdef SK_DEBUG
     void visitProxies_debugOnly(const GrVisitProxyFunc&) const override {}
 #endif
 
-    SkAutoSTArray<16, GrMipLevel> fLevels;
+    skia_private::AutoSTArray<16, GrMipLevel> fLevels;
     SkIRect fRect;
     GrColorType fSrcColorType;
     GrColorType fDstColorType;

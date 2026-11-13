@@ -14,9 +14,10 @@ QuicPacketWriterWrapper::~QuicPacketWriterWrapper() { unset_writer(); }
 
 WriteResult QuicPacketWriterWrapper::WritePacket(
     const char* buffer, size_t buf_len, const QuicIpAddress& self_address,
-    const QuicSocketAddress& peer_address, PerPacketOptions* options) {
+    const QuicSocketAddress& peer_address, PerPacketOptions* options,
+    const QuicPacketWriterParams& params) {
   return writer_->WritePacket(buffer, buf_len, self_address, peer_address,
-                              options);
+                              options, params);
 }
 
 bool QuicPacketWriterWrapper::IsWriteBlocked() const {
@@ -25,7 +26,7 @@ bool QuicPacketWriterWrapper::IsWriteBlocked() const {
 
 void QuicPacketWriterWrapper::SetWritable() { writer_->SetWritable(); }
 
-absl::optional<int> QuicPacketWriterWrapper::MessageTooBigErrorCode() const {
+std::optional<int> QuicPacketWriterWrapper::MessageTooBigErrorCode() const {
   return writer_->MessageTooBigErrorCode();
 }
 

@@ -17,12 +17,13 @@
 #include "include/effects/SkGradientShader.h"
 #include "include/effects/SkImageFilters.h"
 #include "include/effects/SkRuntimeEffect.h"
-#include "include/utils/SkRandom.h"
+#include "src/base/SkRandom.h"
 #include "src/core/SkRuntimeEffectPriv.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
 #include "tools/Resources.h"
 #include "tools/ToolUtils.h"
+#include "tools/fonts/FontToolUtils.h"
 
 static constexpr int kBoxSize     = 100;
 static constexpr int kPadding     = 5;
@@ -47,7 +48,7 @@ static constexpr int rows_to_height(int rows) {
 }
 
 static void draw_label(SkCanvas* canvas, const char* label) {
-    SkFont font(ToolUtils::create_portable_typeface());
+    SkFont font = ToolUtils::DefaultPortableFont();
     SkPaint p(SkColors::kBlack);
     SkRect bounds;
     font.measureText(label, strlen(label), SkTextEncoding::kUTF8, &bounds);
@@ -67,7 +68,7 @@ static SkBitmap draw_shader(SkCanvas* canvas, sk_sp<SkShader> shader,
     SkImageInfo info = SkImageInfo::MakeN32Premul({kBoxSize, kBoxSize});
     auto surface = canvas->makeSurface(info);
     if (allowRasterFallback && !surface) {
-        surface = SkSurface::MakeRaster(info);
+        surface = SkSurfaces::Raster(info);
     }
 
     if (surface) {

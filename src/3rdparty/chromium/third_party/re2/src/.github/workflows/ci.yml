@@ -2,13 +2,15 @@ name: CI
 on:
   push:
     branches: [main]
+permissions:
+  contents: read
 jobs:
   build-appleclang:
     runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
-        ver: [11, 14, 17, 20]
+        ver: [17, 20]
     env:
       CC: clang
       CXX: clang++
@@ -19,7 +21,12 @@ jobs:
       # (The other two flags are the default provided for CXXFLAGS in Makefile.)
       CXXFLAGS: -O3 -g -std=c++${{ matrix.ver }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+      - name: Install Abseil, GoogleTest and Benchmark
+        run: |
+          brew update
+          brew install abseil googletest google-benchmark
+        shell: bash
       - run: make && make test
         shell: bash
   build-clang:
@@ -27,31 +34,42 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ver: [9, 10, 11, 12, 13, 14, 15]
+        ver: [15, 16, 17]
     env:
       CC: clang-${{ matrix.ver }}
       CXX: clang++-${{ matrix.ver }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Install Clang ${{ matrix.ver }}
         run: |
+          # Avoid `Conflicts: python3-lldb-x.y` between packages.
+          sudo apt purge -y python3-lldb-14
           wget https://apt.llvm.org/llvm.sh
           chmod +x ./llvm.sh
           sudo ./llvm.sh ${{ matrix.ver }}
+        shell: bash
+      - name: Install Abseil, GoogleTest and Benchmark
+        run: |
+          sudo apt update -y
+          sudo apt install -y libabsl-dev libgtest-dev libbenchmark-dev
         shell: bash
       - run: make && make test
         shell: bash
   build-gcc:
     runs-on: ubuntu-latest
-    container: gcc:${{ matrix.ver }}
     strategy:
       fail-fast: false
       matrix:
-        ver: [6, 7, 8, 9, 10, 11, 12]
+        ver: [11, 12, 13]
     env:
-      CC: gcc
-      CXX: g++
+      CC: gcc-${{ matrix.ver }}
+      CXX: g++-${{ matrix.ver }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+      - name: Install Abseil, GoogleTest and Benchmark
+        run: |
+          sudo apt update -y
+          sudo apt install -y libabsl-dev libgtest-dev libbenchmark-dev
+        shell: bash
       - run: make && make test
         shell: bash

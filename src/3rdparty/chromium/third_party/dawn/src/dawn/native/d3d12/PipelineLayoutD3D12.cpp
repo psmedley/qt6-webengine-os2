@@ -1,16 +1,29 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/d3d12/PipelineLayoutD3D12.h"
 
@@ -19,10 +32,10 @@
 
 #include "dawn/common/Assert.h"
 #include "dawn/common/BitSetIterator.h"
+#include "dawn/native/d3d/D3DError.h"
 #include "dawn/native/d3d12/BindGroupLayoutD3D12.h"
-#include "dawn/native/d3d12/D3D12Error.h"
 #include "dawn/native/d3d12/DeviceD3D12.h"
-#include "dawn/native/d3d12/PlatformFunctions.h"
+#include "dawn/native/d3d12/PlatformFunctionsD3D12.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -43,7 +56,7 @@ static constexpr uint32_t kInvalidDynamicStorageBufferLengthsParameterIndex =
     std::numeric_limits<uint32_t>::max();
 
 D3D12_SHADER_VISIBILITY ShaderVisibilityType(wgpu::ShaderStage visibility) {
-    ASSERT(visibility != wgpu::ShaderStage::None);
+    DAWN_ASSERT(visibility != wgpu::ShaderStage::None);
 
     if (visibility == wgpu::ShaderStage::Vertex) {
         return D3D12_SHADER_VISIBILITY_VERTEX;
@@ -67,15 +80,83 @@ D3D12_ROOT_PARAMETER_TYPE RootParameterType(wgpu::BufferBindingType type) {
         case wgpu::BufferBindingType::ReadOnlyStorage:
             return D3D12_ROOT_PARAMETER_TYPE_SRV;
         case wgpu::BufferBindingType::Undefined:
-            UNREACHABLE();
+            DAWN_UNREACHABLE();
     }
+}
+
+HRESULT SerializeRootParameter1_0(Device* device,
+                                  const D3D12_VERSIONED_ROOT_SIGNATURE_DESC& rootSignature1_1,
+                                  ID3DBlob** ppBlob,
+                                  ID3DBlob** ppErrorBlob) {
+    std::vector<std::vector<D3D12_DESCRIPTOR_RANGE>> allDescriptorRanges1_0;
+    std::vector<D3D12_ROOT_PARAMETER> rootParameters1_0(rootSignature1_1.Desc_1_1.NumParameters);
+    for (size_t i = 0; i < rootParameters1_0.size(); ++i) {
+        const D3D12_ROOT_PARAMETER1& rootParameter1_1 = rootSignature1_1.Desc_1_1.pParameters[i];
+
+        rootParameters1_0[i].ParameterType = rootParameter1_1.ParameterType;
+        rootParameters1_0[i].ShaderVisibility = rootParameter1_1.ShaderVisibility;
+
+        switch (rootParameters1_0[i].ParameterType) {
+            case D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS:
+                rootParameters1_0[i].Constants = rootParameter1_1.Constants;
+                break;
+
+            case D3D12_ROOT_PARAMETER_TYPE_CBV:
+            case D3D12_ROOT_PARAMETER_TYPE_SRV:
+            case D3D12_ROOT_PARAMETER_TYPE_UAV:
+                rootParameters1_0[i].Descriptor.RegisterSpace =
+                    rootParameter1_1.Descriptor.RegisterSpace;
+                rootParameters1_0[i].Descriptor.ShaderRegister =
+                    rootParameter1_1.Descriptor.ShaderRegister;
+                break;
+
+            case D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE:
+                rootParameters1_0[i].DescriptorTable.NumDescriptorRanges =
+                    rootParameter1_1.DescriptorTable.NumDescriptorRanges;
+                if (rootParameters1_0[i].DescriptorTable.NumDescriptorRanges > 0) {
+                    std::vector<D3D12_DESCRIPTOR_RANGE> descriptorRanges1_0(
+                        rootParameters1_0[i].DescriptorTable.NumDescriptorRanges);
+                    for (uint32_t index = 0;
+                         index < rootParameter1_1.DescriptorTable.NumDescriptorRanges; ++index) {
+                        const D3D12_DESCRIPTOR_RANGE1& descriptorRange1_1 =
+                            rootParameter1_1.DescriptorTable.pDescriptorRanges[index];
+                        descriptorRanges1_0[index].BaseShaderRegister =
+                            descriptorRange1_1.BaseShaderRegister;
+                        descriptorRanges1_0[index].NumDescriptors =
+                            descriptorRange1_1.NumDescriptors;
+                        descriptorRanges1_0[index].OffsetInDescriptorsFromTableStart =
+                            descriptorRange1_1.OffsetInDescriptorsFromTableStart;
+                        descriptorRanges1_0[index].RangeType = descriptorRange1_1.RangeType;
+                        descriptorRanges1_0[index].RegisterSpace = descriptorRange1_1.RegisterSpace;
+                    }
+                    allDescriptorRanges1_0.push_back(descriptorRanges1_0);
+                    rootParameters1_0[i].DescriptorTable.pDescriptorRanges =
+                        allDescriptorRanges1_0.back().data();
+                }
+                break;
+
+            default:
+                DAWN_UNREACHABLE();
+                break;
+        }
+    }
+
+    D3D12_ROOT_SIGNATURE_DESC rootSignatureDescriptor;
+    rootSignatureDescriptor.NumParameters = rootParameters1_0.size();
+    rootSignatureDescriptor.pParameters = rootParameters1_0.data();
+    rootSignatureDescriptor.NumStaticSamplers = 0;
+    rootSignatureDescriptor.pStaticSamplers = nullptr;
+    rootSignatureDescriptor.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+    return device->GetFunctions()->d3d12SerializeRootSignature(
+        &rootSignatureDescriptor, D3D_ROOT_SIGNATURE_VERSION_1, ppBlob, ppErrorBlob);
 }
 
 }  // anonymous namespace
 
 ResultOrError<Ref<PipelineLayout>> PipelineLayout::Create(
     Device* device,
-    const PipelineLayoutDescriptor* descriptor) {
+    const UnpackedPtr<PipelineLayoutDescriptor>& descriptor) {
     Ref<PipelineLayout> layout = AcquireRef(new PipelineLayout(device, descriptor));
     DAWN_TRY(layout->Initialize());
     return layout;
@@ -85,7 +166,7 @@ MaybeError PipelineLayout::Initialize() {
     Device* device = ToBackend(GetDevice());
     // Parameters are D3D12_ROOT_PARAMETER_TYPE which is either a root table, constant, or
     // descriptor.
-    std::vector<D3D12_ROOT_PARAMETER> rootParameters;
+    std::vector<D3D12_ROOT_PARAMETER1> rootParameters;
 
     size_t rangesCount = 0;
     for (BindGroupIndex group : IterateBitSet(GetBindGroupLayoutsMask())) {
@@ -95,7 +176,7 @@ MaybeError PipelineLayout::Initialize() {
     }
 
     // We are taking pointers to `ranges`, so we cannot let it resize while we're pushing to it.
-    std::vector<D3D12_DESCRIPTOR_RANGE> ranges(rangesCount);
+    std::vector<D3D12_DESCRIPTOR_RANGE1> ranges(rangesCount);
 
     uint32_t rangeIndex = 0;
 
@@ -106,20 +187,20 @@ MaybeError PipelineLayout::Initialize() {
         // bind group index Returns whether or not the parameter was set. A root parameter is
         // not set if the number of ranges is 0
         auto SetRootDescriptorTable =
-            [&](const std::vector<D3D12_DESCRIPTOR_RANGE>& descriptorRanges) -> bool {
+            [&](const std::vector<D3D12_DESCRIPTOR_RANGE1>& descriptorRanges) -> bool {
             auto rangeCount = descriptorRanges.size();
             if (rangeCount == 0) {
                 return false;
             }
 
-            D3D12_ROOT_PARAMETER rootParameter = {};
+            D3D12_ROOT_PARAMETER1 rootParameter = {};
             rootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
             rootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
             rootParameter.DescriptorTable.NumDescriptorRanges = rangeCount;
             rootParameter.DescriptorTable.pDescriptorRanges = &ranges[rangeIndex];
 
             for (auto& range : descriptorRanges) {
-                ASSERT(range.RegisterSpace == kRegisterSpacePlaceholder);
+                DAWN_ASSERT(range.RegisterSpace == kRegisterSpacePlaceholder);
                 ranges[rangeIndex] = range;
                 ranges[rangeIndex].RegisterSpace = static_cast<uint32_t>(group);
                 rangeIndex++;
@@ -139,6 +220,7 @@ MaybeError PipelineLayout::Initialize() {
 
         // Init root descriptors in root signatures for dynamic buffer bindings.
         // These are packed at the beginning of the layout binding info.
+        mDynamicRootParameterIndices[group].resize(bindGroupLayout->GetDynamicBufferCount());
         for (BindingIndex dynamicBindingIndex{0};
              dynamicBindingIndex < bindGroupLayout->GetDynamicBufferCount();
              ++dynamicBindingIndex) {
@@ -150,12 +232,17 @@ MaybeError PipelineLayout::Initialize() {
                 continue;
             }
 
-            D3D12_ROOT_PARAMETER rootParameter = {};
+            D3D12_ROOT_PARAMETER1 rootParameter = {};
 
             // Setup root descriptor.
-            D3D12_ROOT_DESCRIPTOR rootDescriptor;
+            D3D12_ROOT_DESCRIPTOR1 rootDescriptor;
             rootDescriptor.ShaderRegister = bindGroupLayout->GetShaderRegister(dynamicBindingIndex);
             rootDescriptor.RegisterSpace = static_cast<uint32_t>(group);
+            // Using D3D12_ROOT_DESCRIPTOR_FLAG_NONE means using DATA_STATIC_WHILE_SET_AT_EXECUTE
+            // for CBV/SRV and using DATA_VOLATILE for UAV, which is allowed because currently in
+            // Dawn the views with dynamic offsets are always re-applied every time before a draw or
+            // a dispatch call.
+            rootDescriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_NONE;
 
             // Set root descriptors in root signatures.
             rootParameter.Descriptor = rootDescriptor;
@@ -173,9 +260,9 @@ MaybeError PipelineLayout::Initialize() {
 
     // Make sure that we added exactly the number of elements we expected. If we added more,
     // |ranges| will have resized and the pointers in the |rootParameter|s will be invalid.
-    ASSERT(rangeIndex == rangesCount);
+    DAWN_ASSERT(rangeIndex == rangesCount);
 
-    D3D12_ROOT_PARAMETER renderOrComputeInternalConstants{};
+    D3D12_ROOT_PARAMETER1 renderOrComputeInternalConstants{};
     renderOrComputeInternalConstants.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     renderOrComputeInternalConstants.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     // Always allocate 3 constants for either:
@@ -205,7 +292,7 @@ MaybeError PipelineLayout::Initialize() {
     // data should start.
     uint32_t dynamicStorageBufferLengthsShaderRegisterOffset = 0;
     for (BindGroupIndex group : IterateBitSet(GetBindGroupLayoutsMask())) {
-        const BindGroupLayoutBase* bgl = GetBindGroupLayout(group);
+        const BindGroupLayoutInternalBase* bgl = GetBindGroupLayout(group);
 
         mDynamicStorageBufferLengthInfo[group].firstRegisterOffset =
             dynamicStorageBufferLengthsShaderRegisterOffset;
@@ -221,14 +308,12 @@ MaybeError PipelineLayout::Initialize() {
             }
         }
 
-        ASSERT(mDynamicStorageBufferLengthInfo[group].bindingAndRegisterOffsets.size() ==
-               bgl->GetBindingCountInfo().dynamicStorageBufferCount);
+        DAWN_ASSERT(mDynamicStorageBufferLengthInfo[group].bindingAndRegisterOffsets.size() ==
+                    bgl->GetBindingCountInfo().dynamicStorageBufferCount);
     }
-    ASSERT(dynamicStorageBufferLengthsShaderRegisterOffset <=
-           kMaxDynamicStorageBuffersPerPipelineLayout);
 
     if (dynamicStorageBufferLengthsShaderRegisterOffset > 0) {
-        D3D12_ROOT_PARAMETER dynamicStorageBufferLengthConstants{};
+        D3D12_ROOT_PARAMETER1 dynamicStorageBufferLengthConstants{};
         dynamicStorageBufferLengthConstants.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         dynamicStorageBufferLengthConstants.ParameterType =
             D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -245,28 +330,45 @@ MaybeError PipelineLayout::Initialize() {
             kInvalidDynamicStorageBufferLengthsParameterIndex;
     }
 
-    D3D12_ROOT_SIGNATURE_DESC rootSignatureDescriptor;
-    rootSignatureDescriptor.NumParameters = rootParameters.size();
-    rootSignatureDescriptor.pParameters = rootParameters.data();
-    rootSignatureDescriptor.NumStaticSamplers = 0;
-    rootSignatureDescriptor.pStaticSamplers = nullptr;
-    rootSignatureDescriptor.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    D3D12_VERSIONED_ROOT_SIGNATURE_DESC versionedRootSignatureDescriptor = {};
+    versionedRootSignatureDescriptor.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
+    versionedRootSignatureDescriptor.Desc_1_1.NumParameters = rootParameters.size();
+    versionedRootSignatureDescriptor.Desc_1_1.pParameters = rootParameters.data();
+    versionedRootSignatureDescriptor.Desc_1_1.NumStaticSamplers = 0;
+    versionedRootSignatureDescriptor.Desc_1_1.pStaticSamplers = nullptr;
+    versionedRootSignatureDescriptor.Desc_1_1.Flags =
+        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-    ComPtr<ID3DBlob> error;
-    HRESULT hr = device->GetFunctions()->d3d12SerializeRootSignature(
-        &rootSignatureDescriptor, D3D_ROOT_SIGNATURE_VERSION_1, &mRootSignatureBlob, &error);
-    if (DAWN_UNLIKELY(FAILED(hr))) {
+    DAWN_TRY([&]() -> MaybeError {
+        ComPtr<ID3DBlob> error;
+        if (device->IsToggleEnabled(Toggle::D3D12UseRootSignatureVersion1_1) &&
+            DAWN_LIKELY(SUCCEEDED(device->GetFunctions()->d3d12SerializeVersionedRootSignature(
+                &versionedRootSignatureDescriptor, &mRootSignatureBlob, &error)))) {
+            return {};
+        }
+        // If using root signature version 1.1 failed, try again with root signature version 1.0.
+        // Some drivers appear to run an outdated version of the DXIL validator and can't support
+        // 1.1.
+        // Note that retrying again is OK because whether we use version 1.0 or 1.1 doesn't
+        // affect anything else except pipeline layout creation. Nothing else in Dawn cares
+        // what decision we made here.
+        // TODO(crbug.com/1512318): Add some telemetry so we log how often/when this happens.
         std::ostringstream messageStream;
         if (error) {
-            messageStream << static_cast<const char*>(error->GetBufferPointer());
-
-            // |error| is observed to always end with a \n, but is not
-            // specified to do so, so we add an extra newline just in case.
-            messageStream << std::endl;
+            messageStream << static_cast<const char*>(error->GetBufferPointer()) << std::endl;
+        }
+        HRESULT hr = SerializeRootParameter1_0(device, versionedRootSignatureDescriptor,
+                                               &mRootSignatureBlob, &error);
+        if (DAWN_LIKELY(SUCCEEDED(hr))) {
+            return {};
+        }
+        if (error) {
+            messageStream << static_cast<const char*>(error->GetBufferPointer()) << std::endl;
         }
         messageStream << "D3D12 serialize root signature";
         DAWN_TRY(CheckHRESULT(hr, messageStream.str().c_str()));
-    }
+        return {};
+    }());
     DAWN_TRY(CheckHRESULT(device->GetD3D12Device()->CreateRootSignature(
                               0, mRootSignatureBlob->GetBufferPointer(),
                               mRootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&mRootSignature)),
@@ -297,12 +399,12 @@ void PipelineLayout::DestroyImpl() {
 }
 
 uint32_t PipelineLayout::GetCbvUavSrvRootParameterIndex(BindGroupIndex group) const {
-    ASSERT(group < kMaxBindGroupsTyped);
+    DAWN_ASSERT(group < kMaxBindGroupsTyped);
     return mCbvUavSrvRootParameterInfo[group];
 }
 
 uint32_t PipelineLayout::GetSamplerRootParameterIndex(BindGroupIndex group) const {
-    ASSERT(group < kMaxBindGroupsTyped);
+    DAWN_ASSERT(group < kMaxBindGroupsTyped);
     return mSamplerRootParameterInfo[group];
 }
 
@@ -321,11 +423,10 @@ PipelineLayout::GetDynamicStorageBufferLengthInfo() const {
 
 uint32_t PipelineLayout::GetDynamicRootParameterIndex(BindGroupIndex group,
                                                       BindingIndex bindingIndex) const {
-    ASSERT(group < kMaxBindGroupsTyped);
-    ASSERT(bindingIndex < kMaxDynamicBuffersPerPipelineLayoutTyped);
-    ASSERT(GetBindGroupLayout(group)->GetBindingInfo(bindingIndex).buffer.hasDynamicOffset);
-    ASSERT(GetBindGroupLayout(group)->GetBindingInfo(bindingIndex).visibility !=
-           wgpu::ShaderStage::None);
+    DAWN_ASSERT(group < kMaxBindGroupsTyped);
+    DAWN_ASSERT(GetBindGroupLayout(group)->GetBindingInfo(bindingIndex).buffer.hasDynamicOffset);
+    DAWN_ASSERT(GetBindGroupLayout(group)->GetBindingInfo(bindingIndex).visibility !=
+                wgpu::ShaderStage::None);
     return mDynamicRootParameterIndices[group][bindingIndex];
 }
 
@@ -362,8 +463,8 @@ uint32_t PipelineLayout::GetDynamicStorageBufferLengthsShaderRegister() const {
 }
 
 uint32_t PipelineLayout::GetDynamicStorageBufferLengthsParameterIndex() const {
-    ASSERT(mDynamicStorageBufferLengthsParameterIndex !=
-           kInvalidDynamicStorageBufferLengthsParameterIndex);
+    DAWN_ASSERT(mDynamicStorageBufferLengthsParameterIndex !=
+                kInvalidDynamicStorageBufferLengthsParameterIndex);
     return mDynamicStorageBufferLengthsParameterIndex;
 }
 

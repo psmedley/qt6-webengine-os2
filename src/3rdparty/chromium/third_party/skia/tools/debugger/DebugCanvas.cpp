@@ -7,6 +7,8 @@
 
 #include "tools/debugger/DebugCanvas.h"
 
+#include "include/core/SkBlendMode.h"
+#include "include/core/SkClipOp.h"
 #include "include/core/SkData.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
@@ -20,10 +22,13 @@
 #include "include/core/SkVertices.h"
 #include "include/gpu/GrDirectContext.h"
 #include "include/gpu/GrRecordingContext.h"
-#include "include/private/SkTArray.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTo.h"
 #include "include/utils/SkPaintFilterCanvas.h"
 #include "src/core/SkCanvasPriv.h"
 #include "src/core/SkRectPriv.h"
+#include "src/core/SkStringUtils.h"
+#include "src/gpu/ganesh/GrCanvas.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
 #include "src/gpu/ganesh/GrRenderTargetProxy.h"
 #include "src/gpu/ganesh/GrSurfaceProxy.h"
@@ -31,6 +36,7 @@
 #include "tools/debugger/DebugLayerManager.h"
 #include "tools/debugger/DrawCommand.h"
 
+#include <cstring>
 #include <string>
 #include <utility>
 
@@ -41,9 +47,11 @@ class SkRegion;
 class UrlDataManager;
 struct SkDrawShadowRec;
 
-#if SK_GPU_V1
+#if defined(SK_GANESH)
 #include "src/gpu/ganesh/GrAuditTrail.h"
 #endif
+
+using namespace skia_private;
 
 #define SKDEBUGCANVAS_VERSION 1
 #define SKDEBUGCANVAS_ATTRIBUTE_VERSION "version"
@@ -133,7 +141,12 @@ DebugCanvas::DebugCanvas(int width, int height)
 DebugCanvas::DebugCanvas(SkIRect bounds)
         : DebugCanvas(bounds.width(), bounds.height()) {}
 
-DebugCanvas::~DebugCanvas() { fCommandVector.deleteAll(); }
+DebugCanvas::~DebugCanvas() {
+    for (DrawCommand* p : fCommandVector) {
+        delete p;
+    }
+    fCommandVector.reset();
+}
 
 void DebugCanvas::addDrawCommand(DrawCommand* command) { fCommandVector.push_back(command); }
 
@@ -155,7 +168,7 @@ void DebugCanvas::drawTo(SkCanvas* originalCanvas, int index, int m) {
     DebugPaintFilterCanvas filterCanvas(originalCanvas);
     SkCanvas* finalCanvas = fOverdrawViz ? &filterCanvas : originalCanvas;
 
-#if SK_GPU_V1
+#if defined(SK_GANESH)
     auto dContext = GrAsDirectContext(finalCanvas->recordingContext());
 
     // If we have a GPU backend we can also visualize the op information
@@ -167,7 +180,7 @@ void DebugCanvas::drawTo(SkCanvas* originalCanvas, int index, int m) {
 #endif
 
     for (int i = 0; i <= index; i++) {
-#if SK_GPU_V1
+#if defined(SK_GANESH)
         GrAuditTrail::AutoCollectOps* acb = nullptr;
         if (at) {
             // We need to flush any pending operations, or they might combine with commands below.
@@ -182,7 +195,7 @@ void DebugCanvas::drawTo(SkCanvas* originalCanvas, int index, int m) {
         if (fCommandVector[i]->isVisible()) {
             fCommandVector[i]->execute(finalCanvas);
         }
-#if SK_GPU_V1
+#if defined(SK_GANESH)
         if (at && acb) {
             delete acb;
         }
@@ -216,7 +229,7 @@ void DebugCanvas::drawTo(SkCanvas* originalCanvas, int index, int m) {
         finalCanvas->drawRect(fAndroidClip, androidClipPaint);
     }
 
-#if SK_GPU_V1
+#if defined(SK_GANESH)
     // draw any ops if required and issue a full reset onto GrAuditTrail
     if (at) {
         // just in case there is global reordering, we flush the canvas before querying
@@ -233,11 +246,11 @@ void DebugCanvas::drawTo(SkCanvas* originalCanvas, int index, int m) {
 
         // get the render target of the top device (from the original canvas) so we can ignore ops
         // drawn offscreen
-        GrRenderTargetProxy* rtp = SkCanvasPriv::TopDeviceTargetProxy(originalCanvas);
+        GrRenderTargetProxy* rtp = skgpu::ganesh::TopDeviceTargetProxy(originalCanvas);
         GrSurfaceProxy::UniqueID proxyID = rtp->uniqueID();
 
         // get the bounding boxes to draw
-        SkTArray<GrAuditTrail::OpInfo> childrenBounds;
+        TArray<GrAuditTrail::OpInfo> childrenBounds;
         if (m == -1) {
             at->getBoundsByClientID(&childrenBounds, index);
         } else {
@@ -250,14 +263,14 @@ void DebugCanvas::drawTo(SkCanvas* originalCanvas, int index, int m) {
         SkPaint paint;
         paint.setStyle(SkPaint::kStroke_Style);
         paint.setStrokeWidth(1);
-        for (int i = 0; i < childrenBounds.count(); i++) {
+        for (int i = 0; i < childrenBounds.size(); i++) {
             if (childrenBounds[i].fProxyUniqueID != proxyID) {
                 // offscreen draw, ignore for now
                 continue;
             }
             paint.setColor(kTotalBounds);
             finalCanvas->drawRect(childrenBounds[i].fBounds, paint);
-            for (int j = 0; j < childrenBounds[i].fOps.count(); j++) {
+            for (int j = 0; j < childrenBounds[i].fOps.size(); j++) {
                 const GrAuditTrail::OpInfo::Op& op = childrenBounds[i].fOps[j];
                 if (op.fClientID != index) {
                     paint.setColor(kOtherOpBounds);
@@ -284,7 +297,7 @@ DrawCommand* DebugCanvas::getDrawCommandAt(int index) const {
     return fCommandVector[index];
 }
 
-#if SK_GPU_V1
+#if defined(SK_GANESH)
 GrAuditTrail* DebugCanvas::getAuditTrail(SkCanvas* canvas) {
     GrAuditTrail* at  = nullptr;
     auto ctx = canvas->recordingContext();
@@ -322,12 +335,12 @@ void DebugCanvas::cleanupAuditTrail(GrAuditTrail* at) {
         at->fullReset();
     }
 }
-#endif // SK_GPU_V1
+#endif // defined(SK_GANESH)
 
 void DebugCanvas::toJSON(SkJSONWriter&   writer,
                          UrlDataManager& urlDataManager,
                          SkCanvas*       canvas) {
-#if SK_GPU_V1
+#if defined(SK_GANESH)
     this->drawAndCollectOps(canvas);
 
     // now collect json
@@ -340,8 +353,8 @@ void DebugCanvas::toJSON(SkJSONWriter&   writer,
         writer.beginObject();  // command
         this->getDrawCommandAt(i)->toJSON(writer, urlDataManager);
 
-#if SK_GPU_V1
-        if (at) {
+#if defined(SK_GANESH)
+        if (at && at->isEnabled()) {
             writer.appendName(SKDEBUGCANVAS_ATTRIBUTE_AUDITTRAIL);
             at->toJson(writer, i);
         }
@@ -350,13 +363,13 @@ void DebugCanvas::toJSON(SkJSONWriter&   writer,
     }
 
     writer.endArray();  // commands
-#if SK_GPU_V1
+#if defined(SK_GANESH)
     this->cleanupAuditTrail(at);
 #endif
 }
 
 void DebugCanvas::toJSONOpsTask(SkJSONWriter& writer, SkCanvas* canvas) {
-#if SK_GPU_V1
+#if defined(SK_GANESH)
     this->drawAndCollectOps(canvas);
 
     GrAuditTrail* at = this->getAuditTrail(canvas);
@@ -414,7 +427,7 @@ void DebugCanvas::didTranslate(SkScalar x, SkScalar y) {
 void DebugCanvas::onDrawAnnotation(const SkRect& rect, const char key[], SkData* value) {
     // Parse layer-releated annotations added in SkiaPipeline.cpp and RenderNodeDrawable.cpp
     // the format of the annotations is <Indicator|RenderNodeId>
-    SkTArray<SkString> tokens;
+    TArray<SkString> tokens;
     SkStrSplit(key, "|", kStrict_SkStrSplitMode, &tokens);
     if (tokens.size() == 2) {
         if (tokens[0].equals(kOffscreenLayerDraw)) {

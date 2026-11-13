@@ -69,6 +69,8 @@ template("spvtools_core_tables") {
       rebase_path(cldebuginfo100_insts_file, root_build_dir),
       "--operand-kinds-output",
       rebase_path(operand_kinds_file, root_build_dir),
+      "--output-language",
+      "c++"
     ]
   }
 }
@@ -101,6 +103,8 @@ template("spvtools_core_enums") {
       rebase_path(extension_enum_file, root_build_dir),
       "--enum-string-mapping-output",
       rebase_path(extension_map_file, root_build_dir),
+      "--output-language",
+      "c++"
     ]
     inputs = [
       core_json_file,
@@ -142,6 +146,8 @@ template("spvtools_glsl_tables") {
       rebase_path(glsl_json_file, root_build_dir),
       "--glsl-insts-output",
       rebase_path(glsl_insts_file, root_build_dir),
+      "--output-language",
+      "c++"
     ]
     inputs = [
       core_json_file,
@@ -364,6 +370,15 @@ config("spvtools_internal_config") {
   } else if (!is_win) {
     # Work around a false-positive on a Skia GCC 10 builder.
     cflags += [ "-Wno-format-truncation" ]
+  } else {
+    # Make MSVC report the correct value for __cplusplus
+    cflags += [ "/Zc:__cplusplus" ]
+  }
+
+  if (!is_win) {
+    cflags += [ "-std=c++17" ]
+  } else {
+    cflags += [ "/std:c++17" ]
   }
 }
 
@@ -533,6 +548,7 @@ static_library("spvtools_val") {
     "source/val/validate_primitives.cpp",
     "source/val/validate_ray_query.cpp",
     "source/val/validate_ray_tracing.cpp",
+    "source/val/validate_ray_tracing_reorder.cpp",
     "source/val/validate_scopes.cpp",
     "source/val/validate_scopes.h",
     "source/val/validate_small_type_uses.cpp",
@@ -562,6 +578,8 @@ static_library("spvtools_opt") {
     "source/opt/aggressive_dead_code_elim_pass.h",
     "source/opt/amd_ext_to_khr.cpp",
     "source/opt/amd_ext_to_khr.h",
+    "source/opt/analyze_live_input_pass.cpp",
+    "source/opt/analyze_live_input_pass.h",
     "source/opt/basic_block.cpp",
     "source/opt/basic_block.h",
     "source/opt/block_merge_pass.cpp",
@@ -624,10 +642,12 @@ static_library("spvtools_opt") {
     "source/opt/eliminate_dead_functions_pass.h",
     "source/opt/eliminate_dead_functions_util.cpp",
     "source/opt/eliminate_dead_functions_util.h",
-    "source/opt/eliminate_dead_input_components_pass.cpp",
-    "source/opt/eliminate_dead_input_components_pass.h",
+    "source/opt/eliminate_dead_io_components_pass.cpp",
+    "source/opt/eliminate_dead_io_components_pass.h",
     "source/opt/eliminate_dead_members_pass.cpp",
     "source/opt/eliminate_dead_members_pass.h",
+    "source/opt/eliminate_dead_output_stores_pass.cpp",
+    "source/opt/eliminate_dead_output_stores_pass.h",
     "source/opt/empty_pass.h",
     "source/opt/feature_manager.cpp",
     "source/opt/feature_manager.h",
@@ -673,6 +693,8 @@ static_library("spvtools_opt") {
     "source/opt/interface_var_sroa.h",
     "source/opt/interp_fixup_pass.cpp",
     "source/opt/interp_fixup_pass.h",
+    "source/opt/invocation_interlock_placement_pass.cpp",
+    "source/opt/invocation_interlock_placement_pass.h",
     "source/opt/ir_builder.h",
     "source/opt/ir_context.cpp",
     "source/opt/ir_context.h",
@@ -681,6 +703,8 @@ static_library("spvtools_opt") {
     "source/opt/iterator.h",
     "source/opt/licm_pass.cpp",
     "source/opt/licm_pass.h",
+    "source/opt/liveness.cpp",
+    "source/opt/liveness.h",
     "source/opt/local_access_chain_convert_pass.cpp",
     "source/opt/local_access_chain_convert_pass.h",
     "source/opt/local_redundancy_elimination.cpp",
@@ -767,7 +791,11 @@ static_library("spvtools_opt") {
     "source/opt/strip_nonsemantic_info_pass.h",
     "source/opt/struct_cfg_analysis.cpp",
     "source/opt/struct_cfg_analysis.h",
+    "source/opt/switch_descriptorset_pass.cpp",
+    "source/opt/switch_descriptorset_pass.h",
     "source/opt/tree_iterator.h",
+    "source/opt/trim_capabilities_pass.cpp",
+    "source/opt/trim_capabilities_pass.h",
     "source/opt/type_manager.cpp",
     "source/opt/type_manager.h",
     "source/opt/types.cpp",
@@ -1414,15 +1442,6 @@ if (spirv_tools_standalone) {
   }
 }
 
-source_set("spvtools_util_cli_consumer") {
-  sources = [
-    "tools/util/cli_consumer.cpp",
-    "tools/util/cli_consumer.h",
-  ]
-  deps = [ ":spvtools_headers" ]
-  configs += [ ":spvtools_internal_config" ]
-}
-
 source_set("spvtools_software_version") {
   sources = [ "source/software_version.cpp" ]
   deps = [
@@ -1432,12 +1451,23 @@ source_set("spvtools_software_version") {
   configs += [ ":spvtools_internal_config" ]
 }
 
+source_set("spvtools_tools_util") {
+  sources = [
+    "tools/util/flags.cpp",
+    "tools/util/cli_consumer.cpp",
+    "tools/util/cli_consumer.h",
+  ]
+  deps = [ ":spvtools_headers" ]
+  configs += [ ":spvtools_internal_config" ]
+}
+
 if (spvtools_build_executables) {
   executable("spirv-as") {
     sources = [ "tools/as/as.cpp" ]
     deps = [
       ":spvtools",
       ":spvtools_software_version",
+      ":spvtools_tools_util",
     ]
     configs += [ ":spvtools_internal_config" ]
   }
@@ -1447,6 +1477,7 @@ if (spvtools_build_executables) {
     deps = [
       ":spvtools",
       ":spvtools_software_version",
+      ":spvtools_tools_util",
     ]
     configs += [ ":spvtools_internal_config" ]
   }
@@ -1456,7 +1487,7 @@ if (spvtools_build_executables) {
     deps = [
       ":spvtools",
       ":spvtools_software_version",
-      ":spvtools_util_cli_consumer",
+      ":spvtools_tools_util",
       ":spvtools_val",
     ]
     configs += [ ":spvtools_internal_config" ]
@@ -1471,6 +1502,7 @@ if (spvtools_build_executables) {
     deps = [
       ":spvtools",
       ":spvtools_software_version",
+      ":spvtools_tools_util",
     ]
     configs += [ ":spvtools_internal_config" ]
   }
@@ -1481,7 +1513,7 @@ if (spvtools_build_executables) {
       ":spvtools",
       ":spvtools_opt",
       ":spvtools_software_version",
-      ":spvtools_util_cli_consumer",
+      ":spvtools_tools_util",
       ":spvtools_val",
     ]
     configs += [ ":spvtools_internal_config" ]
@@ -1494,6 +1526,7 @@ if (spvtools_build_executables) {
       ":spvtools_link",
       ":spvtools_opt",
       ":spvtools_software_version",
+      ":spvtools_tools_util",
       ":spvtools_val",
     ]
     configs += [ ":spvtools_internal_config" ]
@@ -1513,7 +1546,7 @@ if (!is_ios && !spirv_is_winuwp && build_with_chromium && spvtools_build_executa
       ":spvtools_opt",
       ":spvtools_reduce",
       ":spvtools_software_version",
-      ":spvtools_util_cli_consumer",
+      ":spvtools_tools_util",
       ":spvtools_val",
       "//third_party/protobuf:protobuf_full",
     ]
@@ -1532,7 +1565,7 @@ if (!is_ios && !spirv_is_winuwp && spvtools_build_executables) {
       ":spvtools_opt",
       ":spvtools_reduce",
       ":spvtools_software_version",
-      ":spvtools_util_cli_consumer",
+      ":spvtools_tools_util",
       ":spvtools_val",
     ]
     configs += [ ":spvtools_internal_config" ]

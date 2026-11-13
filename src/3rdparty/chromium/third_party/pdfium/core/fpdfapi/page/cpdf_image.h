@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "core/fpdfapi/page/cpdf_colorspace.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CFX_DIBBase;
 class CFX_DIBitmap;
@@ -36,7 +36,9 @@ class CPDF_Image final : public Retainable {
   RetainPtr<const CPDF_Dictionary> GetDict() const;
   RetainPtr<const CPDF_Stream> GetStream() const;
   RetainPtr<const CPDF_Dictionary> GetOC() const;
-  CPDF_Document* GetDocument() const { return m_pDocument.Get(); }
+
+  // Never returns nullptr.
+  CPDF_Document* GetDocument() const { return m_pDocument; }
 
   int32_t GetPixelHeight() const { return m_Height; }
   int32_t GetPixelWidth() const { return m_Width; }
@@ -59,7 +61,8 @@ class CPDF_Image final : public Retainable {
                         const CPDF_Dictionary* pPageResource,
                         bool bStdCS,
                         CPDF_ColorSpace::Family GroupFamily,
-                        bool bLoadMask);
+                        bool bLoadMask,
+                        const CFX_Size& max_size_required);
 
   // Returns whether to Continue() or not.
   bool Continue(PauseIndicatorIface* pPause);

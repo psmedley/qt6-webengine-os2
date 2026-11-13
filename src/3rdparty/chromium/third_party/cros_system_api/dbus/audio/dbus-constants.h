@@ -36,6 +36,8 @@ const char kGetNumberOfActiveInputStreams[] = "GetNumberOfActiveInputStreams";
 const char kGetNumberOfActiveOutputStreams[] = "GetNumberOfActiveOutputStreams";
 const char kGetNumberOfInputStreamsWithPermission[] =
     "GetNumberOfInputStreamsWithPermission";
+const char kGetNumberOfNonChromeOutputStreams[] =
+    "GetNumberOfNonChromeOutputStreams";
 const char kIsAudioOutputActive[] = "IsAudioOutputActive";
 const char kSetGlobalOutputChannelRemix[] = "SetGlobalOutputChannelRemix";
 const char kGetSystemAecSupported[] = "GetSystemAecSupported";
@@ -53,6 +55,12 @@ const char kGetDeprioritizeBtWbsMic[] = "GetDeprioritizeBtWbsMic";
 const char kSetNoiseCancellationEnabled[] = "SetNoiseCancellationEnabled";
 const char kIsNoiseCancellationSupported[] = "IsNoiseCancellationSupported";
 const char kSetFlossEnabled[] = "SetFlossEnabled";
+const char kSetSpeakOnMuteDetection[] = "SetSpeakOnMuteDetection";
+const char kSpeakOnMuteDetectionEnabled[] = "SpeakOnMuteDetectionEnabled";
+const char kSetForceRespectUiGains[] = "SetForceRespectUiGains";
+const char kGetNumStreamIgnoreUiGains[] = "GetNumStreamIgnoreUiGains";
+const char kSetHfpMicSrEnabled[] = "SetHfpMicSrEnabled";
+const char kIsHfpMicSrSupported[] = "IsHfpMicSrSupported";
 
 // Names of properties returned by GetNodes() and GetNodeInfos()
 const char kIsInputProperty[] = "IsInput";
@@ -69,11 +77,13 @@ const char kAudioEffectProperty[] = "AudioEffect";
 const char kNodeVolumeProperty[] = "NodeVolume";
 const char kInputNodeGainProperty[] = "InputNodeGain";
 const char kNumberOfVolumeStepsProperty[] = "NumberOfVolumeSteps";
+const char kDeviceLastOpenResultProperty[] = "DeviceLastOpenResult";
 // The following two properties are optional.
 const char kNumberOfUnderrunsProperty[] = "NumberOfUnderruns";
 const char kNumberOfSevereUnderrunsProperty[] = "NumberOfSevereUnderruns";
 enum AudioEffectType {
   EFFECT_TYPE_NOISE_CANCELLATION = 1 << 0,
+  EFFECT_TYPE_HFP_MIC_SR = 1 << 1,
 };
 // Screen Rotation in clock-wise degrees.
 // This enum corresponds to enum Rotation in chromium ui/display/display.h
@@ -97,16 +107,21 @@ const char kOutputNodeVolumeChanged[] = "OutputNodeVolumeChanged";
 const char kNodeLeftRightSwappedChanged[] = "NodeLeftRightSwappedChanged";
 const char kInputGainChanged[] = "InputGainChanged";
 const char kInputMuteChanged[] = "InputMuteChanged";
+const char kInputNodeGainChanged[] = "InputNodeGainChanged";
 const char kNodesChanged[] = "NodesChanged";
 const char kActiveOutputNodeChanged[] = "ActiveOutputNodeChanged";
 const char kActiveInputNodeChanged[] = "ActiveInputNodeChanged";
 const char kNumberOfActiveStreamsChanged[] = "NumberOfActiveStreamsChanged";
 const char kNumberOfInputStreamsWithPermissionChanged[] =
     "NumberOfInputStreamsWithPermissionChanged";
+const char kNumberOfNonChromeOutputStreamsChanged[] =
+    "NumberOfNonChromeOutputStreamsChanged";
 const char kAudioOutputActiveStateChanged[] = "AudioOutputActiveStateChanged";
 const char kHotwordTriggered[] = "HotwordTriggered";
 const char kBluetoothBatteryChanged[] = "BluetoothBatteryChanged";
 const char kSurveyTrigger[] = "SurveyTrigger";
+const char kSpeakOnMuteDetected[] = "SpeakOnMuteDetected";
+const char kNumStreamIgnoreUiGainsChanged[] = "NumStreamIgnoreUiGainsChanged";
 }  // namespace cras
 
 #endif  // SYSTEM_API_DBUS_AUDIO_DBUS_CONSTANTS_H_

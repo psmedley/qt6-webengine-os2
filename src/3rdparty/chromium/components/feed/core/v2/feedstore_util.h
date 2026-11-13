@@ -6,7 +6,8 @@
 #define COMPONENTS_FEED_CORE_V2_FEEDSTORE_UTIL_H_
 
 #include <string>
-#include "base/strings/string_piece_forward.h"
+#include "base/containers/flat_set.h"
+#include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "components/feed/core/proto/v2/store.pb.h"
 #include "components/feed/core/v2/public/stream_type.h"
@@ -22,9 +23,15 @@ class Metadata;
 
 const char kForYouStreamKey[] = "i";
 const char kFollowStreamKey[] = "w";
+const char kSupervisedUserStreamKey[] = "s";
+constexpr base::StringPiece kSingleWebFeedStreamKeyPrefix = "c";
+constexpr base::StringPiece kSingleWebFeedMenuStreamKeyPrefix = "m/";
+constexpr base::StringPiece kSingleWebFeedOtherStreamKeyPrefix = "o/";
 
 std::string StreamKey(const feed::StreamType& stream_type);
-feed::StreamType StreamTypeFromKey(std::string key);
+feed::StreamType StreamTypeFromKey(base::StringPiece key);
+
+base::StringPiece StreamPrefix(feed::StreamKind stream_type);
 
 ///////////////////////////////////////////////////
 // Functions that operate on feedstore proto types.
@@ -51,6 +58,8 @@ void SetLastFetchTime(Metadata& metadata,
                       const feed::StreamType& stream_type,
                       const base::Time& fetch_time);
 feedstore::Metadata MakeMetadata(const std::string& gaia);
+feedstore::DocView CreateDocView(uint64_t docid,
+                                 base::Time timestamp = base::Time::Now());
 
 // Mutations of Metadata. Metadata will need stored again after being changed,
 // call `FeedStream::SetMetadata()`.
@@ -82,6 +91,10 @@ feed::ContentHashSet GetViewContentIds(const Metadata& metadata,
                                        const feed::StreamType& stream_type);
 int32_t ContentHashFromPrefetchMetadata(
     const feedwire::PrefetchMetadata& prefetch_metadata);
+
+base::flat_set<uint32_t> GetViewedContentHashes(
+    const Metadata& metadata,
+    const feed::StreamType& stream_type);
 
 }  // namespace feedstore
 

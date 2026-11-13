@@ -19,7 +19,6 @@
 #include "absl/time/time.h"
 #include "internal/platform/mutex.h"
 
-namespace location {
 namespace nearby {
 
 // A global registry of running tasks. The goal is to help us monitor
@@ -35,6 +34,7 @@ class PendingJobRegistry {
   void AddRunningJob(const std::string& name, absl::Time post_time);
   void RemoveRunningJob(const std::string& name, absl::Time post_time);
   void ListJobs();
+  void ListAllJobs();
 
  private:
   PendingJobRegistry();
@@ -50,6 +50,5 @@ class PendingJobRegistry {
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_PUBLIC_PENDING_JOB_REGISTRY_H_

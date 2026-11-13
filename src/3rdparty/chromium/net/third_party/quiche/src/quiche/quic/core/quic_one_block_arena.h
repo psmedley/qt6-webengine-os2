@@ -21,7 +21,7 @@
 namespace quic {
 
 template <uint32_t ArenaSize>
-class QUIC_EXPORT_PRIVATE QuicOneBlockArena {
+class QUICHE_EXPORT QuicOneBlockArena {
   static const uint32_t kMaxAlign = 8;
 
  public:
@@ -70,7 +70,7 @@ class QUIC_EXPORT_PRIVATE QuicOneBlockArena {
 
 // QuicConnections currently use around 1KB of polymorphic types which would
 // ordinarily be on the heap. Instead, store them inline in an arena.
-using QuicConnectionArena = QuicOneBlockArena<1280>;
+using QuicConnectionArena = QuicOneBlockArena<1380>;
 
 }  // namespace quic
 

@@ -28,6 +28,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/notreached.h"
 #include "base/rand_util.h"
 #include "base/synchronization/lock.h"
@@ -42,6 +43,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -116,9 +118,9 @@ class PLATFORM_EXPORT NetworkStateNotifier {
     ~NetworkStateObserverHandle();
 
    private:
-    NetworkStateNotifier* notifier_;
+    raw_ptr<NetworkStateNotifier, ExperimentalRenderer> notifier_;
     ObserverType type_;
-    NetworkStateObserver* observer_;
+    raw_ptr<NetworkStateObserver, ExperimentalRenderer> observer_;
     scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   };
 
@@ -339,11 +341,10 @@ class PLATFORM_EXPORT NetworkStateNotifier {
                                   scoped_refptr<base::SingleThreadTaskRunner>>;
 
   void NotifyObservers(ObserverListMap&, ObserverType, const NetworkState&);
-  void NotifyObserverOnTaskRunner(NetworkStateObserver*,
+  void NotifyObserverOnTaskRunner(MayBeDangling<NetworkStateObserver>,
                                   ObserverType,
                                   const NetworkState&);
   ObserverListMap& GetObserverMapFor(ObserverType);
-
   void AddObserverToMap(ObserverListMap&,
                         NetworkStateObserver*,
                         scoped_refptr<base::SingleThreadTaskRunner>);

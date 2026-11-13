@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_stream_acc.h"
+#include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
@@ -68,8 +69,6 @@ class CPDF_Font : public Retainable, public Observable {
   static RetainPtr<CPDF_Font> GetStockFont(CPDF_Document* pDoc,
                                            ByteStringView fontname);
 
-  ~CPDF_Font() override;
-
   virtual bool IsType1Font() const;
   virtual bool IsTrueTypeFont() const;
   virtual bool IsType3Font() const;
@@ -108,7 +107,7 @@ class CPDF_Font : public Retainable, public Observable {
   }
   void ClearFontDict() { m_pFontDict = nullptr; }
   bool IsStandardFont() const;
-  bool HasFace() const { return !!m_Font.GetFaceRec(); }
+  bool HasFace() const { return !!m_Font.GetFace(); }
   void AppendChar(ByteString* str, uint32_t charcode) const;
 
   const FX_RECT& GetFontBBox() const { return m_FontBBox; }
@@ -126,29 +125,34 @@ class CPDF_Font : public Retainable, public Observable {
 
   // Can return nullptr for stock Type1 fonts. Always returns non-null for other
   // font types.
-  CPDF_Document* GetDocument() const { return m_pDocument.Get(); }
+  CPDF_Document* GetDocument() const { return m_pDocument; }
 
   CFX_Font* GetFont() { return &m_Font; }
   const CFX_Font* GetFont() const { return &m_Font; }
 
   CFX_Font* GetFontFallback(int position);
 
+  const ByteString& GetResourceName() const { return m_ResourceName; }
+  void SetResourceName(const ByteString& name) { m_ResourceName = name; }
+
  protected:
   CPDF_Font(CPDF_Document* pDocument, RetainPtr<CPDF_Dictionary> pFontDict);
+  ~CPDF_Font() override;
 
-  static int TT2PDF(FT_Pos m, FXFT_FaceRec* face);
+  static int TT2PDF(FT_Pos m, const RetainPtr<CFX_Face>& face);
+  static FX_RECT GetCharBBoxForFace(const RetainPtr<CFX_Face>& face);
 
   // Commonly used wrappers for UseTTCharmap().
-  static bool UseTTCharmapMSUnicode(FXFT_FaceRec* face) {
+  static bool UseTTCharmapMSUnicode(const RetainPtr<CFX_Face>& face) {
     return UseTTCharmap(face, 3, 1);
   }
-  static bool UseTTCharmapMSSymbol(FXFT_FaceRec* face) {
+  static bool UseTTCharmapMSSymbol(const RetainPtr<CFX_Face>& face) {
     return UseTTCharmap(face, 3, 0);
   }
-  static bool UseTTCharmapMacRoman(FXFT_FaceRec* face) {
+  static bool UseTTCharmapMacRoman(const RetainPtr<CFX_Face>& face) {
     return UseTTCharmap(face, 1, 0);
   }
-  static bool UseTTCharmap(FXFT_FaceRec* face,
+  static bool UseTTCharmap(const RetainPtr<CFX_Face>& face,
                            int platform_id,
                            int encoding_id);
 
@@ -163,6 +167,7 @@ class CPDF_Font : public Retainable, public Observable {
   void CheckFontMetrics();
 
   UnownedPtr<CPDF_Document> const m_pDocument;
+  ByteString m_ResourceName;  // The resource name for this font.
   CFX_Font m_Font;
   std::vector<std::unique_ptr<CFX_Font>> m_FontFallbacks;
   RetainPtr<CPDF_StreamAcc> m_pFontFile;

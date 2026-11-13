@@ -1,4 +1,4 @@
-// Copyright 2020 PDFium Authors. All rights reserved.
+// Copyright 2020 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,9 @@
 #include <vector>
 
 #include "core/fxcrt/retain_ptr.h"
+#include "third_party/base/containers/span.h"
 
-class CFX_DIBitmap;
+class CFX_DIBBase;
 class CFX_GraphStateData;
 class CFX_Matrix;
 class CFX_Path;
@@ -28,9 +29,9 @@ class CGdiplusExt {
   ~CGdiplusExt();
 
   void Load();
-  bool IsAvailable() { return !!m_hModule; }
+  bool IsAvailable() { return !!gdiplus_module_; }
   bool StretchDIBits(HDC hDC,
-                     const RetainPtr<CFX_DIBitmap>& pBitmap,
+                     RetainPtr<const CFX_DIBBase> source,
                      int dest_left,
                      int dest_top,
                      int dest_width,
@@ -45,11 +46,11 @@ class CGdiplusExt {
                 uint32_t stroke_argb,
                 const CFX_FillRenderOptions& fill_options);
 
-  std::vector<FARPROC> m_Functions;
+  pdfium::span<const FARPROC> functions() const { return gdiplus_functions_; }
 
  private:
-  HMODULE m_hModule = nullptr;
-  HMODULE m_GdiModule = nullptr;
+  HMODULE gdiplus_module_ = nullptr;
+  std::vector<FARPROC> gdiplus_functions_;
 };
 
 #endif  // CORE_FXGE_WIN32_CGDI_PLUS_EXT_H_

@@ -20,7 +20,6 @@
 #include "absl/strings/string_view.h"
 #include "connections/implementation/service_id_constants.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace {
@@ -29,7 +28,7 @@ namespace {
 // pure virtual functions in order to test BaseBwuHandler's bookkeeping logic.
 class BwuHandlerImpl : public BaseBwuHandler {
  public:
-  using Medium = location::nearby::proto::connections::Medium;
+  using Medium = ::location::nearby::proto::connections::Medium;
 
   // The arguments passed to the BwuHandler methods. Not all values are set
   // for every method.
@@ -39,7 +38,7 @@ class BwuHandlerImpl : public BaseBwuHandler {
     absl::optional<std::string> endpoint_id;
   };
 
-  BwuHandlerImpl() : BaseBwuHandler(BwuNotifications{}) {}
+  BwuHandlerImpl() : BaseBwuHandler(nullptr) {}
 
   const std::vector<InputData>& handle_initialize_calls() const {
     return handle_initialize_calls_;
@@ -226,4 +225,3 @@ TEST(BaseBwuHandlerTest, Revert_Failure_CantFindEndpoint) {
 }  // namespace
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

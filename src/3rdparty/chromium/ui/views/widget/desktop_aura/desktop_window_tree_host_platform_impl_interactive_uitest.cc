@@ -6,6 +6,7 @@
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_platform.h"
 
 #include "base/run_loop.h"
+#include "base/scoped_observation.h"
 #include "build/build_config.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
@@ -15,7 +16,6 @@
 #include "ui/base/test/ui_controls.h"
 #include "ui/platform_window/platform_window.h"
 #include "ui/platform_window/wm/wm_move_resize_handler.h"
-#include "ui/views/accessibility/accessibility_paint_checks.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
@@ -105,7 +105,7 @@ class FakeWmMoveResizeHandler : public ui::WmMoveResizeHandler {
  public:
   using SetBoundsCallback = base::RepeatingCallback<void(gfx::Rect)>;
   explicit FakeWmMoveResizeHandler(ui::PlatformWindow* window)
-      : platform_window_(window), hittest_(-1) {}
+      : platform_window_(window) {}
 
   FakeWmMoveResizeHandler(const FakeWmMoveResizeHandler&) = delete;
   FakeWmMoveResizeHandler& operator=(const FakeWmMoveResizeHandler&) = delete;
@@ -185,10 +185,7 @@ class HitTestNonClientFrameView : public NativeFrameView {
 // This is used to return HitTestNonClientFrameView on create call.
 class HitTestWidgetDelegate : public WidgetDelegate {
  public:
-  HitTestWidgetDelegate() {
-    SetCanResize(true);
-    SetOwnedByWidget(true);
-  }
+  HitTestWidgetDelegate() { SetCanResize(true); }
 
   HitTestWidgetDelegate(const HitTestWidgetDelegate&) = delete;
   HitTestWidgetDelegate& operator=(const HitTestWidgetDelegate&) = delete;
@@ -249,7 +246,8 @@ class TestDesktopWindowTreeHostPlatformImpl
 }  // namespace
 
 class DesktopWindowTreeHostPlatformImplTest
-    : public test::DesktopWidgetTestInteractive {
+    : public test::DesktopWidgetTestInteractive,
+      public views::WidgetObserver {
  public:
   DesktopWindowTreeHostPlatformImplTest() = default;
 
@@ -263,7 +261,7 @@ class DesktopWindowTreeHostPlatformImplTest
  protected:
   Widget* BuildTopLevelDesktopWidget(const gfx::Rect& bounds) {
     Widget* toplevel = new Widget;
-    delegate_ = new HitTestWidgetDelegate();
+    delegate_ = std::make_unique<HitTestWidgetDelegate>();
     Widget::InitParams toplevel_params =
         CreateParams(Widget::InitParams::TYPE_WINDOW);
     auto* native_widget = new DesktopNativeWidgetAura(toplevel);
@@ -275,6 +273,7 @@ class DesktopWindowTreeHostPlatformImplTest
     toplevel_params.bounds = bounds;
     toplevel_params.remove_standard_frame = true;
     toplevel->Init(std::move(toplevel_params));
+    widget_observation_.Observe(toplevel);
     return toplevel;
   }
 
@@ -297,14 +296,12 @@ class DesktopWindowTreeHostPlatformImplTest
                                      const gfx::Point& click_location,
                                      int flags) {
     int flag = 0;
-    if (flags & ui::EF_LEFT_MOUSE_BUTTON)
+    if (flags & ui::EF_LEFT_MOUSE_BUTTON) {
       flag = ui::EF_LEFT_MOUSE_BUTTON;
-    else if (flags & ui::EF_RIGHT_MOUSE_BUTTON)
-      flag = ui::EF_RIGHT_MOUSE_BUTTON;
-
-    if (!flag) {
-      NOTREACHED()
+    } else {
+      CHECK(flags & ui::EF_RIGHT_MOUSE_BUTTON)
           << "Other mouse clicks are not supported yet. Add the new one.";
+      flag = ui::EF_RIGHT_MOUSE_BUTTON;
     }
     return new ui::MouseEvent(event_type, click_location, click_location,
                               base::TimeTicks::Now(), flags, flag);
@@ -317,8 +314,17 @@ class DesktopWindowTreeHostPlatformImplTest
                                 base::TimeTicks::Now(), gesture_details);
   }
 
-  raw_ptr<HitTestWidgetDelegate> delegate_ = nullptr;
+  // views::WidgetObserver:
+  void OnWidgetDestroying(Widget* widget) override {
+    CHECK(widget_observation_.IsObservingSource(widget));
+    widget_observation_.Reset();
+    host_ = nullptr;
+  }
+
+  std::unique_ptr<HitTestWidgetDelegate> delegate_ = nullptr;
   raw_ptr<TestDesktopWindowTreeHostPlatformImpl> host_ = nullptr;
+  base::ScopedObservation<views::Widget, views::WidgetObserver>
+      widget_observation_{this};
 };
 
 // These tests are run using either click or touch events.
@@ -669,10 +675,8 @@ TEST_F(DesktopWindowTreeHostPlatformImplTest, InputMethodFocus) {
   std::unique_ptr<Widget> widget(CreateWidget(gfx::Rect(100, 100, 100, 100)));
 
   std::unique_ptr<Textfield> textfield(new Textfield);
-  // TODO(crbug.com/1218186): Remove this, this is in place temporarily to be
-  // able to submit accessibility checks, but this focusable View needs to
-  // add a name so that the screen reader knows what to announce.
-  textfield->SetProperty(views::kSkipAccessibilityPaintChecks, true);
+  // Provide an accessible name so that accessibility paint checks pass.
+  textfield->SetAccessibleName(u"test");
   textfield->SetBounds(0, 0, 200, 20);
   widget->GetRootView()->AddChildView(textfield.get());
   widget->ShowInactive();

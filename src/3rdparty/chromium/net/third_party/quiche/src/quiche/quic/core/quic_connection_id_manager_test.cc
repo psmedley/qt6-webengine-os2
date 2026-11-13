@@ -6,8 +6,10 @@
 
 #include <cstddef>
 
+#include "quiche/quic/core/frames/quic_retire_connection_id_frame.h"
 #include "quiche/quic/core/quic_connection_id.h"
 #include "quiche/quic/core/quic_error_codes.h"
+#include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/quic/platform/api/quic_test.h"
 #include "quiche/quic/test_tools/mock_clock.h"
 #include "quiche/quic/test_tools/mock_connection_id_generator.h"
@@ -102,6 +104,7 @@ class QuicPeerIssuedConnectionIdManagerTest : public QuicTest {
   QuicPeerIssuedConnectionIdManager peer_issued_cid_manager_;
   QuicAlarm* retire_peer_issued_cid_alarm_ = nullptr;
   std::string error_details_;
+  bool duplicate_frame_ = false;
 };
 
 TEST_F(QuicPeerIssuedConnectionIdManagerTest,
@@ -114,9 +117,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
 
     // Start to use CID #1 for alternative path.
     const QuicConnectionIdData* aternative_connection_id_data =
@@ -146,9 +149,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 1u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
     // Start to use CID #2 for alternative path.
     peer_issued_cid_manager_.ConsumeOneUnusedConnectionId();
     // Connection migration succeed. Prepares to retire CID #1.
@@ -170,9 +173,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 2u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
     // Start to use CID #3 for alternative path.
     peer_issued_cid_manager_.ConsumeOneUnusedConnectionId();
     // Connection migration succeed. Prepares to retire CID #2.
@@ -194,9 +197,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 3u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
   }
 }
 
@@ -210,9 +213,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
     // Start to use CID #1 for alternative path.
     peer_issued_cid_manager_.ConsumeOneUnusedConnectionId();
     // Connection migration fails. Prepares to retire CID #1.
@@ -234,9 +237,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
     // Start to use CID #2 for alternative path.
     peer_issued_cid_manager_.ConsumeOneUnusedConnectionId();
     // Connection migration fails again. Prepares to retire CID #2.
@@ -258,9 +261,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
     // Start to use CID #3 for alternative path.
     peer_issued_cid_manager_.ConsumeOneUnusedConnectionId();
     // Connection migration succeed. Prepares to retire CID #0.
@@ -284,9 +287,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 3u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    EXPECT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    EXPECT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
     EXPECT_FALSE(retire_peer_issued_cid_alarm_->IsSet());
   }
 }
@@ -302,9 +305,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
     // Start to use CID #1 for alternative path.
     // Outcome: (active: #0 #1 unused: None)
     peer_issued_cid_manager_.ConsumeOneUnusedConnectionId();
@@ -319,9 +322,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 2u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
   }
 
   {
@@ -333,9 +336,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 1u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
   }
 
   {
@@ -369,9 +372,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
   frame.retire_prior_to = 0u;
   frame.stateless_reset_token =
       QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-  ASSERT_THAT(
-      peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-      IsQuicNoError());
+  ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                  frame, &error_details_, &duplicate_frame_),
+              IsQuicNoError());
   // Start to use CID #1 for alternative path.
   // Outcome: (active: #0 #1 unused: None)
   peer_issued_cid_manager_.ConsumeOneUnusedConnectionId();
@@ -385,9 +388,10 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
       cid_manager_visitor_.most_recent_retired_connection_id_sequence_numbers(),
       ElementsAre(1u));
   // Receives the same frame again. Should be a no-op.
-  ASSERT_THAT(
-      peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-      IsQuicNoError());
+  ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                  frame, &error_details_, &duplicate_frame_),
+              IsQuicNoError());
+  EXPECT_EQ(true, duplicate_frame_);
   EXPECT_THAT(peer_issued_cid_manager_.ConsumeOneUnusedConnectionId(),
               testing::IsNull());
 }
@@ -403,9 +407,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
   }
 
   {
@@ -415,9 +419,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsError(QUIC_CONNECTION_ID_LIMIT_ERROR));
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsError(QUIC_CONNECTION_ID_LIMIT_ERROR));
   }
 }
 
@@ -430,9 +434,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
   }
 
   {
@@ -442,9 +446,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 1u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(TestConnectionId(2));
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsError(IETF_QUIC_PROTOCOL_VIOLATION));
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsError(IETF_QUIC_PROTOCOL_VIOLATION));
   }
 }
 
@@ -457,9 +461,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
   }
 
   {
@@ -469,9 +473,10 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = 0u;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(TestConnectionId(2));
-    EXPECT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    EXPECT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
+    EXPECT_EQ(true, duplicate_frame_);
     EXPECT_EQ(
         peer_issued_cid_manager_.ConsumeOneUnusedConnectionId()->connection_id,
         TestConnectionId(1));
@@ -490,9 +495,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
     frame.retire_prior_to = i;
     frame.stateless_reset_token =
         QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-    ASSERT_THAT(
-        peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-        IsQuicNoError());
+    ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                    frame, &error_details_, &duplicate_frame_),
+                IsQuicNoError());
   }
 
   // Interval [40, 41) goes over the limit.
@@ -502,9 +507,9 @@ TEST_F(QuicPeerIssuedConnectionIdManagerTest,
   frame.retire_prior_to = 40u;
   frame.stateless_reset_token =
       QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-  ASSERT_THAT(
-      peer_issued_cid_manager_.OnNewConnectionIdFrame(frame, &error_details_),
-      IsError(IETF_QUIC_PROTOCOL_VIOLATION));
+  ASSERT_THAT(peer_issued_cid_manager_.OnNewConnectionIdFrame(
+                  frame, &error_details_, &duplicate_frame_),
+              IsError(IETF_QUIC_PROTOCOL_VIOLATION));
 }
 
 TEST_F(QuicPeerIssuedConnectionIdManagerTest, ReplaceConnectionId) {
@@ -546,14 +551,11 @@ class QuicSelfIssuedConnectionIdManagerTest : public QuicTest {
  protected:
   // Verify that a call to GenerateNewConnectionId() does the right thing.
   QuicConnectionId CheckGenerate(QuicConnectionId old_cid) {
-    QuicConnectionId new_cid =
-        QuicUtils::CreateReplacementConnectionId(old_cid);
-    if (GetQuicReloadableFlag(
-            quic_connection_uses_abstract_connection_id_generator)) {
-      // Ready for the actual call.
-      EXPECT_CALL(connection_id_generator_, GenerateNextConnectionId(old_cid))
-          .WillOnce(Return(new_cid));
-    }
+    QuicConnectionId new_cid = old_cid;
+    (*new_cid.mutable_data())++;
+    // Ready for the actual call.
+    EXPECT_CALL(connection_id_generator_, GenerateNextConnectionId(old_cid))
+        .WillOnce(Return(new_cid));
     return new_cid;
   }
 
@@ -978,11 +980,7 @@ TEST_F(QuicSelfIssuedConnectionIdManagerTest, CannotIssueNewCidDueToVisitor) {
   QuicConnectionId cid1 = CheckGenerate(cid0);
   EXPECT_CALL(cid_manager_visitor_, MaybeReserveConnectionId(cid1))
       .WillOnce(Return(false));
-  if (GetQuicReloadableFlag(quic_check_cid_collision_when_issue_new_cid)) {
-    EXPECT_CALL(cid_manager_visitor_, SendNewConnectionId(_)).Times(0);
-  } else {
-    EXPECT_CALL(cid_manager_visitor_, SendNewConnectionId(_)).Times(1);
-  }
+  EXPECT_CALL(cid_manager_visitor_, SendNewConnectionId(_)).Times(0);
   cid_manager_.MaybeSendNewConnectionIds();
 }
 
@@ -1001,11 +999,7 @@ TEST_F(QuicSelfIssuedConnectionIdManagerTest,
   // CID #2 is not issued.
   EXPECT_CALL(cid_manager_visitor_, MaybeReserveConnectionId(cid2))
       .WillOnce(Return(false));
-  if (GetQuicReloadableFlag(quic_check_cid_collision_when_issue_new_cid)) {
-    EXPECT_CALL(cid_manager_visitor_, SendNewConnectionId(_)).Times(0);
-  } else {
-    EXPECT_CALL(cid_manager_visitor_, SendNewConnectionId(_)).Times(1);
-  }
+  EXPECT_CALL(cid_manager_visitor_, SendNewConnectionId(_)).Times(0);
   QuicRetireConnectionIdFrame retire_cid_frame;
   retire_cid_frame.sequence_number = 1;
   ASSERT_THAT(cid_manager_.OnRetireConnectionIdFrame(
@@ -1019,7 +1013,7 @@ TEST_F(QuicSelfIssuedConnectionIdManagerTest,
   QuicConnectionId cid1 = CheckGenerate(cid0);
   EXPECT_CALL(cid_manager_visitor_, MaybeReserveConnectionId(cid1))
       .WillOnce(Return(true));
-  absl::optional<QuicNewConnectionIdFrame> new_cid_frame =
+  std::optional<QuicNewConnectionIdFrame> new_cid_frame =
       cid_manager_.MaybeIssueNewConnectionIdForPreferredAddress();
   ASSERT_TRUE(new_cid_frame.has_value());
   ASSERT_THAT(*new_cid_frame, ExpectedNewConnectionIdFrame(cid1, 1u, 0u));
@@ -1029,6 +1023,37 @@ TEST_F(QuicSelfIssuedConnectionIdManagerTest,
   EXPECT_CALL(cid_manager_visitor_, MaybeReserveConnectionId(_)).Times(0);
   EXPECT_CALL(cid_manager_visitor_, SendNewConnectionId(_)).Times(0);
   cid_manager_.MaybeSendNewConnectionIds();
+}
+
+// Regression test for b/258450534
+TEST_F(QuicSelfIssuedConnectionIdManagerTest,
+       RetireConnectionIdAfterConnectionIdCollisionIsFine) {
+  QuicConnectionId cid0 = initial_connection_id_;
+  QuicConnectionId cid1 = CheckGenerate(cid0);
+  EXPECT_CALL(cid_manager_visitor_, MaybeReserveConnectionId(cid1))
+      .WillOnce(Return(true));
+  EXPECT_CALL(cid_manager_visitor_, SendNewConnectionId(_))
+      .WillOnce(Return(true));
+  cid_manager_.MaybeSendNewConnectionIds();
+
+  QuicRetireConnectionIdFrame retire_cid_frame(/*control_frame_id=*/0,
+                                               /*sequence_number=*/1);
+  QuicConnectionId cid2 = CheckGenerate(cid1);
+  // This happens when cid2 is aleady present in the dispatcher map.
+  EXPECT_CALL(cid_manager_visitor_, MaybeReserveConnectionId(cid2))
+      .WillOnce(Return(false));
+  std::string error_details;
+  EXPECT_EQ(
+      cid_manager_.OnRetireConnectionIdFrame(
+          retire_cid_frame, QuicTime::Delta::FromSeconds(1), &error_details),
+      QUIC_NO_ERROR)
+      << error_details;
+
+  EXPECT_EQ(
+      cid_manager_.OnRetireConnectionIdFrame(
+          retire_cid_frame, QuicTime::Delta::FromSeconds(1), &error_details),
+      QUIC_NO_ERROR)
+      << error_details;
 }
 
 }  // namespace

@@ -1,12 +1,10 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "fxjs/js_resources.h"
-
-#include "third_party/base/notreached.h"
 
 WideString JSGetStringFromID(JSMessage msg) {
   const char* msg_string = "";
@@ -91,9 +89,6 @@ WideString JSGetStringFromID(JSMessage msg) {
       break;
     case JSMessage::kWouldBeCyclic:
       msg_string = "Operation would create a cycle.";
-      break;
-    default:
-      NOTREACHED();
       break;
   }
   return WideString::FromASCII(msg_string);

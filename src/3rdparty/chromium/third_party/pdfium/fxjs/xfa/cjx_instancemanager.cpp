@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,8 @@
 #include "fxjs/fxv8.h"
 #include "fxjs/js_resources.h"
 #include "fxjs/xfa/cfxjse_engine.h"
-#include "third_party/base/notreached.h"
+#include "third_party/base/check_op.h"
+#include "third_party/base/containers/span.h"
 #include "v8/include/v8-object.h"
 #include "v8/include/v8-primitive.h"
 #include "xfa/fxfa/cxfa_ffdoc.h"
@@ -78,14 +79,11 @@ int32_t CJX_InstanceManager::SetInstances(v8::Isolate* pIsolate,
 
     while (iCount > iDesired) {
       CXFA_Node* pRemoveInstance = pPrevSibling->GetNextSibling();
-      if (pRemoveInstance->GetElementType() != XFA_Element::Subform &&
-          pRemoveInstance->GetElementType() != XFA_Element::SubformSet) {
+      const XFA_Element type = pRemoveInstance->GetElementType();
+      if (type != XFA_Element::Subform && type != XFA_Element::SubformSet) {
         continue;
       }
-      if (pRemoveInstance->GetElementType() == XFA_Element::InstanceManager) {
-        NOTREACHED();
-        break;
-      }
+      CHECK_NE(type, XFA_Element::InstanceManager);
       if (pRemoveInstance->GetNameHash() == dInstanceNameHash) {
         GetXFANode()->RemoveItem(pRemoveInstance, true);
         iCount--;
@@ -136,7 +134,7 @@ int32_t CJX_InstanceManager::MoveInstance(v8::Isolate* pIsolate,
 
 CJS_Result CJX_InstanceManager::moveInstance(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   CXFA_Document* doc = runtime->GetDocument();
   if (doc->GetFormType() != FormType::kXFAFull)
     return CJS_Result::Failure(JSMessage::kNotSupportedError);
@@ -166,7 +164,7 @@ CJS_Result CJX_InstanceManager::moveInstance(
 
 CJS_Result CJX_InstanceManager::removeInstance(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   CXFA_Document* doc = runtime->GetDocument();
   if (doc->GetFormType() != FormType::kXFAFull)
     return CJS_Result::Failure(JSMessage::kNotSupportedError);
@@ -205,7 +203,7 @@ CJS_Result CJX_InstanceManager::removeInstance(
 
 CJS_Result CJX_InstanceManager::setInstances(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   CXFA_Document* doc = runtime->GetDocument();
   if (doc->GetFormType() != FormType::kXFAFull)
     return CJS_Result::Failure(JSMessage::kNotSupportedError);
@@ -219,7 +217,7 @@ CJS_Result CJX_InstanceManager::setInstances(
 
 CJS_Result CJX_InstanceManager::addInstance(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   CXFA_Document* doc = runtime->GetDocument();
   if (doc->GetFormType() != FormType::kXFAFull)
     return CJS_Result::Failure(JSMessage::kNotSupportedError);
@@ -250,13 +248,12 @@ CJS_Result CJX_InstanceManager::addInstance(
   }
 
   return CJS_Result::Success(
-      GetDocument()->GetScriptContext()->GetOrCreateJSBindingFromMap(
-          pNewInstance));
+      runtime->GetOrCreateJSBindingFromMap(pNewInstance));
 }
 
 CJS_Result CJX_InstanceManager::insertInstance(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   CXFA_Document* doc = runtime->GetDocument();
   if (doc->GetFormType() != FormType::kXFAFull)
     return CJS_Result::Failure(JSMessage::kNotSupportedError);
@@ -291,8 +288,7 @@ CJS_Result CJX_InstanceManager::insertInstance(
   }
 
   return CJS_Result::Success(
-      GetDocument()->GetScriptContext()->GetOrCreateJSBindingFromMap(
-          pNewInstance));
+      runtime->GetOrCreateJSBindingFromMap(pNewInstance));
 }
 
 void CJX_InstanceManager::max(v8::Isolate* pIsolate,

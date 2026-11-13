@@ -408,22 +408,18 @@ int av1_compute_rd_mult_based_on_qindex(aom_bit_depth_t bit_depth,
   return rdmult > 0 ? (int)AOMMIN(rdmult, INT_MAX) : 1;
 }
 
-int av1_compute_rd_mult(const AV1_COMP *cpi, int qindex) {
-  const aom_bit_depth_t bit_depth = cpi->common.seq_params->bit_depth;
-  const FRAME_UPDATE_TYPE update_type =
-      cpi->ppi->gf_group.update_type[cpi->gf_frame_index];
+int av1_compute_rd_mult(const int qindex, const aom_bit_depth_t bit_depth,
+                        const FRAME_UPDATE_TYPE update_type,
+                        const int layer_depth, const int boost_index,
+                        const FRAME_TYPE frame_type,
+                        const int use_fixed_qp_offsets,
+                        const int is_stat_consumption_stage) {
   int64_t rdmult =
       av1_compute_rd_mult_based_on_qindex(bit_depth, update_type, qindex);
-  if (is_stat_consumption_stage(cpi) && !cpi->oxcf.q_cfg.use_fixed_qp_offsets &&
-      (cpi->common.current_frame.frame_type != KEY_FRAME)) {
-    const GF_GROUP *const gf_group = &cpi->ppi->gf_group;
-    const int boost_index = AOMMIN(15, (cpi->ppi->p_rc.gfu_boost / 100));
-    const int layer_depth =
-        AOMMIN(gf_group->layer_depth[cpi->gf_frame_index], 6);
-
+  if (is_stat_consumption_stage && !use_fixed_qp_offsets &&
+      (frame_type != KEY_FRAME)) {
     // Layer depth adjustment
     rdmult = (rdmult * rd_layer_depth_factor[layer_depth]) >> 7;
-
     // ARF boost adjustment
     rdmult += ((rdmult * rd_boost_factor[boost_index]) >> 7);
   }
@@ -474,10 +470,20 @@ int av1_adjust_q_from_delta_q_res(int delta_q_res, int prev_qindex,
 int av1_get_adaptive_rdmult(const AV1_COMP *cpi, double beta) {
   assert(beta > 0.0);
   const AV1_COMMON *cm = &cpi->common;
-  int q = av1_dc_quant_QTX(cm->quant_params.base_qindex, 0,
-                           cm->seq_params->bit_depth);
 
-  return (int)(av1_compute_rd_mult(cpi, q) / beta);
+  const GF_GROUP *const gf_group = &cpi->ppi->gf_group;
+  const int boost_index = AOMMIN(15, (cpi->ppi->p_rc.gfu_boost / 100));
+  const int layer_depth = AOMMIN(gf_group->layer_depth[cpi->gf_frame_index], 6);
+  const FRAME_TYPE frame_type = cm->current_frame.frame_type;
+
+  const int qindex_rdmult = cm->quant_params.base_qindex;
+  return (int)(av1_compute_rd_mult(
+                   qindex_rdmult, cm->seq_params->bit_depth,
+                   cpi->ppi->gf_group.update_type[cpi->gf_frame_index],
+                   layer_depth, boost_index, frame_type,
+                   cpi->oxcf.q_cfg.use_fixed_qp_offsets,
+                   is_stat_consumption_stage(cpi)) /
+               beta);
 }
 
 static int compute_rd_thresh_factor(int qindex, aom_bit_depth_t bit_depth) {
@@ -756,8 +762,18 @@ void av1_initialize_rd_consts(AV1_COMP *cpi) {
   int use_nonrd_pick_mode = cpi->sf.rt_sf.use_nonrd_pick_mode;
   int frames_since_key = cpi->rc.frames_since_key;
 
+  const GF_GROUP *const gf_group = &cpi->ppi->gf_group;
+  const int boost_index = AOMMIN(15, (cpi->ppi->p_rc.gfu_boost / 100));
+  const int layer_depth = AOMMIN(gf_group->layer_depth[cpi->gf_frame_index], 6);
+  const FRAME_TYPE frame_type = cm->current_frame.frame_type;
+
+  const int qindex_rdmult =
+      cm->quant_params.base_qindex + cm->quant_params.y_dc_delta_q;
   rd->RDMULT = av1_compute_rd_mult(
-      cpi, cm->quant_params.base_qindex + cm->quant_params.y_dc_delta_q);
+      qindex_rdmult, cm->seq_params->bit_depth,
+      cpi->ppi->gf_group.update_type[cpi->gf_frame_index], layer_depth,
+      boost_index, frame_type, cpi->oxcf.q_cfg.use_fixed_qp_offsets,
+      is_stat_consumption_stage(cpi));
 #if CONFIG_RD_COMMAND
   if (cpi->oxcf.pass == 2) {
     const RD_COMMAND *rd_command = &cpi->rd_command;
@@ -793,10 +809,11 @@ void av1_initialize_rd_consts(AV1_COMP *cpi) {
 
   // Frame level dv cost update
   if (av1_need_dv_costs(cpi)) {
-    if (cpi->td.mb.dv_costs == NULL) {
+    if (cpi->td.dv_costs_alloc == NULL) {
       CHECK_MEM_ERROR(
-          cm, cpi->td.mb.dv_costs,
-          (IntraBCMVCosts *)aom_malloc(sizeof(*cpi->td.mb.dv_costs)));
+          cm, cpi->td.dv_costs_alloc,
+          (IntraBCMVCosts *)aom_malloc(sizeof(*cpi->td.dv_costs_alloc)));
+      cpi->td.mb.dv_costs = cpi->td.dv_costs_alloc;
     }
     av1_fill_dv_costs(&cm->fc->ndvc, x->dv_costs);
   }
@@ -1164,6 +1181,46 @@ void av1_get_entropy_contexts(BLOCK_SIZE plane_bsize,
   get_entropy_contexts_plane(plane_bsize, pd, t_above, t_left);
 }
 
+// Special clamping used in the encoder when calculating a prediction
+//
+// Logically, all pixel fetches used for prediction are clamped against the
+// edges of the frame. But doing this directly is slow, so instead we allocate
+// a finite border around the frame and fill it with copies of the outermost
+// pixels.
+//
+// Since this border is finite, we need to clamp the motion vector before
+// prediction in order to avoid out-of-bounds reads. At the same time, this
+// clamp must not change the prediction result.
+//
+// We can balance both of these concerns by calculating how far we would have
+// to go in each direction before the extended prediction region (the current
+// block + AOM_INTERP_EXTEND many pixels around the block) would be mapped
+// so that it touches the frame only at one row or column. This is a special
+// point because any more extreme MV will always lead to the same prediction.
+// So it is safe to clamp at that point.
+//
+// In the worst case, this requires a border of
+//   max_block_width + 2*AOM_INTERP_EXTEND = 128 + 2*4 = 136 pixels
+// around the frame edges.
+static INLINE void enc_clamp_mv(const AV1_COMMON *cm, const MACROBLOCKD *xd,
+                                MV *mv) {
+  int bw = xd->width << MI_SIZE_LOG2;
+  int bh = xd->height << MI_SIZE_LOG2;
+
+  int px_to_left_edge = xd->mi_col << MI_SIZE_LOG2;
+  int px_to_right_edge = (cm->mi_params.mi_cols - xd->mi_col) << MI_SIZE_LOG2;
+  int px_to_top_edge = xd->mi_row << MI_SIZE_LOG2;
+  int px_to_bottom_edge = (cm->mi_params.mi_rows - xd->mi_row) << MI_SIZE_LOG2;
+
+  const SubpelMvLimits mv_limits = {
+    .col_min = -GET_MV_SUBPEL(px_to_left_edge + bw + AOM_INTERP_EXTEND),
+    .col_max = GET_MV_SUBPEL(px_to_right_edge + AOM_INTERP_EXTEND),
+    .row_min = -GET_MV_SUBPEL(px_to_top_edge + bh + AOM_INTERP_EXTEND),
+    .row_max = GET_MV_SUBPEL(px_to_bottom_edge + AOM_INTERP_EXTEND)
+  };
+  clamp_mv(mv, &mv_limits);
+}
+
 void av1_mv_pred(const AV1_COMP *cpi, MACROBLOCK *x, uint8_t *ref_y_buffer,
                  int ref_y_stride, int ref_frame, BLOCK_SIZE block_size) {
   const MV_REFERENCE_FRAME ref_frames[2] = { ref_frame, NONE_FRAME };
@@ -1186,7 +1243,9 @@ void av1_mv_pred(const AV1_COMP *cpi, MACROBLOCK *x, uint8_t *ref_y_buffer,
   int max_mv = 0;
   // Get the sad for each candidate reference mv.
   for (int i = 0; i < num_mv_refs; ++i) {
-    const MV *this_mv = &pred_mv[i];
+    MV *this_mv = &pred_mv[i];
+    enc_clamp_mv(&cpi->common, &x->e_mbd, this_mv);
+
     const int fp_row = (this_mv->row + 3 + (this_mv->row >= 0)) >> 3;
     const int fp_col = (this_mv->col + 3 + (this_mv->col >= 0)) >> 3;
     max_mv = AOMMAX(max_mv, AOMMAX(abs(this_mv->row), abs(this_mv->col)) >> 3);

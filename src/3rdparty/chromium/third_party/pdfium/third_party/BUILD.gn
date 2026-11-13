@@ -1,4 +1,4 @@
-# Copyright 2014 PDFium Authors. All rights reserved.
+# Copyright 2014 The PDFium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,16 +7,6 @@ import("//build/config/linux/pkg_config.gni")
 import("//build/config/mips.gni")
 import("//build_overrides/build.gni")
 import("../pdfium.gni")
-
-group("third_party") {
-  deps = [
-    ":pdfium_base",
-    ":skia_shared",
-  ]
-  if (pdf_bundle_freetype) {
-    deps += [ ":fx_freetype" ]
-  }
-}
 
 config("pdfium_third_party_config") {
   configs = [
@@ -63,6 +53,9 @@ if (pdf_bundle_freetype) {
       "FT_CONFIG_MODULES_H=\"freetype-custom-config/ftmodule.h\"",
       "FT_CONFIG_OPTIONS_H=\"freetype-custom-config/ftoption.h\"",
     ]
+  }
+
+  config("freetype_private_config") {
     if (is_clang) {
       # Multiple functions in freetype/src/src/truetype/ttobjs.h are unused.
       cflags = [ "-Wno-unused-function" ]
@@ -75,6 +68,7 @@ if (pdf_bundle_freetype) {
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [
       "//build/config/compiler:no_chromium_code",
+      ":freetype_private_config",
       ":pdfium_third_party_config",
     ]
 
@@ -195,7 +189,7 @@ if (pdf_bundle_freetype) {
       "//third_party/freetype/src/src/truetype/truetype.c",
       "//third_party/freetype/src/src/type1/type1.c",
     ]
-    if (pdf_use_skia || pdf_use_skia_paths) {
+    if (pdf_use_skia) {
       sources += [
         "//third_party/freetype/src/include/freetype/ftsynth.h",
         "//third_party/freetype/src/src/base/fttype1.c",
@@ -204,7 +198,7 @@ if (pdf_bundle_freetype) {
   }
 }
 
-if (pdf_use_skia || pdf_use_skia_paths) {
+if (is_linux || is_chromeos) {
   config("system_fontconfig") {
     libs = [ "fontconfig" ]
   }
@@ -214,7 +208,7 @@ if (pdf_use_skia || pdf_use_skia_paths) {
 }
 
 config("fx_agg_warnings") {
-  visibility = [ ":*" ]
+  visibility = [ ":fx_agg" ]
   if (is_clang) {
     # calc_butt_cap() in agg_vcgen_stroke.cpp is unused.
     cflags = [ "-Wno-unused-function" ]
@@ -230,21 +224,33 @@ source_set("fx_agg") {
     ":fx_agg_warnings",
   ]
   sources = [
+    "agg23/agg_array.h",
     "agg23/agg_basics.h",
     "agg23/agg_clip_liang_barsky.h",
+    "agg23/agg_color_gray.h",
+    "agg23/agg_conv_adaptor_vcgen.h",
     "agg23/agg_conv_dash.h",
     "agg23/agg_conv_stroke.h",
     "agg23/agg_curves.cpp",
     "agg23/agg_curves.h",
+    "agg23/agg_math.h",
+    "agg23/agg_math_stroke.h",
     "agg23/agg_path_storage.cpp",
     "agg23/agg_path_storage.h",
+    "agg23/agg_pixfmt_gray.h",
     "agg23/agg_rasterizer_scanline_aa.cpp",
     "agg23/agg_rasterizer_scanline_aa.h",
+    "agg23/agg_render_scanlines.h",
+    "agg23/agg_renderer_base.h",
     "agg23/agg_renderer_scanline.h",
     "agg23/agg_rendering_buffer.h",
     "agg23/agg_scanline_u.h",
+    "agg23/agg_shorten_path.h",
     "agg23/agg_vcgen_dash.cpp",
+    "agg23/agg_vcgen_dash.h",
     "agg23/agg_vcgen_stroke.cpp",
+    "agg23/agg_vcgen_stroke.h",
+    "agg23/agg_vertex_sequence.h",
   ]
   deps = [ "../core/fxcrt" ]
 }
@@ -445,92 +451,22 @@ group("png") {
   } else if (pdfium_use_qt_libpng) {
     public_configs = [ qt_libpng_config ]
   } else {
-    public_deps = [ ":fx_lpng" ]
-  }
-}
-
-source_set("fx_lpng") {
-  configs -= [ "//build/config/compiler:chromium_code" ]
-  configs += [
-    "//build/config/compiler:no_chromium_code",
-    ":pdfium_third_party_config",
-  ]
-  sources = [
-    "libpng16/png.c",
-    "libpng16/png.h",
-    "libpng16/pngconf.h",
-    "libpng16/pngdebug.h",
-    "libpng16/pngerror.c",
-    "libpng16/pngget.c",
-    "libpng16/pnginfo.h",
-    "libpng16/pnglibconf.h",
-    "libpng16/pngmem.c",
-    "libpng16/pngpread.c",
-    "libpng16/pngprefix.h",
-    "libpng16/pngpriv.h",
-    "libpng16/pngread.c",
-    "libpng16/pngrio.c",
-    "libpng16/pngrtran.c",
-    "libpng16/pngrutil.c",
-    "libpng16/pngset.c",
-    "libpng16/pngstruct.h",
-    "libpng16/pngtrans.c",
-    "libpng16/pngwio.c",
-    "libpng16/pngwrite.c",
-    "libpng16/pngwtran.c",
-    "libpng16/pngwutil.c",
-  ]
-
-  defines = []
-  cflags = []
-  deps = [
-    ":zlib",
-    "../core/fxcrt",
-  ]
-
-  if (current_cpu == "x86" || current_cpu == "x64") {
-    sources += [
-      "libpng16/intel/filter_sse2_intrinsics.c",
-      "libpng16/intel/intel_init.c",
-    ]
-    defines += [ "PNG_INTEL_SSE_OPT=1" ]
-  } else if ((current_cpu == "arm" || current_cpu == "arm64") && arm_use_neon) {
-    sources += [
-      "libpng16/arm/arm_init.c",
-      "libpng16/arm/filter_neon_intrinsics.c",
-      "libpng16/arm/palette_neon_intrinsics.c",
-    ]
-    defines += [
-      "PNG_ARM_NEON_OPT=2",
-      "PNG_ARM_NEON_IMPLEMENTATION=1",
-    ]
-    configs -= [ "//build/config/compiler:default_optimization" ]
-    configs += [ "//build/config/compiler:optimize_speed" ]
-  } else if (current_cpu == "mips64el" && mips_use_msa) {
-    sources += [
-      "mips/filter_msa_intrinsics.c",
-      "mips/mips_init.c",
-    ]
-  }
-
-  if (is_win) {
-    # Unary minus applied to unsigned type.
-    cflags += [ "/wd4146" ]
+    public_deps = [ "//third_party/libpng" ]
   }
 }
 
 if (pdf_enable_xfa_tiff) {
   if (pdfium_use_system_libtiff) {
     config("system_tiff_config") {
-      defines = [ "USE_SYSTEM_LIBTIFF" ]
       libs = [ "tiff" ]
+      defines = [ "USE_SYSTEM_LIBTIFF" ]
     }
   } else {
     source_set("fx_tiff") {
       configs -= [ "//build/config/compiler:chromium_code" ]
       configs += [
-       "//build/config/compiler:no_chromium_code",
-       ":pdfium_third_party_config",
+        "//build/config/compiler:no_chromium_code",
+        ":pdfium_third_party_config",
       ]
       if (is_win) {
         # Need to undefine the macro since it is redefined in tif_jpeg.c.
@@ -558,6 +494,8 @@ if (pdf_enable_xfa_tiff) {
         "libtiff/tif_fax3sm.c",
         "libtiff/tif_flush.c",
         "libtiff/tif_getimage.c",
+        "libtiff/tif_hash_set.c",
+        "libtiff/tif_hash_set.h",
         "libtiff/tif_jpeg.c",
         "libtiff/tif_luv.c",
         "libtiff/tif_lzw.c",
@@ -575,7 +513,6 @@ if (pdf_enable_xfa_tiff) {
         "libtiff/tif_version.c",
         "libtiff/tif_warning.c",
         "libtiff/tif_write.c",
-        "libtiff/tiffio.h",
         "libtiff/tiffiop.h",
         "libtiff/tiffvers.h",
       ]
@@ -600,6 +537,16 @@ source_set("pdfium_compiler_specific") {
   sources = [ "base/compiler_specific.h" ]
 }
 
+if (pdf_use_partition_alloc) {
+  group("pdfium_pa") {
+    public_deps = [
+      "//base/allocator/partition_allocator/src/partition_alloc:partition_alloc_buildflags",
+      "//base/allocator/partition_allocator/src/partition_alloc:raw_ptr",
+    ]
+    deps = [ "//base/allocator/partition_allocator/src/partition_alloc" ]
+  }
+}
+
 source_set("pdfium_base") {
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [
@@ -607,18 +554,19 @@ source_set("pdfium_base") {
     ":pdfium_third_party_config",
   ]
   sources = [
-    "base/base_export.h",
     "base/bits.h",
     "base/check.h",
     "base/check_op.h",
+    "base/component_export.h",
     "base/containers/adapters.h",
     "base/containers/contains.h",
-    "base/cxx17_backports.h",
+    "base/containers/span.h",
     "base/debug/alias.cc",
     "base/debug/alias.h",
     "base/immediate_crash.h",
     "base/memory/aligned_memory.cc",
     "base/memory/aligned_memory.h",
+    "base/memory/ptr_util.h",
     "base/no_destructor.h",
     "base/notreached.h",
     "base/numerics/checked_math.h",
@@ -632,13 +580,11 @@ source_set("pdfium_base") {
     "base/numerics/safe_math_arm_impl.h",
     "base/numerics/safe_math_clang_gcc_impl.h",
     "base/numerics/safe_math_shared_impl.h",
-    "base/span.h",
     "base/sys_byteorder.h",
     "base/template_util.h",
   ]
   public_deps = [
     ":pdfium_compiler_specific",
-    "../core/fxcrt:unowned_ptr",
     "//third_party/abseil-cpp:absl",
   ]
   if (is_win) {
@@ -647,6 +593,9 @@ source_set("pdfium_base") {
       "base/win/win_util.cc",
       "base/win/win_util.h",
     ]
+  }
+  if (pdf_use_partition_alloc) {
+    public_deps += [ ":pdfium_pa" ]
   }
 }
 
@@ -665,15 +614,4 @@ source_set("pdfium_base_test_support") {
     ]
     deps += [ "//testing/gtest" ]
   }
-}
-
-source_set("skia_shared") {
-  sources = [
-    "skia_shared/SkFloatToDecimal.cpp",
-    "skia_shared/SkFloatToDecimal.h",
-  ]
-  configs += [
-    "../:pdfium_strict_config",
-    "../:pdfium_noshorten_config",
-  ]
 }

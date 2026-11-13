@@ -44,18 +44,30 @@ NetworkQualityMetricsReporter::NetworkQualityMetricsReporter(
   RTC_CHECK(metrics_logger_);
 }
 
+NetworkQualityMetricsReporter::NetworkQualityMetricsReporter(
+    absl::string_view alice_network_label,
+    EmulatedNetworkManagerInterface* alice_network,
+    absl::string_view bob_network_label,
+    EmulatedNetworkManagerInterface* bob_network,
+    test::MetricsLogger* metrics_logger)
+    : NetworkQualityMetricsReporter(alice_network,
+                                    bob_network,
+                                    metrics_logger) {
+  alice_network_label_ = std::string(alice_network_label);
+  bob_network_label_ = std::string(bob_network_label);
+}
+
 void NetworkQualityMetricsReporter::Start(
     absl::string_view test_case_name,
     const TrackIdStreamInfoMap* /*reporter_helper*/) {
   test_case_name_ = std::string(test_case_name);
   // Check that network stats are clean before test execution.
-  std::unique_ptr<EmulatedNetworkStats> alice_stats =
-      PopulateStats(alice_network_);
-  RTC_CHECK_EQ(alice_stats->PacketsSent(), 0);
-  RTC_CHECK_EQ(alice_stats->PacketsReceived(), 0);
-  std::unique_ptr<EmulatedNetworkStats> bob_stats = PopulateStats(bob_network_);
-  RTC_CHECK_EQ(bob_stats->PacketsSent(), 0);
-  RTC_CHECK_EQ(bob_stats->PacketsReceived(), 0);
+  EmulatedNetworkStats alice_stats = PopulateStats(alice_network_);
+  RTC_CHECK_EQ(alice_stats.overall_outgoing_stats.packets_sent, 0);
+  RTC_CHECK_EQ(alice_stats.overall_incoming_stats.packets_received, 0);
+  EmulatedNetworkStats bob_stats = PopulateStats(bob_network_);
+  RTC_CHECK_EQ(bob_stats.overall_outgoing_stats.packets_sent, 0);
+  RTC_CHECK_EQ(bob_stats.overall_incoming_stats.packets_received, 0);
 }
 
 void NetworkQualityMetricsReporter::OnStatsReports(
@@ -64,18 +76,17 @@ void NetworkQualityMetricsReporter::OnStatsReports(
   DataSize payload_received = DataSize::Zero();
   DataSize payload_sent = DataSize::Zero();
 
-  auto inbound_stats = report->GetStatsOfType<RTCInboundRTPStreamStats>();
+  auto inbound_stats = report->GetStatsOfType<RTCInboundRtpStreamStats>();
   for (const auto& stat : inbound_stats) {
     payload_received +=
-        DataSize::Bytes(stat->bytes_received.ValueOrDefault(0ul) +
-                        stat->header_bytes_received.ValueOrDefault(0ul));
+        DataSize::Bytes(stat->bytes_received.value_or(0ul) +
+                        stat->header_bytes_received.value_or(0ul));
   }
 
-  auto outbound_stats = report->GetStatsOfType<RTCOutboundRTPStreamStats>();
+  auto outbound_stats = report->GetStatsOfType<RTCOutboundRtpStreamStats>();
   for (const auto& stat : outbound_stats) {
-    payload_sent +=
-        DataSize::Bytes(stat->bytes_sent.ValueOrDefault(0ul) +
-                        stat->header_bytes_sent.ValueOrDefault(0ul));
+    payload_sent += DataSize::Bytes(stat->bytes_sent.value_or(0ul) +
+                                    stat->header_bytes_sent.value_or(0ul));
   }
 
   MutexLock lock(&lock_);
@@ -85,15 +96,16 @@ void NetworkQualityMetricsReporter::OnStatsReports(
 }
 
 void NetworkQualityMetricsReporter::StopAndReportResults() {
-  std::unique_ptr<EmulatedNetworkStats> alice_stats =
-      PopulateStats(alice_network_);
-  std::unique_ptr<EmulatedNetworkStats> bob_stats = PopulateStats(bob_network_);
+  EmulatedNetworkStats alice_stats = PopulateStats(alice_network_);
+  EmulatedNetworkStats bob_stats = PopulateStats(bob_network_);
   int64_t alice_packets_loss =
-      alice_stats->PacketsSent() - bob_stats->PacketsReceived();
+      alice_stats.overall_outgoing_stats.packets_sent -
+      bob_stats.overall_incoming_stats.packets_received;
   int64_t bob_packets_loss =
-      bob_stats->PacketsSent() - alice_stats->PacketsReceived();
-  ReportStats("alice", std::move(alice_stats), alice_packets_loss);
-  ReportStats("bob", std::move(bob_stats), bob_packets_loss);
+      bob_stats.overall_outgoing_stats.packets_sent -
+      alice_stats.overall_incoming_stats.packets_received;
+  ReportStats(alice_network_label_, alice_stats, alice_packets_loss);
+  ReportStats(bob_network_label_, bob_stats, bob_packets_loss);
 
   if (!webrtc::field_trial::IsEnabled(kUseStandardBytesStats)) {
     RTC_LOG(LS_ERROR)
@@ -106,12 +118,11 @@ void NetworkQualityMetricsReporter::StopAndReportResults() {
   }
 }
 
-std::unique_ptr<EmulatedNetworkStats>
-NetworkQualityMetricsReporter::PopulateStats(
+EmulatedNetworkStats NetworkQualityMetricsReporter::PopulateStats(
     EmulatedNetworkManagerInterface* network) {
   rtc::Event wait;
-  std::unique_ptr<EmulatedNetworkStats> stats;
-  network->GetStats([&](std::unique_ptr<EmulatedNetworkStats> s) {
+  EmulatedNetworkStats stats;
+  network->GetStats([&](EmulatedNetworkStats s) {
     stats = std::move(s);
     wait.Set();
   });
@@ -122,38 +133,43 @@ NetworkQualityMetricsReporter::PopulateStats(
 
 void NetworkQualityMetricsReporter::ReportStats(
     const std::string& network_label,
-    std::unique_ptr<EmulatedNetworkStats> stats,
+    const EmulatedNetworkStats& stats,
     int64_t packet_loss) {
   metrics_logger_->LogSingleValueMetric(
-      "bytes_sent", GetTestCaseName(network_label), stats->BytesSent().bytes(),
-      Unit::kBytes, ImprovementDirection::kNeitherIsBetter);
+      "bytes_sent", GetTestCaseName(network_label),
+      stats.overall_outgoing_stats.bytes_sent.bytes(), Unit::kBytes,
+      ImprovementDirection::kNeitherIsBetter);
   metrics_logger_->LogSingleValueMetric(
-      "packets_sent", GetTestCaseName(network_label), stats->PacketsSent(),
-      Unit::kUnitless, ImprovementDirection::kNeitherIsBetter);
+      "packets_sent", GetTestCaseName(network_label),
+      stats.overall_outgoing_stats.packets_sent, Unit::kUnitless,
+      ImprovementDirection::kNeitherIsBetter);
   metrics_logger_->LogSingleValueMetric(
       "average_send_rate", GetTestCaseName(network_label),
-      stats->PacketsSent() >= 2 ? stats->AverageSendRate().kbps<double>() : 0,
+      stats.overall_outgoing_stats.packets_sent >= 2
+          ? stats.overall_outgoing_stats.AverageSendRate().kbps<double>()
+          : 0,
       Unit::kKilobitsPerSecond, ImprovementDirection::kNeitherIsBetter);
   metrics_logger_->LogSingleValueMetric(
       "bytes_discarded_no_receiver", GetTestCaseName(network_label),
-      stats->BytesDropped().bytes(), Unit::kBytes,
-      ImprovementDirection::kNeitherIsBetter);
+      stats.overall_incoming_stats.bytes_discarded_no_receiver.bytes(),
+      Unit::kBytes, ImprovementDirection::kNeitherIsBetter);
   metrics_logger_->LogSingleValueMetric(
       "packets_discarded_no_receiver", GetTestCaseName(network_label),
-      stats->PacketsDropped(), Unit::kUnitless,
-      ImprovementDirection::kNeitherIsBetter);
+      stats.overall_incoming_stats.packets_discarded_no_receiver,
+      Unit::kUnitless, ImprovementDirection::kNeitherIsBetter);
   metrics_logger_->LogSingleValueMetric(
       "bytes_received", GetTestCaseName(network_label),
-      stats->BytesReceived().bytes(), Unit::kBytes,
+      stats.overall_incoming_stats.bytes_received.bytes(), Unit::kBytes,
       ImprovementDirection::kNeitherIsBetter);
   metrics_logger_->LogSingleValueMetric(
       "packets_received", GetTestCaseName(network_label),
-      stats->PacketsReceived(), Unit::kUnitless,
+      stats.overall_incoming_stats.packets_received, Unit::kUnitless,
       ImprovementDirection::kNeitherIsBetter);
   metrics_logger_->LogSingleValueMetric(
       "average_receive_rate", GetTestCaseName(network_label),
-      stats->PacketsReceived() >= 2 ? stats->AverageReceiveRate().kbps<double>()
-                                    : 0,
+      stats.overall_incoming_stats.packets_received >= 2
+          ? stats.overall_incoming_stats.AverageReceiveRate().kbps<double>()
+          : 0,
       Unit::kKilobitsPerSecond, ImprovementDirection::kNeitherIsBetter);
   metrics_logger_->LogSingleValueMetric(
       "sent_packets_loss", GetTestCaseName(network_label), packet_loss,

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <sstream>
 #include <utility>
 
-#include "absl/types/span.h"
 #include "cast/standalone_receiver/avcodec_glue.h"
 #include "cast/streaming/constants.h"
 #include "cast/streaming/encoded_frame.h"
@@ -17,11 +16,10 @@
 #include "util/osp_logging.h"
 #include "util/trace_logging.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 SDLPlayerBase::SDLPlayerBase(ClockNowFunctionPtr now_function,
-                             TaskRunner* task_runner,
+                             TaskRunner& task_runner,
                              Receiver* receiver,
                              const std::string& codec_name,
                              std::function<void()> error_callback,
@@ -102,7 +100,7 @@ void SDLPlayerBase::OnFramesReady(int buffer_size) {
   // Consume the next frame.
   const Clock::time_point start_time = now_();
   buffer_.Resize(buffer_size);
-  EncodedFrame frame = receiver_->ConsumeNextFrame(buffer_.GetSpan());
+  EncodedFrame frame = receiver_->ConsumeNextFrame(buffer_.AsByteBuffer());
 
   // Create the tracking state for the frame in the player pipeline.
   OSP_DCHECK_EQ(frames_to_render_.count(frame.frame_id), 0);
@@ -252,5 +250,4 @@ SDLPlayerBase::PendingFrame::PendingFrame(PendingFrame&&) noexcept = default;
 SDLPlayerBase::PendingFrame& SDLPlayerBase::PendingFrame::operator=(
     PendingFrame&&) noexcept = default;
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

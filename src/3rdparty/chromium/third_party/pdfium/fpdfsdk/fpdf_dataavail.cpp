@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "core/fxcrt/fx_stream.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "core/fxcrt/unowned_ptr_exclusion.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "public/fpdf_formfill.h"
 #include "third_party/base/numerics/safe_conversions.h"
@@ -64,7 +65,8 @@ class FPDF_FileAvailContext final : public CPDF_DataAvail::FileAvail {
   }
 
  private:
-  FX_FILEAVAIL* const avail_;
+  // TODO(tsepez): fix murky ownership in tests.
+  UNOWNED_PTR_EXCLUSION FX_FILEAVAIL* const avail_;
 };
 
 class FPDF_FileAccessContext final : public IFX_SeekableReadStream {
@@ -74,29 +76,29 @@ class FPDF_FileAccessContext final : public IFX_SeekableReadStream {
   // IFX_SeekableReadStream:
   FX_FILESIZE GetSize() override { return file_->m_FileLen; }
 
-  bool ReadBlockAtOffset(void* buffer,
-                         FX_FILESIZE offset,
-                         size_t size) override {
-    if (!buffer || offset < 0 || !size)
+  bool ReadBlockAtOffset(pdfium::span<uint8_t> buffer,
+                         FX_FILESIZE offset) override {
+    if (buffer.empty() || offset < 0)
       return false;
 
-    if (!pdfium::base::IsValueInRangeForNumericType<FX_FILESIZE>(size))
+    if (!pdfium::base::IsValueInRangeForNumericType<FX_FILESIZE>(buffer.size()))
       return false;
 
-    FX_SAFE_FILESIZE new_pos = size;
+    FX_SAFE_FILESIZE new_pos = buffer.size();
     new_pos += offset;
     return new_pos.IsValid() && new_pos.ValueOrDie() <= GetSize() &&
-           file_->m_GetBlock(file_->m_Param,
-                             pdfium::base::checked_cast<unsigned long>(offset),
-                             static_cast<uint8_t*>(buffer),
-                             pdfium::base::checked_cast<unsigned long>(size));
+           file_->m_GetBlock(
+               file_->m_Param,
+               pdfium::base::checked_cast<unsigned long>(offset), buffer.data(),
+               pdfium::base::checked_cast<unsigned long>(buffer.size()));
   }
 
  private:
   explicit FPDF_FileAccessContext(FPDF_FILEACCESS* file) : file_(file) {}
   ~FPDF_FileAccessContext() override = default;
 
-  FPDF_FILEACCESS* const file_;
+  // TODO(tsepez): fix murky ownership in tests.
+  UNOWNED_PTR_EXCLUSION FPDF_FILEACCESS* const file_;
 };
 
 class FPDF_DownloadHintsContext final : public CPDF_DataAvail::DownloadHints {

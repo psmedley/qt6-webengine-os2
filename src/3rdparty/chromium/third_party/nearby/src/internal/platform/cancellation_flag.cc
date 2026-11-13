@@ -16,7 +16,6 @@
 
 #include "internal/platform/feature_flags.h"
 
-namespace location {
 namespace nearby {
 
 CancellationFlag::CancellationFlag() {
@@ -28,7 +27,10 @@ CancellationFlag::CancellationFlag(bool cancelled) {
   cancelled_ = cancelled;
 }
 
-CancellationFlag::~CancellationFlag() { listeners_.clear(); }
+CancellationFlag::~CancellationFlag() {
+  absl::MutexLock lock(mutex_.get());
+  listeners_.clear();
+}
 
 void CancellationFlag::Cancel() {
   // Return immediately as no-op if feature flag is not enabled.
@@ -48,8 +50,21 @@ void CancellationFlag::Cancel() {
     listeners = listeners_;
   }
 
-  for (const auto *listener : listeners) {
+  for (auto *listener : listeners) {
     (*listener)();
+  }
+}
+
+void CancellationFlag::Uncancel() {
+  // Return immediately as no-op if feature flag is not enabled.
+  if (!FeatureFlags::GetInstance().GetFlags().enable_cancellation_flag) {
+    return;
+  }
+
+  {
+    absl::MutexLock lock(mutex_.get());
+    assert(cancelled_);
+    cancelled_ = false;
   }
 }
 
@@ -77,4 +92,3 @@ void CancellationFlag::UnregisterOnCancelListener(CancelListener *listener) {
 }
 
 }  // namespace nearby
-}  // namespace location

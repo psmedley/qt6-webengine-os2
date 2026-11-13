@@ -17,6 +17,7 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_TRACK_TRACKER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_TRACK_TRACKER_H_
 
+#include <optional>
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
@@ -27,6 +28,23 @@ namespace trace_processor {
 // Tracks and stores tracks based on track types, ids and scopes.
 class TrackTracker {
  public:
+  // Enum which groups global tracks to avoid an explosion of tracks at the top
+  // level.
+  // Try and keep members of this enum high level as every entry here
+  // corresponds to ~1 extra UI track.
+  enum class Group : uint32_t {
+    kMemory = 0,
+    kIo,
+    kVirtio,
+    kNetwork,
+    kPower,
+    kDeviceState,
+    kThermals,
+    kClockFrequency,
+
+    // Keep this last.
+    kSizeSentinel,
+  };
   using SetArgsCallback = std::function<void(ArgsTracker::BoundInserter&)>;
 
   explicit TrackTracker(TraceProcessorContext*);
@@ -48,11 +66,15 @@ class TrackTracker {
   // Interns a given GPU track into the storage.
   TrackId InternGpuTrack(const tables::GpuTrackTable::Row& row);
 
+  // Interns a GPU work period track into the storage.
+  TrackId InternGpuWorkPeriodTrack(
+      const tables::GpuWorkPeriodTrackTable::Row& row);
+
   // Interns a legacy Chrome async event track into the storage.
   TrackId InternLegacyChromeAsyncTrack(StringId name,
                                        uint32_t upid,
-                                       int64_t source_id,
-                                       bool source_id_is_process_scoped,
+                                       int64_t trace_id,
+                                       bool trace_id_is_process_scoped,
                                        StringId source_scope);
 
   // Interns a track for legacy Chrome process-scoped instant events into the
@@ -67,7 +89,8 @@ class TrackTracker {
   TrackId GetOrCreateTriggerTrack();
 
   // Interns a global counter track into the storage.
-  TrackId InternGlobalCounterTrack(StringId name,
+  TrackId InternGlobalCounterTrack(Group group,
+                                   StringId name,
                                    SetArgsCallback = {},
                                    StringId unit = kNullStringId,
                                    StringId description = kNullStringId);
@@ -99,9 +122,6 @@ class TrackTracker {
                                    int32_t consumer_id,
                                    StringId consumer_type,
                                    int32_t ordinal);
-  // Interns a per process energy counter track associated with a
-  // Energy into the storage.
-  TrackId InternUidCounterTrack(StringId name, int32_t uid);
 
   // Interns a per process energy consumer counter track associated with a
   // Energy Uid into the storage.
@@ -144,17 +164,34 @@ class TrackTracker {
              std::tie(r.track_name, r.scope, r.context_id);
     }
   };
+  struct GpuWorkPeriodTrackTuple {
+    StringId track_name;
+    uint32_t gpu_id;
+    int32_t uid;
+
+    friend bool operator<(const GpuWorkPeriodTrackTuple& l,
+                          const GpuWorkPeriodTrackTuple& r) {
+      return std::tie(l.track_name, l.gpu_id, l.uid) <
+             std::tie(r.track_name, r.gpu_id, r.uid);
+    }
+  };
   struct ChromeTrackTuple {
-    base::Optional<int64_t> upid;
-    int64_t source_id = 0;
+    std::optional<int64_t> upid;
+    int64_t trace_id = 0;
     StringId source_scope = StringId::Null();
 
     friend bool operator<(const ChromeTrackTuple& l,
                           const ChromeTrackTuple& r) {
-      return std::tie(l.source_id, l.upid, l.source_scope) <
-             std::tie(r.source_id, r.upid, r.source_scope);
+      return std::tie(l.trace_id, l.upid, l.source_scope) <
+             std::tie(r.trace_id, r.upid, r.source_scope);
     }
   };
+  static constexpr size_t kGroupCount =
+      static_cast<uint32_t>(Group::kSizeSentinel);
+
+  TrackId InternTrackForGroup(Group group);
+
+  std::array<std::optional<TrackId>, kGroupCount> group_track_ids_;
 
   std::map<UniqueTid, TrackId> thread_tracks_;
   std::map<UniquePid, TrackId> process_tracks_;
@@ -165,6 +202,8 @@ class TrackTracker {
   std::map<GpuTrackTuple, TrackId> gpu_tracks_;
   std::map<ChromeTrackTuple, TrackId> chrome_tracks_;
   std::map<UniquePid, TrackId> chrome_process_instant_tracks_;
+  std::map<std::pair<StringId, int32_t /*uid*/>, TrackId> uid_tracks_;
+  std::map<GpuWorkPeriodTrackTuple, TrackId> gpu_work_period_tracks_;
 
   std::map<StringId, TrackId> global_counter_tracks_by_name_;
   std::map<std::pair<StringId, uint32_t>, TrackId> cpu_counter_tracks_;
@@ -178,12 +217,12 @@ class TrackTracker {
   std::map<std::pair<StringId, int32_t>, TrackId>
       energy_per_uid_counter_tracks_;
 
-  base::Optional<TrackId> chrome_global_instant_track_id_;
-  base::Optional<TrackId> trigger_track_id_;
+  std::optional<TrackId> chrome_global_instant_track_id_;
+  std::optional<TrackId> trigger_track_id_;
 
   const StringId source_key_ = kNullStringId;
-  const StringId source_id_key_ = kNullStringId;
-  const StringId source_id_is_process_scoped_key_ = kNullStringId;
+  const StringId trace_id_key_ = kNullStringId;
+  const StringId trace_id_is_process_scoped_key_ = kNullStringId;
   const StringId source_scope_key_ = kNullStringId;
   const StringId category_key_ = kNullStringId;
 

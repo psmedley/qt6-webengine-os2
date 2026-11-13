@@ -23,7 +23,6 @@
 #include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/endpoint_channel_manager.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -31,7 +30,8 @@ namespace connections {
 // of the service IDs and endpoint IDs that initiated a bandwidth upgrade.
 class BaseBwuHandler : public BwuHandler {
  public:
-  explicit BaseBwuHandler(BwuNotifications bwu_notifications);
+  explicit BaseBwuHandler(
+      IncomingConnectionCallback incoming_connection_callback);
 
   // BwuHandler implementation:
   ByteArray InitializeUpgradedMediumForEndpoint(
@@ -56,9 +56,13 @@ class BaseBwuHandler : public BwuHandler {
   virtual void HandleRevertInitiatorStateForService(
       const std::string& upgrade_service_id) = 0;
 
-  BwuNotifications bwu_notifications_;
+  // Notifies the caller about incoming connection.
+  void NotifyOnIncomingConnection(
+      ClientProxy* client,
+      std::unique_ptr<IncomingSocketConnection> connection);
 
  private:
+  IncomingConnectionCallback incoming_connection_callback_;
   // Map from the (wrapped) service ID to endpoint IDs that are initiating a
   // bandwidth upgrade. Not used for endpoints that respond to bandwidth upgrade
   // requests from another device.
@@ -68,6 +72,5 @@ class BaseBwuHandler : public BwuHandler {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_BASE_BWU_HANDLER_H_

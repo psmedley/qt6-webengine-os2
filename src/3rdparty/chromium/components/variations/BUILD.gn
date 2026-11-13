@@ -3,10 +3,11 @@
 # found in the LICENSE file.
 
 import("//build/buildflag_header.gni")
-import("//build/config/chromecast_build.gni")
+import("//build/config/cast.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//testing/test.gni")
+import("//third_party/libprotobuf-mutator/fuzzable_proto_library.gni")
 
 mojom("variations_mojom") {
   sources = [ "variations.mojom" ]
@@ -49,8 +50,12 @@ component("variations") {
     "entropy_provider.h",
     "fake_crash.cc",
     "fake_crash.h",
+    "field_trial_internals_utils.cc",
+    "field_trial_internals_utils.h",
     "hashing.cc",
     "hashing.h",
+    "limited_entropy_mode_gate.cc",
+    "limited_entropy_mode_gate.h",
     "metrics.cc",
     "metrics.h",
     "platform_field_trials.h",
@@ -81,6 +86,9 @@ component("variations") {
     "variations_murmur_hash.h",
     "variations_request_scheduler.cc",
     "variations_request_scheduler.h",
+    "variations_safe_seed_store.h",
+    "variations_safe_seed_store_local_state.cc",
+    "variations_safe_seed_store_local_state.h",
     "variations_seed_processor.cc",
     "variations_seed_processor.h",
     "variations_seed_simulator.cc",
@@ -111,7 +119,7 @@ component("variations") {
     ]
   }
 
-  if (is_chromeos_ash) {
+  if (is_chromeos_ash || is_chromeos_lacros) {
     sources += [
       "variations_crash_keys_chromeos.cc",
       "variations_crash_keys_chromeos.h",
@@ -138,18 +146,18 @@ component("variations") {
   ]
 
   if (is_android) {
-    deps += [ ":jni" ]
+    deps += [ "//components/variations/android:variations_jni" ]
+  }
+
+  if (is_chromeos_ash) {
+    deps += [
+      "//chromeos/ash/components/dbus/featured",
+      "//chromeos/ash/components/dbus/featured:proto",
+    ]
   }
 }
 
 if (is_android) {
-  generate_jni("jni") {
-    sources = [
-      "android/java/src/org/chromium/components/variations/VariationsAssociatedData.java",
-      "android/java/src/org/chromium/components/variations/firstrun/VariationsSeedBridge.java",
-    ]
-  }
-
   java_cpp_strings("java_switches_srcjar") {
     # External code should depend on ":variations_java" instead.
     visibility = [ ":*" ]
@@ -209,6 +217,7 @@ source_set("unit_tests") {
     "child_process_field_trial_syncer_unittest.cc",
     "client_filterable_state_unittest.cc",
     "entropy_provider_unittest.cc",
+    "field_trial_internals_utils_unittest.cc",
     "hashing_unittest.cc",
     "net/variations_command_line_unittest.cc",
     "net/variations_http_headers_unittest.cc",
@@ -216,6 +225,7 @@ source_set("unit_tests") {
     "simulate_for_crosstalk_unittest.cc",
     "study_filtering_unittest.cc",
     "synthetic_trial_registry_unittest.cc",
+    "uniformity_unittest.cc",
     "variations_associated_data_unittest.cc",
     "variations_ids_provider_unittest.cc",
     "variations_murmur_hash_unittest.cc",
@@ -262,6 +272,13 @@ source_set("unit_tests") {
     "//third_party/zlib/google:compression_utils",
     "//url",
   ]
+
+  if (is_chromeos_ash) {
+    deps += [
+      "//chromeos/ash/components/dbus/featured",
+      "//chromeos/ash/components/dbus/featured:proto",
+    ]
+  }
 }
 
 # Convenience testing target
@@ -275,7 +292,15 @@ test("variations_unittests") {
   ]
 }
 
-if (use_libfuzzer) {
+if (use_fuzzing_engine_with_lpm) {
+  fuzzable_proto_library("test_cases_proto") {
+    sources = [ "fuzzers/create_trials_from_seed_test_case.proto" ]
+
+    import_dirs = [ "//components/variations/proto" ]
+
+    proto_deps = [ "//components/variations/proto" ]
+    link_deps = [ "//components/variations/proto" ]
+  }
   fuzzer_test("create_trial_from_study_fuzzer") {
     sources = [ "fuzzers/create_trial_from_study_fuzzer.cc" ]
     deps = [
@@ -288,10 +313,23 @@ if (use_libfuzzer) {
   fuzzer_test("create_trials_from_seed_fuzzer") {
     sources = [ "fuzzers/create_trials_from_seed_fuzzer.cc" ]
     deps = [
+      ":test_support",
       ":variations",
       "proto",
       "//base/test:test_support",
       "//third_party/libprotobuf-mutator",
     ]
+  }
+  fuzzer_test("create_trials_from_seed_fuzzer_v2") {
+    sources = [ "fuzzers/create_trials_from_seed_fuzzer_v2.cc" ]
+    deps = [
+      ":test_cases_proto",
+      ":test_support",
+      ":variations",
+      "proto",
+      "//base/test:test_support",
+      "//third_party/libprotobuf-mutator",
+    ]
+    seed_corpus = "fuzzers/testcases/create_trials_from_seed/"
   }
 }

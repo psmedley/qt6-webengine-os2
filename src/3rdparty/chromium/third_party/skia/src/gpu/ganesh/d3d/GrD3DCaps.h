@@ -12,7 +12,10 @@
 #include "src/gpu/ganesh/GrCaps.h"
 
 #include "include/gpu/d3d/GrD3DTypes.h"
+#include "include/private/base/SkTDArray.h"
 #include "src/gpu/ganesh/d3d/GrD3DAttachment.h"
+
+enum class SkTextureCompressionType;
 
 /**
  * Stores some capabilities of a D3D backend.
@@ -83,7 +86,7 @@ public:
     bool canCopyAsResolve(DXGI_FORMAT dstFormat, int dstSampleCnt,
                           DXGI_FORMAT srcFormat, int srcSamplecnt) const;
 
-    GrBackendFormat getBackendFormatFromCompressionType(SkImage::CompressionType) const override;
+    GrBackendFormat getBackendFormatFromCompressionType(SkTextureCompressionType) const override;
 
     DXGI_FORMAT getFormatFromColorType(GrColorType colorType) const {
         int idx = static_cast<int>(colorType);
@@ -105,8 +108,8 @@ public:
     bool resolveSubresourceRegionSupport() const { return fResolveSubresourceRegionSupport; }
     bool standardSwizzleLayoutSupport() const { return fStandardSwizzleLayoutSupport; }
 
-#if GR_TEST_UTILS
-    std::vector<TestFormatColorTypeCombination> getTestingCombinations() const override;
+#if defined(GR_TEST_UTILS)
+    std::vector<GrTest::TestFormatColorTypeCombination> getTestingCombinations() const override;
 #endif
 
 private:

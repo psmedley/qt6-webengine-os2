@@ -12,13 +12,14 @@ bitfield struct JSArrayBufferFlags extends uint32 {
 }
 
 extern class JSArrayBuffer extends JSObjectWithEmbedderSlots {
+  detach_key: Object;
   // A BoundedSize if the sandbox is enabled
   raw_byte_length: uintptr;
   // A BoundedSize if the sandbox is enabled
   raw_max_byte_length: uintptr;
   // A SandboxedPtr if the sandbox is enabled
   backing_store: RawPtr;
-  extension: RawPtr;
+  extension: ExternalPointer;
   bit_field: JSArrayBufferFlags;
   // Pads header size to be a multiple of kTaggedSize.
   @if(TAGGED_SIZE_8_BYTES) optional_padding: uint32;
@@ -123,13 +124,19 @@ macro IsOnHeapTypedArray(array: JSTypedArray): bool {
   return TaggedNotEqual(array.base_pointer, SmiConstant(0));
 }
 
-extern class JSDataView extends JSArrayBufferView {
+@abstract
+extern class JSDataViewOrRabGsabDataView extends JSArrayBufferView {
   // A SandboxedPtr if the sandbox is enabled
   data_pointer: RawPtr;
 }
 
+extern class JSDataView extends JSDataViewOrRabGsabDataView {}
+
+extern class JSRabGsabDataView extends JSDataViewOrRabGsabDataView {}
+
 @abstract
-@doNotGenerateCast extern class TypedArrayConstructor extends JSFunction
+@doNotGenerateCast
+extern class TypedArrayConstructor extends JSFunction
     generates 'TNode<JSFunction>';
 @doNotGenerateCast
 extern class Uint8TypedArrayConstructor extends TypedArrayConstructor

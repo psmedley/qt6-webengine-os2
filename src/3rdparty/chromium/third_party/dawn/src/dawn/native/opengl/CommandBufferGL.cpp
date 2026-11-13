@@ -1,21 +1,35 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/opengl/CommandBufferGL.h"
 
 #include <algorithm>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include "dawn/native/BindGroup.h"
@@ -24,13 +38,13 @@
 #include "dawn/native/Commands.h"
 #include "dawn/native/ExternalTexture.h"
 #include "dawn/native/RenderBundle.h"
-#include "dawn/native/VertexFormat.h"
 #include "dawn/native/opengl/BufferGL.h"
 #include "dawn/native/opengl/ComputePipelineGL.h"
 #include "dawn/native/opengl/DeviceGL.h"
 #include "dawn/native/opengl/Forward.h"
 #include "dawn/native/opengl/PersistentPipelineStateGL.h"
 #include "dawn/native/opengl/PipelineLayoutGL.h"
+#include "dawn/native/opengl/QuerySetGL.h"
 #include "dawn/native/opengl/RenderPipelineGL.h"
 #include "dawn/native/opengl/SamplerGL.h"
 #include "dawn/native/opengl/TextureGL.h"
@@ -49,7 +63,11 @@ GLenum IndexFormatType(wgpu::IndexFormat format) {
         case wgpu::IndexFormat::Undefined:
             break;
     }
-    UNREACHABLE();
+    DAWN_UNREACHABLE();
+}
+
+bool Is1DOr2D(wgpu::TextureDimension dimension) {
+    return dimension == wgpu::TextureDimension::e1D || dimension == wgpu::TextureDimension::e2D;
 }
 
 GLenum VertexFormatType(wgpu::VertexFormat format) {
@@ -92,8 +110,10 @@ GLenum VertexFormatType(wgpu::VertexFormat format) {
         case wgpu::VertexFormat::Sint32x3:
         case wgpu::VertexFormat::Sint32x4:
             return GL_INT;
+        case wgpu::VertexFormat::Unorm10_10_10_2:
+            return GL_UNSIGNED_INT_2_10_10_10_REV;
         default:
-            UNREACHABLE();
+            DAWN_UNREACHABLE();
     }
 }
 
@@ -107,6 +127,7 @@ GLboolean VertexFormatIsNormalized(wgpu::VertexFormat format) {
         case wgpu::VertexFormat::Unorm16x4:
         case wgpu::VertexFormat::Snorm16x2:
         case wgpu::VertexFormat::Snorm16x4:
+        case wgpu::VertexFormat::Unorm10_10_10_2:
             return GL_TRUE;
         default:
             return GL_FALSE;
@@ -159,7 +180,7 @@ class VertexStateBufferBindingTracker {
         }
 
         mIndexBufferDirty = true;
-        mDirtyVertexBuffers |= pipeline->GetVertexBufferSlotsUsed();
+        mDirtyVertexBuffers |= pipeline->GetVertexBuffersUsed();
 
         mLastPipeline = pipeline;
     }
@@ -171,7 +192,7 @@ class VertexStateBufferBindingTracker {
         }
 
         for (VertexBufferSlot slot :
-             IterateBitSet(mDirtyVertexBuffers & mLastPipeline->GetVertexBufferSlotsUsed())) {
+             IterateBitSet(mDirtyVertexBuffers & mLastPipeline->GetVertexBuffersUsed())) {
             for (VertexAttributeLocation location :
                  IterateBitSet(ToBackend(mLastPipeline)->GetAttributesUsingVertexBuffer(slot))) {
                 const VertexAttributeInfo& attribute = mLastPipeline->GetAttribute(location);
@@ -205,9 +226,9 @@ class VertexStateBufferBindingTracker {
     bool mIndexBufferDirty = false;
     Buffer* mIndexBuffer = nullptr;
 
-    ityp::bitset<VertexBufferSlot, kMaxVertexBuffers> mDirtyVertexBuffers;
-    ityp::array<VertexBufferSlot, Buffer*, kMaxVertexBuffers> mVertexBuffers;
-    ityp::array<VertexBufferSlot, uint64_t, kMaxVertexBuffers> mVertexBufferOffsets;
+    VertexBufferMask mDirtyVertexBuffers;
+    PerVertexBuffer<Buffer*> mVertexBuffers;
+    PerVertexBuffer<uint64_t> mVertexBufferOffsets;
 
     RenderPipelineBase* mLastPipeline = nullptr;
 };
@@ -217,30 +238,30 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
     void OnSetPipeline(RenderPipeline* pipeline) {
         BindGroupTrackerBase::OnSetPipeline(pipeline);
         mPipeline = pipeline;
+        ResetInternalUniformDataDirtyRange();
     }
 
     void OnSetPipeline(ComputePipeline* pipeline) {
         BindGroupTrackerBase::OnSetPipeline(pipeline);
         mPipeline = pipeline;
+        ResetInternalUniformDataDirtyRange();
     }
 
     void Apply(const OpenGLFunctions& gl) {
         BeforeApply();
         for (BindGroupIndex index : IterateBitSet(mDirtyBindGroupsObjectChangedOrIsDynamic)) {
-            ApplyBindGroup(gl, index, mBindGroups[index], mDynamicOffsetCounts[index],
-                           mDynamicOffsets[index].data());
+            ApplyBindGroup(gl, index, mBindGroups[index], mDynamicOffsets[index]);
         }
+        ApplyInternalUniforms(gl);
         AfterApply();
     }
 
   private:
     void ApplyBindGroup(const OpenGLFunctions& gl,
-                        BindGroupIndex index,
+                        BindGroupIndex groupIndex,
                         BindGroupBase* group,
-                        uint32_t dynamicOffsetCount,
-                        uint64_t* dynamicOffsets) {
-        const auto& indices = ToBackend(mPipelineLayout)->GetBindingIndexInfo()[index];
-        uint32_t currentDynamicOffsetIndex = 0;
+                        const ityp::vector<BindingIndex, uint64_t>& dynamicOffsets) {
+        const auto& indices = ToBackend(mPipelineLayout)->GetBindingIndexInfo()[groupIndex];
 
         for (BindingIndex bindingIndex{0}; bindingIndex < group->GetLayout()->GetBindingCount();
              ++bindingIndex) {
@@ -264,8 +285,8 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
                     GLuint offset = binding.offset;
 
                     if (bindingInfo.buffer.hasDynamicOffset) {
-                        offset += dynamicOffsets[currentDynamicOffsetIndex];
-                        ++currentDynamicOffsetIndex;
+                        // Dynamic buffers are packed at the front of BindingIndices.
+                        offset += dynamicOffsets[bindingIndex];
                     }
 
                     GLenum target;
@@ -279,7 +300,7 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
                             target = GL_SHADER_STORAGE_BUFFER;
                             break;
                         case wgpu::BufferBindingType::Undefined:
-                            UNREACHABLE();
+                            DAWN_UNREACHABLE();
                     }
 
                     gl.BindBufferRange(target, index, buffer, offset, binding.size);
@@ -315,14 +336,15 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
                         if (ToBackend(view->GetTexture())->GetGLFormat().format ==
                             GL_DEPTH_STENCIL) {
                             Aspect aspect = view->GetAspects();
-                            ASSERT(HasOneBit(aspect));
+                            DAWN_ASSERT(HasOneBit(aspect));
                             switch (aspect) {
                                 case Aspect::None:
                                 case Aspect::Color:
                                 case Aspect::CombinedDepthStencil:
                                 case Aspect::Plane0:
                                 case Aspect::Plane1:
-                                    UNREACHABLE();
+                                case Aspect::Plane2:
+                                    DAWN_UNREACHABLE();
                                 case Aspect::Depth:
                                     gl.TexParameteri(target, GL_DEPTH_STENCIL_TEXTURE_MODE,
                                                      GL_DEPTH_COMPONENT);
@@ -333,7 +355,15 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
                                     break;
                             }
                         }
+                        gl.TexParameteri(target, GL_TEXTURE_BASE_LEVEL, view->GetBaseMipLevel());
+                        gl.TexParameteri(target, GL_TEXTURE_MAX_LEVEL,
+                                         view->GetBaseMipLevel() + view->GetLevelCount() - 1);
                     }
+
+                    // Some texture builtin function data needs emulation to update into the
+                    // internal uniform buffer.
+                    UpdateTextureBuiltinsUniformData(gl, view, groupIndex, bindingIndex);
+
                     break;
                 }
 
@@ -348,8 +378,14 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
                         case wgpu::StorageTextureAccess::WriteOnly:
                             access = GL_WRITE_ONLY;
                             break;
+                        case wgpu::StorageTextureAccess::ReadWrite:
+                            access = GL_READ_WRITE;
+                            break;
+                        case wgpu::StorageTextureAccess::ReadOnly:
+                            access = GL_READ_ONLY;
+                            break;
                         case wgpu::StorageTextureAccess::Undefined:
-                            UNREACHABLE();
+                            DAWN_UNREACHABLE();
                     }
 
                     // OpenGL ES only supports either binding a layer or the entire
@@ -360,7 +396,7 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
                     } else if (texture->GetArrayLayers() == view->GetLayerCount()) {
                         isLayered = GL_TRUE;
                     } else {
-                        UNREACHABLE();
+                        DAWN_UNREACHABLE();
                     }
 
                     gl.BindImageTexture(imageIndex, handle, view->GetBaseMipLevel(), isLayered,
@@ -371,27 +407,98 @@ class BindGroupTracker : public BindGroupTrackerBase<false, uint64_t> {
                 }
 
                 case BindingInfoType::ExternalTexture:
-                    UNREACHABLE();
+                    DAWN_UNREACHABLE();
                     break;
             }
         }
     }
 
+    void UpdateTextureBuiltinsUniformData(const OpenGLFunctions& gl,
+                                          const TextureView* view,
+                                          BindGroupIndex groupIndex,
+                                          BindingIndex bindingIndex) {
+        const auto& bindingInfo = mPipeline->GetBindingPointBuiltinDataInfo();
+        if (bindingInfo.empty()) {
+            return;
+        }
+
+        auto iter = bindingInfo.find(tint::BindingPoint{static_cast<uint32_t>(groupIndex),
+                                                        static_cast<uint32_t>(bindingIndex)});
+        if (iter == bindingInfo.end()) {
+            return;
+        }
+
+        // Update data by retrieving information from texture view object.
+        const tint::TextureBuiltinsFromUniformOptions::Field field = iter->second.first;
+        const size_t byteOffset = static_cast<size_t>(iter->second.second);
+
+        uint32_t data;
+        switch (field) {
+            case tint::TextureBuiltinsFromUniformOptions::Field::TextureNumLevels:
+                data = view->GetLevelCount();
+                break;
+            case tint::TextureBuiltinsFromUniformOptions::Field::TextureNumSamples:
+                data = view->GetTexture()->GetSampleCount();
+                break;
+        }
+
+        if (byteOffset >= mInternalUniformBufferData.size()) {
+            mInternalUniformBufferData.resize(byteOffset + sizeof(uint32_t));
+        }
+        memcpy(mInternalUniformBufferData.data() + byteOffset, &data, sizeof(uint32_t));
+
+        // Updating dirty range of the data vector
+        mDirtyRange.first = std::min(mDirtyRange.first, byteOffset);
+        mDirtyRange.second = std::max(mDirtyRange.second, byteOffset + sizeof(uint32_t));
+    }
+
+    void ResetInternalUniformDataDirtyRange() {
+        mDirtyRange = {mInternalUniformBufferData.size(), 0};
+    }
+
+    void ApplyInternalUniforms(const OpenGLFunctions& gl) {
+        const Buffer* internalUniformBuffer = mPipeline->GetInternalUniformBuffer();
+        if (!internalUniformBuffer) {
+            return;
+        }
+
+        GLuint internalUniformBufferHandle = internalUniformBuffer->GetHandle();
+        if (mDirtyRange.first >= mDirtyRange.second) {
+            // Early return if no dirty uniform range needs updating.
+            return;
+        }
+
+        gl.BindBuffer(GL_UNIFORM_BUFFER, internalUniformBufferHandle);
+        gl.BufferSubData(GL_UNIFORM_BUFFER, mDirtyRange.first,
+                         mDirtyRange.second - mDirtyRange.first,
+                         mInternalUniformBufferData.data() + mDirtyRange.first);
+        gl.BindBuffer(GL_UNIFORM_BUFFER, 0);
+
+        ResetInternalUniformDataDirtyRange();
+    }
+
     PipelineGL* mPipeline = nullptr;
+
+    // The data used for mPipeline's internal uniform buffer from current bind group.
+    // Expecting no more than 4 texture bindings called as textureNumLevels/textureNumSamples
+    // argument in a pipeline. Initialize the vector to this size to avoid frequent resizing.
+    std::vector<uint8_t> mInternalUniformBufferData = std::vector<uint8_t>(4 * sizeof(uint32_t));
+    // Tracking dirty byte range of the mInternalUniformBufferData that needs to call bufferSubData
+    // to update to the internal uniform buffer of mPipeline. Range it represents: [first, second)
+    std::pair<size_t, size_t> mDirtyRange;
 };
 
 void ResolveMultisampledRenderTargets(const OpenGLFunctions& gl,
                                       const BeginRenderPassCmd* renderPass) {
-    ASSERT(renderPass != nullptr);
+    DAWN_ASSERT(renderPass != nullptr);
 
     GLuint readFbo = 0;
     GLuint writeFbo = 0;
 
-    for (ColorAttachmentIndex i :
-         IterateBitSet(renderPass->attachmentState->GetColorAttachmentsMask())) {
+    for (auto i : IterateBitSet(renderPass->attachmentState->GetColorAttachmentsMask())) {
         if (renderPass->colorAttachments[i].resolveTarget != nullptr) {
             if (readFbo == 0) {
-                ASSERT(writeFbo == 0);
+                DAWN_ASSERT(writeFbo == 0);
                 gl.GenFramebuffers(1, &readFbo);
                 gl.GenFramebuffers(1, &writeFbo);
             }
@@ -423,25 +530,21 @@ Extent3D ComputeTextureCopyExtent(const TextureCopy& textureCopy, const Extent3D
     Extent3D validTextureCopyExtent = copySize;
     const TextureBase* texture = textureCopy.texture.Get();
     Extent3D virtualSizeAtLevel =
-        texture->GetMipLevelSingleSubresourceVirtualSize(textureCopy.mipLevel);
-    ASSERT(textureCopy.origin.x <= virtualSizeAtLevel.width);
-    ASSERT(textureCopy.origin.y <= virtualSizeAtLevel.height);
+        texture->GetMipLevelSingleSubresourceVirtualSize(textureCopy.mipLevel, textureCopy.aspect);
+    DAWN_ASSERT(textureCopy.origin.x <= virtualSizeAtLevel.width);
+    DAWN_ASSERT(textureCopy.origin.y <= virtualSizeAtLevel.height);
     if (copySize.width > virtualSizeAtLevel.width - textureCopy.origin.x) {
-        ASSERT(texture->GetFormat().isCompressed);
+        DAWN_ASSERT(texture->GetFormat().isCompressed);
         validTextureCopyExtent.width = virtualSizeAtLevel.width - textureCopy.origin.x;
     }
     if (copySize.height > virtualSizeAtLevel.height - textureCopy.origin.y) {
-        ASSERT(texture->GetFormat().isCompressed);
+        DAWN_ASSERT(texture->GetFormat().isCompressed);
         validTextureCopyExtent.height = virtualSizeAtLevel.height - textureCopy.origin.y;
     }
 
     return validTextureCopyExtent;
 }
 
-bool TextureFormatIsSnorm(wgpu::TextureFormat format) {
-    return format == wgpu::TextureFormat::RGBA8Snorm || format == wgpu::TextureFormat::RG8Snorm ||
-           format == wgpu::TextureFormat::R8Snorm;
-}
 }  // namespace
 
 CommandBuffer::CommandBuffer(CommandEncoder* encoder, const CommandBufferDescriptor* descriptor)
@@ -450,24 +553,26 @@ CommandBuffer::CommandBuffer(CommandEncoder* encoder, const CommandBufferDescrip
 MaybeError CommandBuffer::Execute() {
     const OpenGLFunctions& gl = ToBackend(GetDevice())->GetGL();
 
-    auto LazyClearSyncScope = [](const SyncScopeResourceUsage& scope) {
+    auto LazyClearSyncScope = [](const SyncScopeResourceUsage& scope) -> MaybeError {
         for (size_t i = 0; i < scope.textures.size(); i++) {
             Texture* texture = ToBackend(scope.textures[i]);
 
             // Clear subresources that are not render attachments. Render attachments will be
             // cleared in RecordBeginRenderPass by setting the loadop to clear when the texture
             // subresource has not been initialized before the render pass.
-            scope.textureUsages[i].Iterate(
-                [&](const SubresourceRange& range, wgpu::TextureUsage usage) {
-                    if (usage & ~wgpu::TextureUsage::RenderAttachment) {
-                        texture->EnsureSubresourceContentInitialized(range);
+            DAWN_TRY(scope.textureSyncInfos[i].Iterate(
+                [&](const SubresourceRange& range, const TextureSyncInfo& syncInfo) -> MaybeError {
+                    if (syncInfo.usage & ~wgpu::TextureUsage::RenderAttachment) {
+                        DAWN_TRY(texture->EnsureSubresourceContentInitialized(range));
                     }
-                });
+                    return {};
+                }));
         }
 
         for (BufferBase* bufferBase : scope.buffers) {
             ToBackend(bufferBase)->EnsureDataInitialized();
         }
+        return {};
     };
 
     size_t nextComputePassNumber = 0;
@@ -480,7 +585,7 @@ MaybeError CommandBuffer::Execute() {
                 mCommands.NextCommand<BeginComputePassCmd>();
                 for (const SyncScopeResourceUsage& scope :
                      GetResourceUsages().computePasses[nextComputePassNumber].dispatchUsages) {
-                    LazyClearSyncScope(scope);
+                    DAWN_TRY(LazyClearSyncScope(scope));
                 }
                 DAWN_TRY(ExecuteComputePass());
 
@@ -490,7 +595,8 @@ MaybeError CommandBuffer::Execute() {
 
             case Command::BeginRenderPass: {
                 auto* cmd = mCommands.NextCommand<BeginRenderPassCmd>();
-                LazyClearSyncScope(GetResourceUsages().renderPasses[nextRenderPassNumber]);
+                DAWN_TRY(
+                    LazyClearSyncScope(GetResourceUsages().renderPasses[nextRenderPassNumber]));
                 LazyClearRenderPassAttachments(cmd);
                 DAWN_TRY(ExecuteRenderPass(cmd));
 
@@ -516,6 +622,9 @@ MaybeError CommandBuffer::Execute() {
 
                 gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
                 gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+                ToBackend(copy->source)->TrackUsage();
+                ToBackend(copy->destination)->TrackUsage();
                 break;
             }
 
@@ -530,19 +639,13 @@ MaybeError CommandBuffer::Execute() {
                 auto& dst = copy->destination;
                 Buffer* buffer = ToBackend(src.buffer.Get());
 
-                DAWN_INVALID_IF(
-                    dst.aspect == Aspect::Stencil,
-                    "Copies to stencil textures are unsupported on the OpenGL backend.");
-
-                ASSERT(dst.aspect == Aspect::Color);
-
                 buffer->EnsureDataInitialized();
                 SubresourceRange range = GetSubresourcesAffectedByCopy(dst, copy->copySize);
-                if (IsCompleteSubresourceCopiedTo(dst.texture.Get(), copy->copySize,
-                                                  dst.mipLevel)) {
+                if (IsCompleteSubresourceCopiedTo(dst.texture.Get(), copy->copySize, dst.mipLevel,
+                                                  dst.aspect)) {
                     dst.texture->SetIsSubresourceContentInitialized(true, range);
                 } else {
-                    ToBackend(dst.texture)->EnsureSubresourceContentInitialized(range);
+                    DAWN_TRY(ToBackend(dst.texture)->EnsureSubresourceContentInitialized(range));
                 }
 
                 gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->GetHandle());
@@ -556,6 +659,8 @@ MaybeError CommandBuffer::Execute() {
                               copy->copySize);
                 gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
                 ToBackend(dst.texture)->Touch();
+
+                buffer->TrackUsage();
                 break;
             }
 
@@ -575,20 +680,14 @@ MaybeError CommandBuffer::Execute() {
                 const GLFormat& format = texture->GetGLFormat();
                 GLenum target = texture->GetGLTarget();
 
-                // TODO(crbug.com/dawn/667): Implement validation in WebGPU/Compat to
-                // avoid this codepath. OpenGL does not support readback from non-renderable
-                // texture formats.
-                if (formatInfo.isCompressed ||
-                    (TextureFormatIsSnorm(formatInfo.format) &&
-                     GetDevice()->IsToggleEnabled(Toggle::DisableSnormRead))) {
-                    UNREACHABLE();
+                if (formatInfo.isCompressed) {
+                    DAWN_UNREACHABLE();
                 }
 
                 buffer->EnsureDataInitializedAsDestination(copy);
 
-                ASSERT(texture->GetDimension() != wgpu::TextureDimension::e1D);
                 SubresourceRange subresources = GetSubresourcesAffectedByCopy(src, copy->copySize);
-                texture->EnsureSubresourceContentInitialized(subresources);
+                DAWN_TRY(texture->EnsureSubresourceContentInitialized(subresources));
                 // The only way to move data from a texture to a buffer in GL is via
                 // glReadPixels with a pack buffer. Create a temporary FBO for the copy.
                 gl.BindTexture(target, texture->GetHandle());
@@ -626,11 +725,15 @@ MaybeError CommandBuffer::Execute() {
                     case Aspect::None:
                     case Aspect::Plane0:
                     case Aspect::Plane1:
-                        UNREACHABLE();
+                    case Aspect::Plane2:
+                        DAWN_UNREACHABLE();
                 }
 
                 uint8_t* offset = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(dst.offset));
                 switch (texture->GetDimension()) {
+                    case wgpu::TextureDimension::Undefined:
+                        DAWN_UNREACHABLE();
+                    case wgpu::TextureDimension::e1D:
                     case wgpu::TextureDimension::e2D: {
                         if (texture->GetArrayLayers() == 1) {
                             gl.FramebufferTexture2D(GL_READ_FRAMEBUFFER, glAttachment, target,
@@ -656,15 +759,14 @@ MaybeError CommandBuffer::Execute() {
                         }
                         break;
                     }
-
-                    case wgpu::TextureDimension::e1D:
-                        UNREACHABLE();
                 }
 
                 gl.PixelStorei(GL_PACK_ROW_LENGTH, 0);
 
                 gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
                 gl.DeleteFramebuffers(1, &readFBO);
+
+                buffer->TrackUsage();
                 break;
             }
 
@@ -689,11 +791,11 @@ MaybeError CommandBuffer::Execute() {
                 SubresourceRange srcRange = GetSubresourcesAffectedByCopy(src, copy->copySize);
                 SubresourceRange dstRange = GetSubresourcesAffectedByCopy(dst, copy->copySize);
 
-                srcTexture->EnsureSubresourceContentInitialized(srcRange);
-                if (IsCompleteSubresourceCopiedTo(dstTexture, copySize, dst.mipLevel)) {
+                DAWN_TRY(srcTexture->EnsureSubresourceContentInitialized(srcRange));
+                if (IsCompleteSubresourceCopiedTo(dstTexture, copySize, dst.mipLevel, dst.aspect)) {
                     dstTexture->SetIsSubresourceContentInitialized(true, dstRange);
                 } else {
-                    dstTexture->EnsureSubresourceContentInitialized(dstRange);
+                    DAWN_TRY(dstTexture->EnsureSubresourceContentInitialized(dstRange));
                 }
                 CopyImageSubData(gl, src.aspect, srcTexture->GetHandle(), srcTexture->GetGLTarget(),
                                  src.mipLevel, src.origin, dstTexture->GetHandle(),
@@ -719,12 +821,35 @@ MaybeError CommandBuffer::Execute() {
                     gl.BufferSubData(GL_ARRAY_BUFFER, cmd->offset, cmd->size, clearValues.data());
                 }
 
+                dstBuffer->TrackUsage();
                 break;
             }
 
             case Command::ResolveQuerySet: {
-                // TODO(crbug.com/dawn/434): Resolve non-precise occlusion query.
-                SkipCommand(&mCommands, type);
+                ResolveQuerySetCmd* cmd = mCommands.NextCommand<ResolveQuerySetCmd>();
+                QuerySet* querySet = ToBackend(cmd->querySet.Get());
+                Buffer* destination = ToBackend(cmd->destination.Get());
+
+                size_t size = cmd->queryCount * sizeof(uint64_t);
+                destination->EnsureDataInitializedAsDestination(cmd->destinationOffset, size);
+
+                std::vector<uint64_t> values(cmd->queryCount);
+                auto availability = querySet->GetQueryAvailability();
+
+                for (uint32_t i = 0; i < cmd->queryCount; ++i) {
+                    if (!availability[cmd->firstQuery + i]) {
+                        values[i] = 0;
+                        continue;
+                    }
+                    uint32_t query = querySet->Get(cmd->firstQuery + i);
+                    GLuint value;
+                    gl.GetQueryObjectuiv(query, GL_QUERY_RESULT, &value);
+                    values[i] = value;
+                }
+
+                gl.BindBuffer(GL_ARRAY_BUFFER, destination->GetHandle());
+                gl.BufferSubData(GL_ARRAY_BUFFER, cmd->destinationOffset, size, values.data());
+
                 break;
             }
 
@@ -755,11 +880,13 @@ MaybeError CommandBuffer::Execute() {
 
                 gl.BindBuffer(GL_ARRAY_BUFFER, dstBuffer->GetHandle());
                 gl.BufferSubData(GL_ARRAY_BUFFER, offset, size, data);
+
+                dstBuffer->TrackUsage();
                 break;
             }
 
             default:
-                UNREACHABLE();
+                DAWN_UNREACHABLE();
         }
     }
 
@@ -798,6 +925,8 @@ MaybeError CommandBuffer::ExecuteComputePass() {
                 gl.BindBuffer(GL_DISPATCH_INDIRECT_BUFFER, indirectBuffer->GetHandle());
                 gl.DispatchComputeIndirect(static_cast<GLintptr>(indirectBufferOffset));
                 gl.MemoryBarrier(GL_ALL_BARRIER_BITS);
+
+                indirectBuffer->TrackUsage();
                 break;
             }
 
@@ -835,12 +964,12 @@ MaybeError CommandBuffer::ExecuteComputePass() {
             }
 
             default:
-                UNREACHABLE();
+                DAWN_UNREACHABLE();
         }
     }
 
     // EndComputePass should have been called
-    UNREACHABLE();
+    DAWN_UNREACHABLE();
 }
 
 MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
@@ -862,21 +991,20 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
 
         // Mapping from attachmentSlot to GL framebuffer attachment points. Defaults to zero
         // (GL_NONE).
-        ityp::array<ColorAttachmentIndex, GLenum, kMaxColorAttachments> drawBuffers = {};
+        PerColorAttachment<GLenum> drawBuffers = {};
 
         // Construct GL framebuffer
 
-        ColorAttachmentIndex attachmentCount(uint8_t(0));
-        for (ColorAttachmentIndex i :
-             IterateBitSet(renderPass->attachmentState->GetColorAttachmentsMask())) {
+        ColorAttachmentIndex attachmentCount{};
+        for (auto i : IterateBitSet(renderPass->attachmentState->GetColorAttachmentsMask())) {
             TextureView* textureView = ToBackend(renderPass->colorAttachments[i].view.Get());
             GLenum glAttachment = GL_COLOR_ATTACHMENT0 + static_cast<uint8_t>(i);
 
             // Attach color buffers.
-            textureView->BindToFramebuffer(GL_DRAW_FRAMEBUFFER, glAttachment);
+            textureView->BindToFramebuffer(GL_DRAW_FRAMEBUFFER, glAttachment,
+                                           renderPass->colorAttachments[i].depthSlice);
             drawBuffers[i] = glAttachment;
-            attachmentCount = i;
-            attachmentCount++;
+            attachmentCount = ityp::PlusOne(i);
         }
         gl.DrawBuffers(static_cast<uint8_t>(attachmentCount), drawBuffers.data());
 
@@ -893,14 +1021,14 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
             } else if (format.aspects == Aspect::Stencil) {
                 glAttachment = GL_STENCIL_ATTACHMENT;
             } else {
-                UNREACHABLE();
+                DAWN_UNREACHABLE();
             }
 
             textureView->BindToFramebuffer(GL_DRAW_FRAMEBUFFER, glAttachment);
         }
     }
 
-    ASSERT(gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    DAWN_ASSERT(gl.CheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
 
     // Set defaults for dynamic state before executing clears and commands.
     PersistentPipelineState persistentPipelineState;
@@ -912,8 +1040,7 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
 
     // Clear framebuffer attachments as needed
     {
-        for (ColorAttachmentIndex index :
-             IterateBitSet(renderPass->attachmentState->GetColorAttachmentsMask())) {
+        for (auto index : IterateBitSet(renderPass->attachmentState->GetColorAttachmentsMask())) {
             uint8_t i = static_cast<uint8_t>(index);
             auto* attachmentInfo = &renderPass->colorAttachments[index];
 
@@ -921,30 +1048,27 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
             if (attachmentInfo->loadOp == wgpu::LoadOp::Clear) {
                 gl.ColorMask(true, true, true, true);
 
-                wgpu::TextureComponentType baseType =
+                TextureComponentType baseType =
                     attachmentInfo->view->GetFormat().GetAspectInfo(Aspect::Color).baseType;
                 switch (baseType) {
-                    case wgpu::TextureComponentType::Float: {
+                    case TextureComponentType::Float: {
                         const std::array<float, 4> appliedClearColor =
                             ConvertToFloatColor(attachmentInfo->clearColor);
                         gl.ClearBufferfv(GL_COLOR, i, appliedClearColor.data());
                         break;
                     }
-                    case wgpu::TextureComponentType::Uint: {
+                    case TextureComponentType::Uint: {
                         const std::array<uint32_t, 4> appliedClearColor =
                             ConvertToUnsignedIntegerColor(attachmentInfo->clearColor);
                         gl.ClearBufferuiv(GL_COLOR, i, appliedClearColor.data());
                         break;
                     }
-                    case wgpu::TextureComponentType::Sint: {
+                    case TextureComponentType::Sint: {
                         const std::array<int32_t, 4> appliedClearColor =
                             ConvertToSignedIntegerColor(attachmentInfo->clearColor);
                         gl.ClearBufferiv(GL_COLOR, i, appliedClearColor.data());
                         break;
                     }
-
-                    case wgpu::TextureComponentType::DepthComparison:
-                        UNREACHABLE();
                 }
             }
 
@@ -997,7 +1121,11 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
                 vertexStateBufferBindingTracker.Apply(gl);
                 bindGroupTracker.Apply(gl);
 
-                if (draw->firstInstance > 0) {
+                if (gl.DrawArraysInstancedBaseInstanceANGLE) {
+                    gl.DrawArraysInstancedBaseInstanceANGLE(
+                        lastPipeline->GetGLPrimitiveTopology(), draw->firstVertex,
+                        draw->vertexCount, draw->instanceCount, draw->firstInstance);
+                } else if (draw->firstInstance > 0) {
                     gl.DrawArraysInstancedBaseInstance(lastPipeline->GetGLPrimitiveTopology(),
                                                        draw->firstVertex, draw->vertexCount,
                                                        draw->instanceCount, draw->firstInstance);
@@ -1015,7 +1143,13 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
                 vertexStateBufferBindingTracker.Apply(gl);
                 bindGroupTracker.Apply(gl);
 
-                if (draw->firstInstance > 0) {
+                if (gl.DrawElementsInstancedBaseVertexBaseInstanceANGLE) {
+                    gl.DrawElementsInstancedBaseVertexBaseInstanceANGLE(
+                        lastPipeline->GetGLPrimitiveTopology(), draw->indexCount, indexBufferFormat,
+                        reinterpret_cast<void*>(draw->firstIndex * indexFormatSize +
+                                                indexBufferBaseOffset),
+                        draw->instanceCount, draw->baseVertex, draw->firstInstance);
+                } else if (draw->firstInstance > 0) {
                     gl.DrawElementsInstancedBaseVertexBaseInstance(
                         lastPipeline->GetGLPrimitiveTopology(), draw->indexCount, indexBufferFormat,
                         reinterpret_cast<void*>(draw->firstIndex * indexFormatSize +
@@ -1055,6 +1189,7 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
                 gl.DrawArraysIndirect(
                     lastPipeline->GetGLPrimitiveTopology(),
                     reinterpret_cast<void*>(static_cast<intptr_t>(indirectBufferOffset)));
+                indirectBuffer->TrackUsage();
                 break;
             }
 
@@ -1065,12 +1200,13 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
                 bindGroupTracker.Apply(gl);
 
                 Buffer* indirectBuffer = ToBackend(draw->indirectBuffer.Get());
-                ASSERT(indirectBuffer != nullptr);
+                DAWN_ASSERT(indirectBuffer != nullptr);
 
                 gl.BindBuffer(GL_DRAW_INDIRECT_BUFFER, indirectBuffer->GetHandle());
                 gl.DrawElementsIndirect(
                     lastPipeline->GetGLPrimitiveTopology(), indexBufferFormat,
                     reinterpret_cast<void*>(static_cast<intptr_t>(draw->indirectOffset)));
+                indirectBuffer->TrackUsage();
                 break;
             }
 
@@ -1111,6 +1247,7 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
                 indexBufferFormat = IndexFormatType(cmd->format);
                 indexFormatSize = IndexFormatSize(cmd->format);
                 vertexStateBufferBindingTracker.OnSetIndexBuffer(cmd->buffer.Get());
+                ToBackend(cmd->buffer)->TrackUsage();
                 break;
             }
 
@@ -1118,11 +1255,12 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
                 SetVertexBufferCmd* cmd = iter->NextCommand<SetVertexBufferCmd>();
                 vertexStateBufferBindingTracker.OnSetVertexBuffer(cmd->slot, cmd->buffer.Get(),
                                                                   cmd->offset);
+                ToBackend(cmd->buffer)->TrackUsage();
                 break;
             }
 
             default:
-                UNREACHABLE();
+                DAWN_UNREACHABLE();
                 break;
         }
     };
@@ -1133,7 +1271,7 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
             case Command::EndRenderPass: {
                 mCommands.NextCommand<EndRenderPassCmd>();
 
-                for (ColorAttachmentIndex i :
+                for (auto i :
                      IterateBitSet(renderPass->attachmentState->GetColorAttachmentsMask())) {
                     TextureView* textureView =
                         ToBackend(renderPass->colorAttachments[i].view.Get());
@@ -1200,11 +1338,16 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
             }
 
             case Command::BeginOcclusionQuery: {
-                return DAWN_UNIMPLEMENTED_ERROR("BeginOcclusionQuery unimplemented.");
+                BeginOcclusionQueryCmd* cmd = mCommands.NextCommand<BeginOcclusionQueryCmd>();
+                QuerySet* querySet = ToBackend(renderPass->occlusionQuerySet.Get());
+                gl.BeginQuery(GL_ANY_SAMPLES_PASSED, querySet->Get(cmd->queryIndex));
+                break;
             }
 
             case Command::EndOcclusionQuery: {
-                return DAWN_UNIMPLEMENTED_ERROR("EndOcclusionQuery unimplemented.");
+                mCommands.NextCommand<EndOcclusionQueryCmd>();
+                gl.EndQuery(GL_ANY_SAMPLES_PASSED);
+                break;
             }
 
             case Command::WriteTimestamp:
@@ -1218,7 +1361,7 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass) {
     }
 
     // EndRenderPass should have been called
-    UNREACHABLE();
+    DAWN_UNREACHABLE();
 }
 
 void DoTexSubImage(const OpenGLFunctions& gl,
@@ -1227,7 +1370,6 @@ void DoTexSubImage(const OpenGLFunctions& gl,
                    const TextureDataLayout& dataLayout,
                    const Extent3D& copySize) {
     Texture* texture = ToBackend(destination.texture.Get());
-    ASSERT(texture->GetDimension() != wgpu::TextureDimension::e1D);
 
     const GLFormat& format = texture->GetGLFormat();
     GLenum target = texture->GetGLTarget();
@@ -1241,7 +1383,8 @@ void DoTexSubImage(const OpenGLFunctions& gl,
     uint32_t z = destination.origin.z;
     if (texture->GetFormat().isCompressed) {
         size_t rowSize = copySize.width / blockInfo.width * blockInfo.byteSize;
-        Extent3D virtSize = texture->GetMipLevelSingleSubresourceVirtualSize(destination.mipLevel);
+        Extent3D virtSize = texture->GetMipLevelSingleSubresourceVirtualSize(destination.mipLevel,
+                                                                             destination.aspect);
         uint32_t width = std::min(copySize.width, virtSize.width - x);
 
         // In GLES glPixelStorei() doesn't affect CompressedTexSubImage*D() and
@@ -1263,8 +1406,7 @@ void DoTexSubImage(const OpenGLFunctions& gl,
             gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, blockInfo.height);
             gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_DEPTH, 1);
 
-            if (texture->GetArrayLayers() == 1 &&
-                texture->GetDimension() == wgpu::TextureDimension::e2D) {
+            if (texture->GetArrayLayers() == 1 && Is1DOr2D(texture->GetDimension())) {
                 gl.CompressedTexSubImage2D(target, destination.mipLevel, x, y, width, height,
                                            format.internalFormat, imageSize, data);
             } else {
@@ -1281,8 +1423,7 @@ void DoTexSubImage(const OpenGLFunctions& gl,
             gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, 0);
             gl.PixelStorei(GL_UNPACK_COMPRESSED_BLOCK_DEPTH, 0);
         } else {
-            if (texture->GetArrayLayers() == 1 &&
-                texture->GetDimension() == wgpu::TextureDimension::e2D) {
+            if (texture->GetArrayLayers() == 1 && Is1DOr2D(texture->GetDimension())) {
                 const uint8_t* d = static_cast<const uint8_t*>(data);
 
                 for (; y < destination.origin.y + copySize.height; y += blockInfo.height) {
@@ -1313,10 +1454,11 @@ void DoTexSubImage(const OpenGLFunctions& gl,
         uint32_t width = copySize.width;
         uint32_t height = copySize.height;
         if (dataLayout.bytesPerRow % blockInfo.byteSize == 0) {
+            // Valid values for GL_UNPACK_ALIGNMENT are 1, 2, 4, 8
+            gl.PixelStorei(GL_UNPACK_ALIGNMENT, std::min(8u, blockInfo.byteSize));
             gl.PixelStorei(GL_UNPACK_ROW_LENGTH,
                            dataLayout.bytesPerRow / blockInfo.byteSize * blockInfo.width);
-            if (texture->GetArrayLayers() == 1 &&
-                texture->GetDimension() == wgpu::TextureDimension::e2D) {
+            if (texture->GetArrayLayers() == 1 && Is1DOr2D(texture->GetDimension())) {
                 gl.TexSubImage2D(target, destination.mipLevel, x, y, width, height, format.format,
                                  format.type, data);
             } else {
@@ -1326,9 +1468,9 @@ void DoTexSubImage(const OpenGLFunctions& gl,
                 gl.PixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
             }
             gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4);  // Reset to default
         } else {
-            if (texture->GetArrayLayers() == 1 &&
-                texture->GetDimension() == wgpu::TextureDimension::e2D) {
+            if (texture->GetArrayLayers() == 1 && Is1DOr2D(texture->GetDimension())) {
                 const uint8_t* d = static_cast<const uint8_t*>(data);
                 for (; y < destination.origin.y + height; ++y) {
                     gl.TexSubImage2D(target, destination.mipLevel, x, y, width, 1, format.format,

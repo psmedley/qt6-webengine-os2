@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,7 +94,8 @@ class CFWL_WidgetMgr final : public cppgc::GarbageCollected<CFWL_WidgetMgr> {
 
   cppgc::Member<AdapterIface> const m_pAdapter;
   cppgc::Member<CFWL_App> const m_pApp;
-  std::map<const CFWL_Widget*, cppgc::Member<Item>> m_mapWidgetItem;
+  std::map<cppgc::Member<const CFWL_Widget>, cppgc::Member<Item>>
+      m_mapWidgetItem;
 };
 
 #endif  // XFA_FWL_CFWL_WIDGETMGR_H_

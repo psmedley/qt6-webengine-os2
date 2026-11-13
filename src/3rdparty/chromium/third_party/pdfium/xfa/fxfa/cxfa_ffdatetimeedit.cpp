@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -201,9 +201,8 @@ void CXFA_FFDateTimeEdit::OnSelectChanged(CFWL_Widget* pWidget,
   pPicker->Update();
   GetDoc()->SetFocusWidget(nullptr);
 
-  CXFA_EventParam eParam;
+  CXFA_EventParam eParam(XFA_EVENT_Unknown);
   eParam.m_eType = XFA_EVENT_Change;
-  eParam.m_pTarget = m_pNode.Get();
   eParam.m_wsPrevText = m_pNode->GetValue(XFA_ValuePicture::kRaw);
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeValue::Change, &eParam);
 }

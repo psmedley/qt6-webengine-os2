@@ -25,9 +25,11 @@ message BatteryCounters {
   optional float capacity_percent = 2;
 
   // Instantaneous battery current in microamperes(µA).
-  // Positive values indicate current drained from the battery,
-  // negative values current feeding the battery from a charge source (USB).
-  // See https://perfetto.dev/docs/data-sources/battery-counters for more.
+  // Negative values indicate current being drained from the battery and
+  // positive values indicate current feeding the battery from a charge source
+  // (USB).
+  //
+  // See https://perfetto.dev/docs/data-sources/battery-counters for more info.
   optional int64 current_ua = 3;
 
   // Instantaneous battery current in microamperes(µA).
@@ -35,4 +37,10 @@ message BatteryCounters {
 
   // Battery name, emitted only on multiple batteries.
   optional string name = 5;
+
+  // Battery capacity in microwatt-hours(µWh).
+  optional int64 energy_counter_uwh = 6;
+
+  // Battery voltage in microvolts(µV).
+  optional int64 voltage_uv = 7;
 }

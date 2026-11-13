@@ -8,9 +8,12 @@
 #include "src/gpu/ganesh/ops/PathTessellateOp.h"
 
 #include "src/gpu/ganesh/GrAppliedClip.h"
+#include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrOpFlushState.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
 #include "src/gpu/ganesh/tessellate/GrPathTessellationShader.h"
-namespace skgpu::v1 {
+
+namespace skgpu::ganesh {
 
 void PathTessellateOp::visitProxies(const GrVisitProxyFunc& func) const {
     if (fTessellationProgram) {
@@ -120,4 +123,4 @@ void PathTessellateOp::onExecute(GrOpFlushState* flushState, const SkRect& chain
     fTessellator->draw(flushState);
 }
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh

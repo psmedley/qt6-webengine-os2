@@ -2,18 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import '../test_runner/test_runner.js';
-import '../../panels/security/security-legacy.js';
+import * as SDK from '../../core/sdk/sdk.js';
+import * as Security from '../../panels/security/security.js';
+import {TestRunner} from '../test_runner/test_runner.js';
 
 /**
  * @fileoverview using private properties isn't a Closure violation in tests.
  */
-self.SecurityTestRunner = self.SecurityTestRunner || {};
+export const SecurityTestRunner = {};
 
 SecurityTestRunner.dumpSecurityPanelSidebarOrigins = function() {
-  for (const key in Security.SecurityPanelSidebarTree.OriginGroup) {
-    const originGroup = Security.SecurityPanelSidebarTree.OriginGroup[key];
-    const element = Security.SecurityPanel.instance().sidebarTree.originGroups.get(originGroup);
+  for (const key in Security.SecurityPanel.OriginGroup) {
+    const originGroup = Security.SecurityPanel.OriginGroup[key];
+    const element = Security.SecurityPanel.SecurityPanel.instance().sidebarTree.originGroups.get(originGroup);
 
     if (element.hidden) {
       continue;

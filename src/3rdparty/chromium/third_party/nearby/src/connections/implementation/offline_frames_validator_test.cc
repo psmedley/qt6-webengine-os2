@@ -14,21 +14,23 @@
 
 #include "connections/implementation/offline_frames_validator.h"
 
+#include <array>
 #include <string>
 
-#include "gmock/gmock.h"
-#include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
-#include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/implementation/offline_frames.h"
+#include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "internal/platform/byte_array.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace parser {
 namespace {
+
+using ::location::nearby::connections::OfflineFrame;
+using ::location::nearby::connections::OsInfo;
+using ::location::nearby::connections::PayloadTransferFrame;
 
 constexpr absl::string_view kEndpointId{"ABC"};
 constexpr absl::string_view kEndpointName{"XYZ"};
@@ -43,8 +45,10 @@ constexpr absl::string_view kPassword = "password";
 constexpr absl::string_view kWifiHotspotGateway = "0.0.0.0";
 constexpr absl::string_view kWifiDirectSsid = "DIRECT-A0-0123456789AB";
 constexpr absl::string_view kWifiDirectPassword = "WIFIDIRECT123456";
-constexpr int kWifiDirectFrequency = 1000;
+constexpr absl::string_view kGateway = "192.168.1.1";
+constexpr int kWifiDirectFrequency = 2412;
 constexpr int kPort = 1000;
+constexpr int kHotspotFrequency = 2412;
 constexpr bool kSupportsDisablingEncryption = true;
 constexpr std::array<Medium, 9> kMediums = {
     Medium::MDNS, Medium::BLUETOOTH,   Medium::WIFI_HOTSPOT,
@@ -54,26 +58,26 @@ constexpr std::array<Medium, 9> kMediums = {
 constexpr int kKeepAliveIntervalMillis = 1000;
 constexpr int kKeepAliveTimeoutMillis = 5000;
 
-class OfflineFramesConnectionRequestTest : public testing::Test  {
+class OfflineFramesConnectionRequestTest : public testing::Test {
  protected:
   ConnectionInfo connection_info_{std::string(kEndpointId),
-                               ByteArray{std::string(kEndpointName)},
-                               kNonce,
-                               kSupports5ghz,
-                               std::string(kBssid),
-                               kApFrequency,
-                               std::string(kIp4Bytes),
-                               std::vector<Medium, std::allocator<Medium>>(
-                                   kMediums.begin(), kMediums.end()),
-                               kKeepAliveIntervalMillis,
-                               kKeepAliveTimeoutMillis};
+                                  ByteArray{std::string(kEndpointName)},
+                                  kNonce,
+                                  kSupports5ghz,
+                                  std::string(kBssid),
+                                  kApFrequency,
+                                  std::string(kIp4Bytes),
+                                  std::vector<Medium, std::allocator<Medium>>(
+                                      kMediums.begin(), kMediums.end()),
+                                  kKeepAliveIntervalMillis,
+                                  kKeepAliveTimeoutMillis};
 };
 
 TEST_F(OfflineFramesConnectionRequestTest,
        ValidatesAsOkWithValidConnectionRequestFrame) {
   OfflineFrame offline_frame;
 
-  ByteArray bytes = ForConnectionRequest(connection_info_);
+  ByteArray bytes = ForConnectionRequestConnections({}, connection_info_);
   offline_frame.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame);
@@ -82,10 +86,10 @@ TEST_F(OfflineFramesConnectionRequestTest,
 }
 
 TEST_F(OfflineFramesConnectionRequestTest,
-     ValidatesAsFailWithNullConnectionRequestFrame) {
+       ValidatesAsFailWithNullConnectionRequestFrame) {
   OfflineFrame offline_frame;
 
-  ByteArray bytes = ForConnectionRequest(connection_info_);
+  ByteArray bytes = ForConnectionRequestConnections({}, connection_info_);
   offline_frame.ParseFromString(std::string(bytes));
   auto* v1_frame = offline_frame.mutable_v1();
 
@@ -97,11 +101,11 @@ TEST_F(OfflineFramesConnectionRequestTest,
 }
 
 TEST_F(OfflineFramesConnectionRequestTest,
-     ValidatesAsFailWithNullEndpointIdInConnectionRequestFrame) {
+       ValidatesAsFailWithNullEndpointIdInConnectionRequestFrame) {
   OfflineFrame offline_frame;
 
   connection_info_.local_endpoint_id = "";
-  ByteArray bytes = ForConnectionRequest(connection_info_);
+  ByteArray bytes = ForConnectionRequestConnections({}, connection_info_);
   offline_frame.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame);
@@ -110,11 +114,11 @@ TEST_F(OfflineFramesConnectionRequestTest,
 }
 
 TEST_F(OfflineFramesConnectionRequestTest,
-     ValidatesAsFailWithNullEndpointInfoInConnectionRequestFrame) {
+       ValidatesAsFailWithNullEndpointInfoInConnectionRequestFrame) {
   OfflineFrame offline_frame;
 
   connection_info_.local_endpoint_info = ByteArray{""};
-  ByteArray bytes = ForConnectionRequest(connection_info_);
+  ByteArray bytes = ForConnectionRequestConnections({}, connection_info_);
   offline_frame.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame);
@@ -123,11 +127,11 @@ TEST_F(OfflineFramesConnectionRequestTest,
 }
 
 TEST_F(OfflineFramesConnectionRequestTest,
-     ValidatesAsOkWithNullBssidInConnectionRequestFrame) {
+       ValidatesAsOkWithNullBssidInConnectionRequestFrame) {
   OfflineFrame offline_frame;
 
   connection_info_.bssid = "";
-  ByteArray bytes = ForConnectionRequest(connection_info_);
+  ByteArray bytes = ForConnectionRequestConnections({}, connection_info_);
   offline_frame.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame);
@@ -136,11 +140,11 @@ TEST_F(OfflineFramesConnectionRequestTest,
 }
 
 TEST_F(OfflineFramesConnectionRequestTest,
-     ValidatesAsOkWithNullMediumsInConnectionRequestFrame) {
+       ValidatesAsOkWithNullMediumsInConnectionRequestFrame) {
   OfflineFrame offline_frame;
 
   connection_info_.supported_mediums = {};
-  ByteArray bytes = ForConnectionRequest(connection_info_);
+  ByteArray bytes = ForConnectionRequestConnections({}, connection_info_);
   offline_frame.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame);
@@ -152,7 +156,8 @@ TEST(OfflineFramesValidatorTest,
      ValidatesAsOkWithValidConnectionResponseFrame) {
   OfflineFrame offline_frame;
 
-  ByteArray bytes = ForConnectionResponse(kStatusAccepted);
+  OsInfo os_info;
+  ByteArray bytes = ForConnectionResponse(kStatusAccepted, os_info);
   offline_frame.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame);
@@ -164,7 +169,8 @@ TEST(OfflineFramesValidatorTest,
      ValidatesAsFailWithNullConnectionResponseFrame) {
   OfflineFrame offline_frame;
 
-  ByteArray bytes = ForConnectionResponse(kStatusAccepted);
+  OsInfo os_info;
+  ByteArray bytes = ForConnectionResponse(kStatusAccepted, os_info);
   offline_frame.ParseFromString(std::string(bytes));
   auto* v1_frame = offline_frame.mutable_v1();
 
@@ -179,7 +185,8 @@ TEST(OfflineFramesValidatorTest,
      ValidatesAsFailWithUnexpectedStatusInConnectionResponseFrame) {
   OfflineFrame offline_frame;
 
-  ByteArray bytes = ForConnectionResponse(-1);
+  OsInfo os_info;
+  ByteArray bytes = ForConnectionResponse(-1, os_info);
   offline_frame.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame);
@@ -564,7 +571,7 @@ TEST(OfflineFramesValidatorTest,
   OfflineFrame offline_frame;
 
   ByteArray bytes = ForBwuWifiHotspotPathAvailable(
-      std::string(kSsid), std::string(kPassword), kPort,
+      std::string(kSsid), std::string(kPassword), kPort, kHotspotFrequency,
       std::string(kWifiHotspotGateway), kSupportsDisablingEncryption);
   offline_frame.ParseFromString(std::string(bytes));
 
@@ -578,7 +585,7 @@ TEST(OfflineFramesValidatorTest,
   OfflineFrame offline_frame;
 
   ByteArray bytes = ForBwuWifiHotspotPathAvailable(
-      std::string(kSsid), std::string(kPassword), kPort,
+      std::string(kSsid), std::string(kPassword), kPort, kHotspotFrequency,
       std::string(kWifiHotspotGateway), kSupportsDisablingEncryption);
   offline_frame.ParseFromString(std::string(bytes));
   auto* v1_frame = offline_frame.mutable_v1();
@@ -595,7 +602,8 @@ TEST(OfflineFramesValidatorTest, ValidatesAsOkBandwidthUpgradeWifiDirect) {
 
   ByteArray bytes = ForBwuWifiDirectPathAvailable(
       std::string(kWifiDirectSsid), std::string(kWifiDirectPassword), kPort,
-      kWifiDirectFrequency, kSupportsDisablingEncryption);
+      kWifiDirectFrequency, kSupportsDisablingEncryption,
+      std::string(kGateway));
   offline_frame.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame);
@@ -611,7 +619,7 @@ TEST(OfflineFramesValidatorTest,
   // Anything less than -1 is invalid
   ByteArray bytes = ForBwuWifiDirectPathAvailable(
       std::string(kWifiDirectSsid), std::string(kWifiDirectPassword), kPort, -2,
-      kSupportsDisablingEncryption);
+      kSupportsDisablingEncryption, std::string(kGateway));
   offline_frame_1.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame_1);
@@ -619,9 +627,9 @@ TEST(OfflineFramesValidatorTest,
   ASSERT_FALSE(ret_value.Ok());
 
   // But -1 itself is not invalid
-  bytes = ForBwuWifiDirectPathAvailable(std::string(kWifiDirectSsid),
-                                        std::string(kWifiDirectPassword), kPort,
-                                        -1, kSupportsDisablingEncryption);
+  bytes = ForBwuWifiDirectPathAvailable(
+      std::string(kWifiDirectSsid), std::string(kWifiDirectPassword), kPort, -1,
+      kSupportsDisablingEncryption, std::string(kGateway));
   offline_frame_2.ParseFromString(std::string(bytes));
 
   ret_value = EnsureValidOfflineFrame(offline_frame_2);
@@ -637,7 +645,8 @@ TEST(OfflineFramesValidatorTest,
   std::string wifi_direct_ssid{"DIRECT-A*-0123456789AB"};
   ByteArray bytes = ForBwuWifiDirectPathAvailable(
       wifi_direct_ssid, std::string(kWifiDirectPassword), kPort,
-      kWifiDirectFrequency, kSupportsDisablingEncryption);
+      kWifiDirectFrequency, kSupportsDisablingEncryption,
+      std::string(kGateway));
   offline_frame_1.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame_1);
@@ -648,7 +657,8 @@ TEST(OfflineFramesValidatorTest,
       std::string{kWifiDirectSsid} + "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789";
   bytes = ForBwuWifiDirectPathAvailable(
       wifi_direct_ssid_wrong_length, std::string(kWifiDirectPassword), kPort,
-      kWifiDirectFrequency, kSupportsDisablingEncryption);
+      kWifiDirectFrequency, kSupportsDisablingEncryption,
+      std::string(kGateway));
   offline_frame_2.ParseFromString(std::string(bytes));
 
   ret_value = EnsureValidOfflineFrame(offline_frame_2);
@@ -664,7 +674,8 @@ TEST(OfflineFramesValidatorTest,
   std::string short_wifi_direct_password{"Test"};
   ByteArray bytes = ForBwuWifiDirectPathAvailable(
       std::string(kWifiDirectSsid), short_wifi_direct_password, kPort,
-      kWifiDirectFrequency, kSupportsDisablingEncryption);
+      kWifiDirectFrequency, kSupportsDisablingEncryption,
+      std::string(kGateway));
   offline_frame_1.ParseFromString(std::string(bytes));
 
   auto ret_value = EnsureValidOfflineFrame(offline_frame_1);
@@ -676,7 +687,8 @@ TEST(OfflineFramesValidatorTest,
       "AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789";
   bytes = ForBwuWifiDirectPathAvailable(
       std::string(kWifiDirectSsid), long_wifi_direct_password, kPort,
-      kWifiDirectFrequency, kSupportsDisablingEncryption);
+      kWifiDirectFrequency, kSupportsDisablingEncryption,
+      std::string(kGateway));
   offline_frame_2.ParseFromString(std::string(bytes));
 
   ret_value = EnsureValidOfflineFrame(offline_frame_2);
@@ -688,4 +700,3 @@ TEST(OfflineFramesValidatorTest,
 }  // namespace parser
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1199,7 +1199,6 @@ CXFA_XMLLocale* CXFA_LocaleMgr::GetLocale(LangID lcid) {
     case LangID::k_ru_RU:
       return GetLocaleFromBuffer(m_pHeap, k_ruRU_Locale);
     case LangID::k_en_US:
-    default:
       return GetLocaleFromBuffer(m_pHeap, k_enUS_Locale);
   }
 }

@@ -37,13 +37,13 @@ import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
 
 const UIStrings = {
   /**
-  *@description Message in Database Model of the Application panel
-  */
+   *@description Message in Database Model of the Application panel
+   */
   databaseNoLongerHasExpected: 'Database no longer has expected version.',
   /**
-  *@description Message in Database Model of the Application panel
-  *@example {-197} PH1
-  */
+   *@description Message in Database Model of the Application panel
+   *@example {-197} PH1
+   */
   anUnexpectedErrorSOccurred: 'An unexpected error {PH1} occurred.',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/DatabaseModel.ts', UIStrings);
@@ -171,9 +171,7 @@ export class DatabaseModel extends SDK.SDKModel.SDKModel<EventTypes> {
 
 SDK.SDKModel.SDKModel.register(DatabaseModel, {capabilities: SDK.Target.Capability.DOM, autostart: false});
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   DatabaseAdded = 'DatabaseAdded',
   DatabasesRemoved = 'DatabasesRemoved',
 }

@@ -42,7 +42,7 @@ class MediaSessionAndroid final
   void MediaSessionInfoChanged(
       media_session::mojom::MediaSessionInfoPtr session_info) override;
   void MediaSessionMetadataChanged(
-      const absl::optional<media_session::MediaMetadata>& metadata) override;
+      const std::optional<media_session::MediaMetadata>& metadata) override;
   void MediaSessionActionsChanged(
       const std::vector<media_session::mojom::MediaSessionAction>& action)
       override;
@@ -51,7 +51,7 @@ class MediaSessionAndroid final
                            std::vector<media_session::MediaImage>>& images)
       override;
   void MediaSessionPositionChanged(
-      const absl::optional<media_session::MediaPosition>& position) override;
+      const std::optional<media_session::MediaPosition>& position) override;
 
   // MediaSession method wrappers.
   void Resume(JNIEnv* env, const base::android::JavaParamRef<jobject>& j_obj);
@@ -78,9 +78,9 @@ class MediaSessionAndroid final
   JavaObjectWeakGlobalRef j_media_session_;
   // WebContentsAndroid corresponding to the Java WebContentsImpl that holds a
   // strong reference to |j_media_session_|.
-  raw_ptr<WebContentsAndroid> web_contents_android_;
+  raw_ptr<WebContentsAndroid, DanglingUntriaged> web_contents_android_;
 
-  const raw_ptr<MediaSessionImpl> media_session_;
+  const raw_ptr<MediaSessionImpl, DanglingUntriaged> media_session_;
 
   bool is_paused_ = false;
   bool is_controllable_ = false;

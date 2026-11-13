@@ -19,7 +19,7 @@
 
 namespace http2 {
 
-class QUICHE_EXPORT_PRIVATE HpackWholeEntryListener {
+class QUICHE_EXPORT HpackWholeEntryListener {
  public:
   virtual ~HpackWholeEntryListener();
 
@@ -49,13 +49,12 @@ class QUICHE_EXPORT_PRIVATE HpackWholeEntryListener {
   virtual void OnDynamicTableSizeUpdate(size_t size) = 0;
 
   // OnHpackDecodeError is called if an error is detected while decoding.
-  virtual void OnHpackDecodeError(HpackDecodingError error,
-                                  std::string detailed_error) = 0;
+  virtual void OnHpackDecodeError(HpackDecodingError error) = 0;
 };
 
 // A no-op implementation of HpackWholeEntryDecoderListener, useful for ignoring
 // callbacks once an error is detected.
-class QUICHE_EXPORT_PRIVATE HpackWholeEntryNoOpListener
+class QUICHE_EXPORT HpackWholeEntryNoOpListener
     : public HpackWholeEntryListener {
  public:
   ~HpackWholeEntryNoOpListener() override;
@@ -68,8 +67,7 @@ class QUICHE_EXPORT_PRIVATE HpackWholeEntryNoOpListener
                              HpackDecoderStringBuffer* name_buffer,
                              HpackDecoderStringBuffer* value_buffer) override;
   void OnDynamicTableSizeUpdate(size_t size) override;
-  void OnHpackDecodeError(HpackDecodingError error,
-                          std::string detailed_error) override;
+  void OnHpackDecodeError(HpackDecodingError error) override;
 
   // Returns a listener that ignores all the calls.
   static HpackWholeEntryNoOpListener* NoOpListener();

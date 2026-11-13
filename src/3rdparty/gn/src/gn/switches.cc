@@ -119,8 +119,8 @@ const char kScriptExecutable_Help[] =
   action targets and exec_script calls. By default GN searches the
   PATH for Python to execute these scripts.
 
-  If set to the empty string, the path specified in action targets
-  and exec_script calls will be executed directly.
+  If set to the empty string, the path of scripts specified in action
+  targets and exec_script calls will be executed directly.
 )";
 
 const char kQuiet[] = "q";
@@ -153,8 +153,7 @@ Examples
 )";
 
 const char kRootTarget[] = "root-target";
-const char kRootTarget_HelpShort[] =
-    "--root-target: Override the root target.";
+const char kRootTarget_HelpShort[] = "--root-target: Override the root target.";
 const char kRootTarget_Help[] =
     R"(--root-target: Override the root target.
 
@@ -181,6 +180,34 @@ Examples
   gn gen //out/Default --root-target="//third_party/icu"
 
   gn gen //out/Default --root-target="//third_party/grpc"
+)";
+
+const char kRootPattern[] = "root-pattern";
+const char kRootPattern_HelpShort[] =
+    "--root-pattern: Add root pattern override.";
+const char kRootPattern_Help[] =
+    R"(--root-pattern: Add root pattern override.
+
+  The root patterns is a list of label patterns used to control which
+  targets are defined when evaluating BUILD.gn files in the default toolchain.
+
+  The list is empty by default, meaning that all targets defined in all
+  BUILD.gn files evaluated in the default toolchain will be added to the
+  final GN build graph (GN's default behavior for historical reasons).
+
+  When this list is not empty, only targets matching any of the root patterns,
+  as well as their transitive dependencies, will be defined in the default
+  toolchain instead. This is a way to restrict the size of the final build graph
+  for projects with a very large number of target definitions per BUILD.gn file.
+
+  Using --root-pattern overrides the root_patterns value specified in the .gn file.
+
+  The argument must be a GN label pattern, and each --root-pattern=<pattern>
+  on the command-line will append a pattern to the list.
+
+Example
+
+  gn gen //out/Default --root-pattern="//:*"
 )";
 
 const char kRuntimeDepsListFile[] = "runtime-deps-list-file";
@@ -284,6 +311,9 @@ const char kVersion_Help[] = "";
 const char kDefaultToolchain[] = "default-toolchain";
 
 const char kRegeneration[] = "regeneration";
+
+const char kAddExportCompileCommands[] = "add-export-compile-commands";
+
 // -----------------------------------------------------------------------------
 
 SwitchInfo::SwitchInfo() : short_help(""), long_help("") {}

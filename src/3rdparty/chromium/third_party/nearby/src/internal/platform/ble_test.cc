@@ -19,11 +19,10 @@
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
-#include "internal/platform/medium_environment.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/medium_environment.h"
 
-namespace location {
 namespace nearby {
 namespace {
 
@@ -47,8 +46,6 @@ class BleMediumTest : public ::testing::TestWithParam<FeatureFlags> {
  protected:
   using DiscoveredPeripheralCallback = BleMedium::DiscoveredPeripheralCallback;
   using AcceptedConnectionCallback = BleMedium::AcceptedConnectionCallback;
-
-  BleMediumTest() { env_.Stop(); }
 
   MediumEnvironment& env_{MediumEnvironment::Instance()};
 };
@@ -89,14 +86,11 @@ TEST_P(BleMediumTest, CanStartAcceptingConnectionsAndConnect) {
   ble_b.StartAdvertising(service_id, advertisement_bytes,
                          fast_advertisement_service_uuid);
   ble_b.StartAcceptingConnections(
-      service_id,
-      AcceptedConnectionCallback{
-          .accepted_cb = [&accepted_latch](BleSocket socket,
-                                           const std::string& service_id) {
-            NEARBY_LOG(INFO, "Connection accepted: socket=%p, service_id=%s",
-                       &socket, service_id.c_str());
-            accepted_latch.CountDown();
-          }});
+      service_id, [&](BleSocket socket, const std::string& service_id) {
+        NEARBY_LOG(INFO, "Connection accepted: socket=%p, service_id=%s",
+                   &socket, service_id.c_str());
+        accepted_latch.CountDown();
+      });
   EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
 
   BleSocket socket_a;
@@ -151,14 +145,11 @@ TEST_P(BleMediumTest, CanCancelConnect) {
   ble_b.StartAdvertising(service_id, advertisement_bytes,
                          fast_advertisement_service_uuid);
   ble_b.StartAcceptingConnections(
-      service_id,
-      AcceptedConnectionCallback{
-          .accepted_cb = [&accepted_latch](BleSocket socket,
-                                           const std::string& service_id) {
-            NEARBY_LOG(INFO, "Connection accepted: socket=%p, service_id=%s",
-                       &socket, service_id.c_str());
-            accepted_latch.CountDown();
-          }});
+      service_id, [&](BleSocket socket, const std::string& service_id) {
+        NEARBY_LOG(INFO, "Connection accepted: socket=%p, service_id=%s",
+                   &socket, service_id.c_str());
+        accepted_latch.CountDown();
+      });
   EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
 
   BleSocket socket_a;
@@ -303,4 +294,3 @@ TEST_F(BleMediumTest, CanStopDiscovery) {
 
 }  // namespace
 }  // namespace nearby
-}  // namespace location

@@ -1,26 +1,26 @@
-/*
- * This externs file prevents the Closure JS compiler from minifying away
- * names of objects created by Emscripten.
- * Basically, by defining empty objects and functions here, Closure will
- * know not to rename them.  This is needed because of our pre-js files,
- * that is, the JS we hand-write to bundle into the output. That JS will be
- * hit by the closure compiler and thus needs to know about what functions
- * have special names and should not be minified.
- *
- * Emscripten does not support automatically generating an externs file, so we
- * do it by hand. The general process is to write some JS code, and then put any
- * calls to CanvasKit or related things in here. Running ./compile.sh and then
- * looking at the minified results or running the Release trybot should
- * verify nothing was missed. Optionally, looking directly at the minified
- * pathkit.js can be useful when developing locally.
- *
- * Docs:
- *   https://github.com/cljsjs/packages/wiki/Creating-Externs
- *   https://github.com/google/closure-compiler/wiki/Types-in-the-Closure-Type-System
- *
- * Example externs:
- *   https://github.com/google/closure-compiler/tree/master/externs
- */
+//
+// This externs file prevents the Closure JS compiler from minifying away
+// names of objects created by Emscripten.
+// Basically, by defining empty objects and functions here, Closure will
+// know not to rename them.  This is needed because of our pre-js files,
+// that is, the JS we hand-write to bundle into the output. That JS will be
+// hit by the closure compiler and thus needs to know about what functions
+// have special names and should not be minified.
+//
+// Emscripten does not support automatically generating an externs file, so we
+// do it by hand. The general process is to write some JS code, and then put any
+// calls to CanvasKit or related things in here. Running ./compile.sh and then
+// looking at the minified results or running the Release trybot should
+// verify nothing was missed. Optionally, looking directly at the minified
+// pathkit.js can be useful when developing locally.
+//
+// Docs:
+//   https://github.com/cljsjs/packages/wiki/Creating-Externs
+//   https://github.com/google/closure-compiler/wiki/Types-in-the-Closure-Type-System
+//
+// Example externs:
+//   https://github.com/google/closure-compiler/tree/master/externs
+//
 
 var CanvasKit = {
   // public API (i.e. things we declare in the pre-js file or in the cpp bindings)
@@ -52,7 +52,6 @@ var CanvasKit = {
   MakePicture: function() {},
   MakeSWCanvasSurface: function() {},
   MakeManagedAnimation: function() {},
-  MakeParticles: function() {},
   MakeVertices: function() {},
   MakeSurface: function() {},
   MakeGPUDeviceContext: function() {},
@@ -87,7 +86,6 @@ var CanvasKit = {
   _MakeImage: function() {},
   _MakeManagedAnimation: function() {},
   _MakeOnScreenGLSurface: function() {},
-  _MakeParticles: function() {},
   _MakePicture: function() {},
   _MakeRenderTargetII: function() {},
   _MakeRenderTargetWH: function() {},
@@ -112,6 +110,10 @@ var CanvasKit = {
     _size: function() {},
   },
 
+  Blender: {
+    Mode: function() {},
+  },
+
   GrDirectContext: {
     // public API (from webgl.js)
     prototype: {
@@ -134,11 +136,34 @@ var CanvasKit = {
       seek: function() {},
       seekFrame: function() {},
       setColor: function() {},
+      setColorSlot: function() {},
+      getColorSlot: function() {},
+      setScalarSlot: function() {},
+      getScalarSlot: function() {},
+      setVec2Slot: function() {},
+      getVec2Slot: function() {},
+      setTextSlot: function() {},
+      getTextSlot: function() {},
+      setImageSlot: function() {},
+      setTransform: function() {},
       size: function() {},
+
+      attachEditor:          function() {},
+      enableEditor:          function() {},
+      dispatchEditorKey:     function() {},
+      dispatchEditorPointer: function() {},
+      setEditorCursorWeight: function() {},
     },
     _render: function() {},
     _seek: function() {},
     _seekFrame: function() {},
+    _setTransform: function() {},
+    _getSlotInfo: function() {},
+    _setColorSlot: function() {},
+    _getColorSlot: function() {},
+    _setVec2Slot: function() {},
+    _getVec2Slot: function() {},
+    _setTextSlot: function() {},
     _size: function() {},
   },
 
@@ -150,16 +175,21 @@ var CanvasKit = {
     getHeight: function() {},
     getIdeographicBaseline: function() {},
     getLineMetrics: function() {},
+    getLineMetricsAt: function() {},
+    getLineNumberAt: function() {},
     getLongestLine: function() {},
     getMaxIntrinsicWidth: function() {},
     getMaxWidth: function() {},
     getMinIntrinsicWidth: function() {},
+    getNumberOfLines: function() {},
     getWordBoundary: function() {},
     getShapedLines: function() {},
     layout: function() {},
 
     // private API
     /** @return {Float32Array} */
+    _getClosestGlyphInfoAtCoordinate: function() {},
+    _getGlyphInfoAt: function() {},
     _getRectsForRange: function() {},
     _getRectsForPlaceholders: function() {},
   },
@@ -167,10 +197,20 @@ var CanvasKit = {
   ParagraphBuilder: {
     Make: function() {},
     MakeFromFontProvider: function() {},
+    MakeFromFontCollection: function() {},
     ShapeText: function() {},
+    RequiresClientICU() {},
+
     addText: function() {},
     build: function() {},
-    buildWithClientInfo: function() {},
+
+    setWordsUtf8: function() {},
+    setWordsUtf16: function() {},
+    setGraphemeBreaksUtf8: function() {},
+    setGraphemeBreaksUtf16: function() {},
+    setLineBreaksUtf8: function() {},
+    setLineBreaksUtf16: function() {},
+
     getText: function() {},
     pop: function() {},
     reset: function() {},
@@ -184,16 +224,24 @@ var CanvasKit = {
     // private API
     _Make: function() {},
     _MakeFromFontProvider: function() {},
+    _MakeFromFontCollection: function() {},
     _ShapeText: function() {},
     _pushStyle: function() {},
     _pushPaintStyle: function() {},
     _addPlaceholder: function() {},
-    _buildWithClientInfo: function() {},
+
+    _setWordsUtf8: function() {},
+    _setWordsUtf16: function() {},
+    _setGraphemeBreaksUtf8: function() {},
+    _setGraphemeBreaksUtf16: function() {},
+    _setLineBreaksUtf8: function() {},
+    _setLineBreaksUtf16: function() {},
   },
 
   RuntimeEffect: {
     // public API (from JS bindings)
     Make: function() {},
+    MakeForBlender: function() {},
     getUniform: function() {},
     getUniformCount: function() {},
     getUniformFloatCount: function() {},
@@ -201,11 +249,14 @@ var CanvasKit = {
     prototype: {
       makeShader: function() {},
       makeShaderWithChildren: function() {},
+      makeBlender: function() {},
     },
     // private API (from C++ bindings)
     _Make: function() {},
+    _MakeForBlender: function() {},
     _makeShader: function() {},
     _makeShaderWithChildren: function() {},
+    _makeBlender: function() {},
   },
 
   ParagraphStyle: function() {},
@@ -403,6 +454,7 @@ var CanvasKit = {
     FromData: function() {},
     countFamilies: function() {},
     getFamilyName: function() {},
+    matchFamilyStyle: function() {},
 
     // private API
     _makeTypefaceFromData: function() {},
@@ -416,6 +468,13 @@ var CanvasKit = {
 
     // private API
     _registerFont: function() {},
+  },
+
+  FontCollection: {
+    // public API (from C++ and JS bindings)
+    Make: function() {},
+    setDefaultFontManager: function() {},
+    enableFontFallback: function() {},
   },
 
   Image: {
@@ -432,9 +491,10 @@ var CanvasKit = {
       makeShaderOptions: function() {},
     },
     // private API
+    _encodeToBytes: function() {},
+    _makeFromGenerator: function() {},
     _makeShaderCubic: function() {},
     _makeShaderOptions: function() {},
-    _makeFromGenerator: function() {},
   },
 
   ImageFilter: {
@@ -451,7 +511,12 @@ var CanvasKit = {
     MakeMatrixTransform: function() {},
     MakeOffset: function() {},
 
+    prototype: {
+      getOutputBounds: function() {},
+    },
+
     // private API
+    _getOutputBounds: function() {},
     _MakeDropShadow: function() {},
     _MakeDropShadowOnly: function() {},
     _MakeImageCubic: function() {},
@@ -508,7 +573,9 @@ var CanvasKit = {
     getStrokeWidth: function() {},
     setAntiAlias: function() {},
     setBlendMode: function() {},
+    setBlender: function() {},
     setColorInt: function() {},
+    setDither: function() {},
     setImageFilter: function() {},
     setMaskFilter: function() {},
     setPathEffect: function() {},
@@ -544,27 +611,6 @@ var CanvasKit = {
     _MakeDash: function() {},
     _MakeLine2D: function() {},
     _MakePath2D: function() {},
-  },
-
-  ParticleEffect: {
-    // public API (from C++ bindings)
-    draw: function() {},
-    getUniform: function() {},
-    getUniformCount: function() {},
-    getUniformFloatCount: function() {},
-    getUniformName: function() {},
-    setRate: function() {},
-    start: function() {},
-    update: function() {},
-
-    prototype: {
-      setPosition: function() {},
-      uniforms: function() {},
-    },
-
-    // private API (from C++ bindings)
-    _uniformPtr: function() {},
-    _setPosition: function() {},
   },
 
   Path: {
@@ -671,10 +717,13 @@ var CanvasKit = {
 
   Picture: {
     serialize: function() {},
+    approximateByteSize: function() {},
     prototype: {
       makeShader: function() {},
+      cullRect: function () {},
     },
     _makeShader: function() {},
+    _cullRect: function () {},
   },
 
   PictureRecorder: {
@@ -751,11 +800,12 @@ var CanvasKit = {
   },
 
   Typeface: {
-    MakeFreeTypeFaceFromData: function() {},
+    GetDefault: function() {},
+    MakeTypefaceFromData: function() {},
     prototype: {
       getGlyphIDs: function() {},
     },
-    _MakeFreeTypeFaceFromData: function() {},
+    _MakeTypefaceFromData: function() {},
     _getGlyphIDs: function() {},
   },
 
@@ -1061,6 +1111,23 @@ var CanvasKit = {
     TriangleFan: {},
   },
 
+  InputState: {
+    Up: {},
+    Down: {},
+    Move: {},
+    Right: {},
+    Left: {},
+  },
+
+  ModifierKey: {
+    None: {},
+    Shift: {},
+    Control: {},
+    Option: {},
+    Command: {},
+    FirstPass: {},
+  },
+
   // Things Enscriptem adds for us
 
   /**
@@ -1106,6 +1173,8 @@ var CanvasKit = {
 // unless they go on the prototype.
 CanvasKit.Paragraph.prototype.getRectsForRange = function() {};
 CanvasKit.Paragraph.prototype.getRectsForPlaceholders = function() {};
+CanvasKit.Paragraph.prototype.getClosestGlyphInfoAtCoordinate = function() {};
+CanvasKit.Paragraph.prototype.getGlyphInfoAt = function() {};
 
 CanvasKit.Surface.prototype.dispose = function() {};
 CanvasKit.Surface.prototype.flush = function() {};

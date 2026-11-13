@@ -29,9 +29,11 @@
 #include "include/core/SkTypes.h"
 #include "include/effects/SkGradientShader.h"
 #include "include/gpu/GrDirectContext.h"
+#include "src/base/SkMathPriv.h"
 #include "src/core/SkBlurMask.h"
-#include "src/core/SkMathPriv.h"
+#include "tools/GpuToolUtils.h"
 #include "tools/ToolUtils.h"
+#include "tools/fonts/FontToolUtils.h"
 
 static SkBitmap make_chessbm(int w, int h) {
     SkBitmap bm;
@@ -138,15 +140,22 @@ static void imageproc(SkCanvas* canvas, sk_sp<SkImage> image, const SkBitmap&, c
 static void imagesubsetproc(SkCanvas* canvas, sk_sp<SkImage> image, const SkBitmap& bm,
                             const SkIRect& srcR, const SkRect& dstR,
                             const SkSamplingOptions& sampling, const SkPaint* paint) {
+    SkASSERT_RELEASE(image);
     if (!image->bounds().contains(srcR)) {
         imageproc(canvas, std::move(image), bm, srcR, dstR, sampling, paint);
         return;
     }
 
     auto direct = GrAsDirectContext(canvas->recordingContext());
-    if (sk_sp<SkImage> subset = image->makeSubset(srcR, direct)) {
+    if (sk_sp<SkImage> subset = image->makeSubset(direct, srcR)) {
+        canvas->drawImageRect(subset, dstR, sampling, paint);
+        return;
+    }
+#if defined(SK_GRAPHITE)
+    if (sk_sp<SkImage> subset = image->makeSubset(canvas->recorder(), srcR, {})) {
         canvas->drawImageRect(subset, dstR, sampling, paint);
     }
+#endif
 }
 
 typedef void DrawRectRectProc(SkCanvas*, sk_sp<SkImage>, const SkBitmap&,
@@ -171,9 +180,9 @@ public:
     SkString            fName;
 
 protected:
-    SkString onShortName() override { return fName; }
+    SkString getName() const override { return fName; }
 
-    SkISize onISize() override { return SkISize::Make(gSize, gSize); }
+    SkISize getISize() override { return SkISize::Make(gSize, gSize); }
 
     DrawResult onDraw(SkCanvas* canvas, SkString* errorMsg) override {
         if (!fImage || !fImage->isValid(canvas->recordingContext())) {
@@ -201,7 +210,7 @@ protected:
         blackPaint.setColor(SK_ColorBLACK);
         blackPaint.setAntiAlias(true);
 
-        SkFont font(ToolUtils::create_portable_typeface(), titleHeight);
+        SkFont font(ToolUtils::DefaultPortableTypeface(), titleHeight);
 
         SkString title;
         title.printf("Bitmap size: %d x %d", gBmpSize, gBmpSize);

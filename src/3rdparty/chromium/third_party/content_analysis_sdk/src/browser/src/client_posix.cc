@@ -11,13 +11,13 @@ namespace sdk {
 
 // static
 std::unique_ptr<Client> Client::Create(Config config) {
-  return std::make_unique<ClientPosix>(std::move(config));
+  return nullptr;
 }
 
 ClientPosix::ClientPosix(Config config) : ClientBase(std::move(config)) {}
 
-int ClientPosix::Send(const ContentAnalysisRequest& request,
-                    ContentAnalysisResponse* response) {
+int ClientPosix::Send(ContentAnalysisRequest request,
+                      ContentAnalysisResponse* response) {
   return -1;
 }
 

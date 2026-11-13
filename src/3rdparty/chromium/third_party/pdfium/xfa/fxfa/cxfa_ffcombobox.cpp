@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,7 +144,6 @@ bool CXFA_FFComboBox::IsDataChanged() {
 
 void CXFA_FFComboBox::FWLEventSelChange(CXFA_EventParam* pParam) {
   pParam->m_eType = XFA_EVENT_Change;
-  pParam->m_pTarget = m_pNode.Get();
   pParam->m_wsPrevText = ToComboBox(GetNormalWidget())->GetEditText();
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeValue::Change, pParam);
 }
@@ -314,14 +313,14 @@ void CXFA_FFComboBox::DeleteItem(int32_t nIndex) {
 
 void CXFA_FFComboBox::OnTextChanged(CFWL_Widget* pWidget,
                                     const WideString& wsChanged) {
-  CXFA_EventParam eParam;
+  CXFA_EventParam eParam(XFA_EVENT_Unknown);
   eParam.m_wsPrevText = m_pNode->GetValue(XFA_ValuePicture::kRaw);
   eParam.m_wsChange = wsChanged;
   FWLEventSelChange(&eParam);
 }
 
 void CXFA_FFComboBox::OnSelectChanged(CFWL_Widget* pWidget, bool bLButtonUp) {
-  CXFA_EventParam eParam;
+  CXFA_EventParam eParam(XFA_EVENT_Unknown);
   eParam.m_wsPrevText = m_pNode->GetValue(XFA_ValuePicture::kRaw);
   FWLEventSelChange(&eParam);
   if (m_pNode->IsChoiceListCommitOnSelect() && bLButtonUp)
@@ -329,16 +328,12 @@ void CXFA_FFComboBox::OnSelectChanged(CFWL_Widget* pWidget, bool bLButtonUp) {
 }
 
 void CXFA_FFComboBox::OnPreOpen(CFWL_Widget* pWidget) {
-  CXFA_EventParam eParam;
-  eParam.m_eType = XFA_EVENT_PreOpen;
-  eParam.m_pTarget = m_pNode.Get();
+  CXFA_EventParam eParam(XFA_EVENT_PreOpen);
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeValue::PreOpen, &eParam);
 }
 
 void CXFA_FFComboBox::OnPostOpen(CFWL_Widget* pWidget) {
-  CXFA_EventParam eParam;
-  eParam.m_eType = XFA_EVENT_PostOpen;
-  eParam.m_pTarget = m_pNode.Get();
+  CXFA_EventParam eParam(XFA_EVENT_PostOpen);
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeValue::PostOpen, &eParam);
 }
 

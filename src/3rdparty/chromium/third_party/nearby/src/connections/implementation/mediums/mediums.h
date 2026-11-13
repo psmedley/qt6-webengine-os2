@@ -26,9 +26,9 @@
 #endif
 #include "connections/implementation/mediums/wifi.h"
 #include "connections/implementation/mediums/wifi_hotspot.h"
+#include "connections/implementation/mediums/wifi_direct.h"
 #include "connections/implementation/mediums/wifi_lan.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -59,6 +59,9 @@ class Mediums {
   // Returns a handle to the Wifi-Hotspot medium.
   WifiHotspot& GetWifiHotspot();
 
+  // Returns a handle to the Wifi-Direct medium.
+  WifiDirect& GetWifiDirect();
+
   // Returns a handle to the WebRtc medium.
   mediums::WebRtc& GetWebRtc();
 
@@ -78,11 +81,11 @@ class Mediums {
   Wifi wifi_;
   WifiLan wifi_lan_;
   WifiHotspot wifi_hotspot_;
+  WifiDirect wifi_direct_;
   mediums::WebRtc webrtc_;
 };
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_MEDIUMS_MEDIUMS_H_

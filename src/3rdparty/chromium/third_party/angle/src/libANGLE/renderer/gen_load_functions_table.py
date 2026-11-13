@@ -47,7 +47,8 @@ namespace
 //    device's capabilities)
 // This map type determines which loading function to use, based on these three parameters.
 // Source formats and types are taken from Tables 3.2 and 3.3 of the ES 3 spec.
-void UnimplementedLoadFunction(size_t width,
+void UnimplementedLoadFunction(const ImageLoadContext &context,
+                               size_t width,
                                size_t height,
                                size_t depth,
                                const uint8_t *input,
@@ -60,7 +61,8 @@ void UnimplementedLoadFunction(size_t width,
     UNIMPLEMENTED();
 }}
 
-void UnreachableLoadFunction(size_t width,
+void UnreachableLoadFunction(const ImageLoadContext &context,
+                             size_t width,
                              size_t height,
                              size_t depth,
                              const uint8_t *input,
@@ -114,7 +116,8 @@ def get_load_func(func_name, type_functions):
     snippet += "    {\n"
     for gl_type, load_function in sorted(type_functions.items()):
         snippet += "        case " + gl_type + ":\n"
-        requiresConversion = str('LoadToNative<' not in load_function).lower()
+        requiresConversion = str('LoadToNative<' not in load_function and
+                                 'LoadCompressedToNative<' not in load_function).lower()
         snippet += "            return LoadImageFunctionInfo(" + load_function + ", " + requiresConversion + ");\n"
     snippet += "        default:\n"
     snippet += "            UNREACHABLE();\n"

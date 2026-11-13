@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,6 +44,7 @@ class CPDFSDK_BAAnnot : public CPDFSDK_Annot,
   bool Redo() override;
   WideString GetText() override;
   WideString GetSelectedText() override;
+  void ReplaceAndKeepSelection(const WideString& text) override;
   void ReplaceSelection(const WideString& text) override;
   bool SelectAllText() override;
   bool SetIndexSelected(int index, bool selected) override;
@@ -54,8 +55,6 @@ class CPDFSDK_BAAnnot : public CPDFSDK_Annot,
   virtual void DrawAppearance(CFX_RenderDevice* pDevice,
                               const CFX_Matrix& mtUser2Device,
                               CPDF_Annot::AppearanceMode mode);
-
-  CPDF_Annot* GetPDFPopupAnnot() const;
 
   void SetAnnotName(const WideString& sName);
   WideString GetAnnotName() const;

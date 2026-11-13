@@ -981,10 +981,6 @@ static const GLEnums::EnumToString enum_to_string_table[] = {
         "GL_ASYNC_PIXEL_PACK_COMPLETED_CHROMIUM",
     },
     {
-        0x6007,
-        "GL_LATENCY_QUERY_CHROMIUM",
-    },
-    {
         0x6009,
         "GL_PROGRAM_COMPLETION_QUERY_CHROMIUM",
     },
@@ -1007,10 +1003,6 @@ static const GLEnums::EnumToString enum_to_string_table[] = {
     {
         0x78FA,
         "GL_RGB_YCRCB_420_CHROMIUM",
-    },
-    {
-        0x78FB,
-        "GL_RGB_YCBCR_422_CHROMIUM",
     },
     {
         0x78FC,
@@ -2653,20 +2645,12 @@ static const GLEnums::EnumToString enum_to_string_table[] = {
         "GL_COMPRESSED_SRGB_ALPHA_PVRTC_4BPPV1_EXT",
     },
     {
-        0x8AF0,
-        "GL_TEXTURE_FILTERING_HINT_CHROMIUM",
-    },
-    {
         0x8AF6,
         "GL_SHARED_IMAGE_ACCESS_MODE_READ_CHROMIUM",
     },
     {
         0x8AF7,
         "GL_SHARED_IMAGE_ACCESS_MODE_READWRITE_CHROMIUM",
-    },
-    {
-        0x8AF8,
-        "GL_SHARED_IMAGE_ACCESS_MODE_OVERLAY_CHROMIUM",
     },
     {
         0x8B30,
@@ -3889,6 +3873,10 @@ static const GLEnums::EnumToString enum_to_string_table[] = {
         "GL_LAST_VERTEX_CONVENTION_OES",
     },
     {
+        0x8E4F,
+        "GL_PROVOKING_VERTEX_ANGLE",
+    },
+    {
         0x8E50,
         "GL_SAMPLE_LOCATION_NV",
     },
@@ -4894,7 +4882,7 @@ static const GLEnums::EnumToString enum_to_string_table[] = {
     },
     {
         0x90EA,
-        "GL_DEPTH_STENCIL_TEXTURE_MODE",
+        "GL_DEPTH_STENCIL_TEXTURE_MODE_ANGLE",
     },
     {
         0x90EB,
@@ -6748,6 +6736,66 @@ static const GLEnums::EnumToString enum_to_string_table[] = {
     {
         0x96BA,
         "GL_RGBX8_ANGLE",
+    },
+    {
+        0x96E0,
+        "GL_MAX_PIXEL_LOCAL_STORAGE_PLANES_ANGLE",
+    },
+    {
+        0x96E1,
+        "GL_MAX_COLOR_ATTACHMENTS_WITH_ACTIVE_PIXEL_LOCAL_STORAGE_ANGLE",
+    },
+    {
+        0x96E2,
+        "GL_MAX_COMBINED_DRAW_BUFFERS_AND_PIXEL_LOCAL_STORAGE_PLANES_ANGLE",
+    },
+    {
+        0x96E3,
+        "GL_PIXEL_LOCAL_STORAGE_ACTIVE_PLANES_ANGLE",
+    },
+    {
+        0x96E4,
+        "GL_LOAD_OP_ZERO_ANGLE",
+    },
+    {
+        0x96E5,
+        "GL_LOAD_OP_CLEAR_ANGLE",
+    },
+    {
+        0x96E6,
+        "GL_LOAD_OP_LOAD_ANGLE",
+    },
+    {
+        0x96E7,
+        "GL_STORE_OP_STORE_ANGLE",
+    },
+    {
+        0x96E8,
+        "GL_PIXEL_LOCAL_FORMAT_ANGLE",
+    },
+    {
+        0x96E9,
+        "GL_PIXEL_LOCAL_TEXTURE_NAME_ANGLE",
+    },
+    {
+        0x96EA,
+        "GL_PIXEL_LOCAL_TEXTURE_LEVEL_ANGLE",
+    },
+    {
+        0x96EB,
+        "GL_PIXEL_LOCAL_TEXTURE_LAYER_ANGLE",
+    },
+    {
+        0x96EC,
+        "GL_PIXEL_LOCAL_CLEAR_VALUE_FLOAT_ANGLE",
+    },
+    {
+        0x96ED,
+        "GL_PIXEL_LOCAL_CLEAR_VALUE_INT_ANGLE",
+    },
+    {
+        0x96EE,
+        "GL_PIXEL_LOCAL_CLEAR_VALUE_UNSIGNED_INT_ANGLE",
     },
     {
         0xC0,

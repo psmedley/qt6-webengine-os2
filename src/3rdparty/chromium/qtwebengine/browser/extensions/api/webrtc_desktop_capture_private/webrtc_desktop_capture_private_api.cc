@@ -73,6 +73,8 @@ WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::
 
 WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::
     ~WebrtcDesktopCapturePrivateChooseDesktopMediaFunction() {
+      DesktopCaptureRequestsRegistry::GetInstance()->RemoveRequest(
+      source_process_id(), request_id_);
 }
 
 ExtensionFunction::ResponseAction
@@ -88,8 +90,8 @@ WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::Run() {
                                                             request_id_, this);
   mutable_args().erase(args().begin());
 
-  std::unique_ptr<Params> params = Params::Create(args());
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  absl::optional<Params> params = Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
   content::RenderFrameHost* rfh = content::RenderFrameHost::FromID(
       params->request.guest_process_id,
@@ -99,7 +101,7 @@ WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::Run() {
     return RespondNow(Error(kTargetNotFoundError));
   }
 
-  GURL origin = rfh->GetLastCommittedURL().DeprecatedGetOriginAsURL();
+  const url::Origin origin = rfh->GetLastCommittedOrigin();
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(rfh);
   if (!web_contents) {
@@ -123,7 +125,7 @@ WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::Run() {
   extensions::ExtensionHost *host = extensions::ProcessManager::Get(browser_context())->GetBackgroundHostForExtension(extension_id());
   host->RequestMediaAccessPermission(web_contents, request,
                                      base::BindOnce(&WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::ProcessAccessRequestResponse,
-                                                    weak_factory_.GetWeakPtr(), main_frame, origin));
+                                                    this, main_frame, origin.GetURL()));
 
   return RespondLater();
 }
@@ -136,7 +138,10 @@ void WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::ProcessAccessRequest
       std::unique_ptr<content::MediaStreamUI> stream_ui)
 {
   if (stream_request_result != blink::mojom::MediaStreamRequestResult::OK) {
-    Respond(ArgumentList(Create(std::string(), Options())));
+    // The request is canceled either by the desktopMediaRequest or the permission request.
+    // Respond with no arguments to mimic DesktopCaptureCancelChooseDesktopMediaFunctionBase::Run()
+    // form desktop_capture_base.cc.
+    Respond(NoArguments());
     return;
   }
 
@@ -146,7 +151,8 @@ void WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::ProcessAccessRequest
   auto it = devicesSet.stream_devices.begin();
   for (; it != devicesSet.stream_devices.end(); ++it) {
     content::DesktopMediaID id = content::DesktopMediaID::Parse((*it)->video_device->id);
-    if (id.type == content::DesktopMediaID::TYPE_SCREEN) {
+    if (id.type == content::DesktopMediaID::TYPE_SCREEN ||
+        id.type == content::DesktopMediaID::TYPE_WINDOW) {
         source = id;
         break;
     }
@@ -154,8 +160,7 @@ void WebrtcDesktopCapturePrivateChooseDesktopMediaFunction::ProcessAccessRequest
 
   std::string result = content::DesktopStreamsRegistry::GetInstance()->RegisterStream(
         main_frame->GetProcess()->GetID(), main_frame->GetRoutingID(),
-        url::Origin::Create(origin), source, extension()->name(),
-        content::kRegistryStreamTypeDesktop);
+        url::Origin::Create(origin), source, content::kRegistryStreamTypeDesktop);
 
   Options options;
   options.can_request_audio_track = source.audio_share;

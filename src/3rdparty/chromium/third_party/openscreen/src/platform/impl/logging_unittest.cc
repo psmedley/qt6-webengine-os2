@@ -1,19 +1,19 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "platform/api/logging.h"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/string_view.h"
 #include "gtest/gtest.h"
 #include "platform/impl/logging.h"
 #include "platform/impl/logging_test.h"
 #include "util/osp_logging.h"
+#include "util/stringutil.h"
 
 namespace openscreen {
 
@@ -34,7 +34,7 @@ class LoggingTest : public ::testing::Test {
   }
 
  protected:
-  void ExpectLog(LogLevel level, absl::string_view message) {
+  void ExpectLog(LogLevel level, std::string_view message) {
     const char* level_string = "";
     switch (level) {
       case LogLevel::kVerbose:
@@ -65,9 +65,9 @@ class LoggingTest : public ::testing::Test {
     // NOTE: This is somewhat brittle; it relies on details of how
     // logging_posix.cc formats log messages.
     while (expected_it != expected_messages.end()) {
-      EXPECT_TRUE(
-          absl::StartsWith(*actual_it, absl::StrCat("[", expected_it->level)));
-      EXPECT_TRUE(absl::EndsWith(
+      EXPECT_TRUE(stringutil::starts_with(
+          *actual_it, absl::StrCat("[", expected_it->level)));
+      EXPECT_TRUE(stringutil::ends_with(
           *actual_it, absl::StrCat("] ", expected_it->message, "\n")));
       actual_it++;
       expected_it++;

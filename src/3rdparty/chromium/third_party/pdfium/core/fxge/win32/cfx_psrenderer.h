@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/cfx_graphstatedata.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CFX_DIBBase;
 class CFX_Font;
@@ -37,9 +37,9 @@ struct FXDIB_ResampleOptions;
 
 struct EncoderIface {
   DataVector<uint8_t> (*pA85EncodeFunc)(pdfium::span<const uint8_t> src_span);
-  DataVector<uint8_t> (*pFaxEncodeFunc)(RetainPtr<CFX_DIBBase> src);
+  DataVector<uint8_t> (*pFaxEncodeFunc)(RetainPtr<const CFX_DIBBase> src);
   DataVector<uint8_t> (*pFlateEncodeFunc)(pdfium::span<const uint8_t> src_span);
-  bool (*pJpegEncodeFunc)(const RetainPtr<CFX_DIBBase>& pSource,
+  bool (*pJpegEncodeFunc)(const RetainPtr<const CFX_DIBBase>& pSource,
                           uint8_t** dest_buf,
                           size_t* dest_size);
   DataVector<uint8_t> (*pRunLengthEncodeFunc)(
@@ -77,18 +77,18 @@ class CFX_PSRenderer {
                 uint32_t fill_color,
                 uint32_t stroke_color,
                 const CFX_FillRenderOptions& fill_options);
-  bool SetDIBits(const RetainPtr<CFX_DIBBase>& pBitmap,
+  bool SetDIBits(const RetainPtr<const CFX_DIBBase>& pBitmap,
                  uint32_t color,
                  int dest_left,
                  int dest_top);
-  bool StretchDIBits(const RetainPtr<CFX_DIBBase>& pBitmap,
+  bool StretchDIBits(RetainPtr<const CFX_DIBBase> bitmap,
                      uint32_t color,
                      int dest_left,
                      int dest_top,
                      int dest_width,
                      int dest_height,
                      const FXDIB_ResampleOptions& options);
-  bool DrawDIBits(const RetainPtr<CFX_DIBBase>& pBitmap,
+  bool DrawDIBits(RetainPtr<const CFX_DIBBase> bitmap,
                   uint32_t color,
                   const CFX_Matrix& matrix,
                   const FXDIB_ResampleOptions& options);
@@ -121,7 +121,7 @@ class CFX_PSRenderer {
     ~FaxCompressResult();
 
     DataVector<uint8_t> data;
-    bool compressed;
+    bool compressed = false;
   };
 
   struct PSCompressResult {
@@ -156,7 +156,7 @@ class CFX_PSRenderer {
                             CFX_Font* font,
                             float font_size,
                             fxcrt::ostringstream& buf);
-  FaxCompressResult FaxCompressData(RetainPtr<CFX_DIBBase> src) const;
+  FaxCompressResult FaxCompressData(RetainPtr<const CFX_DIBBase> src) const;
   absl::optional<PSCompressResult> PSCompressData(
       pdfium::span<const uint8_t> src_span) const;
   void WritePreambleString(ByteStringView str);

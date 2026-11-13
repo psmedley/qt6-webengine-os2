@@ -24,7 +24,7 @@
 
 namespace quic {
 
-class QUIC_EXPORT_PRIVATE Bbr2Sender final : public SendAlgorithmInterface {
+class QUICHE_EXPORT Bbr2Sender final : public SendAlgorithmInterface {
  public:
   Bbr2Sender(QuicTime now, const RttStats* rtt_stats,
              const QuicUnackedPacketMap* unacked_packets,
@@ -55,7 +55,9 @@ class QUIC_EXPORT_PRIVATE Bbr2Sender final : public SendAlgorithmInterface {
   void OnCongestionEvent(bool rtt_updated, QuicByteCount prior_in_flight,
                          QuicTime event_time,
                          const AckedPacketVector& acked_packets,
-                         const LostPacketVector& lost_packets) override;
+                         const LostPacketVector& lost_packets,
+                         QuicPacketCount num_ect,
+                         QuicPacketCount num_ce) override;
 
   void OnPacketSent(QuicTime sent_time, QuicByteCount bytes_in_flight,
                     QuicPacketNumber packet_number, QuicByteCount bytes,
@@ -92,6 +94,9 @@ class QUIC_EXPORT_PRIVATE Bbr2Sender final : public SendAlgorithmInterface {
   void OnApplicationLimited(QuicByteCount bytes_in_flight) override;
 
   void PopulateConnectionStats(QuicConnectionStats* stats) const override;
+
+  bool EnableECT0() override { return false; }
+  bool EnableECT1() override { return false; }
   // End implementation of SendAlgorithmInterface.
 
   const Bbr2Params& Params() const { return params_; }
@@ -107,7 +112,7 @@ class QUIC_EXPORT_PRIVATE Bbr2Sender final : public SendAlgorithmInterface {
     return model_.IsBandwidthOverestimateAvoidanceEnabled();
   }
 
-  struct QUIC_EXPORT_PRIVATE DebugState {
+  struct QUICHE_EXPORT DebugState {
     Bbr2Mode mode;
 
     // Shared states.
@@ -133,6 +138,8 @@ class QUIC_EXPORT_PRIVATE Bbr2Sender final : public SendAlgorithmInterface {
   };
 
   DebugState ExportDebugState() const;
+
+  const Bbr2NetworkModel& GetNetworkModel() const { return model_; }
 
  private:
   void UpdatePacingRate(QuicByteCount bytes_acked);
@@ -205,8 +212,8 @@ class QUIC_EXPORT_PRIVATE Bbr2Sender final : public SendAlgorithmInterface {
   friend class Bbr2ProbeRttMode;
 };
 
-QUIC_EXPORT_PRIVATE std::ostream& operator<<(
-    std::ostream& os, const Bbr2Sender::DebugState& state);
+QUICHE_EXPORT std::ostream& operator<<(std::ostream& os,
+                                       const Bbr2Sender::DebugState& state);
 
 }  // namespace quic
 

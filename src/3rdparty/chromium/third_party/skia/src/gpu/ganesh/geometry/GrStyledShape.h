@@ -10,9 +10,9 @@
 
 #include "include/core/SkPath.h"
 #include "include/core/SkRRect.h"
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkTemplates.h"
+#include "src/base/SkTLazy.h"
 #include "src/core/SkPathPriv.h"
-#include "src/core/SkTLazy.h"
 #include "src/gpu/ganesh/GrStyle.h"
 #include "src/gpu/ganesh/geometry/GrShape.h"
 #include <new>
@@ -77,11 +77,8 @@ public:
 
     GrStyledShape(const SkRRect& rrect, const GrStyle& style,
                   DoSimplify doSimplify = DoSimplify::kYes)
-            : fShape(rrect), fStyle(style) {
-        if (doSimplify == DoSimplify::kYes) {
-            this->simplify();
-        }
-    }
+            // Preserve legacy indices (6 for CW), see SkPathBuilder::addRRect().
+            : GrStyledShape(rrect, SkPathDirection::kCW, 6, false, style, doSimplify) {}
 
     GrStyledShape(const SkRRect& rrect, SkPathDirection dir, unsigned start, bool inverted,
                   const GrStyle& style, DoSimplify doSimplify = DoSimplify::kYes)
@@ -308,6 +305,6 @@ private:
     bool    fSimplified = false;
 
     SkTLazy<SkPath>            fInheritedPathForListeners;
-    SkAutoSTArray<8, uint32_t> fInheritedKey;
+    skia_private::AutoSTArray<8, uint32_t> fInheritedKey;
 };
 #endif

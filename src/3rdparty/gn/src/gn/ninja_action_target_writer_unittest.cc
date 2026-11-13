@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <sstream>
 
+#include "gn/config.h"
 #include "gn/ninja_action_target_writer.h"
 #include "gn/pool.h"
 #include "gn/substitution_list.h"
@@ -41,11 +42,11 @@ TEST(NinjaActionTargetWriter, ActionNoSources) {
   Err err;
   TestWithScope setup;
 
-  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
+  Target target(setup.settings(), Label(SourceDir("//foo++/"), "bar"));
   target.set_output_type(Target::ACTION);
 
-  target.action_values().set_script(SourceFile("//foo/script.py"));
-  target.config_values().inputs().push_back(SourceFile("//foo/included.txt"));
+  target.action_values().set_script(SourceFile("//foo++/script.py"));
+  target.config_values().inputs().push_back(SourceFile("//foo++/included.txt"));
 
   target.action_values().outputs() =
       SubstitutionList::MakeForTest("//out/Debug/foo.out");
@@ -60,14 +61,14 @@ TEST(NinjaActionTargetWriter, ActionNoSources) {
   NinjaActionTargetWriter writer(&target, out);
   writer.Run();
 
-  const char* expected = R"(rule __foo_bar___rule
-  command = /usr/bin/python ../../foo/script.py
-  description = ACTION //foo:bar()
+  const char* expected = R"(rule __foo___bar___rule
+  command = /usr/bin/python ../../foo++/script.py
+  description = ACTION //foo++:bar()
   restat = 1
 
-build foo.out: __foo_bar___rule | ../../foo/script.py ../../foo/included.txt
+build foo.out: __foo___bar___rule | ../../foo++/script.py ../../foo++/included.txt
 
-build obj/foo/bar.stamp: stamp foo.out
+build obj/foo++/bar.stamp: stamp foo.out
 )";
   EXPECT_EQ(expected, out.str()) << expected << "--" << out.str();
 }
@@ -90,7 +91,7 @@ TEST(NinjaActionTargetWriter, ActionNoSourcesConsole) {
             Label(SourceDir("//"), "console", setup.toolchain()->label().dir(),
                   setup.toolchain()->label().name()));
   pool.set_depth(1);
-  target.action_values().set_pool(LabelPtrPair<Pool>(&pool));
+  target.set_pool(LabelPtrPair<Pool>(&pool));
 
   target.SetToolchain(setup.toolchain());
   ASSERT_TRUE(target.OnResolved(&err));
@@ -155,6 +156,65 @@ TEST(NinjaActionTargetWriter, ActionWithSources) {
       "\n"
       "build obj/foo/bar.stamp: stamp foo.out\n";
   EXPECT_EQ(expected_linux, out.str());
+}
+
+TEST(NinjaActionTargetWriter, ActionWithOrderOnlyDeps) {
+  Err err;
+  TestWithScope setup;
+
+  // Some dependencies that the action can depend on. Use actions for these
+  // so they have a nice platform-independent stamp file that can appear in the
+  // output (rather than having to worry about how the current platform names
+  // binaries).
+  Target dep(setup.settings(), Label(SourceDir("//foo/"), "dep"));
+  dep.set_output_type(Target::ACTION);
+  dep.visibility().SetPublic();
+  dep.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(dep.OnResolved(&err));
+
+  Target datadep(setup.settings(), Label(SourceDir("//foo/"), "datadep"));
+  datadep.set_output_type(Target::ACTION);
+  datadep.visibility().SetPublic();
+  datadep.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(datadep.OnResolved(&err));
+
+  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
+  target.set_output_type(Target::ACTION);
+
+  target.action_values().set_script(SourceFile("//foo/script.py"));
+
+  target.sources().push_back(SourceFile("//foo/source.txt"));
+  target.config_values().inputs().push_back(SourceFile("//foo/included.txt"));
+
+  target.action_values().outputs() =
+      SubstitutionList::MakeForTest("//out/Debug/foo.out");
+
+  target.private_deps().push_back(LabelTargetPair(&dep));
+  target.data_deps().push_back(LabelTargetPair(&datadep));
+
+  target.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(target.OnResolved(&err));
+
+  setup.build_settings()->set_python_path(
+      base::FilePath(FILE_PATH_LITERAL("/usr/bin/python")));
+
+  std::ostringstream out;
+  NinjaActionTargetWriter writer(&target, out);
+  writer.Run();
+
+  const char expected[] =
+      "rule __foo_bar___rule\n"
+      "  command = /usr/bin/python ../../foo/script.py\n"
+      "  description = ACTION //foo:bar()\n"
+      "  restat = 1\n"
+      "\n"
+      "build foo.out: __foo_bar___rule | ../../foo/script.py "
+      "../../foo/included.txt ../../foo/source.txt obj/foo/dep.stamp || "
+      "obj/foo/datadep.stamp\n"
+      "\n"
+      "build obj/foo/bar.stamp: stamp foo.out\n";
+
+  EXPECT_EQ(expected, out.str());
 }
 
 TEST(NinjaActionTargetWriter, ForEach) {
@@ -228,15 +288,16 @@ TEST(NinjaActionTargetWriter, ForEach) {
       "../../foo/included.txt obj/foo/dep.stamp\n"
       "\n"
       "build input1.out: __foo_bar___rule ../../foo/input1.txt | "
-      "obj/foo/bar.inputdeps.stamp\n"
+      "obj/foo/bar.inputdeps.stamp || obj/foo/bundle_data_dep.stamp "
+      "obj/foo/datadep.stamp\n"
       "  source_name_part = input1\n"
       "build input2.out: __foo_bar___rule ../../foo/input2.txt | "
-      "obj/foo/bar.inputdeps.stamp\n"
+      "obj/foo/bar.inputdeps.stamp || obj/foo/bundle_data_dep.stamp "
+      "obj/foo/datadep.stamp\n"
       "  source_name_part = input2\n"
       "\n"
       "build obj/foo/bar.stamp: "
-      "stamp input1.out input2.out || obj/foo/bundle_data_dep.stamp "
-      "obj/foo/datadep.stamp\n";
+      "stamp input1.out input2.out\n";
 
   std::string out_str = out.str();
 #if defined(OS_WIN)
@@ -376,7 +437,7 @@ TEST(NinjaActionTargetWriter, ForEachWithPool) {
             Label(SourceDir("//foo/"), "pool", setup.toolchain()->label().dir(),
                   setup.toolchain()->label().name()));
   pool.set_depth(5);
-  target.action_values().set_pool(LabelPtrPair<Pool>(&pool));
+  target.set_pool(LabelPtrPair<Pool>(&pool));
 
   target.SetToolchain(setup.toolchain());
   ASSERT_TRUE(target.OnResolved(&err));
@@ -485,4 +546,110 @@ TEST(NinjaActionTargetWriter, NoTransitiveHardDeps) {
         "build obj/bar/bar.stamp: stamp bar.out\n";
     EXPECT_EQ(expected_linux, out.str());
   }
+}
+
+TEST(NinjaActionTargetWriter, SeesConfig) {
+  Err err;
+  TestWithScope setup;
+
+  setup.build_settings()->set_python_path(
+      base::FilePath(FILE_PATH_LITERAL("/usr/bin/python")));
+
+  Config farcfg(setup.settings(), Label(SourceDir("//foo/"), "farcfg"));
+  farcfg.own_values().defines().push_back("MY_DEFINE2");
+  farcfg.own_values().cflags().push_back("-isysroot=baz");
+  farcfg.visibility().SetPublic();
+  ASSERT_TRUE(farcfg.OnResolved(&err));
+
+  Config cfgdep(setup.settings(), Label(SourceDir("//foo/"), "cfgdep"));
+  cfgdep.own_values().rustenv().push_back("my_rustenv");
+  cfgdep.own_values().include_dirs().push_back(SourceDir("//my_inc_dir/"));
+  cfgdep.own_values().defines().push_back("MY_DEFINE");
+  cfgdep.visibility().SetPublic();
+  cfgdep.configs().push_back(LabelConfigPair(&farcfg));
+  ASSERT_TRUE(cfgdep.OnResolved(&err));
+
+  Target foo(setup.settings(), Label(SourceDir("//foo/"), "foo"));
+  foo.set_output_type(Target::ACTION);
+  foo.visibility().SetPublic();
+  foo.sources().push_back(SourceFile("//foo/input1.txt"));
+  foo.action_values().set_script(SourceFile("//foo/script.py"));
+  foo.action_values().args() = SubstitutionList::MakeForTest(
+      "{{rustenv}}", "{{include_dirs}}", "{{defines}}", "{{cflags}}");
+  foo.configs().push_back(LabelConfigPair(&cfgdep));
+  foo.SetToolchain(setup.toolchain());
+  foo.action_values().outputs() =
+      SubstitutionList::MakeForTest("//out/Debug/foo.out");
+  ASSERT_TRUE(foo.OnResolved(&err));
+
+  {
+    std::ostringstream out;
+    NinjaActionTargetWriter writer(&foo, out);
+    writer.Run();
+
+    const char expected[] =
+        "rule __foo_foo___rule\n"
+        // These come from the args.
+        "  command = /usr/bin/python ../../foo/script.py ${rustenv} "
+        "${include_dirs} ${defines} ${cflags}\n"
+        "  description = ACTION //foo:foo()\n"
+        "  restat = 1\n"
+        "\n"
+        "build foo.out: __foo_foo___rule | ../../foo/script.py"
+        " ../../foo/input1.txt\n"
+        "  rustenv = my_rustenv\n"
+        "  defines = -DMY_DEFINE -DMY_DEFINE2\n"
+        "  include_dirs = -I../../my_inc_dir\n"
+        "  cflags = -isysroot=baz\n"
+        "\n"
+        "build obj/foo/foo.stamp: stamp foo.out\n";
+    std::string out_str = out.str();
+    EXPECT_EQ(expected, out_str) << expected << "\n" << out_str;
+  }
+}
+
+// Check for proper escaping of actions with spaces in python & script.
+TEST(NinjaActionTargetWriter, ActionWithSpaces) {
+  Err err;
+  TestWithScope setup;
+
+  Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
+  target.set_output_type(Target::ACTION);
+
+  target.action_values().set_script(SourceFile("//foo/my script.py"));
+  target.action_values().args() = SubstitutionList::MakeForTest("my argument");
+  target.config_values().inputs().push_back(SourceFile("//foo/input file.txt"));
+
+  target.action_values().outputs() =
+      SubstitutionList::MakeForTest("//out/Debug/foo.out");
+
+  target.SetToolchain(setup.toolchain());
+  ASSERT_TRUE(target.OnResolved(&err));
+
+  setup.build_settings()->set_python_path(
+      base::FilePath(FILE_PATH_LITERAL("/Program Files/python")));
+
+  std::ostringstream out;
+  NinjaActionTargetWriter writer(&target, out);
+  writer.Run();
+
+  const char expected[] =
+      R"(rule __foo_bar___rule)"
+      "\n"
+// Escaping is different between Windows and Posix.
+#if defined(OS_WIN)
+      R"(  command = "/Program$ Files/python" "../../foo/my$ script.py" "my$ argument")"
+      "\n"
+#else
+      R"(  command = /Program\$ Files/python ../../foo/my\$ script.py my\$ argument)"
+      "\n"
+#endif
+      R"(  description = ACTION //foo:bar()
+  restat = 1
+
+build foo.out: __foo_bar___rule | ../../foo/my$ script.py ../../foo/input$ file.txt
+
+build obj/foo/bar.stamp: stamp foo.out
+)";
+  EXPECT_EQ(expected, out.str()) << expected << "--" << out.str();
 }

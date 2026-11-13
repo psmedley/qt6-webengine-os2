@@ -10,17 +10,10 @@
 namespace content {
 class BrowserContext;
 class BrowserMainParts;
-
-#if QT_CONFIG(webengine_pepper_plugins)
-class BrowserPpapiHost;
-#endif
-
 class DevToolsManagerDelegate;
 class RenderFrameHost;
 class RenderProcessHost;
-class ResourceContext;
 class WebContents;
-struct MainFunctionParams;
 struct Referrer;
 } // namespace content
 
@@ -49,7 +42,8 @@ public:
                                bool is_main_frame_request,
                                bool strict_enforcement,
                                base::OnceCallback<void(content::CertificateRequestResultType)> callback) override;
-    base::OnceClosure SelectClientCertificate(content::WebContents* web_contents,
+    base::OnceClosure SelectClientCertificate(content::BrowserContext* browser_context,
+                                              content::WebContents* web_contents,
                                               net::SSLCertRequestInfo* cert_request_info,
                                               net::ClientCertIdentityList client_certs,
                                               std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
@@ -149,15 +143,13 @@ public:
     void GetAdditionalMappedFilesForChildProcess(const base::CommandLine& command_line, int child_process_id, content::PosixFileDescriptorInfo* mappings) override;
 #endif
 
-    std::unique_ptr<content::LoginDelegate> CreateLoginDelegate(
-            const net::AuthChallengeInfo &auth_info,
-            content::WebContents *web_contents,
-            const content::GlobalRequestID& request_id,
-            bool is_request_for_main_frame,
-            const GURL &url,
-            scoped_refptr<net::HttpResponseHeaders> response_headers,
-            bool first_auth_attempt,
-            LoginAuthRequiredCallback auth_required_callback) override;
+    std::unique_ptr<content::LoginDelegate>
+    CreateLoginDelegate(const net::AuthChallengeInfo &auth_info, content::WebContents *web_contents,
+                        content::BrowserContext *browser_context,
+                        const content::GlobalRequestID &request_id, bool is_request_for_main_frame,
+                        const GURL &url, scoped_refptr<net::HttpResponseHeaders> response_headers,
+                        bool first_auth_attempt,
+                        LoginAuthRequiredCallback auth_required_callback) override;
 
     bool HandleExternalProtocol(
             const GURL &url,
@@ -173,10 +165,12 @@ public:
             content::RenderFrameHost *initiator_document,
             mojo::PendingRemote<network::mojom::URLLoaderFactory> *out_factory) override;
 
-    std::vector<std::unique_ptr<blink::URLLoaderThrottle>> CreateURLLoaderThrottles(
-            const network::ResourceRequest &request, content::BrowserContext *browser_context,
-            const base::RepeatingCallback<content::WebContents *()> &wc_getter,
-            content::NavigationUIData *navigation_ui_data, int frame_tree_node_id) override;
+    std::vector<std::unique_ptr<blink::URLLoaderThrottle>>
+    CreateURLLoaderThrottles(const network::ResourceRequest &request,
+                             content::BrowserContext *browser_context,
+                             const base::RepeatingCallback<content::WebContents *()> &wc_getter,
+                             content::NavigationUIData *navigation_ui_data, int frame_tree_node_id,
+                             absl::optional<int64_t> navigation_id) override;
 
     std::vector<std::unique_ptr<content::NavigationThrottle>> CreateThrottlesForNavigation(
             content::NavigationHandle *navigation_handle) override;
@@ -187,7 +181,9 @@ public:
                                 const std::string &scheme) override;
     std::vector<std::unique_ptr<content::URLLoaderRequestInterceptor>>
     WillCreateURLLoaderRequestInterceptors(content::NavigationUIData *navigation_ui_data,
-                                           int frame_tree_node_id) override;
+                                           int frame_tree_node_id,
+                                           int64_t navigation_id,
+                                           scoped_refptr<base::SequencedTaskRunner> navigation_response_task_runner) override;
     bool WillCreateURLLoaderFactory(content::BrowserContext *browser_context,
                                     content::RenderFrameHost *frame,
                                     int render_process_id,
@@ -199,7 +195,8 @@ public:
                                     mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient> *header_client,
                                     bool *bypass_redirect_checks,
                                     bool *disable_secure_dns,
-                                    network::mojom::URLLoaderFactoryOverridePtr *factory_override) override;
+                                    network::mojom::URLLoaderFactoryOverridePtr *factory_override,
+                                    scoped_refptr<base::SequencedTaskRunner> navigation_response_task_runner) override;
     scoped_refptr<network::SharedURLLoaderFactory> GetSystemSharedURLLoaderFactory() override;
     network::mojom::NetworkContext *GetSystemNetworkContext() override;
     void OnNetworkServiceCreated(network::mojom::NetworkService *network_service) override;
@@ -210,9 +207,8 @@ public:
                                        cert_verifier::mojom::CertVerifierCreationParams *cert_verifier_creation_params) override;
 
     std::vector<base::FilePath> GetNetworkContextsParentDirectory() override;
-    void RegisterNonNetworkNavigationURLLoaderFactories(int frame_tree_node_id,
-                                                        ukm::SourceIdObj ukm_source_id,
-                                                        NonNetworkURLLoaderFactoryMap *factories) override;
+    void RegisterNonNetworkNavigationURLLoaderFactories(
+            int frame_tree_node_id, NonNetworkURLLoaderFactoryMap *factories) override;
     void RegisterNonNetworkSubresourceURLLoaderFactories(int render_process_id, int render_frame_id,
                                                          const absl::optional<url::Origin>& request_initiator_origin,
                                                          NonNetworkURLLoaderFactoryMap *factories) override;
@@ -220,18 +216,27 @@ public:
                                                                 NonNetworkURLLoaderFactoryMap* factories) override;
     void RegisterNonNetworkServiceWorkerUpdateURLLoaderFactories(content::BrowserContext* browser_context,
                                                                  NonNetworkURLLoaderFactoryMap* factories) override;
-    void SiteInstanceGotProcess(content::SiteInstance *site_instance) override;
-    void SiteInstanceDeleting(content::SiteInstance *site_instance) override;
+    void SiteInstanceGotProcessAndSite(content::SiteInstance *site_instance) override;
     base::flat_set<std::string> GetPluginMimeTypesWithExternalHandlers(content::BrowserContext *browser_context) override;
 
     std::unique_ptr<content::WebContentsViewDelegate> GetWebContentsViewDelegate(content::WebContents *web_contents) override;
 
     static std::string getUserAgent();
-    static blink::UserAgentMetadata getUserAgentMetadata();
 
     std::string GetUserAgent() override { return getUserAgent(); }
-    blink::UserAgentMetadata GetUserAgentMetadata() override { return getUserAgentMetadata(); }
+    blink::UserAgentMetadata GetUserAgentMetadata() override;
     std::string GetProduct() override;
+
+    content::WebAuthenticationDelegate *GetWebAuthenticationDelegate() override;
+#if !BUILDFLAG(IS_ANDROID)
+    std::unique_ptr<content::AuthenticatorRequestClientDelegate>
+    GetWebAuthenticationRequestDelegate(content::RenderFrameHost *render_frame_host) override;
+#endif
+
+    void GetMediaDeviceIDSalt(content::RenderFrameHost *rfh,
+                              const net::SiteForCookies &site_for_cookies,
+                              const blink::StorageKey &storage_key,
+                              base::OnceCallback<void(bool, const std::string&)> callback) override;
 
 private:
     BrowserMainPartsQt *m_browserMainParts = nullptr;

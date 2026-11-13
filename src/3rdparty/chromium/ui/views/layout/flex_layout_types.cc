@@ -8,7 +8,7 @@
 #include <tuple>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -153,7 +153,7 @@ gfx::Size GetPreferredSize(MinimumFlexSizeRule minimum_width_rule,
                            const SizeBounds& size_bounds) {
   LazySize minimum_size(view, &View::GetMinimumSize);
   LazySize maximum_size(view, &View::GetMaximumSize);
-  gfx::Size preferred = view->GetPreferredSize();
+  gfx::Size preferred = view->GetPreferredSize(size_bounds);
 
   int width;
   if (!size_bounds.width().is_bounded()) {

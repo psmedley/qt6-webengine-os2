@@ -14,8 +14,6 @@
 #include "absl/base/macros.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "quiche/quic/core/crypto/null_decrypter.h"
-#include "quiche/quic/core/crypto/null_encrypter.h"
 #include "quiche/quic/core/crypto/quic_decrypter.h"
 #include "quiche/quic/core/crypto/quic_encrypter.h"
 #include "quiche/quic/core/frames/quic_frame.h"
@@ -115,13 +113,7 @@ class TestPacketCreator : public QuicPacketCreator {
         frame);
   }
 
-  void StopSendingVersion() {
-    if (version_.HasIetfInvariantHeader()) {
-      set_encryption_level(ENCRYPTION_FORWARD_SECURE);
-      return;
-    }
-    QuicPacketCreator::StopSendingVersion();
-  }
+  void StopSendingVersion() { set_encryption_level(ENCRYPTION_FORWARD_SECURE); }
 
   SimpleDataProducer* producer_;
   ParsedQuicVersion version_;
@@ -153,35 +145,36 @@ class QuicPacketCreatorTest : public QuicTestWithParam<TestParams> {
         .WillRepeatedly(Return(QuicPacketBuffer()));
     EXPECT_CALL(delegate_, GetSerializedPacketFate(_, _))
         .WillRepeatedly(Return(SEND_TO_WRITER));
-    creator_.SetEncrypter(ENCRYPTION_INITIAL, std::make_unique<NullEncrypter>(
-                                                  Perspective::IS_CLIENT));
-    creator_.SetEncrypter(ENCRYPTION_HANDSHAKE, std::make_unique<NullEncrypter>(
-                                                    Perspective::IS_CLIENT));
-    creator_.SetEncrypter(ENCRYPTION_ZERO_RTT, std::make_unique<NullEncrypter>(
-                                                   Perspective::IS_CLIENT));
+    creator_.SetEncrypter(
+        ENCRYPTION_INITIAL,
+        std::make_unique<TaggingEncrypter>(ENCRYPTION_INITIAL));
+    creator_.SetEncrypter(
+        ENCRYPTION_HANDSHAKE,
+        std::make_unique<TaggingEncrypter>(ENCRYPTION_HANDSHAKE));
+    creator_.SetEncrypter(
+        ENCRYPTION_ZERO_RTT,
+        std::make_unique<TaggingEncrypter>(ENCRYPTION_ZERO_RTT));
     creator_.SetEncrypter(
         ENCRYPTION_FORWARD_SECURE,
-        std::make_unique<NullEncrypter>(Perspective::IS_CLIENT));
+        std::make_unique<TaggingEncrypter>(ENCRYPTION_FORWARD_SECURE));
     client_framer_.set_visitor(&framer_visitor_);
     server_framer_.set_visitor(&framer_visitor_);
     client_framer_.set_data_producer(&producer_);
     if (server_framer_.version().KnowsWhichDecrypterToUse()) {
-      server_framer_.InstallDecrypter(
-          ENCRYPTION_INITIAL,
-          std::make_unique<NullDecrypter>(Perspective::IS_SERVER));
-      server_framer_.InstallDecrypter(
-          ENCRYPTION_ZERO_RTT,
-          std::make_unique<NullDecrypter>(Perspective::IS_SERVER));
-      server_framer_.InstallDecrypter(
-          ENCRYPTION_HANDSHAKE,
-          std::make_unique<NullDecrypter>(Perspective::IS_SERVER));
-      server_framer_.InstallDecrypter(
-          ENCRYPTION_FORWARD_SECURE,
-          std::make_unique<NullDecrypter>(Perspective::IS_SERVER));
+      server_framer_.InstallDecrypter(ENCRYPTION_INITIAL,
+                                      std::make_unique<TaggingDecrypter>());
+      server_framer_.InstallDecrypter(ENCRYPTION_ZERO_RTT,
+                                      std::make_unique<TaggingDecrypter>());
+      server_framer_.InstallDecrypter(ENCRYPTION_HANDSHAKE,
+                                      std::make_unique<TaggingDecrypter>());
+      server_framer_.InstallDecrypter(ENCRYPTION_FORWARD_SECURE,
+                                      std::make_unique<TaggingDecrypter>());
     } else {
-      server_framer_.SetDecrypter(
-          ENCRYPTION_INITIAL,
-          std::make_unique<NullDecrypter>(Perspective::IS_SERVER));
+      server_framer_.SetDecrypter(ENCRYPTION_INITIAL,
+                                  std::make_unique<TaggingDecrypter>());
+      server_framer_.SetAlternativeDecrypter(
+          ENCRYPTION_FORWARD_SECURE, std::make_unique<TaggingDecrypter>(),
+          false);
     }
   }
 
@@ -256,6 +249,8 @@ class QuicPacketCreatorTest : public QuicTestWithParam<TestParams> {
            n * 2;
   }
 
+  void TestChaosProtection(bool enabled);
+
   static constexpr QuicStreamOffset kOffset = 0u;
 
   char buffer_[kMaxOutgoingPacketSize];
@@ -280,17 +275,24 @@ INSTANTIATE_TEST_SUITE_P(QuicPacketCreatorTests, QuicPacketCreatorTest,
                          ::testing::PrintToStringParamName());
 
 TEST_P(QuicPacketCreatorTest, SerializeFrames) {
+  ParsedQuicVersion version = client_framer_.version();
   for (int i = ENCRYPTION_INITIAL; i < NUM_ENCRYPTION_LEVELS; ++i) {
     EncryptionLevel level = static_cast<EncryptionLevel>(i);
+    bool has_ack = false, has_stream = false;
     creator_.set_encryption_level(level);
+    size_t payload_len = 0;
     if (level != ENCRYPTION_ZERO_RTT) {
       frames_.push_back(QuicFrame(new QuicAckFrame(InitAckFrame(1))));
+      has_ack = true;
+      payload_len += version.UsesTls() ? 12 : 6;
     }
-    QuicStreamId stream_id = QuicUtils::GetFirstBidirectionalStreamId(
-        client_framer_.transport_version(), Perspective::IS_CLIENT);
     if (level != ENCRYPTION_INITIAL && level != ENCRYPTION_HANDSHAKE) {
+      QuicStreamId stream_id = QuicUtils::GetFirstBidirectionalStreamId(
+          client_framer_.transport_version(), Perspective::IS_CLIENT);
       frames_.push_back(QuicFrame(
           QuicStreamFrame(stream_id, false, 0u, absl::string_view())));
+      has_stream = true;
+      payload_len += 2;
     }
     SerializedPacket serialized = SerializeAllFrames(frames_);
     EXPECT_EQ(level, serialized.encryption_level);
@@ -298,7 +300,10 @@ TEST_P(QuicPacketCreatorTest, SerializeFrames) {
       delete frames_[0].ack_frame;
     }
     frames_.clear();
-
+    ASSERT_GT(payload_len, 0);  // Must have a frame!
+    size_t min_payload = version.UsesTls() ? 3 : 7;
+    bool need_padding =
+        (version.HasHeaderProtection() && (payload_len < min_payload));
     {
       InSequence s;
       EXPECT_CALL(framer_visitor_, OnPacket());
@@ -306,21 +311,20 @@ TEST_P(QuicPacketCreatorTest, SerializeFrames) {
       EXPECT_CALL(framer_visitor_, OnUnauthenticatedHeader(_));
       EXPECT_CALL(framer_visitor_, OnDecryptedPacket(_, _));
       EXPECT_CALL(framer_visitor_, OnPacketHeader(_));
-      if (level != ENCRYPTION_ZERO_RTT) {
+      if (need_padding) {
+        EXPECT_CALL(framer_visitor_, OnPaddingFrame(_));
+      }
+      if (has_ack) {
         EXPECT_CALL(framer_visitor_, OnAckFrameStart(_, _))
             .WillOnce(Return(true));
         EXPECT_CALL(framer_visitor_,
                     OnAckRange(QuicPacketNumber(1), QuicPacketNumber(2)))
             .WillOnce(Return(true));
-        EXPECT_CALL(framer_visitor_, OnAckFrameEnd(QuicPacketNumber(1)))
+        EXPECT_CALL(framer_visitor_, OnAckFrameEnd(QuicPacketNumber(1), _))
             .WillOnce(Return(true));
       }
-      if (level != ENCRYPTION_INITIAL && level != ENCRYPTION_HANDSHAKE) {
+      if (has_stream) {
         EXPECT_CALL(framer_visitor_, OnStreamFrame(_));
-      }
-      if (client_framer_.version().HasHeaderProtection()) {
-        EXPECT_CALL(framer_visitor_, OnPaddingFrame(_))
-            .Times(testing::AnyNumber());
       }
       EXPECT_CALL(framer_visitor_, OnPacketComplete());
     }
@@ -350,6 +354,76 @@ TEST_P(QuicPacketCreatorTest, SerializeConnectionClose) {
   EXPECT_CALL(framer_visitor_, OnPacketComplete());
 
   ProcessPacket(serialized);
+}
+
+TEST_P(QuicPacketCreatorTest, SerializePacketWithPadding) {
+  creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
+
+  creator_.AddFrame(QuicFrame(QuicWindowUpdateFrame()), NOT_RETRANSMISSION);
+  creator_.AddFrame(QuicFrame(QuicPaddingFrame()), NOT_RETRANSMISSION);
+  EXPECT_CALL(delegate_, OnSerializedPacket(_))
+      .WillOnce(Invoke(this, &QuicPacketCreatorTest::SaveSerializedPacket));
+  creator_.FlushCurrentPacket();
+  ASSERT_TRUE(serialized_packet_->encrypted_buffer);
+
+  EXPECT_EQ(kDefaultMaxPacketSize, serialized_packet_->encrypted_length);
+
+  DeleteSerializedPacket();
+}
+
+TEST_P(QuicPacketCreatorTest, SerializeLargerPacketWithPadding) {
+  creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
+  const QuicByteCount packet_size = 100 + kDefaultMaxPacketSize;
+  creator_.SetMaxPacketLength(packet_size);
+
+  creator_.AddFrame(QuicFrame(QuicWindowUpdateFrame()), NOT_RETRANSMISSION);
+  creator_.AddFrame(QuicFrame(QuicPaddingFrame()), NOT_RETRANSMISSION);
+  EXPECT_CALL(delegate_, OnSerializedPacket(_))
+      .WillOnce(Invoke(this, &QuicPacketCreatorTest::SaveSerializedPacket));
+  creator_.FlushCurrentPacket();
+  ASSERT_TRUE(serialized_packet_->encrypted_buffer);
+
+  EXPECT_EQ(packet_size, serialized_packet_->encrypted_length);
+
+  DeleteSerializedPacket();
+}
+
+TEST_P(QuicPacketCreatorTest, IncreaseMaxPacketLengthWithFramesPending) {
+  if (!GetQuicRestartFlag(quic_allow_control_frames_while_procesing)) {
+    // When this flag is not set, the call to SetMaxPacketLength()
+    // is an error which triggers a QUICHE_DCHECK.
+    return;
+  }
+
+  creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
+  const QuicByteCount packet_size = 100 + kDefaultMaxPacketSize;
+
+  // Since the creator has a frame queued, the packet size will not change.
+  creator_.AddFrame(QuicFrame(QuicWindowUpdateFrame()), NOT_RETRANSMISSION);
+  creator_.SetMaxPacketLength(packet_size);
+  creator_.AddFrame(QuicFrame(QuicPaddingFrame()), NOT_RETRANSMISSION);
+  EXPECT_CALL(delegate_, OnSerializedPacket(_))
+      .WillOnce(Invoke(this, &QuicPacketCreatorTest::SaveSerializedPacket));
+  creator_.FlushCurrentPacket();
+  ASSERT_TRUE(serialized_packet_->encrypted_buffer);
+
+  EXPECT_EQ(kDefaultMaxPacketSize, serialized_packet_->encrypted_length);
+
+  DeleteSerializedPacket();
+
+  // Now that the previous packet was generated, the next on will use
+  // the new larger size.
+  creator_.AddFrame(QuicFrame(QuicWindowUpdateFrame()), NOT_RETRANSMISSION);
+  creator_.AddFrame(QuicFrame(QuicPaddingFrame()), NOT_RETRANSMISSION);
+  EXPECT_CALL(delegate_, OnSerializedPacket(_))
+      .WillOnce(Invoke(this, &QuicPacketCreatorTest::SaveSerializedPacket));
+  creator_.FlushCurrentPacket();
+  ASSERT_TRUE(serialized_packet_->encrypted_buffer);
+  EXPECT_EQ(packet_size, serialized_packet_->encrypted_length);
+
+  EXPECT_EQ(packet_size, serialized_packet_->encrypted_length);
+
+  DeleteSerializedPacket();
 }
 
 TEST_P(QuicPacketCreatorTest, ConsumeCryptoDataToFillCurrentPacket) {
@@ -410,8 +484,10 @@ TEST_P(QuicPacketCreatorTest, CreateAllFreeBytesForStreamFrames) {
   const size_t overhead =
       GetPacketHeaderOverhead(client_framer_.transport_version()) +
       GetEncryptionOverhead();
-  for (size_t i = overhead + QuicPacketCreator::MinPlaintextPacketSize(
-                                 client_framer_.version());
+  for (size_t i = overhead +
+                  QuicPacketCreator::MinPlaintextPacketSize(
+                      client_framer_.version(),
+                      QuicPacketCreatorPeer::GetPacketNumberLength(&creator_));
        i < overhead + 100; ++i) {
     SCOPED_TRACE(i);
     creator_.SetMaxPacketLength(i);
@@ -479,7 +555,9 @@ TEST_P(QuicPacketCreatorTest, CryptoStreamFramePacketPadding) {
     overhead +=
         QuicFramer::GetMinCryptoFrameSize(kOffset, kMaxOutgoingPacketSize);
   } else {
-    overhead += GetStreamFrameOverhead(client_framer_.transport_version());
+    overhead += QuicFramer::GetMinStreamFrameSize(
+        client_framer_.transport_version(), GetNthClientInitiatedStreamId(1),
+        kOffset, false, 0);
   }
   ASSERT_GT(kMaxOutgoingPacketSize, overhead);
   size_t capacity = kDefaultMaxPacketSize - overhead;
@@ -517,9 +595,7 @@ TEST_P(QuicPacketCreatorTest, CryptoStreamFramePacketPadding) {
     // (1 byte) and to expand the stream frame (another 2 bytes) the packet
     // will not be padded.
     // Padding is skipped when we try to send coalesced packets.
-    if ((bytes_free < 3 &&
-         !QuicVersionUsesCryptoFrames(client_framer_.transport_version())) ||
-        client_framer_.version().CanSendCoalescedPackets()) {
+    if (client_framer_.version().CanSendCoalescedPackets()) {
       EXPECT_EQ(kDefaultMaxPacketSize - bytes_free,
                 serialized_packet_->encrypted_length);
     } else {
@@ -627,21 +703,6 @@ TEST_P(QuicPacketCreatorTest, BuildConnectivityProbingPacket) {
 
   // clang-format off
   unsigned char packet[] = {
-    // public flags (8 byte connection_id)
-    0x2C,
-    // connection_id
-    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
-    // packet number
-    0x12, 0x34, 0x56, 0x78,
-
-    // frame type (ping frame)
-    0x07,
-    // frame type (padding frame)
-    0x00,
-    0x00, 0x00, 0x00, 0x00
-  };
-
-  unsigned char packet46[] = {
     // type (short header, 4 byte packet number)
     0x43,
     // connection_id
@@ -677,9 +738,6 @@ TEST_P(QuicPacketCreatorTest, BuildConnectivityProbingPacket) {
   if (creator_.version().HasIetfQuicFrames()) {
     p = packet99;
     packet_size = ABSL_ARRAYSIZE(packet99);
-  } else if (creator_.version().HasIetfInvariantHeader()) {
-    p = packet46;
-    packet_size = ABSL_ARRAYSIZE(packet46);
   }
 
   std::unique_ptr<char[]> buffer(new char[kMaxOutgoingPacketSize]);
@@ -1150,8 +1208,7 @@ TEST_P(QuicPacketCreatorTest,
 }
 
 TEST_P(QuicPacketCreatorTest, UpdatePacketSequenceNumberLengthLeastAwaiting) {
-  if (creator_.version().HasIetfInvariantHeader() &&
-      !GetParam().version.SendsVariableLengthPacketNumberInLongHeader()) {
+  if (!GetParam().version.SendsVariableLengthPacketNumberInLongHeader()) {
     EXPECT_EQ(PACKET_4BYTE_PACKET_NUMBER,
               QuicPacketCreatorPeer::GetPacketNumberLength(&creator_));
     creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
@@ -1188,8 +1245,7 @@ TEST_P(QuicPacketCreatorTest, UpdatePacketSequenceNumberLengthLeastAwaiting) {
 
 TEST_P(QuicPacketCreatorTest, UpdatePacketSequenceNumberLengthCwnd) {
   QuicPacketCreatorPeer::SetPacketNumber(&creator_, 1);
-  if (creator_.version().HasIetfInvariantHeader() &&
-      !GetParam().version.SendsVariableLengthPacketNumberInLongHeader()) {
+  if (!GetParam().version.SendsVariableLengthPacketNumberInLongHeader()) {
     EXPECT_EQ(PACKET_4BYTE_PACKET_NUMBER,
               QuicPacketCreatorPeer::GetPacketNumberLength(&creator_));
     creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
@@ -1222,8 +1278,7 @@ TEST_P(QuicPacketCreatorTest, UpdatePacketSequenceNumberLengthCwnd) {
 
 TEST_P(QuicPacketCreatorTest, SkipNPacketNumbers) {
   QuicPacketCreatorPeer::SetPacketNumber(&creator_, 1);
-  if (creator_.version().HasIetfInvariantHeader() &&
-      !GetParam().version.SendsVariableLengthPacketNumberInLongHeader()) {
+  if (!GetParam().version.SendsVariableLengthPacketNumberInLongHeader()) {
     EXPECT_EQ(PACKET_4BYTE_PACKET_NUMBER,
               QuicPacketCreatorPeer::GetPacketNumberLength(&creator_));
     creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
@@ -1324,7 +1379,7 @@ TEST_P(QuicPacketCreatorTest, SerializeFrameShortData) {
   EXPECT_EQ(GetParam().version_serialization, header.version_flag);
 }
 
-TEST_P(QuicPacketCreatorTest, ChaosProtection) {
+void QuicPacketCreatorTest::TestChaosProtection(bool enabled) {
   if (!GetParam().version.UsesCryptoFrames()) {
     return;
   }
@@ -1341,11 +1396,26 @@ TEST_P(QuicPacketCreatorTest, ChaosProtection) {
   EXPECT_CALL(framer_visitor_, OnUnauthenticatedHeader(_));
   EXPECT_CALL(framer_visitor_, OnDecryptedPacket(_, _));
   EXPECT_CALL(framer_visitor_, OnPacketHeader(_));
-  EXPECT_CALL(framer_visitor_, OnCryptoFrame(_)).Times(AtLeast(2));
-  EXPECT_CALL(framer_visitor_, OnPaddingFrame(_)).Times(AtLeast(2));
-  EXPECT_CALL(framer_visitor_, OnPingFrame(_)).Times(AtLeast(1));
+  if (enabled) {
+    EXPECT_CALL(framer_visitor_, OnCryptoFrame(_)).Times(AtLeast(2));
+    EXPECT_CALL(framer_visitor_, OnPaddingFrame(_)).Times(AtLeast(2));
+    EXPECT_CALL(framer_visitor_, OnPingFrame(_)).Times(AtLeast(1));
+  } else {
+    EXPECT_CALL(framer_visitor_, OnCryptoFrame(_)).Times(1);
+    EXPECT_CALL(framer_visitor_, OnPaddingFrame(_)).Times(1);
+    EXPECT_CALL(framer_visitor_, OnPingFrame(_)).Times(0);
+  }
   EXPECT_CALL(framer_visitor_, OnPacketComplete());
   ProcessPacket(serialized);
+}
+
+TEST_P(QuicPacketCreatorTest, ChaosProtectionEnabled) {
+  TestChaosProtection(true);
+}
+
+TEST_P(QuicPacketCreatorTest, ChaosProtectionDisabled) {
+  SetQuicFlag(quic_enable_chaos_protection, false);
+  TestChaosProtection(false);
 }
 
 TEST_P(QuicPacketCreatorTest, ConsumeDataLargerThanOneStreamFrame) {
@@ -1496,20 +1566,20 @@ TEST_P(QuicPacketCreatorTest, SerializeStreamFrameWithPadding) {
   }
   EXPECT_FALSE(creator_.HasPendingFrames());
 
-  // Send one byte of stream data.
-  const std::string data("a");
-  producer_.SaveStreamData(GetNthClientInitiatedStreamId(0), data);
+  // Send zero bytes of stream data. This requires padding.
   EXPECT_CALL(delegate_, OnSerializedPacket(_))
       .WillOnce(Invoke(this, &QuicPacketCreatorTest::SaveSerializedPacket));
   size_t num_bytes_consumed;
-  creator_.CreateAndSerializeStreamFrame(
-      GetNthClientInitiatedStreamId(0), data.length(), 0, 0, true,
-      NOT_RETRANSMISSION, &num_bytes_consumed);
-  EXPECT_EQ(1u, num_bytes_consumed);
+  creator_.CreateAndSerializeStreamFrame(GetNthClientInitiatedStreamId(0), 0, 0,
+                                         0, true, NOT_RETRANSMISSION,
+                                         &num_bytes_consumed);
+  EXPECT_EQ(0u, num_bytes_consumed);
 
   // Check that a packet is created.
   ASSERT_TRUE(serialized_packet_->encrypted_buffer);
   ASSERT_FALSE(serialized_packet_->retransmittable_frames.empty());
+  ASSERT_EQ(serialized_packet_->packet_number_length,
+            PACKET_1BYTE_PACKET_NUMBER);
   {
     InSequence s;
     EXPECT_CALL(framer_visitor_, OnPacket());
@@ -1517,9 +1587,11 @@ TEST_P(QuicPacketCreatorTest, SerializeStreamFrameWithPadding) {
     EXPECT_CALL(framer_visitor_, OnUnauthenticatedHeader(_));
     EXPECT_CALL(framer_visitor_, OnDecryptedPacket(_, _));
     EXPECT_CALL(framer_visitor_, OnPacketHeader(_));
-    EXPECT_CALL(framer_visitor_, OnStreamFrame(_));
     if (client_framer_.version().HasHeaderProtection()) {
       EXPECT_CALL(framer_visitor_, OnPaddingFrame(_));
+      EXPECT_CALL(framer_visitor_, OnStreamFrame(_));
+    } else {
+      EXPECT_CALL(framer_visitor_, OnStreamFrame(_));
     }
     EXPECT_CALL(framer_visitor_, OnPacketComplete());
   }
@@ -1645,7 +1717,7 @@ TEST_P(QuicPacketCreatorTest, ConsumeDataAndRandomPadding) {
       GetEncryptionOverhead() +
       QuicFramer::GetMinStreamFrameSize(
           client_framer_.transport_version(), stream_id, 0,
-          /*last_frame_in_packet=*/false, kStreamFramePayloadSize + 1) +
+          /*last_frame_in_packet=*/true, kStreamFramePayloadSize + 1) +
       kStreamFramePayloadSize + 1;
   creator_.SetMaxPacketLength(length);
   creator_.AddPendingPadding(kMaxNumRandomPaddingBytes);
@@ -1712,9 +1784,6 @@ TEST_P(QuicPacketCreatorTest, IetfAckGapErrorRegression) {
 }
 
 TEST_P(QuicPacketCreatorTest, AddMessageFrame) {
-  if (!VersionSupportsMessageFrames(client_framer_.transport_version())) {
-    return;
-  }
   if (client_framer_.version().UsesTls()) {
     creator_.SetMaxDatagramFrameSize(kMaxAcceptedDatagramFrameSize);
   }
@@ -1765,9 +1834,6 @@ TEST_P(QuicPacketCreatorTest, AddMessageFrame) {
 }
 
 TEST_P(QuicPacketCreatorTest, MessageFrameConsumption) {
-  if (!VersionSupportsMessageFrames(client_framer_.transport_version())) {
-    return;
-  }
   if (client_framer_.version().UsesTls()) {
     creator_.SetMaxDatagramFrameSize(kMaxAcceptedDatagramFrameSize);
   }
@@ -1810,13 +1876,10 @@ TEST_P(QuicPacketCreatorTest, MessageFrameConsumption) {
 
 TEST_P(QuicPacketCreatorTest, GetGuaranteedLargestMessagePayload) {
   ParsedQuicVersion version = GetParam().version;
-  if (!version.SupportsMessageFrames()) {
-    return;
-  }
   if (version.UsesTls()) {
     creator_.SetMaxDatagramFrameSize(kMaxAcceptedDatagramFrameSize);
   }
-  QuicPacketLength expected_largest_payload = 1219;
+  QuicPacketLength expected_largest_payload = 1215;
   if (version.HasLongHeaderLengths()) {
     expected_largest_payload -= 2;
   }
@@ -1861,13 +1924,10 @@ TEST_P(QuicPacketCreatorTest, GetGuaranteedLargestMessagePayload) {
 
 TEST_P(QuicPacketCreatorTest, GetCurrentLargestMessagePayload) {
   ParsedQuicVersion version = GetParam().version;
-  if (!version.SupportsMessageFrames()) {
-    return;
-  }
   if (version.UsesTls()) {
     creator_.SetMaxDatagramFrameSize(kMaxAcceptedDatagramFrameSize);
   }
-  QuicPacketLength expected_largest_payload = 1219;
+  QuicPacketLength expected_largest_payload = 1215;
   if (version.SendsVariableLengthPacketNumberInLongHeader()) {
     expected_largest_payload += 3;
   }
@@ -2099,10 +2159,10 @@ TEST_P(QuicPacketCreatorTest, RetryToken) {
     EXPECT_CALL(framer_visitor_, OnDecryptedPacket(_, _));
     EXPECT_CALL(framer_visitor_, OnPacketHeader(_))
         .WillOnce(DoAll(SaveArg<0>(&header), Return(true)));
-    EXPECT_CALL(framer_visitor_, OnPingFrame(_));
     if (client_framer_.version().HasHeaderProtection()) {
       EXPECT_CALL(framer_visitor_, OnPaddingFrame(_));
     }
+    EXPECT_CALL(framer_visitor_, OnPingFrame(_));
     EXPECT_CALL(framer_visitor_, OnPacketComplete());
   }
   ProcessPacket(serialized);
@@ -2247,9 +2307,9 @@ TEST_P(QuicPacketCreatorTest, SerializeCoalescedPacket) {
     SerializedPacket serialized = SerializeAllFrames(frames_);
     EXPECT_EQ(level, serialized.encryption_level);
     frames_.clear();
-    ASSERT_TRUE(coalesced.MaybeCoalescePacket(serialized, self_address,
-                                              peer_address, &allocator,
-                                              creator_.max_packet_length()));
+    ASSERT_TRUE(coalesced.MaybeCoalescePacket(
+        serialized, self_address, peer_address, &allocator,
+        creator_.max_packet_length(), ECN_NOT_ECT));
   }
   char buffer[kMaxOutgoingPacketSize];
   size_t coalesced_length = creator_.SerializeCoalescedPacket(
@@ -2278,27 +2338,28 @@ TEST_P(QuicPacketCreatorTest, SerializeCoalescedPacket) {
     EXPECT_CALL(framer_visitor_, OnDecryptedPacket(_, _));
     EXPECT_CALL(framer_visitor_, OnPacketHeader(_));
     if (i != ENCRYPTION_ZERO_RTT) {
+      if (i != ENCRYPTION_INITIAL) {
+        EXPECT_CALL(framer_visitor_, OnPaddingFrame(_))
+            .Times(testing::AtMost(1));
+      }
       EXPECT_CALL(framer_visitor_, OnAckFrameStart(_, _))
           .WillOnce(Return(true));
       EXPECT_CALL(framer_visitor_,
                   OnAckRange(QuicPacketNumber(1), QuicPacketNumber(2)))
           .WillOnce(Return(true));
-      EXPECT_CALL(framer_visitor_, OnAckFrameEnd(_)).WillOnce(Return(true));
+      EXPECT_CALL(framer_visitor_, OnAckFrameEnd(_, _)).WillOnce(Return(true));
     }
     if (i == ENCRYPTION_INITIAL) {
       // Verify padding is added.
       EXPECT_CALL(framer_visitor_, OnPaddingFrame(_));
-    } else if (i != ENCRYPTION_ZERO_RTT) {
-      EXPECT_CALL(framer_visitor_, OnPaddingFrame(_)).Times(testing::AtMost(1));
-    }
-    if (i != ENCRYPTION_INITIAL && i != ENCRYPTION_HANDSHAKE) {
-      EXPECT_CALL(framer_visitor_, OnStreamFrame(_));
     }
     if (i == ENCRYPTION_ZERO_RTT) {
       EXPECT_CALL(framer_visitor_, OnPaddingFrame(_));
     }
+    if (i != ENCRYPTION_INITIAL && i != ENCRYPTION_HANDSHAKE) {
+      EXPECT_CALL(framer_visitor_, OnStreamFrame(_));
+    }
     EXPECT_CALL(framer_visitor_, OnPacketComplete());
-
     server_framer_.ProcessPacket(*packets[i]);
   }
 }
@@ -2308,7 +2369,9 @@ TEST_P(QuicPacketCreatorTest, SoftMaxPacketLength) {
   QuicByteCount previous_max_packet_length = creator_.max_packet_length();
   const size_t overhead =
       GetPacketHeaderOverhead(client_framer_.transport_version()) +
-      QuicPacketCreator::MinPlaintextPacketSize(client_framer_.version()) +
+      QuicPacketCreator::MinPlaintextPacketSize(
+          client_framer_.version(),
+          QuicPacketCreatorPeer::GetPacketNumberLength(&creator_)) +
       GetEncryptionOverhead();
   // Make sure a length which cannot accommodate header (includes header
   // protection minimal length) gets rejected.
@@ -2326,19 +2389,17 @@ TEST_P(QuicPacketCreatorTest, SoftMaxPacketLength) {
   EXPECT_EQ(previous_max_packet_length, creator_.max_packet_length());
 
   // Same for message frame.
-  if (VersionSupportsMessageFrames(client_framer_.transport_version())) {
-    creator_.SetSoftMaxPacketLength(overhead);
-    if (client_framer_.version().UsesTls()) {
-      creator_.SetMaxDatagramFrameSize(kMaxAcceptedDatagramFrameSize);
-    }
-    // Verify GetCurrentLargestMessagePayload is based on the actual
-    // max_packet_length.
-    EXPECT_LT(1u, creator_.GetCurrentLargestMessagePayload());
-    EXPECT_EQ(overhead, creator_.max_packet_length());
-    ASSERT_TRUE(creator_.HasRoomForMessageFrame(
-        creator_.GetCurrentLargestMessagePayload()));
-    EXPECT_EQ(previous_max_packet_length, creator_.max_packet_length());
+  creator_.SetSoftMaxPacketLength(overhead);
+  if (client_framer_.version().UsesTls()) {
+    creator_.SetMaxDatagramFrameSize(kMaxAcceptedDatagramFrameSize);
   }
+  // Verify GetCurrentLargestMessagePayload is based on the actual
+  // max_packet_length.
+  EXPECT_LT(1u, creator_.GetCurrentLargestMessagePayload());
+  EXPECT_EQ(overhead, creator_.max_packet_length());
+  ASSERT_TRUE(creator_.HasRoomForMessageFrame(
+      creator_.GetCurrentLargestMessagePayload()));
+  EXPECT_EQ(previous_max_packet_length, creator_.max_packet_length());
 
   // Verify creator can consume crypto data because max_packet_length_ gets
   // restored.
@@ -2383,7 +2444,9 @@ TEST_P(QuicPacketCreatorTest,
   const QuicByteCount previous_max_packet_length = creator_.max_packet_length();
   const size_t min_acceptable_packet_size =
       GetPacketHeaderOverhead(client_framer_.transport_version()) +
-      QuicPacketCreator::MinPlaintextPacketSize(client_framer_.version()) +
+      QuicPacketCreator::MinPlaintextPacketSize(
+          client_framer_.version(),
+          QuicPacketCreatorPeer::GetPacketNumberLength(&creator_)) +
       GetEncryptionOverhead();
   // Then set the soft max packet length to the lowest allowed value.
   creator_.SetSoftMaxPacketLength(min_acceptable_packet_size);
@@ -2399,6 +2462,80 @@ TEST_P(QuicPacketCreatorTest,
   EXPECT_EQ(creator_.max_packet_length(), previous_max_packet_length);
 }
 
+TEST_P(QuicPacketCreatorTest, MinPayloadLength) {
+  ParsedQuicVersion version = client_framer_.version();
+  for (QuicPacketNumberLength pn_length :
+       {PACKET_1BYTE_PACKET_NUMBER, PACKET_2BYTE_PACKET_NUMBER,
+        PACKET_3BYTE_PACKET_NUMBER, PACKET_4BYTE_PACKET_NUMBER}) {
+    if (!version.HasHeaderProtection()) {
+      EXPECT_EQ(creator_.MinPlaintextPacketSize(version, pn_length), 0);
+    } else {
+      EXPECT_EQ(creator_.MinPlaintextPacketSize(version, pn_length),
+                (version.UsesTls() ? 4 : 8) - pn_length);
+    }
+  }
+}
+
+// A variant of StreamFrameConsumption that tests when expansion of the stream
+// frame puts it at or over the max length, but the packet is supposed to be
+// padded to max length.
+TEST_P(QuicPacketCreatorTest, PadWhenAlmostMaxLength) {
+  creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
+  // Compute the total overhead for a single frame in packet.
+  const size_t overhead =
+      GetPacketHeaderOverhead(client_framer_.transport_version()) +
+      GetEncryptionOverhead() +
+      GetStreamFrameOverhead(client_framer_.transport_version());
+  size_t capacity = kDefaultMaxPacketSize - overhead;
+  for (size_t bytes_free = 1; bytes_free <= 2; bytes_free++) {
+    std::string data(capacity - bytes_free, 'A');
+
+    QuicFrame frame;
+    ASSERT_TRUE(creator_.ConsumeDataToFillCurrentPacket(
+        GetNthClientInitiatedStreamId(1), data, kOffset, false,
+        /*needs_full_padding=*/true, NOT_RETRANSMISSION, &frame));
+
+    // BytesFree() returns bytes available for the next frame, which will
+    // be two bytes smaller since the stream frame would need to be grown.
+    EXPECT_EQ(2u, creator_.ExpansionOnNewFrame());
+    EXPECT_EQ(0u, creator_.BytesFree());
+    EXPECT_CALL(delegate_, OnSerializedPacket(_))
+        .WillOnce(Invoke(this, &QuicPacketCreatorTest::SaveSerializedPacket));
+    creator_.FlushCurrentPacket();
+    EXPECT_EQ(serialized_packet_->encrypted_length, kDefaultMaxPacketSize);
+    DeleteSerializedPacket();
+  }
+}
+
+TEST_P(QuicPacketCreatorTest, MorePendingPaddingThanBytesFree) {
+  creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
+  // Compute the total overhead for a single frame in packet.
+  const size_t overhead =
+      GetPacketHeaderOverhead(client_framer_.transport_version()) +
+      GetEncryptionOverhead() +
+      GetStreamFrameOverhead(client_framer_.transport_version());
+  size_t capacity = kDefaultMaxPacketSize - overhead;
+  const size_t pending_padding = 10;
+  std::string data(capacity - pending_padding, 'A');
+  QuicFrame frame;
+  // The stream frame means that BytesFree() will be less than the
+  // available space, because of the frame length field.
+  ASSERT_TRUE(creator_.ConsumeDataToFillCurrentPacket(
+      GetNthClientInitiatedStreamId(1), data, kOffset, false,
+      /*needs_full_padding=*/false, NOT_RETRANSMISSION, &frame));
+  creator_.AddPendingPadding(pending_padding);
+  EXPECT_EQ(2u, creator_.ExpansionOnNewFrame());
+  // BytesFree() does not know about pending_padding because that's added
+  // when flushed.
+  EXPECT_EQ(pending_padding - 2u, creator_.BytesFree());
+  EXPECT_CALL(delegate_, OnSerializedPacket(_))
+      .WillOnce(Invoke(this, &QuicPacketCreatorTest::SaveSerializedPacket));
+  creator_.FlushCurrentPacket();
+  /* Without the fix, the packet is not full-length. */
+  EXPECT_EQ(serialized_packet_->encrypted_length, kDefaultMaxPacketSize);
+  DeleteSerializedPacket();
+}
+
 class MockDelegate : public QuicPacketCreator::DelegateInterface {
  public:
   MockDelegate() {}
@@ -2409,7 +2546,8 @@ class MockDelegate : public QuicPacketCreator::DelegateInterface {
   MOCK_METHOD(bool, ShouldGeneratePacket,
               (HasRetransmittableData retransmittable, IsHandshake handshake),
               (override));
-  MOCK_METHOD(const QuicFrames, MaybeBundleAckOpportunistically, (),
+  MOCK_METHOD(void, MaybeBundleOpportunistically, (), (override));
+  MOCK_METHOD(QuicByteCount, GetFlowControlSendWindowSize, (QuicStreamId),
               (override));
   MOCK_METHOD(QuicPacketBuffer, GetPacketBuffer, (), (override));
   MOCK_METHOD(void, OnSerializedPacket, (SerializedPacket), (override));
@@ -2482,17 +2620,15 @@ class MultiplePacketsTestPacketCreator : public QuicPacketCreator {
 
   bool ConsumeRetransmittableControlFrame(const QuicFrame& frame,
                                           bool bundle_ack) {
-    if (!has_ack()) {
-      QuicFrames frames;
-      if (bundle_ack) {
-        frames.push_back(QuicFrame(&ack_frame_));
-      }
-      if (delegate_->ShouldGeneratePacket(NO_RETRANSMITTABLE_DATA,
-                                          NOT_HANDSHAKE)) {
-        EXPECT_CALL(*delegate_, MaybeBundleAckOpportunistically())
-            .WillOnce(Return(frames));
-      }
+    QuicFrames frames;
+    if (bundle_ack) {
+      frames.push_back(QuicFrame(&ack_frame_));
     }
+    EXPECT_CALL(*delegate_, MaybeBundleOpportunistically())
+        .WillOnce(Invoke([this, frames = std::move(frames)] {
+          FlushAckFrame(frames);
+          return QuicFrames();
+        }));
     return QuicPacketCreator::ConsumeRetransmittableControlFrame(frame);
   }
 
@@ -2514,10 +2650,7 @@ class MultiplePacketsTestPacketCreator : public QuicPacketCreator {
     if (!data.empty()) {
       producer_->SaveStreamData(id, data);
     }
-    if (!has_ack() && delegate_->ShouldGeneratePacket(NO_RETRANSMITTABLE_DATA,
-                                                      NOT_HANDSHAKE)) {
-      EXPECT_CALL(*delegate_, MaybeBundleAckOpportunistically()).Times(1);
-    }
+    EXPECT_CALL(*delegate_, MaybeBundleOpportunistically()).Times(1);
     return QuicPacketCreator::ConsumeData(id, data.length(), offset, state);
   }
 
@@ -2525,7 +2658,7 @@ class MultiplePacketsTestPacketCreator : public QuicPacketCreator {
                                 quiche::QuicheMemSlice message) {
     if (!has_ack() && delegate_->ShouldGeneratePacket(NO_RETRANSMITTABLE_DATA,
                                                       NOT_HANDSHAKE)) {
-      EXPECT_CALL(*delegate_, MaybeBundleAckOpportunistically()).Times(1);
+      EXPECT_CALL(*delegate_, MaybeBundleOpportunistically()).Times(1);
     }
     return QuicPacketCreator::AddMessageFrame(message_id,
                                               absl::MakeSpan(&message, 1));
@@ -2534,10 +2667,7 @@ class MultiplePacketsTestPacketCreator : public QuicPacketCreator {
   size_t ConsumeCryptoData(EncryptionLevel level, absl::string_view data,
                            QuicStreamOffset offset) {
     producer_->SaveCryptoData(level, offset, data);
-    if (!has_ack() && delegate_->ShouldGeneratePacket(NO_RETRANSMITTABLE_DATA,
-                                                      NOT_HANDSHAKE)) {
-      EXPECT_CALL(*delegate_, MaybeBundleAckOpportunistically()).Times(1);
-    }
+    EXPECT_CALL(*delegate_, MaybeBundleOpportunistically()).Times(1);
     return QuicPacketCreator::ConsumeCryptoData(level, data.length(), offset);
   }
 
@@ -2558,15 +2688,16 @@ class QuicPacketCreatorMultiplePacketsTest : public QuicTest {
         .WillRepeatedly(Return(QuicPacketBuffer()));
     EXPECT_CALL(delegate_, GetSerializedPacketFate(_, _))
         .WillRepeatedly(Return(SEND_TO_WRITER));
+    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(_))
+        .WillRepeatedly(Return(std::numeric_limits<QuicByteCount>::max()));
     creator_.SetEncrypter(
         ENCRYPTION_FORWARD_SECURE,
-        std::make_unique<NullEncrypter>(Perspective::IS_CLIENT));
+        std::make_unique<TaggingEncrypter>(ENCRYPTION_FORWARD_SECURE));
     creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
     framer_.set_data_producer(&producer_);
     if (simple_framer_.framer()->version().KnowsWhichDecrypterToUse()) {
       simple_framer_.framer()->InstallDecrypter(
-          ENCRYPTION_FORWARD_SECURE,
-          std::make_unique<NullDecrypter>(Perspective::IS_SERVER));
+          ENCRYPTION_FORWARD_SECURE, std::make_unique<TaggingDecrypter>());
     }
     creator_.AttachPacketFlusher();
   }
@@ -2605,7 +2736,6 @@ class QuicPacketCreatorMultiplePacketsTest : public QuicTest {
     if (num_retransmittable_frames == 0) {
       ASSERT_TRUE(packet.retransmittable_frames.empty());
     } else {
-      ASSERT_FALSE(packet.retransmittable_frames.empty());
       EXPECT_EQ(num_retransmittable_frames,
                 packet.retransmittable_frames.size());
     }
@@ -2794,6 +2924,61 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   EXPECT_FALSE(creator_.HasPendingRetransmittableFrames());
 }
 
+// Tests the case that after bundling data, send window reduced to be shorter
+// than data.
+TEST_F(QuicPacketCreatorMultiplePacketsTest,
+       ConsumeDataAdjustWriteLengthAfterBundledData) {
+  creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
+  creator_.SetTransmissionType(NOT_RETRANSMISSION);
+  delegate_.SetCanWriteAnything();
+
+  const std::string data(1000, 'D');
+  QuicStreamId stream_id = QuicUtils::GetFirstBidirectionalStreamId(
+      framer_.transport_version(), Perspective::IS_CLIENT);
+
+  if (GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data3)) {
+    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(stream_id))
+        .WillOnce(Return(data.length() - 1));
+  } else {
+    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(_)).Times(0);
+  }
+
+  QuicConsumedData consumed = creator_.ConsumeData(stream_id, data, 0u, FIN);
+
+  if (GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data3)) {
+    EXPECT_EQ(consumed.bytes_consumed, data.length() - 1);
+    EXPECT_FALSE(consumed.fin_consumed);
+  } else {
+    EXPECT_EQ(consumed.bytes_consumed, data.length());
+    EXPECT_TRUE(consumed.fin_consumed);
+  }
+}
+
+// Tests the case that after bundling data, send window is exactly as big as
+// data length.
+TEST_F(QuicPacketCreatorMultiplePacketsTest,
+       ConsumeDataDoesNotAdjustWriteLengthAfterBundledData) {
+  creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
+  creator_.SetTransmissionType(NOT_RETRANSMISSION);
+  delegate_.SetCanWriteAnything();
+
+  const std::string data(1000, 'D');
+  QuicStreamId stream_id = QuicUtils::GetFirstBidirectionalStreamId(
+      framer_.transport_version(), Perspective::IS_CLIENT);
+
+  if (GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data3)) {
+    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(stream_id))
+        .WillOnce(Return(data.length()));
+  } else {
+    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(_)).Times(0);
+  }
+
+  QuicConsumedData consumed = creator_.ConsumeData(stream_id, data, 0u, FIN);
+
+  EXPECT_EQ(consumed.bytes_consumed, data.length());
+  EXPECT_TRUE(consumed.fin_consumed);
+}
+
 TEST_F(QuicPacketCreatorMultiplePacketsTest, ConsumeData_NotWritable) {
   delegate_.SetCanNotWrite();
 
@@ -2922,14 +3107,11 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
 
   // Packet is not fully padded, but we want to future packets to be larger.
   ASSERT_EQ(kDefaultMaxPacketSize, creator_.max_packet_length());
-  size_t expected_packet_length = 27;
+  size_t expected_packet_length = 31;
   if (QuicVersionUsesCryptoFrames(framer_.transport_version())) {
     // The framing of CRYPTO frames is slightly different than that of stream
     // frames, so the expected packet length differs slightly.
-    expected_packet_length = 28;
-  }
-  if (framer_.version().HasHeaderProtection()) {
-    expected_packet_length = 29;
+    expected_packet_length = 32;
   }
   EXPECT_EQ(expected_packet_length, packets_[0].encrypted_length);
 }
@@ -2991,7 +3173,7 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   // Set the packet size be enough for two stream frames with 0 stream offset,
   // but not enough for a stream frame of 0 offset and one with non-zero offset.
   size_t length =
-      NullEncrypter(Perspective::IS_CLIENT).GetCiphertextSize(0) +
+      TaggingEncrypter(0x00).GetCiphertextSize(0) +
       GetPacketHeaderSize(
           framer_.transport_version(),
           creator_.GetDestinationConnectionIdLength(),
@@ -3294,7 +3476,7 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest, PacketTransmissionType) {
   // The first ConsumeData will fill the packet without flush.
   creator_.SetTransmissionType(LOSS_RETRANSMISSION);
 
-  size_t data_len = 1224;
+  size_t data_len = 1220;
   const std::string data(data_len, '?');
   QuicStreamId stream1_id = QuicUtils::GetFirstBidirectionalStreamId(
       framer_.transport_version(), Perspective::IS_CLIENT);
@@ -3331,18 +3513,11 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest, PacketTransmissionType) {
 TEST_F(QuicPacketCreatorMultiplePacketsTest, TestConnectionIdLength) {
   QuicFramerPeer::SetPerspective(&framer_, Perspective::IS_SERVER);
   creator_.SetServerConnectionIdLength(0);
-  EXPECT_EQ(PACKET_0BYTE_CONNECTION_ID,
-            creator_.GetDestinationConnectionIdLength());
+  EXPECT_EQ(0, creator_.GetDestinationConnectionIdLength());
 
   for (size_t i = 1; i < 10; i++) {
     creator_.SetServerConnectionIdLength(i);
-    if (framer_.version().HasIetfInvariantHeader()) {
-      EXPECT_EQ(PACKET_0BYTE_CONNECTION_ID,
-                creator_.GetDestinationConnectionIdLength());
-    } else {
-      EXPECT_EQ(PACKET_8BYTE_CONNECTION_ID,
-                creator_.GetDestinationConnectionIdLength());
-    }
+    EXPECT_EQ(0, creator_.GetDestinationConnectionIdLength());
   }
 }
 
@@ -3629,27 +3804,6 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   CheckPacketHasSingleStreamFrame(4);
 }
 
-TEST_F(QuicPacketCreatorMultiplePacketsTest, DontCrashOnInvalidStopWaiting) {
-  if (VersionSupportsMessageFrames(framer_.transport_version())) {
-    return;
-  }
-  // Test added to ensure the creator does not crash when an invalid frame is
-  // added.  Because this is an indication of internal programming errors,
-  // DFATALs are expected.
-  // A 1 byte packet number length can't encode a gap of 1000.
-  QuicPacketCreatorPeer::SetPacketNumber(&creator_, 1000);
-
-  delegate_.SetCanNotWrite();
-  delegate_.SetCanWriteAnything();
-
-  // This will not serialize any packets, because of the invalid frame.
-  EXPECT_CALL(delegate_,
-              OnUnrecoverableError(QUIC_FAILED_TO_SERIALIZE_PACKET, _));
-  EXPECT_QUIC_BUG(creator_.Flush(),
-                  "packet_number_length 1 is too small "
-                  "for least_unacked_delta: 1001");
-}
-
 // Regression test for b/31486443.
 TEST_F(QuicPacketCreatorMultiplePacketsTest,
        ConnectionCloseFrameLargerThanPacketSize) {
@@ -3676,7 +3830,7 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   // Set the packet size be enough for one stream frame with 0 stream offset and
   // max size of random padding.
   size_t length =
-      NullEncrypter(Perspective::IS_CLIENT).GetCiphertextSize(0) +
+      TaggingEncrypter(0x00).GetCiphertextSize(0) +
       GetPacketHeaderSize(
           framer_.transport_version(),
           creator_.GetDestinationConnectionIdLength(),
@@ -3720,7 +3874,7 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   // Set the packet size be enough for one stream frame with 0 stream offset +
   // 1. One or more packets will accommodate.
   size_t length =
-      NullEncrypter(Perspective::IS_CLIENT).GetCiphertextSize(0) +
+      TaggingEncrypter(0x00).GetCiphertextSize(0) +
       GetPacketHeaderSize(
           framer_.transport_version(),
           creator_.GetDestinationConnectionIdLength(),
@@ -3771,7 +3925,7 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   // Set the packet size be enough for first frame with 0 stream offset + second
   // frame + 1 byte payload. two or more packets will accommodate.
   size_t length =
-      NullEncrypter(Perspective::IS_CLIENT).GetCiphertextSize(0) +
+      TaggingEncrypter(0x00).GetCiphertextSize(0) +
       GetPacketHeaderSize(
           framer_.transport_version(),
           creator_.GetDestinationConnectionIdLength(),
@@ -3826,9 +3980,6 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
 }
 
 TEST_F(QuicPacketCreatorMultiplePacketsTest, AddMessageFrame) {
-  if (!VersionSupportsMessageFrames(framer_.transport_version())) {
-    return;
-  }
   if (framer_.version().UsesTls()) {
     creator_.SetMaxDatagramFrameSize(kMaxAcceptedDatagramFrameSize);
   }
@@ -3877,18 +4028,21 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest, ExtraPaddingNeeded) {
     return;
   }
   delegate_.SetCanWriteAnything();
-
+  // If the packet number length > 1, we won't get padding.
+  EXPECT_EQ(QuicPacketCreatorPeer::GetPacketNumberLength(&creator_),
+            PACKET_1BYTE_PACKET_NUMBER);
   EXPECT_CALL(delegate_, OnSerializedPacket(_))
       .WillOnce(
           Invoke(this, &QuicPacketCreatorMultiplePacketsTest::SavePacket));
+  // with no data and no offset, this is a 2B STREAM frame.
   creator_.ConsumeData(QuicUtils::GetFirstBidirectionalStreamId(
                            framer_.transport_version(), Perspective::IS_CLIENT),
-                       "a", 0, FIN);
+                       "", 0, FIN);
   creator_.Flush();
   ASSERT_FALSE(packets_[0].nonretransmittable_frames.empty());
   QuicFrame padding = packets_[0].nonretransmittable_frames[0];
   // Verify stream frame expansion is excluded.
-  padding.padding_frame.num_padding_bytes = 3;
+  EXPECT_EQ(padding.padding_frame.num_padding_bytes, 1);
 }
 
 TEST_F(QuicPacketCreatorMultiplePacketsTest,
@@ -3902,26 +4056,27 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   // Send some stream data.
   EXPECT_CALL(delegate_, ShouldGeneratePacket(_, _))
       .WillRepeatedly(Return(true));
-  QuicConsumedData consumed = creator_.ConsumeData(
-      QuicUtils::GetFirstBidirectionalStreamId(creator_.transport_version(),
-                                               Perspective::IS_CLIENT),
-      "foo", 0, NO_FIN);
-  EXPECT_EQ(3u, consumed.bytes_consumed);
+  EXPECT_EQ(3u, creator_
+                    .ConsumeData(QuicUtils::GetFirstBidirectionalStreamId(
+                                     creator_.transport_version(),
+                                     Perspective::IS_CLIENT),
+                                 "foo", 0, NO_FIN)
+                    .bytes_consumed);
   EXPECT_TRUE(creator_.HasPendingFrames());
   {
     // Set the same address via context which should not trigger flush.
     QuicPacketCreator::ScopedPeerAddressContext context(
-        &creator_, peer_addr, client_connection_id, server_connection_id,
-        /*update_connection_id=*/true);
+        &creator_, peer_addr, client_connection_id, server_connection_id);
     ASSERT_EQ(client_connection_id, creator_.GetClientConnectionId());
     ASSERT_EQ(server_connection_id, creator_.GetServerConnectionId());
     EXPECT_TRUE(creator_.HasPendingFrames());
     // Queue another STREAM_FRAME.
-    QuicConsumedData consumed = creator_.ConsumeData(
-        QuicUtils::GetFirstBidirectionalStreamId(creator_.transport_version(),
-                                                 Perspective::IS_CLIENT),
-        "foo", 0, FIN);
-    EXPECT_EQ(3u, consumed.bytes_consumed);
+    EXPECT_EQ(3u, creator_
+                      .ConsumeData(QuicUtils::GetFirstBidirectionalStreamId(
+                                       creator_.transport_version(),
+                                       Perspective::IS_CLIENT),
+                                   "foo", 0, FIN)
+                      .bytes_consumed);
   }
   // After exiting the scope, the last queued frame should be flushed.
   EXPECT_TRUE(creator_.HasPendingFrames());
@@ -3942,11 +4097,12 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   // Send some stream data.
   EXPECT_CALL(delegate_, ShouldGeneratePacket(_, _))
       .WillRepeatedly(Return(true));
-  QuicConsumedData consumed = creator_.ConsumeData(
-      QuicUtils::GetFirstBidirectionalStreamId(creator_.transport_version(),
-                                               Perspective::IS_CLIENT),
-      "foo", 0, NO_FIN);
-  EXPECT_EQ(3u, consumed.bytes_consumed);
+  EXPECT_EQ(3u, creator_
+                    .ConsumeData(QuicUtils::GetFirstBidirectionalStreamId(
+                                     creator_.transport_version(),
+                                     Perspective::IS_CLIENT),
+                                 "foo", 0, NO_FIN)
+                    .bytes_consumed);
 
   QuicSocketAddress peer_addr1(QuicIpAddress::Any4(), 12346);
   EXPECT_CALL(delegate_, OnSerializedPacket(_))
@@ -3966,17 +4122,17 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
     QuicConnectionId server_connection_id = TestConnectionId(2);
     // Set a different address via context which should trigger flush.
     QuicPacketCreator::ScopedPeerAddressContext context(
-        &creator_, peer_addr1, client_connection_id, server_connection_id,
-        /*update_connection_id=*/true);
+        &creator_, peer_addr1, client_connection_id, server_connection_id);
     ASSERT_EQ(client_connection_id, creator_.GetClientConnectionId());
     ASSERT_EQ(server_connection_id, creator_.GetServerConnectionId());
     EXPECT_FALSE(creator_.HasPendingFrames());
     // Queue another STREAM_FRAME.
-    QuicConsumedData consumed = creator_.ConsumeData(
-        QuicUtils::GetFirstBidirectionalStreamId(creator_.transport_version(),
-                                                 Perspective::IS_CLIENT),
-        "foo", 0, FIN);
-    EXPECT_EQ(3u, consumed.bytes_consumed);
+    EXPECT_EQ(3u, creator_
+                      .ConsumeData(QuicUtils::GetFirstBidirectionalStreamId(
+                                       creator_.transport_version(),
+                                       Perspective::IS_CLIENT),
+                                   "foo", 0, FIN)
+                      .bytes_consumed);
     EXPECT_TRUE(creator_.HasPendingFrames());
   }
   // After exiting the scope, the last queued frame should be flushed.
@@ -3990,19 +4146,19 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   QuicSocketAddress peer_addr(QuicIpAddress::Any4(), 12345);
   creator_.SetDefaultPeerAddress(peer_addr);
   QuicPacketCreator::ScopedPeerAddressContext context(
-      &creator_, peer_addr, client_connection_id1, server_connection_id1,
-      /*update_connection_id=*/true);
+      &creator_, peer_addr, client_connection_id1, server_connection_id1);
   ASSERT_EQ(client_connection_id1, creator_.GetClientConnectionId());
   ASSERT_EQ(server_connection_id1, creator_.GetServerConnectionId());
 
   // Send some stream data.
   EXPECT_CALL(delegate_, ShouldGeneratePacket(_, _))
       .WillRepeatedly(Return(true));
-  QuicConsumedData consumed = creator_.ConsumeData(
-      QuicUtils::GetFirstBidirectionalStreamId(creator_.transport_version(),
-                                               Perspective::IS_CLIENT),
-      "foo", 0, NO_FIN);
-  EXPECT_EQ(3u, consumed.bytes_consumed);
+  EXPECT_EQ(3u, creator_
+                    .ConsumeData(QuicUtils::GetFirstBidirectionalStreamId(
+                                     creator_.transport_version(),
+                                     Perspective::IS_CLIENT),
+                                 "foo", 0, NO_FIN)
+                    .bytes_consumed);
   EXPECT_TRUE(creator_.HasPendingFrames());
 
   QuicSocketAddress peer_addr1(QuicIpAddress::Any4(), 12346);
@@ -4016,17 +4172,18 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
         QuicConnectionId server_connection_id2 = TestConnectionId(4);
         // Set up another context with a different address.
         QuicPacketCreator::ScopedPeerAddressContext context(
-            &creator_, peer_addr1, client_connection_id2, server_connection_id2,
-            /*update_connection_id=*/true);
+            &creator_, peer_addr1, client_connection_id2,
+            server_connection_id2);
         ASSERT_EQ(client_connection_id2, creator_.GetClientConnectionId());
         ASSERT_EQ(server_connection_id2, creator_.GetServerConnectionId());
         EXPECT_CALL(delegate_, ShouldGeneratePacket(_, _))
             .WillRepeatedly(Return(true));
-        QuicConsumedData consumed = creator_.ConsumeData(
-            QuicUtils::GetFirstBidirectionalStreamId(
-                creator_.transport_version(), Perspective::IS_CLIENT),
-            "foo", 0, NO_FIN);
-        EXPECT_EQ(3u, consumed.bytes_consumed);
+        EXPECT_EQ(3u, creator_
+                          .ConsumeData(QuicUtils::GetFirstBidirectionalStreamId(
+                                           creator_.transport_version(),
+                                           Perspective::IS_CLIENT),
+                                       "foo", 0, NO_FIN)
+                          .bytes_consumed);
         EXPECT_TRUE(creator_.HasPendingFrames());
         // This should trigger another OnSerializedPacket() with the 2nd
         // address.

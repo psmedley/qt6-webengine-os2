@@ -3,47 +3,47 @@
 // found in the LICENSE file.
 
 import * as i18n from '../../core/i18n/i18n.js';
+import * as Root from '../../core/root/root.js';
+import type * as Profiler from '../../panels/profiler/profiler.js';
+import type * as Timeline from '../../panels/timeline/timeline.js';
 import * as UI from '../../ui/legacy/legacy.js';
-
-import type * as Profiler from '../profiler/profiler.js';
-import type * as Timeline from '../timeline/timeline.js';
 
 const UIStrings = {
   /**
-  *@description Title of the Profiler tool
-  */
+   *@description Title of the Profiler tool
+   */
   profiler: 'Profiler',
   /**
-  *@description Command for showing the Profiler tool
-  */
+   *@description Command for showing the Profiler tool
+   */
   showProfiler: 'Show Profiler',
   /**
-  *@description Text for the performance of something
-  */
+   *@description Text for the performance of something
+   */
   performance: 'Performance',
   /**
-  *@description Command for showing the 'Performance' tool
-  */
+   *@description Command for showing the 'Performance' tool
+   */
   showPerformance: 'Show Performance',
   /**
-  *@description Text in the Shortcuts page to explain a keyboard shortcut (start/stop recording performance)
-  */
+   *@description Text in the Shortcuts page to explain a keyboard shortcut (start/stop recording performance)
+   */
   startStopRecording: 'Start/stop recording',
   /**
-  *@description Title of an action in the timeline tool to show history
-  */
+   *@description Title of an action in the timeline tool to show history
+   */
   showRecentTimelineSessions: 'Show recent timeline sessions',
   /**
-  *@description Text to record a series of actions for analysis
-  */
+   *@description Text to record a series of actions for analysis
+   */
   record: 'Record',
   /**
-  *@description Text of an item that stops the running task
-  */
+   *@description Text of an item that stops the running task
+   */
   stop: 'Stop',
   /**
-  *@description Title of an action in the timeline tool to record reload
-  */
+   *@description Title of an action in the timeline tool to record reload
+   */
   startProfilingAndReloadPage: 'Start profiling and reload page',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/js_profiler/js_profiler-meta.ts', UIStrings);
@@ -87,6 +87,8 @@ UI.ViewManager.registerViewExtension({
   title: i18nLazyString(UIStrings.profiler),
   commandPrompt: i18nLazyString(UIStrings.showProfiler),
   order: 65,
+  persistence: UI.ViewManager.ViewPersistence.CLOSEABLE,
+  experiment: Root.Runtime.ExperimentName.JS_PROFILER_TEMP_ENABLE,
   async loadView() {
     const Profiler = await loadProfilerModule();
     return Profiler.ProfilesPanel.JSProfilerPanel.instance();
@@ -99,7 +101,6 @@ UI.ViewManager.registerViewExtension({
   title: i18nLazyString(UIStrings.performance),
   commandPrompt: i18nLazyString(UIStrings.showPerformance),
   order: 66,
-  persistence: UI.ViewManager.ViewPersistence.CLOSEABLE,
   hasToolbar: false,
   isPreviewFeature: true,
   async loadView() {
@@ -112,9 +113,9 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'profiler.js-toggle-recording',
   category: UI.ActionRegistration.ActionCategory.JAVASCRIPT_PROFILER,
   title: i18nLazyString(UIStrings.startStopRecording),
-  iconClass: UI.ActionRegistration.IconClass.LARGEICON_START_RECORDING,
+  iconClass: UI.ActionRegistration.IconClass.START_RECORDING,
   toggleable: true,
-  toggledIconClass: UI.ActionRegistration.IconClass.LARGEICON_STOP_RECORDING,
+  toggledIconClass: UI.ActionRegistration.IconClass.STOP_RECORDING,
   toggleWithRedColor: true,
   contextTypes() {
     return maybeRetrieveContextTypes(Profiler => [Profiler.ProfilesPanel.JSProfilerPanel]);
@@ -139,7 +140,7 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'timeline.show-history',
   async loadActionDelegate() {
     const Timeline = await loadTimelineModule();
-    return Timeline.TimelinePanel.ActionDelegate.instance();
+    return new Timeline.TimelinePanel.ActionDelegate();
   },
   category: UI.ActionRegistration.ActionCategory.PERFORMANCE,
   title: i18nLazyString(UIStrings.showRecentTimelineSessions),
@@ -161,16 +162,16 @@ UI.ActionRegistration.registerActionExtension({
 UI.ActionRegistration.registerActionExtension({
   actionId: 'timeline.toggle-recording',
   category: UI.ActionRegistration.ActionCategory.PERFORMANCE,
-  iconClass: UI.ActionRegistration.IconClass.LARGEICON_START_RECORDING,
+  iconClass: UI.ActionRegistration.IconClass.START_RECORDING,
   toggleable: true,
-  toggledIconClass: UI.ActionRegistration.IconClass.LARGEICON_STOP_RECORDING,
+  toggledIconClass: UI.ActionRegistration.IconClass.STOP_RECORDING,
   toggleWithRedColor: true,
   contextTypes() {
     return maybeRetrieveTimelineContextTypes(Timeline => [Timeline.TimelinePanel.TimelinePanel]);
   },
   async loadActionDelegate() {
     const Timeline = await loadTimelineModule();
-    return Timeline.TimelinePanel.ActionDelegate.instance();
+    return new Timeline.TimelinePanel.ActionDelegate();
   },
   options: [
     {
@@ -196,7 +197,7 @@ UI.ActionRegistration.registerActionExtension({
 
 UI.ActionRegistration.registerActionExtension({
   actionId: 'timeline.record-reload',
-  iconClass: UI.ActionRegistration.IconClass.LARGEICON_REFRESH,
+  iconClass: UI.ActionRegistration.IconClass.REFRESH,
   contextTypes() {
     return maybeRetrieveTimelineContextTypes(Timeline => [Timeline.TimelinePanel.TimelinePanel]);
   },
@@ -204,7 +205,7 @@ UI.ActionRegistration.registerActionExtension({
   title: i18nLazyString(UIStrings.startProfilingAndReloadPage),
   async loadActionDelegate() {
     const Timeline = await loadTimelineModule();
-    return Timeline.TimelinePanel.ActionDelegate.instance();
+    return new Timeline.TimelinePanel.ActionDelegate();
   },
   bindings: [
     {

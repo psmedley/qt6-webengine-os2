@@ -68,7 +68,7 @@ def _CheckCommitMessageFormatting(input_api, output_api):
     def _CheckTabInCommit(lines):
         return all([line.find("\t") == -1 for line in lines])
 
-    allowlist_strings = ['Revert "', 'Roll ', 'Reland ', 'Re-land ']
+    allowlist_strings = ['Revert', 'Roll', 'Manual roll', 'Reland', 'Re-land']
     summary_linelength_warning_lower_limit = 65
     summary_linelength_warning_upper_limit = 70
     description_linelength_limit = 72
@@ -170,9 +170,9 @@ def _CheckCommitMessageFormatting(input_api, output_api):
         # loop through description body
         while len(commit_msg_lines) > 0:
             line = commit_msg_lines.pop(0)
-            # lines starting with 4 spaces or lines without space(urls)
+            # lines starting with 4 spaces, quotes or lines without space(urls)
             # are exempt from length check
-            if line.startswith("    ") or " " not in line:
+            if line.startswith("    ") or line.startswith("> ") or " " not in line:
                 continue
             if len(line) > description_linelength_limit:
                 errors.append(
@@ -233,7 +233,7 @@ def _CheckCodeGeneration(input_api, output_api):
     class Msg(output_api.PresubmitError):
         """Specialized error message"""
 
-        def __init__(self, message):
+        def __init__(self, message, **kwargs):
             super(output_api.PresubmitError, self).__init__(
                 message,
                 long_text='Please ensure your ANGLE repositiory is synced to tip-of-tree\n'
@@ -242,7 +242,8 @@ def _CheckCodeGeneration(input_api, output_api):
                 'If that fails, run scripts/run_code_generation.py to refresh generated hashes.\n'
                 '\n'
                 'If you are building ANGLE inside Chromium you must bootstrap ANGLE\n'
-                'before gclient sync. See the DevSetup documentation for more details.\n')
+                'before gclient sync. See the DevSetup documentation for more details.\n',
+                **kwargs)
 
     code_gen_path = input_api.os_path.join(input_api.PresubmitLocalPath(),
                                            'scripts/run_code_generation.py')
@@ -307,8 +308,8 @@ def _CheckExportValidity(input_api, output_api):
             subprocess.check_output(['gn', 'gen', outdir], shell=use_shell)
         except subprocess.CalledProcessError as e:
             return [
-                output_api.PresubmitError(
-                    'Unable to run gn gen for export_targets.py: %s' % e.output)
+                output_api.PresubmitError('Unable to run gn gen for export_targets.py: %s' %
+                                          e.output.decode())
             ]
         export_target_script = os.path.join(input_api.PresubmitLocalPath(), 'scripts',
                                             'export_targets.py')
@@ -319,11 +320,13 @@ def _CheckExportValidity(input_api, output_api):
                 shell=use_shell)
         except subprocess.CalledProcessError as e:
             if input_api.is_committing:
-                return [output_api.PresubmitError('export_targets.py failed: %s' % e.output)]
+                return [
+                    output_api.PresubmitError('export_targets.py failed: %s' % e.output.decode())
+                ]
             return [
                 output_api.PresubmitPromptWarning(
                     'export_targets.py failed, this may just be due to your local checkout: %s' %
-                    e.output)
+                    e.output.decode())
             ]
         return []
     finally:
@@ -426,6 +429,69 @@ def _CheckCommentBeforeTestInTestFiles(input_api, output_api):
     return []
 
 
+def _CheckWildcardInTestExpectationFiles(input_api, output_api):
+    """Require wildcard as API tag (i.e. in foo.bar/*) in expectations when no additional feature is
+    enabled."""
+
+    def expectation_files(f):
+        return input_api.FilterSourceFile(
+            f, files_to_check=[r'^src/tests/angle_end2end_tests_expectations.txt$'])
+
+    expectation_pattern = re.compile(r'^.*:\s*[a-zA-Z0-9._*]+\/([^ ]*)\s*=.*$')
+
+    expectations_without_wildcard = []
+    for f in input_api.AffectedSourceFiles(expectation_files):
+        diff = f.GenerateScmDiff()
+        for line in diff.splitlines():
+            # Only look at new lines
+            if not line.startswith('+'):
+                continue
+
+            match = re.match(expectation_pattern, line[1:].strip())
+            if match is None:
+                continue
+
+            tag = match.group(1)
+
+            # The tag is in the following general form:
+            #
+            #     FRONTENDAPI_BACKENDAPI[_FEATURE]*
+            #
+            # Any part of the above may be a wildcard.  Warn about usage of FRONTEND_BACKENDAPI as
+            # the tag.  Instead, the backend should be specified before the : and `*` used as the
+            # tag.  If any additional tags are present, it's a specific expectation that should
+            # remain specific (and not wildcarded).  NoFixture is an exception as X_Y_NoFixture is
+            # the generic form of the tags of tests that don't use the fixture.
+
+            sections = [section for section in tag.split('_') if section != 'NoFixture']
+
+            # Allow '*_...', or 'FRONTENDAPI_*_...'.
+            if '*' in sections[0] or (len(sections) > 1 and '*' in sections[1]):
+                continue
+
+            # Warn if no additional tags are present
+            if len(sections) == 2:
+                expectations_without_wildcard.append(line[1:])
+
+    if expectations_without_wildcard:
+        return [
+            output_api.PresubmitError(
+                'Use wildcard in API tags (after /) in angle_end2end_tests_expectations.txt.',
+                items=expectations_without_wildcard,
+                long_text="""ANGLE prefers end2end expections to use the following form:
+
+1234 MAC OPENGL : Foo.Bar/* = SKIP
+
+instead of:
+
+1234 MAC OPENGL : Foo.Bar/ES2_OpenGL = SKIP
+1234 MAC OPENGL : Foo.Bar/ES3_OpenGL = SKIP
+
+Expectatations that are specific (such as Foo.Bar/ES2_OpenGL_SomeFeature) are allowed.""")
+        ]
+    return []
+
+
 def _CheckShaderVersionInShaderLangHeader(input_api, output_api):
     """Requires an update to ANGLE_SH_VERSION when ShaderLang.h or ShaderVars.h change."""
 
@@ -484,12 +550,13 @@ def _CheckGClientExists(input_api, output_api, search_limit=None):
             '\n\nhttps://chromium.googlesource.com/angle/angle/+/refs/heads/main/doc/DevSetup.md')
     ]
 
-
 def CheckChangeOnUpload(input_api, output_api):
     results = []
+    results.extend(input_api.canned_checks.CheckForCommitObjects(input_api, output_api))
     results.extend(_CheckTabsInSourceFiles(input_api, output_api))
     results.extend(_CheckNonAsciiInSourceFiles(input_api, output_api))
     results.extend(_CheckCommentBeforeTestInTestFiles(input_api, output_api))
+    results.extend(_CheckWildcardInTestExpectationFiles(input_api, output_api))
     results.extend(_CheckShaderVersionInShaderLangHeader(input_api, output_api))
     results.extend(_CheckCodeGeneration(input_api, output_api))
     results.extend(_CheckChangeHasBugField(input_api, output_api))

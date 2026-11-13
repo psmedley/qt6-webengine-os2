@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,10 +23,12 @@
 #include "core/fxge/cfx_gemodule.h"
 #include "core/fxge/cfx_graphstatedata.h"
 #include "core/fxge/cfx_path.h"
+#include "core/fxge/dib/cfx_dibbase.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
 #include "core/fxge/win32/cwin32_platform.h"
+#include "third_party/base/containers/span.h"
+#include "third_party/base/notreached.h"
 #include "third_party/base/numerics/safe_conversions.h"
-#include "third_party/base/span.h"
 
 // Has to come before gdiplus.h
 namespace Gdiplus {
@@ -180,7 +182,7 @@ using FuncType_GdipSetPixelOffsetMode =
     decltype(&Gdiplus::DllExports::GdipSetPixelOffsetMode);
 #define CallFunc(funcname)               \
   reinterpret_cast<FuncType_##funcname>( \
-      GdiplusExt.m_Functions[FuncId_##funcname])
+      GdiplusExt.functions()[FuncId_##funcname])
 
 Gdiplus::GpFillMode FillType2Gdip(CFX_FillRenderOptions::FillType fill_type) {
   return fill_type == CFX_FillRenderOptions::FillType::kEvenOdd
@@ -202,7 +204,7 @@ Gdiplus::GpBrush* GdipCreateBrushImpl(DWORD argb) {
 }
 
 void OutputImage(Gdiplus::GpGraphics* pGraphics,
-                 const RetainPtr<CFX_DIBitmap>& pBitmap,
+                 RetainPtr<const CFX_DIBBase> source,
                  const FX_RECT& src_rect,
                  int dest_left,
                  int dest_top,
@@ -211,20 +213,34 @@ void OutputImage(Gdiplus::GpGraphics* pGraphics,
   int src_width = src_rect.Width();
   int src_height = src_rect.Height();
   const CGdiplusExt& GdiplusExt = GetGdiplusExt();
-  if (pBitmap->GetBPP() == 1 && (src_rect.left % 8)) {
+  if (source->GetBPP() == 1 && (src_rect.left % 8)) {
     FX_RECT new_rect(0, 0, src_width, src_height);
-    RetainPtr<CFX_DIBitmap> pCloned = pBitmap->ClipTo(src_rect);
-    if (!pCloned)
+    source = source->ClipTo(src_rect);
+    if (!source) {
       return;
-    OutputImage(pGraphics, pCloned, new_rect, dest_left, dest_top, dest_width,
-                dest_height);
+    }
+    OutputImage(pGraphics, std::move(source), new_rect, dest_left, dest_top,
+                dest_width, dest_height);
     return;
   }
-  int src_pitch = pBitmap->GetPitch();
-  uint8_t* scan0 = pBitmap->GetBuffer() + src_rect.top * src_pitch +
-                   pBitmap->GetBPP() * src_rect.left / 8;
+
+  RetainPtr<const CFX_DIBitmap> realized_source = source->RealizeIfNeeded();
+  if (!realized_source) {
+    return;
+  }
+
+  int src_pitch = realized_source->GetPitch();
+
+  // `GdipCreateBitmapFromScan0()` requires a `BYTE*` scanline buffer, but in
+  // this case, the bitmap only gets read by `GdipDrawImagePointsI()`, then
+  // disposed of, so it's safe to cast away `const` here.
+  uint8_t* scan0 = const_cast<uint8_t*>(
+      realized_source->GetBuffer()
+          .subspan(src_rect.top * src_pitch +
+                   realized_source->GetBPP() * src_rect.left / 8)
+          .data());
   Gdiplus::GpBitmap* bitmap = nullptr;
-  switch (pBitmap->GetFormat()) {
+  switch (source->GetFormat()) {
     case FXDIB_Format::kArgb:
       CallFunc(GdipCreateBitmapFromScan0)(src_width, src_height, src_pitch,
                                           PixelFormat32bppARGB, scan0, &bitmap);
@@ -245,7 +261,7 @@ void OutputImage(Gdiplus::GpGraphics* pGraphics,
       pal[0] = 0;
       pal[1] = 256;
       for (int i = 0; i < 256; i++)
-        pal[i + 2] = pBitmap->GetPaletteArgb(i);
+        pal[i + 2] = realized_source->GetPaletteArgb(i);
       CallFunc(GdipSetImagePalette)(bitmap, (Gdiplus::ColorPalette*)pal);
       break;
     }
@@ -255,6 +271,10 @@ void OutputImage(Gdiplus::GpGraphics* pGraphics,
                                           &bitmap);
       break;
     }
+    case FXDIB_Format::kInvalid:
+    case FXDIB_Format::k1bppMask:
+    case FXDIB_Format::k8bppMask:
+      NOTREACHED_NORETURN();
   }
   if (dest_height < 0) {
     dest_height--;
@@ -325,10 +345,11 @@ Gdiplus::GpPen* GdipCreatePenImpl(const CFX_GraphStateData* pGraphState,
     for (size_t i = 0; i < pGraphState->m_DashArray.size(); i += 2) {
       float on_phase = pGraphState->m_DashArray[i];
       float off_phase;
-      if (i == pGraphState->m_DashArray.size() - 1)
-        off_phase = on_phase;
-      else
+      if (i + 1 < pGraphState->m_DashArray.size()) {
         off_phase = pGraphState->m_DashArray[i + 1];
+      } else {
+        off_phase = on_phase;
+      }
       on_phase /= width;
       off_phase /= width;
       if (on_phase + off_phase <= 0.00002f) {
@@ -538,8 +559,7 @@ class GpStream final : public IStream {
 CGdiplusExt::CGdiplusExt() = default;
 
 CGdiplusExt::~CGdiplusExt() {
-  FreeLibrary(m_GdiModule);
-  FreeLibrary(m_hModule);
+  FreeLibrary(gdiplus_module_);
 }
 
 void CGdiplusExt::Load() {
@@ -547,28 +567,29 @@ void CGdiplusExt::Load() {
   GetSystemDirectoryA(buf, MAX_PATH);
   ByteString dllpath = buf;
   dllpath += "\\GDIPLUS.DLL";
-  m_hModule = LoadLibraryA(dllpath.c_str());
-  if (!m_hModule)
+  gdiplus_module_ = LoadLibraryA(dllpath.c_str());
+  if (!gdiplus_module_) {
     return;
+  }
 
-  m_Functions.resize(std::size(g_GdipFuncNames));
+  gdiplus_functions_.resize(std::size(g_GdipFuncNames));
   for (size_t i = 0; i < std::size(g_GdipFuncNames); ++i) {
-    m_Functions[i] = GetProcAddress(m_hModule, g_GdipFuncNames[i]);
-    if (!m_Functions[i]) {
-      m_hModule = nullptr;
+    gdiplus_functions_[i] = GetProcAddress(gdiplus_module_, g_GdipFuncNames[i]);
+    if (!gdiplus_functions_[i]) {
+      FreeLibrary(gdiplus_module_);
+      gdiplus_module_ = nullptr;
       return;
     }
   }
 
   ULONG_PTR gdiplus_token;
   Gdiplus::GdiplusStartupInput gdiplus_startup_input;
-  ((FuncType_GdiplusStartup)m_Functions[FuncId_GdiplusStartup])(
+  ((FuncType_GdiplusStartup)gdiplus_functions_[FuncId_GdiplusStartup])(
       &gdiplus_token, &gdiplus_startup_input, nullptr);
-  m_GdiModule = LoadLibraryA("GDI32.DLL");
 }
 
 bool CGdiplusExt::StretchDIBits(HDC hDC,
-                                const RetainPtr<CFX_DIBitmap>& pBitmap,
+                                RetainPtr<const CFX_DIBBase> source,
                                 int dest_left,
                                 int dest_top,
                                 int dest_width,
@@ -582,17 +603,17 @@ bool CGdiplusExt::StretchDIBits(HDC hDC,
   if (options.bNoSmoothing) {
     CallFunc(GdipSetInterpolationMode)(
         pGraphics, Gdiplus::InterpolationModeNearestNeighbor);
-  } else if (pBitmap->GetWidth() > abs(dest_width) / 2 ||
-             pBitmap->GetHeight() > abs(dest_height) / 2) {
+  } else if (source->GetWidth() > abs(dest_width) / 2 ||
+             source->GetHeight() > abs(dest_height) / 2) {
     CallFunc(GdipSetInterpolationMode)(pGraphics,
                                        Gdiplus::InterpolationModeHighQuality);
   } else {
     CallFunc(GdipSetInterpolationMode)(pGraphics,
                                        Gdiplus::InterpolationModeBilinear);
   }
-  FX_RECT src_rect(0, 0, pBitmap->GetWidth(), pBitmap->GetHeight());
-  OutputImage(pGraphics, pBitmap, src_rect, dest_left, dest_top, dest_width,
-              dest_height);
+  FX_RECT src_rect(0, 0, source->GetWidth(), source->GetHeight());
+  OutputImage(pGraphics, std::move(source), src_rect, dest_left, dest_top,
+              dest_width, dest_height);
   CallFunc(GdipDeleteGraphics)(pGraphics);
   CallFunc(GdipDeleteGraphics)(pGraphics);
   return true;
@@ -654,7 +675,7 @@ bool CGdiplusExt::DrawPath(HDC hDC,
     } else if (point_type == CFX_Path::Point::Type::kLine) {
       gp_types[i] = Gdiplus::PathPointTypeLine;
       if (points[i - 1].IsTypeAndOpen(CFX_Path::Point::Type::kMove) &&
-          (i == points.size() - 1 ||
+          (i + 1 == points.size() ||
            points[i + 1].IsTypeAndOpen(CFX_Path::Point::Type::kMove)) &&
           gp_points[i].Y == gp_points[i - 1].Y &&
           gp_points[i].X == gp_points[i - 1].X) {
@@ -740,7 +761,7 @@ bool CGdiplusExt::DrawPath(HDC hDC,
     } else {
       size_t iStart = 0;
       for (size_t i = 0; i < points.size(); ++i) {
-        if (i == points.size() - 1 ||
+        if (i + 1 == points.size() ||
             gp_types[i + 1] == Gdiplus::PathPointTypeStart) {
           Gdiplus::GpPath* pSubPath;
           CallFunc(GdipCreatePath2)(

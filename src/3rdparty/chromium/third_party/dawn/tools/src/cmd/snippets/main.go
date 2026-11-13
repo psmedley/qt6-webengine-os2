@@ -1,21 +1,35 @@
-// Copyright 2021 The Tint Authors.
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // snippets gathers information about changes merged for weekly reports (snippets).
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -23,22 +37,21 @@ import (
 	"strings"
 	"time"
 
+	"dawn.googlesource.com/dawn/tools/src/auth"
 	"dawn.googlesource.com/dawn/tools/src/dawn"
 	"dawn.googlesource.com/dawn/tools/src/gerrit"
 	"dawn.googlesource.com/dawn/tools/src/git"
+	"go.chromium.org/luci/auth/client/authcli"
 )
 
 const yyyymmdd = "2006-01-02"
 
 var (
-	// See https://dawn-review.googlesource.com/new-password for obtaining
-	// username and password for gerrit.
-	gerritUser = flag.String("gerrit-user", "", "gerrit authentication username")
-	gerritPass = flag.String("gerrit-pass", "", "gerrit authentication password")
 	userFlag   = flag.String("user", defaultUser(), "user name / email")
 	afterFlag  = flag.String("after", "", "start date")
 	beforeFlag = flag.String("before", "", "end date")
 	daysFlag   = flag.Int("days", 7, "interval in days (used if --after is not specified)")
+	authFlags  = authcli.Flags{}
 )
 
 func defaultUser() string {
@@ -57,6 +70,8 @@ func defaultUser() string {
 }
 
 func main() {
+	authFlags.Register(flag.CommandLine, auth.DefaultAuthOptions())
+
 	flag.Parse()
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -77,7 +92,7 @@ func run() error {
 			return fmt.Errorf("Couldn't parse before date: %w", err)
 		}
 	} else {
-		before = time.Now()
+		before = time.Now().Add(time.Hour * 24)
 	}
 	if *afterFlag != "" {
 		after, err = time.Parse(yyyymmdd, *afterFlag)
@@ -88,9 +103,13 @@ func run() error {
 		after = before.Add(-time.Hour * time.Duration(24**daysFlag))
 	}
 
-	g, err := gerrit.New(dawn.GerritURL, gerrit.Credentials{
-		Username: *gerritUser, Password: *gerritPass,
-	})
+	ctx := context.Background()
+	auth, err := authFlags.Options()
+	if err != nil {
+		return err
+	}
+
+	g, err := gerrit.New(ctx, auth, dawn.GerritURL)
 	if err != nil {
 		return err
 	}
@@ -113,8 +132,8 @@ func run() error {
 	for _, project := range []string{"tint", "dawn"} {
 		if changes := changesByProject[project]; len(changes) > 0 {
 			fmt.Println("##", strings.Title(project))
-			for _, change := range changes {
-				fmt.Println(change)
+			for i := len(changes) - 1; i >= 0; i-- {
+				fmt.Println(changes[i])
 			}
 			fmt.Println()
 		}

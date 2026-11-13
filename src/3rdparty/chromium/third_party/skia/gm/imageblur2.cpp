@@ -14,9 +14,9 @@
 #include "include/core/SkTypeface.h"
 #include "include/core/SkTypes.h"
 #include "include/effects/SkImageFilters.h"
-#include "include/utils/SkRandom.h"
+#include "src/base/SkRandom.h"
 #include "tools/ToolUtils.h"
-
+#include "tools/fonts/FontToolUtils.h"
 // TODO deprecate imageblur
 
 constexpr int kWidth  = 500;
@@ -38,7 +38,7 @@ DEF_SIMPLE_GM(imageblur2, canvas, kWidth, kHeight) {
     constexpr SkScalar dy = kHeight / sigmaCount;
     constexpr SkScalar textSize = 12;
 
-    SkFont font(ToolUtils::create_portable_typeface(), textSize);
+    SkFont font(ToolUtils::DefaultPortableTypeface(), textSize);
     font.setEdging(SkFont::Edging::kAlias);
 
     for (int x = 0; x < sigmaCount; x++) {

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,13 @@
 
 #include <chrono>
 
-#include "absl/types/span.h"
 #include "cast/streaming/encoded_frame.h"
 #include "cast/streaming/session_config.h"
 #include "cast/streaming/ssrc.h"
 #include "platform/api/time.h"
+#include "platform/base/span.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 // The Cast Streaming Receiver, a peer corresponding to some Cast Streaming
 // Sender at the other end of a network link.
@@ -94,7 +93,7 @@ class ReceiverBase {
   // |buffer| must point to a sufficiently-sized buffer that will be populated
   // with the frame's payload data. Upon return |frame->data| will be set to the
   // portion of the buffer that was populated.
-  virtual EncodedFrame ConsumeNextFrame(absl::Span<uint8_t> buffer) = 0;
+  virtual EncodedFrame ConsumeNextFrame(ByteBuffer buffer) = 0;
 
   // The default "player processing time" amount. See SetPlayerProcessingTime().
   // This value is based on real world experimentation, however may vary
@@ -107,7 +106,6 @@ class ReceiverBase {
   static constexpr int kNoFramesReady = -1;
 };
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast
 
 #endif  // CAST_STREAMING_RECEIVER_BASE_H_

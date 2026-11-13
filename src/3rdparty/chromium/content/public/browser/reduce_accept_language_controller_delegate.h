@@ -18,7 +18,7 @@ class CONTENT_EXPORT ReduceAcceptLanguageControllerDelegate {
   virtual ~ReduceAcceptLanguageControllerDelegate() = default;
 
   // Get which language was persisted for the given origin, if any.
-  virtual absl::optional<std::string> GetReducedLanguage(
+  virtual std::optional<std::string> GetReducedLanguage(
       const url::Origin& origin) = 0;
 
   // Get user's current list of accepted languages.
@@ -28,6 +28,9 @@ class CONTENT_EXPORT ReduceAcceptLanguageControllerDelegate {
   // top-level frames with the same origin.
   virtual void PersistReducedLanguage(const url::Origin& origin,
                                       const std::string& language) = 0;
+
+  // Clear the persisted reduced language for the given origin.
+  virtual void ClearReducedLanguage(const url::Origin& origin) = 0;
 };
 
 }  // namespace content

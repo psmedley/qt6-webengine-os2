@@ -34,6 +34,7 @@
 #include "rtc_base/nat_types.h"
 #include "rtc_base/net_helper.h"
 #include "rtc_base/net_helpers.h"
+#include "rtc_base/net_test_helpers.h"
 #include "rtc_base/network.h"
 #include "rtc_base/network_constants.h"
 #include "rtc_base/network_monitor.h"
@@ -111,6 +112,8 @@ static const char kTurnPassword[] = "test";
 // Add some margin of error for slow bots.
 static const int kStunTimeoutMs = cricket::STUN_TOTAL_TIMEOUT;
 
+constexpr uint64_t kTiebreakerDefault = 44444;
+
 namespace {
 
 void CheckStunKeepaliveIntervalOfAllReadyPorts(
@@ -154,12 +157,13 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
   BasicPortAllocatorTestBase()
       : vss_(new rtc::VirtualSocketServer()),
         fss_(new rtc::FirewallSocketServer(vss_.get())),
+        socket_factory_(fss_.get()),
         thread_(fss_.get()),
         // Note that the NAT is not used by default. ResetWithStunServerAndNat
         // must be called.
         nat_factory_(vss_.get(), kNatUdpAddr, kNatTcpAddr),
         nat_socket_factory_(new rtc::BasicPacketSocketFactory(&nat_factory_)),
-        stun_server_(TestStunServer::Create(fss_.get(), kStunAddr)),
+        stun_server_(TestStunServer::Create(fss_.get(), kStunAddr, thread_)),
         turn_server_(rtc::Thread::Current(),
                      fss_.get(),
                      kTurnUdpIntAddr,
@@ -169,11 +173,10 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
     stun_servers.insert(kStunAddr);
 
     allocator_ = std::make_unique<BasicPortAllocator>(
-        &network_manager_,
-        std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get()),
-        stun_servers, &field_trials_);
+        &network_manager_, &socket_factory_, stun_servers, &field_trials_);
     allocator_->Initialize();
     allocator_->set_step_delay(kMinimumStepDelay);
+    allocator_->SetIceTiebreaker(kTiebreakerDefault);
     webrtc::metrics::Reset();
   }
 
@@ -208,10 +211,10 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
   }
   // Endpoint is on the public network. No STUN or TURN.
   void ResetWithNoServersOrNat() {
-    allocator_.reset(new BasicPortAllocator(
-        &network_manager_,
-        std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get())));
+    allocator_.reset(
+        new BasicPortAllocator(&network_manager_, &socket_factory_));
     allocator_->Initialize();
+    allocator_->SetIceTiebreaker(kTiebreakerDefault);
     allocator_->set_step_delay(kMinimumStepDelay);
   }
   // Endpoint is behind a NAT, with STUN specified.
@@ -247,7 +250,7 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
   void AddTurnServers(const rtc::SocketAddress& udp_turn,
                       const rtc::SocketAddress& tcp_turn) {
     RelayServerConfig turn_server = CreateTurnServers(udp_turn, tcp_turn);
-    allocator_->AddTurnServer(turn_server);
+    allocator_->AddTurnServerForTesting(turn_server);
   }
 
   bool CreateSession(int component) {
@@ -296,6 +299,7 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
         this, &BasicPortAllocatorTestBase::OnCandidatesRemoved);
     session->SignalCandidatesAllocationDone.connect(
         this, &BasicPortAllocatorTestBase::OnCandidatesAllocationDone);
+    session->set_ice_tiebreaker(kTiebreakerDefault);
     return session;
   }
 
@@ -492,8 +496,8 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
                            bool with_nat) {
     if (with_nat) {
       nat_server_.reset(new rtc::NATServer(
-          rtc::NAT_OPEN_CONE, vss_.get(), kNatUdpAddr, kNatTcpAddr, vss_.get(),
-          rtc::SocketAddress(kNatUdpAddr.ipaddr(), 0)));
+          rtc::NAT_OPEN_CONE, thread_, vss_.get(), kNatUdpAddr, kNatTcpAddr,
+          thread_, vss_.get(), rtc::SocketAddress(kNatUdpAddr.ipaddr(), 0)));
     } else {
       nat_socket_factory_ =
           std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get());
@@ -512,11 +516,12 @@ class BasicPortAllocatorTestBase : public ::testing::Test,
 
   std::unique_ptr<rtc::VirtualSocketServer> vss_;
   std::unique_ptr<rtc::FirewallSocketServer> fss_;
+  rtc::BasicPacketSocketFactory socket_factory_;
   rtc::AutoSocketServerThread thread_;
   std::unique_ptr<rtc::NATServer> nat_server_;
   rtc::NATSocketFactory nat_factory_;
   std::unique_ptr<rtc::BasicPacketSocketFactory> nat_socket_factory_;
-  std::unique_ptr<TestStunServer> stun_server_;
+  TestStunServer::StunServerPtr stun_server_;
   TestTurnServer turn_server_;
   rtc::FakeNetworkManager network_manager_;
   std::unique_ptr<BasicPortAllocator> allocator_;
@@ -602,9 +607,8 @@ class BasicPortAllocatorTest : public FakeClockBase,
     // Add two IP addresses on the same interface.
     AddInterface(kClientAddr, "net1");
     AddInterface(kClientIPv6Addr, "net1");
-    allocator_.reset(new BasicPortAllocator(
-        &network_manager_,
-        std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get())));
+    allocator_.reset(
+        new BasicPortAllocator(&network_manager_, &socket_factory_));
     allocator_->Initialize();
     allocator_->SetConfiguration(allocator_->stun_servers(),
                                  allocator_->turn_servers(), 0,
@@ -645,9 +649,8 @@ class BasicPortAllocatorTest : public FakeClockBase,
       bool tcp_pruned) {
     turn_server_.AddInternalSocket(kTurnTcpIntAddr, PROTO_TCP);
     AddInterface(kClientAddr);
-    allocator_.reset(new BasicPortAllocator(
-        &network_manager_,
-        std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get())));
+    allocator_.reset(
+        new BasicPortAllocator(&network_manager_, &socket_factory_));
     allocator_->Initialize();
     allocator_->SetConfiguration(allocator_->stun_servers(),
                                  allocator_->turn_servers(), 0, prune_policy);
@@ -699,9 +702,8 @@ class BasicPortAllocatorTest : public FakeClockBase,
     AddInterface(kClientIPv6Addr, "net1", rtc::ADAPTER_TYPE_WIFI);
     AddInterface(kClientAddr2, "net2", rtc::ADAPTER_TYPE_CELLULAR);
     AddInterface(kClientIPv6Addr2, "net2", rtc::ADAPTER_TYPE_CELLULAR);
-    allocator_.reset(new BasicPortAllocator(
-        &network_manager_,
-        std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get())));
+    allocator_.reset(
+        new BasicPortAllocator(&network_manager_, &socket_factory_));
     allocator_->Initialize();
     allocator_->SetConfiguration(allocator_->stun_servers(),
                                  allocator_->turn_servers(), 0,
@@ -1667,9 +1669,7 @@ TEST_F(BasicPortAllocatorTest, TestSharedSocketWithNat) {
 TEST_F(BasicPortAllocatorTest, TestSharedSocketWithoutNatUsingTurn) {
   turn_server_.AddInternalSocket(kTurnTcpIntAddr, PROTO_TCP);
   AddInterface(kClientAddr);
-  allocator_.reset(new BasicPortAllocator(
-      &network_manager_,
-      std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get())));
+  allocator_.reset(new BasicPortAllocator(&network_manager_, &socket_factory_));
   allocator_->Initialize();
 
   AddTurnServers(kTurnUdpIntAddr, kTurnTcpIntAddr);
@@ -1804,16 +1804,14 @@ TEST_F(BasicPortAllocatorTestWithRealClock,
   turn_server_.AddInternalSocket(rtc::SocketAddress("127.0.0.1", 3478),
                                  PROTO_UDP);
   AddInterface(kClientAddr);
-  allocator_.reset(new BasicPortAllocator(
-      &network_manager_,
-      std::make_unique<rtc::BasicPacketSocketFactory>(fss_.get())));
+  allocator_.reset(new BasicPortAllocator(&network_manager_, &socket_factory_));
   allocator_->Initialize();
   RelayServerConfig turn_server;
   RelayCredentials credentials(kTurnUsername, kTurnPassword);
   turn_server.credentials = credentials;
   turn_server.ports.push_back(
       ProtocolAddress(rtc::SocketAddress("localhost", 3478), PROTO_UDP));
-  allocator_->AddTurnServer(turn_server);
+  allocator_->AddTurnServerForTesting(turn_server);
 
   allocator_->set_step_delay(kMinimumStepDelay);
   allocator_->set_flags(allocator().flags() |
@@ -2392,24 +2390,6 @@ TEST_F(BasicPortAllocatorTest,
                                             expected_stun_keepalive_interval);
 }
 
-TEST_F(BasicPortAllocatorTest, IceRegatheringMetricsLoggedWhenNetworkChanges) {
-  // Only test local ports to simplify test.
-  ResetWithNoServersOrNat();
-  AddInterface(kClientAddr, "test_net0");
-  ASSERT_TRUE(CreateSession(ICE_CANDIDATE_COMPONENT_RTP));
-  session_->StartGettingPorts();
-  EXPECT_TRUE_SIMULATED_WAIT(candidate_allocation_done_,
-                             kDefaultAllocationTimeout, fake_clock);
-  candidate_allocation_done_ = false;
-  AddInterface(kClientAddr2, "test_net1");
-  EXPECT_TRUE_SIMULATED_WAIT(candidate_allocation_done_,
-                             kDefaultAllocationTimeout, fake_clock);
-  EXPECT_METRIC_EQ(1,
-                   webrtc::metrics::NumEvents(
-                       "WebRTC.PeerConnection.IceRegatheringReason",
-                       static_cast<int>(IceRegatheringReason::NETWORK_CHANGE)));
-}
-
 // Test that when an mDNS responder is present, the local address of a host
 // candidate is concealed by an mDNS hostname and the related address of a srflx
 // candidate is set to 0.0.0.0 or ::0.
@@ -2437,7 +2417,7 @@ TEST_F(BasicPortAllocatorTest, HostCandidateAddressIsReplacedByHostname) {
   for (const auto& candidate : candidates_) {
     const auto& raddr = candidate.related_address();
 
-    if (candidate.type() == LOCAL_PORT_TYPE) {
+    if (candidate.is_local()) {
       EXPECT_FALSE(candidate.address().hostname().empty());
       EXPECT_TRUE(raddr.IsNil());
       if (candidate.protocol() == UDP_PROTOCOL_NAME) {
@@ -2445,13 +2425,13 @@ TEST_F(BasicPortAllocatorTest, HostCandidateAddressIsReplacedByHostname) {
       } else {
         ++num_host_tcp_candidates;
       }
-    } else if (candidate.type() == STUN_PORT_TYPE) {
+    } else if (candidate.is_stun()) {
       // For a srflx candidate, the related address should be set to 0.0.0.0 or
       // ::0
       EXPECT_TRUE(IPIsAny(raddr.ipaddr()));
       EXPECT_EQ(raddr.port(), 0);
       ++num_srflx_candidates;
-    } else if (candidate.type() == RELAY_PORT_TYPE) {
+    } else if (candidate.is_relay()) {
       EXPECT_EQ(kNatUdpAddr.ipaddr(), raddr.ipaddr());
       EXPECT_EQ(kNatUdpAddr.family(), raddr.family());
       ++num_relay_candidates;
@@ -2489,6 +2469,29 @@ TEST_F(BasicPortAllocatorTest, TestDoNotUseTurnServerAsStunSever) {
   port_config.AddRelay(turn_servers);
 
   EXPECT_EQ(1U, port_config.StunServers().size());
+}
+
+// Test that candidates from different servers get assigned a unique local
+// preference (the middle 16 bits of the priority)
+TEST_F(BasicPortAllocatorTest, AssignsUniqueLocalPreferencetoRelayCandidates) {
+  allocator_->SetCandidateFilter(CF_RELAY);
+  allocator_->AddTurnServerForTesting(
+      CreateTurnServers(kTurnUdpIntAddr, SocketAddress()));
+  allocator_->AddTurnServerForTesting(
+      CreateTurnServers(kTurnUdpIntAddr, SocketAddress()));
+  allocator_->AddTurnServerForTesting(
+      CreateTurnServers(kTurnUdpIntAddr, SocketAddress()));
+
+  AddInterface(kClientAddr);
+  ASSERT_TRUE(CreateSession(ICE_CANDIDATE_COMPONENT_RTP));
+  session_->StartGettingPorts();
+  ASSERT_TRUE_SIMULATED_WAIT(candidate_allocation_done_,
+                             kDefaultAllocationTimeout, fake_clock);
+  EXPECT_EQ(3u, candidates_.size());
+  EXPECT_GT((candidates_[0].priority() >> 8) & 0xFFFF,
+            (candidates_[1].priority() >> 8) & 0xFFFF);
+  EXPECT_GT((candidates_[1].priority() >> 8) & 0xFFFF,
+            (candidates_[2].priority() >> 8) & 0xFFFF);
 }
 
 // Test that no more than allocator.max_ipv6_networks() IPv6 networks are used
@@ -2621,69 +2624,7 @@ TEST_F(BasicPortAllocatorTest, IPv6EtherAndWifiHaveHigherPriorityThanOthers) {
   EXPECT_TRUE(HasNetwork(networks, ethe1));
 }
 
-// Do not change the default IPv6 selection behavior if
-// IPv6NetworkResolutionFixes is disabled.
-TEST_F(BasicPortAllocatorTest,
-       NotDiversifyIPv6NetworkTypesIfIPv6NetworkResolutionFixesDisabled) {
-  webrtc::test::ScopedKeyValueConfig field_trials(
-      field_trials_, "WebRTC-IPv6NetworkResolutionFixes/Disabled/");
-  // Add three IPv6 network interfaces, but tell the allocator to only use two.
-  allocator().set_max_ipv6_networks(2);
-  AddInterface(kClientIPv6Addr, "ethe1", rtc::ADAPTER_TYPE_ETHERNET);
-  AddInterface(kClientIPv6Addr2, "ethe2", rtc::ADAPTER_TYPE_ETHERNET);
-  AddInterface(kClientIPv6Addr3, "wifi1", rtc::ADAPTER_TYPE_WIFI);
-  // To simplify the test, only gather UDP host candidates.
-  allocator().set_flags(PORTALLOCATOR_ENABLE_IPV6 | PORTALLOCATOR_DISABLE_TCP |
-                        PORTALLOCATOR_DISABLE_STUN |
-                        PORTALLOCATOR_DISABLE_RELAY |
-                        PORTALLOCATOR_ENABLE_IPV6_ON_WIFI);
-
-  ASSERT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
-  session_->StartGettingPorts();
-  EXPECT_TRUE_SIMULATED_WAIT(candidate_allocation_done_,
-                             kDefaultAllocationTimeout, fake_clock);
-
-  EXPECT_EQ(2U, candidates_.size());
-  // Wifi1 was not selected because it comes after ethe1 and ethe2.
-  EXPECT_FALSE(HasCandidate(candidates_, "local", "udp", kClientIPv6Addr3));
-}
-
-// Do not change the default IPv6 selection behavior if
-// IPv6NetworkResolutionFixes is enabled but DiversifyIpv6Interfaces is not
-// enabled.
-TEST_F(BasicPortAllocatorTest,
-       NotDiversifyIPv6NetworkTypesIfDiversifyIpv6InterfacesDisabled) {
-  webrtc::test::ScopedKeyValueConfig field_trials(
-      field_trials_,
-      "WebRTC-IPv6NetworkResolutionFixes/"
-      "Enabled,DiversifyIpv6Interfaces:false/");
-  // Add three IPv6 network interfaces, but tell the allocator to only use two.
-  allocator().set_max_ipv6_networks(2);
-  AddInterface(kClientIPv6Addr, "ethe1", rtc::ADAPTER_TYPE_ETHERNET);
-  AddInterface(kClientIPv6Addr2, "ethe2", rtc::ADAPTER_TYPE_ETHERNET);
-  AddInterface(kClientIPv6Addr3, "wifi1", rtc::ADAPTER_TYPE_WIFI);
-  // To simplify the test, only gather UDP host candidates.
-  allocator().set_flags(PORTALLOCATOR_ENABLE_IPV6 | PORTALLOCATOR_DISABLE_TCP |
-                        PORTALLOCATOR_DISABLE_STUN |
-                        PORTALLOCATOR_DISABLE_RELAY |
-                        PORTALLOCATOR_ENABLE_IPV6_ON_WIFI);
-
-  ASSERT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
-  session_->StartGettingPorts();
-  EXPECT_TRUE_SIMULATED_WAIT(candidate_allocation_done_,
-                             kDefaultAllocationTimeout, fake_clock);
-
-  EXPECT_EQ(2U, candidates_.size());
-  // Wifi1 was not selected because it comes after ethe1 and ethe2.
-  EXPECT_FALSE(HasCandidate(candidates_, "local", "udp", kClientIPv6Addr3));
-}
-
-TEST_F(BasicPortAllocatorTest,
-       Select2DifferentIntefacesIfDiversifyIpv6InterfacesEnabled) {
-  webrtc::test::ScopedKeyValueConfig field_trials(
-      field_trials_,
-      "WebRTC-IPv6NetworkResolutionFixes/"
-      "Enabled,DiversifyIpv6Interfaces:true/");
+TEST_F(BasicPortAllocatorTest, Select2DifferentIntefaces) {
   allocator().set_max_ipv6_networks(2);
   AddInterface(kClientIPv6Addr, "ethe1", rtc::ADAPTER_TYPE_ETHERNET);
   AddInterface(kClientIPv6Addr2, "ethe2", rtc::ADAPTER_TYPE_ETHERNET);
@@ -2708,12 +2649,7 @@ TEST_F(BasicPortAllocatorTest,
   EXPECT_TRUE(HasCandidate(candidates_, "local", "udp", kClientIPv6Addr3));
 }
 
-TEST_F(BasicPortAllocatorTest,
-       Select3DifferentIntefacesIfDiversifyIpv6InterfacesEnabled) {
-  webrtc::test::ScopedKeyValueConfig field_trials(
-      field_trials_,
-      "WebRTC-IPv6NetworkResolutionFixes/"
-      "Enabled,DiversifyIpv6Interfaces:true/");
+TEST_F(BasicPortAllocatorTest, Select3DifferentIntefaces) {
   allocator().set_max_ipv6_networks(3);
   AddInterface(kClientIPv6Addr, "ethe1", rtc::ADAPTER_TYPE_ETHERNET);
   AddInterface(kClientIPv6Addr2, "ethe2", rtc::ADAPTER_TYPE_ETHERNET);
@@ -2739,12 +2675,7 @@ TEST_F(BasicPortAllocatorTest,
   EXPECT_TRUE(HasCandidate(candidates_, "local", "udp", kClientIPv6Addr5));
 }
 
-TEST_F(BasicPortAllocatorTest,
-       Select4DifferentIntefacesIfDiversifyIpv6InterfacesEnabled) {
-  webrtc::test::ScopedKeyValueConfig field_trials(
-      field_trials_,
-      "WebRTC-IPv6NetworkResolutionFixes/"
-      "Enabled,DiversifyIpv6Interfaces:true/");
+TEST_F(BasicPortAllocatorTest, Select4DifferentIntefaces) {
   allocator().set_max_ipv6_networks(4);
   AddInterface(kClientIPv6Addr, "ethe1", rtc::ADAPTER_TYPE_ETHERNET);
   AddInterface(kClientIPv6Addr2, "ethe2", rtc::ADAPTER_TYPE_ETHERNET);

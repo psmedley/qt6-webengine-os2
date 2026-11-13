@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -135,8 +135,7 @@ RetainPtr<CFX_CSSComputedStyle> CXFA_TextParser::CreateRootStyle(
       case XFA_AttributeValue::Radix:
         break;
       default:
-        NOTREACHED();
-        break;
+        NOTREACHED_NORETURN();
     }
     pStyle->SetTextAlign(hAlign);
     CFX_CSSRect rtMarginWidth;
@@ -196,7 +195,7 @@ RetainPtr<CFX_CSSComputedStyle> CXFA_TextParser::CreateStyle(
 
 RetainPtr<CFX_CSSComputedStyle> CXFA_TextParser::ComputeStyle(
     const CFX_XMLNode* pXMLNode,
-    const CFX_CSSComputedStyle* pParentStyle) {
+    RetainPtr<const CFX_CSSComputedStyle> pParentStyle) {
   auto it = m_mapXMLNodeToParseContext.find(pXMLNode);
   if (it == m_mapXMLNodeToParseContext.end())
     return nullptr;
@@ -634,8 +633,8 @@ CXFA_TextParser::Context::Context() = default;
 CXFA_TextParser::Context::~Context() = default;
 
 void CXFA_TextParser::Context::SetParentStyle(
-    const CFX_CSSComputedStyle* style) {
-  m_pParentStyle.Reset(style);
+    RetainPtr<const CFX_CSSComputedStyle> style) {
+  m_pParentStyle = std::move(style);
 }
 
 void CXFA_TextParser::Context::SetDecls(

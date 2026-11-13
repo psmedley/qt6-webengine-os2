@@ -5,7 +5,7 @@
 #ifndef CONTENT_BROWSER_LOADER_CROSS_ORIGIN_READ_BLOCKING_CHECKER_H_
 #define CONTENT_BROWSER_LOADER_CROSS_ORIGIN_READ_BLOCKING_CHECKER_H_
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/cpp/corb/corb_api.h"
@@ -35,11 +35,14 @@ class CrossOriginReadBlockingChecker {
     kBlocked_ShouldNotReport,
     kNetError
   };
+  // The caller needs to guarantee that `orb_state`'s lifetime is at least as
+  // long as the lifetime of `CrossOriginReadBlockingChecker`.  `orb_state`
+  // needs to be non-null.
   CrossOriginReadBlockingChecker(
       const network::ResourceRequest& request,
       const network::mojom::URLResponseHead& response,
       const storage::BlobDataHandle& blob_data_handle,
-      network::corb::PerFactoryState& corb_state,
+      network::corb::PerFactoryState* corb_state,
       base::OnceCallback<void(Result)> callback);
 
   CrossOriginReadBlockingChecker(const CrossOriginReadBlockingChecker&) =

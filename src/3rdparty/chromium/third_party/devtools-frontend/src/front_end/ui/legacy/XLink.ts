@@ -6,6 +6,7 @@ import * as Host from '../../core/host/host.js';
 import * as Platform from '../../core/platform/platform.js';
 import * as ComponentHelpers from '../components/helpers/helpers.js';
 import * as LitHtml from '../lit-html/lit-html.js';
+import * as VisualLogging from '../visual_logging/visual_logging.js';
 
 import * as ARIAUtils from './ARIAUtils.js';
 import {type ContextMenu, type Provider} from './ContextMenu.js';
@@ -23,8 +24,9 @@ export class XLink extends XElement {
   hrefInternal: Platform.DevToolsPath.UrlString|null;
   private clickable: boolean;
   private readonly onClick: (arg0: Event) => void;
-  private readonly onKeyDown: (arg0: Event) => void;
-  static create(url: string, linkText?: string, className?: string, preventClick?: boolean): HTMLElement {
+  private readonly onKeyDown: (arg0: KeyboardEvent) => void;
+  static create(url: string, linkText?: string, className?: string, preventClick?: boolean, jsLogContext?: string):
+      HTMLElement {
     if (!linkText) {
       linkText = url;
     }
@@ -33,7 +35,7 @@ export class XLink extends XElement {
     // TODO(dgozman): migrate css from 'devtools-link' to 'x-link'.
     const element = html `
   <x-link href='${url}' tabindex="0" class='${className} devtools-link' ${preventClick ? 'no-click' : ''}
-  >${Platform.StringUtilities.trimMiddle(linkText, MaxLengthForDisplayedURLs)}</x-link>`;
+  jslog=${VisualLogging.link().track({click: true}).context(jsLogContext)}>${Platform.StringUtilities.trimMiddle(linkText, MaxLengthForDisplayedURLs)}</x-link>`;
     // clang-format on
     return element as HTMLElement;
   }
@@ -57,8 +59,8 @@ export class XLink extends XElement {
       }
       this.dispatchEvent(new Event('x-link-invoke'));
     };
-    this.onKeyDown = (event: Event): void => {
-      if (isEnterOrSpaceKey(event)) {
+    this.onKeyDown = (event: KeyboardEvent): void => {
+      if (Platform.KeyboardUtilities.isEnterOrSpaceKey(event)) {
         event.consume(true);
         if (this.hrefInternal) {
           Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(this.hrefInternal);
@@ -68,16 +70,16 @@ export class XLink extends XElement {
     };
   }
 
-  static get observedAttributes(): string[] {
+  static override get observedAttributes(): string[] {
     // TODO(dgozman): should be super.observedAttributes, but it does not compile.
-    return XElement.observedAttributes.concat(['href', 'no-click']);
+    return XElement.observedAttributes.concat(['href', 'no-click', 'title']);
   }
 
   get href(): Platform.DevToolsPath.UrlString|null {
     return this.hrefInternal;
   }
 
-  attributeChangedCallback(attr: string, oldValue: string|null, newValue: string|null): void {
+  override attributeChangedCallback(attr: string, oldValue: string|null, newValue: string|null): void {
     if (attr === 'no-click') {
       this.clickable = !newValue;
       this.updateClick();
@@ -101,7 +103,9 @@ export class XLink extends XElement {
       }
 
       this.hrefInternal = href;
-      Tooltip.install(this, newValue);
+      if (!this.hasAttribute('title')) {
+        Tooltip.install(this, newValue);
+      }
       this.updateClick();
       return;
     }
@@ -122,22 +126,9 @@ export class XLink extends XElement {
   }
 }
 
-let contextMenuProviderInstance: ContextMenuProvider;
-
-export class ContextMenuProvider implements Provider {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): ContextMenuProvider {
-    const {forceNew} = opts;
-    if (!contextMenuProviderInstance || forceNew) {
-      contextMenuProviderInstance = new ContextMenuProvider();
-    }
-
-    return contextMenuProviderInstance;
-  }
-
-  appendApplicableItems(event: Event, contextMenu: ContextMenu, target: Object): void {
-    let targetNode: (Node|null) = (target as Node | null);
+export class ContextMenuProvider implements Provider<Node> {
+  appendApplicableItems(_event: Event, contextMenu: ContextMenu, target: Node): void {
+    let targetNode: Node|null = target;
     while (targetNode && !(targetNode instanceof XLink)) {
       targetNode = targetNode.parentNodeOrShadowHost();
     }

@@ -16,6 +16,7 @@
 #define THIRD_PARTY_NEARBY_INTERNAL_PLATFORM_IMPLEMENTATION_G3_CREDENTIAL_STORAGE_H_
 
 #include <memory>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -25,9 +26,8 @@
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/implementation/credential_callbacks.h"
 #include "internal/platform/implementation/credential_storage.h"
-#include "internal/proto/credential.proto.h"
+#include "internal/proto/credential.pb.h"
 
-namespace location {
 namespace nearby {
 namespace g3 {
 
@@ -38,38 +38,61 @@ namespace g3 {
  */
 class CredentialStorageImpl : public api::CredentialStorage {
  public:
+  using LocalCredential = ::nearby::internal::LocalCredential;
+  using SharedCredential = ::nearby::internal::SharedCredential;
+  using PublicCredentialType = ::nearby::presence::PublicCredentialType;
+  using LocalCredentialKey = std::pair<std::string, std::string>;
+  using PublicCredentialKey =
+      std::tuple<std::string, std::string, PublicCredentialType>;
+
   explicit CredentialStorageImpl() = default;
   ~CredentialStorageImpl() override = default;
 
   // Used to save private and public credentials.
   void SaveCredentials(
       absl::string_view manager_app_id, absl::string_view account_name,
-      const std::vector<::nearby::internal::PrivateCredential>&
-          private_credentials,
-      const std::vector<::nearby::internal::PublicCredential>&
-          public_credentials,
-      ::nearby::presence::PublicCredentialType public_credential_type,
-      ::nearby::presence::GenerateCredentialsCallback callback) override;
+      const std::vector<LocalCredential>& private_credentials,
+      const std::vector<SharedCredential>& public_credentials,
+      PublicCredentialType public_credential_type,
+      SaveCredentialsResultCallback callback) override;
+
+  void UpdateLocalCredential(absl::string_view manager_app_id,
+                               absl::string_view account_name,
+                               nearby::internal::LocalCredential credential,
+                               SaveCredentialsResultCallback callback) override;
 
   // Used to fetch private creds when broadcasting.
-  void GetPrivateCredentials(
-      const ::nearby::presence::CredentialSelector& credential_selector,
-      ::nearby::presence::GetPrivateCredentialsResultCallback callback)
-      override;
+  void GetLocalCredentials(
+      const CredentialSelector& credential_selector,
+      GetLocalCredentialsResultCallback callback) override;
 
   // Used to fetch remote public creds when scanning.
   void GetPublicCredentials(
-      const ::nearby::presence::CredentialSelector& credential_selector,
-      ::nearby::presence::PublicCredentialType public_credential_type,
-      ::nearby::presence::GetPublicCredentialsResultCallback callback) override;
+      const CredentialSelector& credential_selector,
+      PublicCredentialType public_credential_type,
+      GetPublicCredentialsResultCallback callback) override;
 
  private:
-  absl::flat_hash_map<std::pair<absl::string_view, absl::string_view>,
-                      std::vector<::nearby::internal::PrivateCredential>>
+  LocalCredentialKey CreateLocalCredentialKey(
+      absl::string_view manager_app_id, absl::string_view account_name) {
+    return std::make_tuple(std::string(manager_app_id),
+                           std::string(account_name));
+  }
+  PublicCredentialKey CreatePublicCredentialKey(
+      absl::string_view manager_app_id, absl::string_view account_name,
+      PublicCredentialType credential_type) {
+    return std::make_tuple(std::string(manager_app_id),
+                           std::string(account_name), credential_type);
+  }
+  absl::StatusOr<std::vector<LocalCredential>> GetLocalCredentialsLocked(
+      const CredentialSelector& credential_selector);
+  void SaveLocalCredentialsLocked(
+      absl::string_view manager_app_id, absl::string_view account_name,
+      const std::vector<LocalCredential>& private_credentials);
+
+  absl::flat_hash_map<LocalCredentialKey, std::vector<LocalCredential>>
       private_credentials_map_;
-  absl::flat_hash_map<std::tuple<absl::string_view, absl::string_view,
-                                 ::nearby::presence::PublicCredentialType>,
-                      std::vector<::nearby::internal::PublicCredential>>
+  absl::flat_hash_map<PublicCredentialKey, std::vector<SharedCredential>>
       public_credentials_map_;
   absl::Mutex private_mutex_;
   absl::Mutex public_mutex_;
@@ -77,6 +100,5 @@ class CredentialStorageImpl : public api::CredentialStorage {
 
 }  // namespace g3
 }  // namespace nearby
-}  // namespace location
 
 #endif  // THIRD_PARTY_NEARBY_INTERNAL_PLATFORM_IMPLEMENTATION_G3_CREDENTIAL_STORAGE_H_

@@ -32,13 +32,13 @@ Android [IHealth HAL][health-hal].
 For more details on HW specs and resolution see
 [Measuring Device Power](https://source.android.com/devices/tech/power/device).
 
-[health-hal]: https://cs.android.com/android/platform/superproject/+/master:hardware/interfaces/health/2.0/IHealth.hal?q=IHealth
+[health-hal]: https://cs.android.com/android/platform/superproject/+/main:hardware/interfaces/health/2.0/IHealth.hal?q=IHealth
 
 #### Measuring charge while plugged on USB
 
 Battery counters measure the charge flowing *in* and *out* of
 the battery. If the device is plugged to a USB cable, you will likely observe
-a negative instantaneous current and an increase of the total charge, denoting
+a positive instantaneous current and an increase of the total charge, denoting
 the fact that charge is flowing in the battery (i.e. charging it) rather
 than out.
 
@@ -96,6 +96,7 @@ data_sources: {
             battery_counters: BATTERY_COUNTER_CAPACITY_PERCENT
             battery_counters: BATTERY_COUNTER_CHARGE
             battery_counters: BATTERY_COUNTER_CURRENT
+            battery_counters: BATTERY_COUNTER_VOLTAGE
         }
     }
 }
@@ -111,14 +112,15 @@ data_sources: {
 }
 ```
 
-## Power rails
+## {#odpm} On-Device Power Rails Monitor (ODPM)
 
 _This data source has been introduced in Android 10 (Q) and requires the
 dedicated hardware on the device. This hardware is not yet available on
 most production phones._
 
 Recent version of Android introduced the support for more advanced power
-monitoring at the hardware subsystem level, known as "Power rail counters".
+monitoring at the hardware subsystem level, known as
+"On-Device Power Rail Monitors" (ODPMs).
 These counters measure the energy drained by (groups of) hardware units.
 
 Unlike the battery counters, they are not affected by the charging/discharging
@@ -128,11 +130,14 @@ The presence and the resolution of power rail counters depends on the device
 manufacturer. At the platform level this data is obtained polling the
 Android [IPowerStats HAL][power-hal].
 
-[power-hal]: https://cs.android.com/android/platform/superproject/+/master:hardware/interfaces/power/stats/1.0/IPowerStats.hal
+Googlers: See [go/power-rails-internal-doc](http://go/power-rails-internal-doc)
+for instructions on how to change the default rail selection on Pixel devices.
+
+[power-hal]: https://cs.android.com/android/platform/superproject/+/main:hardware/interfaces/power/stats/1.0/IPowerStats.hal
 
 Simplified block diagram:
 
-![](/docs/images/power-rails.png "Block diagram of power rail counters")
+![](/docs/images/power-rails.png "Block diagram of ODPMs")
 
 ### TraceConfig
 

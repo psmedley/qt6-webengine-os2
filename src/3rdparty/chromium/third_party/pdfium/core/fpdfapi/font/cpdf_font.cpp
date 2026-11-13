@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,7 @@
 #include "core/fxge/freetype/fx_freetype.h"
 #include "core/fxge/fx_font.h"
 #include "third_party/base/check.h"
+#include "third_party/base/numerics/clamped_math.h"
 #include "third_party/base/numerics/safe_conversions.h"
 
 namespace {
@@ -55,11 +56,8 @@ CPDF_Font::CPDF_Font(CPDF_Document* pDocument,
       m_BaseFontName(m_pFontDict->GetByteStringFor("BaseFont")) {}
 
 CPDF_Font::~CPDF_Font() {
-  if (m_pFontFile) {
-    auto* pPageData = m_pDocument->GetPageData();
-    if (pPageData)
-      pPageData->MaybePurgeFontFileStreamAcc(std::move(m_pFontFile));
-  }
+  if (m_pFontFile)
+    m_pDocument->MaybePurgeFontFileStreamAcc(std::move(m_pFontFile));
 }
 
 bool CPDF_Font::IsType1Font() const {
@@ -209,26 +207,27 @@ void CPDF_Font::LoadFontDescriptor(const CPDF_Dictionary* pFontDesc) {
     return;
 
   const uint64_t key = pFontFile->KeyForCache();
-  auto* pData = m_pDocument->GetPageData();
-  m_pFontFile = pData->GetFontFileStreamAcc(std::move(pFontFile));
+  m_pFontFile = m_pDocument->GetFontFileStreamAcc(std::move(pFontFile));
   if (!m_pFontFile)
     return;
 
   if (!m_Font.LoadEmbedded(m_pFontFile->GetSpan(), IsVertWriting(), key))
-    pData->MaybePurgeFontFileStreamAcc(std::move(m_pFontFile));
+    m_pDocument->MaybePurgeFontFileStreamAcc(std::move(m_pFontFile));
 }
 
 void CPDF_Font::CheckFontMetrics() {
   if (m_FontBBox.top == 0 && m_FontBBox.bottom == 0 && m_FontBBox.left == 0 &&
       m_FontBBox.right == 0) {
-    FXFT_FaceRec* face = m_Font.GetFaceRec();
+    RetainPtr<CFX_Face> face = m_Font.GetFace();
     if (face) {
-      m_FontBBox.left = TT2PDF(FXFT_Get_Face_xMin(face), face);
-      m_FontBBox.bottom = TT2PDF(FXFT_Get_Face_yMin(face), face);
-      m_FontBBox.right = TT2PDF(FXFT_Get_Face_xMax(face), face);
-      m_FontBBox.top = TT2PDF(FXFT_Get_Face_yMax(face), face);
-      m_Ascent = TT2PDF(FXFT_Get_Face_Ascender(face), face);
-      m_Descent = TT2PDF(FXFT_Get_Face_Descender(face), face);
+      // Note that `m_FontBBox` is deliberately flipped.
+      const FX_RECT raw_bbox = face->GetBBox();
+      m_FontBBox.left = TT2PDF(raw_bbox.left, face);
+      m_FontBBox.bottom = TT2PDF(raw_bbox.top, face);
+      m_FontBBox.right = TT2PDF(raw_bbox.right, face);
+      m_FontBBox.top = TT2PDF(raw_bbox.bottom, face);
+      m_Ascent = TT2PDF(face->GetAscender(), face);
+      m_Descent = TT2PDF(face->GetDescender(), face);
     } else {
       bool bFirst = true;
       for (int i = 0; i < 256; i++) {
@@ -394,8 +393,7 @@ int CPDF_Font::FallbackGlyphFromCharcode(int fallbackFont, uint32_t charcode) {
 
   WideString str = UnicodeFromCharCode(charcode);
   uint32_t unicode = !str.IsEmpty() ? str[0] : charcode;
-  int glyph =
-      FT_Get_Char_Index(m_FontFallbacks[fallbackFont]->GetFaceRec(), unicode);
+  int glyph = m_FontFallbacks[fallbackFont]->GetFace()->GetCharIndex(unicode);
   if (glyph == 0)
     return -1;
 
@@ -409,8 +407,8 @@ CFX_Font* CPDF_Font::GetFontFallback(int position) {
 }
 
 // static
-int CPDF_Font::TT2PDF(FT_Pos m, FXFT_FaceRec* face) {
-  int upm = FXFT_Get_Face_UnitsPerEM(face);
+int CPDF_Font::TT2PDF(FT_Pos m, const RetainPtr<CFX_Face>& face) {
+  int upm = face->GetUnitsPerEm();
   if (upm == 0)
     return pdfium::base::saturated_cast<int>(m);
 
@@ -419,13 +417,23 @@ int CPDF_Font::TT2PDF(FT_Pos m, FXFT_FaceRec* face) {
 }
 
 // static
-bool CPDF_Font::UseTTCharmap(FXFT_FaceRec* face,
+FX_RECT CPDF_Font::GetCharBBoxForFace(const RetainPtr<CFX_Face>& face) {
+  FXFT_FaceRec* rec = face->GetRec();
+  pdfium::base::ClampedNumeric<FT_Pos> left = FXFT_Get_Glyph_HoriBearingX(rec);
+  pdfium::base::ClampedNumeric<FT_Pos> top = FXFT_Get_Glyph_HoriBearingY(rec);
+  return FX_RECT(TT2PDF(left, face), TT2PDF(top, face),
+                 TT2PDF(left + FXFT_Get_Glyph_Width(rec), face),
+                 TT2PDF(top - FXFT_Get_Glyph_Height(rec), face));
+}
+
+// static
+bool CPDF_Font::UseTTCharmap(const RetainPtr<CFX_Face>& face,
                              int platform_id,
                              int encoding_id) {
-  for (int i = 0; i < face->num_charmaps; i++) {
-    if (FXFT_Get_Charmap_PlatformID(face->charmaps[i]) == platform_id &&
-        FXFT_Get_Charmap_EncodingID(face->charmaps[i]) == encoding_id) {
-      FT_Set_Charmap(face, face->charmaps[i]);
+  for (size_t i = 0; i < face->GetCharMapCount(); i++) {
+    if (face->GetCharMapPlatformIdByIndex(i) == platform_id &&
+        face->GetCharMapEncodingIdByIndex(i) == encoding_id) {
+      face->SetCharMapByIndex(i);
       return true;
     }
   }

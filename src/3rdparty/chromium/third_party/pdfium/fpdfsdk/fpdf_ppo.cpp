@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "core/fpdfapi/page/cpdf_form.h"
 #include "core/fpdfapi/page/cpdf_formobject.h"
 #include "core/fpdfapi/page/cpdf_page.h"
+#include "core/fpdfapi/page/cpdf_pageimagecache.h"
 #include "core/fpdfapi/page/cpdf_pageobject.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
@@ -30,7 +31,6 @@
 #include "core/fpdfapi/parser/cpdf_stream_acc.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
-#include "core/fpdfapi/render/cpdf_pagerendercache.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/fx_string_wrappers.h"
 #include "core/fxcrt/retain_ptr.h"
@@ -38,10 +38,10 @@
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "public/cpp/fpdf_scopers.h"
 #include "third_party/base/check.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 struct XObjectContext {
-  CPDF_Document* dest_doc;
+  UnownedPtr<CPDF_Document> dest_doc;
   RetainPtr<CPDF_Stream> xobject;
 };
 
@@ -52,7 +52,7 @@ namespace {
 // scaled down, and scale is in range of (0, 1) exclusive.
 struct NupPageSettings {
   CFX_PointF subPageStartPoint;
-  float scale;
+  float scale = 0.0f;
 };
 
 // Calculates the N-up parameters.  When importing multiple pages into one page.
@@ -219,11 +219,11 @@ class CPDF_PageOrganizer {
 
   bool UpdateReference(RetainPtr<CPDF_Object> pObj);
 
-  CPDF_Document* dest() { return m_pDestDoc.Get(); }
-  const CPDF_Document* dest() const { return m_pDestDoc.Get(); }
+  CPDF_Document* dest() { return m_pDestDoc; }
+  const CPDF_Document* dest() const { return m_pDestDoc; }
 
-  CPDF_Document* src() { return m_pSrcDoc.Get(); }
-  const CPDF_Document* src() const { return m_pSrcDoc.Get(); }
+  CPDF_Document* src() { return m_pSrcDoc; }
+  const CPDF_Document* src() const { return m_pSrcDoc; }
 
   void AddObjectMapping(uint32_t dwOldPageObj, uint32_t dwNewPageObj) {
     m_ObjectNumberMap[dwOldPageObj] = dwNewPageObj;
@@ -232,6 +232,8 @@ class CPDF_PageOrganizer {
   void ClearObjectNumberMap() { m_ObjectNumberMap.clear(); }
 
  private:
+  bool InitDestDoc();
+
   uint32_t GetNewObjId(CPDF_Reference* pRef);
 
   UnownedPtr<CPDF_Document> const m_pDestDoc;
@@ -251,37 +253,41 @@ bool CPDF_PageOrganizer::Init() {
   DCHECK(m_pDestDoc);
   DCHECK(m_pSrcDoc);
 
-  RetainPtr<CPDF_Dictionary> pNewRoot = dest()->GetMutableRoot();
-  if (!pNewRoot)
+  return InitDestDoc();
+}
+
+bool CPDF_PageOrganizer::InitDestDoc() {
+  RetainPtr<CPDF_Dictionary> root = dest()->GetMutableRoot();
+  if (!root) {
     return false;
-
-  RetainPtr<CPDF_Dictionary> pDocInfoDict = dest()->GetInfo();
-  if (!pDocInfoDict)
-    return false;
-
-  pDocInfoDict->SetNewFor<CPDF_String>("Producer", "PDFium", false);
-
-  ByteString cbRootType = pNewRoot->GetByteStringFor("Type", ByteString());
-  if (cbRootType.IsEmpty())
-    pNewRoot->SetNewFor<CPDF_Name>("Type", "Catalog");
-
-  RetainPtr<CPDF_Object> pElement = pNewRoot->GetMutableObjectFor("Pages");
-  RetainPtr<CPDF_Dictionary> pNewPages =
-      pElement ? ToDictionary(pElement->GetMutableDirect()) : nullptr;
-  if (!pNewPages) {
-    pNewPages = dest()->NewIndirect<CPDF_Dictionary>();
-    pNewRoot->SetNewFor<CPDF_Reference>("Pages", dest(),
-                                        pNewPages->GetObjNum());
   }
-  ByteString cbPageType = pNewPages->GetByteStringFor("Type", ByteString());
-  if (cbPageType.IsEmpty())
-    pNewPages->SetNewFor<CPDF_Name>("Type", "Pages");
 
-  if (!pNewPages->GetArrayFor("Kids")) {
-    auto pNewArray = dest()->NewIndirect<CPDF_Array>();
-    pNewPages->SetNewFor<CPDF_Number>("Count", 0);
-    pNewPages->SetNewFor<CPDF_Reference>("Kids", dest(),
-                                         pNewArray->GetObjNum());
+  RetainPtr<CPDF_Dictionary> info = dest()->GetInfo();
+  if (info) {
+    info->SetNewFor<CPDF_String>("Producer", "PDFium", false);
+  }
+
+  if (root->GetByteStringFor("Type", ByteString()).IsEmpty()) {
+    root->SetNewFor<CPDF_Name>("Type", "Catalog");
+  }
+
+  RetainPtr<CPDF_Dictionary> pages;
+  if (RetainPtr<CPDF_Object> current_pages = root->GetMutableObjectFor("Pages");
+      current_pages) {
+    pages = ToDictionary(current_pages->GetMutableDirect());
+  }
+  if (!pages) {
+    pages = dest()->NewIndirect<CPDF_Dictionary>();
+    root->SetNewFor<CPDF_Reference>("Pages", dest(), pages->GetObjNum());
+  }
+  if (pages->GetByteStringFor("Type", ByteString()).IsEmpty()) {
+    pages->SetNewFor<CPDF_Name>("Type", "Pages");
+  }
+
+  if (!pages->GetArrayFor("Kids")) {
+    auto kids_array = dest()->NewIndirect<CPDF_Array>();
+    pages->SetNewFor<CPDF_Number>("Count", 0);
+    pages->SetNewFor<CPDF_Reference>("Kids", dest(), kids_array->GetObjNum());
   }
   return true;
 }
@@ -358,11 +364,9 @@ uint32_t CPDF_PageOrganizer::GetNewObjId(CPDF_Reference* pRef) {
       return 0;
   }
 
-  RetainPtr<CPDF_Object> pIndirectClone(
-      dest()->AddIndirectObject(std::move(pClone)));
-  dwNewObjNum = pIndirectClone->GetObjNum();
+  dwNewObjNum = dest()->AddIndirectObject(pClone);
   AddObjectMapping(dwObjnum, dwNewObjNum);
-  if (!UpdateReference(std::move(pIndirectClone)))
+  if (!UpdateReference(std::move(pClone)))
     return 0;
 
   return dwNewObjNum;
@@ -404,12 +408,11 @@ bool CPDF_PageExporter::ExportPage(pdfium::span<const uint32_t> pageIndices,
     CPDF_DictionaryLocker locker(pSrcPageDict);
     for (const auto& it : locker) {
       const ByteString& cbSrcKeyStr = it.first;
+      const RetainPtr<CPDF_Object>& pObj = it.second;
       if (cbSrcKeyStr == pdfium::page_object::kType ||
           cbSrcKeyStr == pdfium::page_object::kParent) {
         continue;
       }
-
-      CPDF_Object* pObj = it.second.Get();
       pDestPageDict->SetFor(cbSrcKeyStr, pObj->Clone());
     }
 
@@ -564,8 +567,7 @@ bool CPDF_NPageToOneExporter::ExportNPagesToOne(
         return false;
 
       auto pSrcPage = pdfium::MakeRetain<CPDF_Page>(src(), pSrcPageDict);
-      pSrcPage->SetRenderCache(
-          std::make_unique<CPDF_PageRenderCache>(pSrcPage.Get()));
+      pSrcPage->AddPageImageCache();
       NupPageSettings settings =
           nupState.CalculateNewPagePosition(pSrcPage->GetPageSize());
       bsContent += AddSubPage(pSrcPage, settings);
@@ -605,8 +607,8 @@ RetainPtr<CPDF_Stream> CPDF_NPageToOneExporter::MakeXObjectFromPageRaw(
   RetainPtr<const CPDF_Object> pSrcContentObj =
       pSrcPageDict->GetDirectObjectFor(pdfium::page_object::kContents);
 
-  auto pNewXObject = dest()->NewIndirect<CPDF_Stream>(
-      nullptr, 0, dest()->New<CPDF_Dictionary>());
+  auto pNewXObject =
+      dest()->NewIndirect<CPDF_Stream>(dest()->New<CPDF_Dictionary>());
   RetainPtr<CPDF_Dictionary> pNewXObjectDict = pNewXObject->GetMutableDict();
   static const char kResourceString[] = "Resources";
   if (!CopyInheritable(pNewXObjectDict, pSrcPageDict, kResourceString)) {
@@ -679,11 +681,38 @@ void CPDF_NPageToOneExporter::FinishPage(
   for (auto& it : m_XObjectNameToNumberMap)
     pPageXObject->SetNewFor<CPDF_Reference>(it.first, dest(), it.second);
 
-  auto pDict = dest()->New<CPDF_Dictionary>();
-  auto pStream = dest()->NewIndirect<CPDF_Stream>(nullptr, 0, std::move(pDict));
+  auto pStream =
+      dest()->NewIndirect<CPDF_Stream>(dest()->New<CPDF_Dictionary>());
   pStream->SetData(bsContent.raw_span());
   pDestPageDict->SetNewFor<CPDF_Reference>(pdfium::page_object::kContents,
                                            dest(), pStream->GetObjNum());
+}
+
+// Make sure arrays only contain objects of basic types.
+bool IsValidViewerPreferencesArray(const CPDF_Array* array) {
+  CPDF_ArrayLocker locker(array);
+  for (const auto& obj : locker) {
+    if (obj->IsArray() || obj->IsDictionary() || obj->IsReference() ||
+        obj->IsStream()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsValidViewerPreferencesObject(const CPDF_Object* obj) {
+  // Per spec, there are no valid entries of these types.
+  if (obj->IsDictionary() || obj->IsNull() || obj->IsReference() ||
+      obj->IsStream()) {
+    return false;
+  }
+
+  const CPDF_Array* array = obj->AsArray();
+  if (!array) {
+    return true;
+  }
+
+  return IsValidViewerPreferencesArray(array);
 }
 
 }  // namespace
@@ -810,13 +839,11 @@ FPDF_NewFormObjectFromXObject(FPDF_XOBJECT xobject) {
   if (!xobj)
     return nullptr;
 
-  // If used directly with std::make_unique(), linking fails.
-  // Build toolchain bug?
-  constexpr int kNoContentStream = CPDF_PageObject::kNoContentStream;
   auto form = std::make_unique<CPDF_Form>(xobj->dest_doc, nullptr,
                                           xobj->xobject, nullptr);
+  form->ParseContent(nullptr, nullptr, nullptr);
   auto form_object = std::make_unique<CPDF_FormObject>(
-      kNoContentStream, std::move(form), CFX_Matrix());
+      CPDF_PageObject::kNoContentStream, std::move(form), CFX_Matrix());
   return FPDFPageObjectFromCPDFPageObject(form_object.release());
 }
 
@@ -830,9 +857,8 @@ FPDF_CopyViewerPreferences(FPDF_DOCUMENT dest_doc, FPDF_DOCUMENT src_doc) {
   if (!pSrcDoc)
     return false;
 
-  const CPDF_Dictionary* pSrcDict = pSrcDoc->GetRoot();
   RetainPtr<const CPDF_Dictionary> pPrefDict =
-      pSrcDict->GetDictFor("ViewerPreferences");
+      pSrcDoc->GetRoot()->GetDictFor("ViewerPreferences");
   if (!pPrefDict)
     return false;
 
@@ -840,6 +866,14 @@ FPDF_CopyViewerPreferences(FPDF_DOCUMENT dest_doc, FPDF_DOCUMENT src_doc) {
   if (!pDstDict)
     return false;
 
-  pDstDict->SetFor("ViewerPreferences", pPrefDict->CloneDirectObject());
+  auto cloned_dict = pdfium::MakeRetain<CPDF_Dictionary>();
+  CPDF_DictionaryLocker locker(pPrefDict);
+  for (const auto& it : locker) {
+    if (IsValidViewerPreferencesObject(it.second)) {
+      cloned_dict->SetFor(it.first, it.second->Clone());
+    }
+  }
+
+  pDstDict->SetFor("ViewerPreferences", std::move(cloned_dict));
   return true;
 }

@@ -18,6 +18,10 @@ namespace infobars {
 class ContentInfoBarManager;
 }  // namespace infobars
 
+namespace url {
+class Origin;
+}  // namespace url
+
 namespace webapps {
 
 class AppBannerManager;
@@ -37,6 +41,11 @@ class WebappsClient {
   // Return the webapps client.
   static WebappsClient* Get();
 
+  // Returns true if the given Origin should be considered secure enough to
+  // host an app. Returning false signals that other checks should be
+  // performed, not that the app is insecure.
+  virtual bool IsOriginConsideredSecure(const url::Origin& url) = 0;
+
   virtual security_state::SecurityLevel GetSecurityLevelForWebContents(
       content::WebContents* web_contents) = 0;
 
@@ -52,7 +61,6 @@ class WebappsClient {
 
 #if BUILDFLAG(IS_ANDROID)
   virtual bool IsInstallationInProgress(content::WebContents* web_contents,
-                                        const GURL& manifest_url,
                                         const GURL& manifest_id) = 0;
 
   virtual bool CanShowAppBanners(content::WebContents* web_contents) = 0;

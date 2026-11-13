@@ -5,8 +5,9 @@
 
 from . import base
 from testrunner.local import utils
-from testrunner.testproc.indicators import JsonTestProgressIndicator, PROGRESS_INDICATORS
-from testrunner.testproc.resultdb import ResultDBIndicator
+from testrunner.testproc.indicators import (
+    JsonTestProgressIndicator, TestScheduleIndicator, PROGRESS_INDICATORS)
+from testrunner.testproc.resultdb import rdb_sink, ResultDBIndicator
 
 
 class ResultsTracker(base.TestProcObserver):
@@ -30,7 +31,8 @@ class ResultsTracker(base.TestProcObserver):
 
   def _on_result_for(self, test, result):
     self.remaining -= 1
-    if result.has_unexpected_output:
+    # Count failures - treat flakes as failures, too.
+    if result.has_unexpected_output or result.is_rerun:
       self.failed += 1
       if self.max_failures and self.failed >= self.max_failures:
         print('>>> Too many failures, exiting...')
@@ -57,17 +59,22 @@ class ResultsTracker(base.TestProcObserver):
 
 class ProgressProc(base.TestProcObserver):
 
-  def __init__(self, context, options, framework_name, test_count):
+  def __init__(self, context, options, test_count):
     super(ProgressProc, self).__init__()
     self.procs = [
         PROGRESS_INDICATORS[options.progress](context, options, test_count)
     ]
+    if options.log_test_schedule:
+      self.procs.insert(
+          0,
+          TestScheduleIndicator(context, options, test_count))
     if options.json_test_results:
       self.procs.insert(
           0,
-          JsonTestProgressIndicator(context, options, test_count,
-                                    framework_name))
-    self.procs.append(ResultDBIndicator(context, options, test_count))
+          JsonTestProgressIndicator(context, options, test_count))
+    sink = rdb_sink()
+    if sink:
+      self.procs.append(ResultDBIndicator(context, options, test_count, sink))
     self._requirement = max(proc._requirement for proc in self.procs)
 
   def _on_result_for(self, test, result):

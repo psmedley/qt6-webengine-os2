@@ -6,9 +6,10 @@
 
 #include <stddef.h>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/i18n/rtl.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -113,8 +114,7 @@ void CustomHomePagesTableModel::MoveURLs(
   }
 
   // Insert moved elements.
-  std::copy(moved_entries.begin(), moved_entries.end(),
-      entries_.begin() + insert_before);
+  base::ranges::copy(moved_entries, entries_.begin() + insert_before);
 
   // Possibly large change, so tell the view to just rebuild itself.
   if (observer_)
@@ -161,7 +161,7 @@ void CustomHomePagesTableModel::SetToCurrentlyOpenPages(
 
   // Add tabs from appropriate browser windows.
   size_t add_index = 0;
-  for (auto* browser : *BrowserList::GetInstance()) {
+  for (Browser* browser : *BrowserList::GetInstance()) {
     if (!ShouldIncludeBrowser(browser))
       continue;
 

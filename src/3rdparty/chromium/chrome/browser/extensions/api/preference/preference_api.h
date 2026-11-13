@@ -18,15 +18,16 @@
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
-#include "extensions/browser/extension_prefs_helper.h"
+#include "extensions/common/api/types.h"
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include <optional>
+
 #include "chromeos/crosapi/mojom/prefs.mojom-shared.h"
 #include "chromeos/crosapi/mojom/prefs.mojom.h"
 #include "chromeos/lacros/crosapi_pref_observer.h"
 #include "chromeos/lacros/lacros_service.h"
 #include "components/prefs/pref_service.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #endif
 
 class PrefService;
@@ -70,7 +71,7 @@ class PreferenceEventRouter : public ProfileObserver {
   // Second callback to return additional detail about the extension-controlled
   // pref.
   void OnAshGetSuccess(const std::string& browser_pref,
-                       absl::optional<::base::Value> opt_value,
+                       std::optional<::base::Value> opt_value,
                        crosapi::mojom::PrefControlState control_state);
 
   // Callback for lacros version of the prefs, to update ash in the event that
@@ -97,6 +98,7 @@ class PreferenceAPI : public BrowserContextKeyedAPI,
                       public EventRouter::Observer,
                       public ContentSettingsStore::Observer {
  public:
+  using ChromeSettingScope = extensions::api::types::ChromeSettingScope;
   explicit PreferenceAPI(content::BrowserContext* context);
 
   PreferenceAPI(const PreferenceAPI&) = delete;
@@ -119,43 +121,6 @@ class PreferenceAPI : public BrowserContextKeyedAPI,
   // Ensures that a PreferenceEventRouter is created only once.
   void EnsurePreferenceEventRouterCreated();
 
-  // Set a new extension-controlled preference value.
-  void SetExtensionControlledPref(const std::string& extension_id,
-                                  const std::string& pref_key,
-                                  ExtensionPrefsScope scope,
-                                  base::Value value) {
-    prefs_helper_.SetExtensionControlledPref(extension_id, pref_key, scope,
-                                             std::move(value));
-  }
-
-  // Remove an extension-controlled preference value.
-  void RemoveExtensionControlledPref(const std::string& extension_id,
-                                     const std::string& pref_key,
-                                     ExtensionPrefsScope scope) {
-    prefs_helper_.RemoveExtensionControlledPref(extension_id, pref_key, scope);
-  }
-
-  // Returns true if currently no extension with higher precedence controls the
-  // preference.
-  bool CanExtensionControlPref(const std::string& extension_id,
-                               const std::string& pref_key,
-                               bool incognito) {
-    return prefs_helper_.CanExtensionControlPref(extension_id, pref_key,
-                                                 incognito);
-  }
-
-  // Returns true if extension |extension_id| currently controls the
-  // preference. If `from_incognito` is not NULL, looks at incognito preferences
-  // first, and `from_incognito` is set to true if the effective pref value is
-  // coming from the incognito preferences, false if it is coming from the
-  // normal ones.
-  bool DoesExtensionControlPref(const std::string& extension_id,
-                                const std::string& pref_key,
-                                bool* from_incognito) {
-    return prefs_helper_.DoesExtensionControlPref(extension_id, pref_key,
-                                                  from_incognito);
-  }
-
  private:
   friend class BrowserContextKeyedAPIFactory<PreferenceAPI>;
 
@@ -169,7 +134,6 @@ class PreferenceAPI : public BrowserContextKeyedAPI,
   scoped_refptr<ContentSettingsStore> content_settings_store();
 
   raw_ptr<Profile> profile_;
-  ExtensionPrefsHelper prefs_helper_;
 
   // BrowserContextKeyedAPI implementation.
   static const char* service_name() {
@@ -180,30 +144,6 @@ class PreferenceAPI : public BrowserContextKeyedAPI,
 
   // Created lazily upon OnListenerAdded.
   std::unique_ptr<PreferenceEventRouter> preference_event_router_;
-};
-
-class PrefTransformerInterface {
- public:
-  virtual ~PrefTransformerInterface() = default;
-
-  // Converts the representation of a preference as seen by the extension
-  // into a representation that is used in the pref stores of the browser.
-  // Returns the pref store representation in case of success or sets
-  // |error| and returns NULL otherwise. |bad_message| is passed to simulate
-  // the behavior of EXTENSION_FUNCTION_VALIDATE. It is never NULL.
-  // The ownership of the returned value is passed to the caller.
-  virtual std::unique_ptr<base::Value> ExtensionToBrowserPref(
-      const base::Value* extension_pref,
-      std::string* error,
-      bool* bad_message) = 0;
-
-  // Converts the representation of the preference as stored in the browser
-  // into a representation that is used by the extension.
-  // Returns the extension representation in case of success or NULL otherwise.
-  // The ownership of the returned value is passed to the caller.
-  virtual std::unique_ptr<base::Value> BrowserToExtensionPref(
-      const base::Value* browser_pref,
-      bool is_incognito_profile) = 0;
 };
 
 // A base class to provide functionality common to the other *PreferenceFunction
@@ -223,7 +163,7 @@ class GetPreferenceFunction : public PreferenceFunction {
   ~GetPreferenceFunction() override;
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  void OnLacrosGetSuccess(absl::optional<::base::Value> opt_value,
+  void OnLacrosGetSuccess(std::optional<::base::Value> opt_value,
                           crosapi::mojom::PrefControlState control_state);
 #endif
 
@@ -231,7 +171,7 @@ class GetPreferenceFunction : public PreferenceFunction {
   ResponseAction Run() override;
 
  private:
-  void ProduceGetResult(base::Value* result,
+  void ProduceGetResult(base::Value::Dict* result,
                         const base::Value* pref_value,
                         const std::string& level_of_control,
                         const std::string& browser_pref,

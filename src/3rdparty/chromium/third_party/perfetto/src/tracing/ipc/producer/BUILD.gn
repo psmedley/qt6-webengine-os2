@@ -23,6 +23,7 @@ source_set("producer") {
   public_deps = [
     "../../../../include/perfetto/ext/tracing/core",
     "../../../../include/perfetto/ext/tracing/ipc",
+    "../../../../include/perfetto/tracing",
     "../../../../protos/perfetto/ipc",
   ]
   sources = [
@@ -34,6 +35,7 @@ source_set("producer") {
     "../../../../gn:default_deps",
     "../../../base",
     "../../../base:version",
+    "../../core",
   ]
   if (perfetto_component_type == "static_library") {
     deps += [ "../../../ipc:perfetto_ipc" ]

@@ -16,12 +16,12 @@ import {NodeConnectionsPanel} from './NodeConnectionsPanel.js';  // eslint-disab
 
 const UIStrings = {
   /**
-  *@description Text that refers to the network connection
-  */
+   *@description Text that refers to the network connection
+   */
   connection: 'Connection',
   /**
- *@description A tag of Node.js Connection Panel that can be searched in the command menu
- */
+   *@description A tag of Node.js Connection Panel that can be searched in the command menu
+   */
   node: 'node',
   /**
    *@description Command for showing the Connection tool
@@ -29,12 +29,12 @@ const UIStrings = {
   showConnection: 'Show Connection',
   /**
    *@description Title of the 'Node' tool in the Network Navigator View, which is part of the Sources tool
-  */
+   */
   networkTitle: 'Node',
   /**
    *@description Command for showing the 'Node' tool in the Network Navigator View, which is part of the Sources tool
-  */
-  showNode: 'Node',
+   */
+  showNode: 'Show Node',
 };
 
 const str_ = i18n.i18n.registerUIStrings('entrypoints/node_app/node_app.ts', UIStrings);
@@ -56,7 +56,7 @@ UI.ViewManager.registerViewExtension({
   commandPrompt: i18nLazyString(UIStrings.showConnection),
   order: 0,
   async loadView() {
-    return NodeConnectionsPanel.instance();
+    return new NodeConnectionsPanel();
   },
   tags: [i18nLazyString(UIStrings.node)],
 });

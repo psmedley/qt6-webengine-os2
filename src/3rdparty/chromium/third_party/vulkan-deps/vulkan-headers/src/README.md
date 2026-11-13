@@ -1,78 +1,52 @@
+<!--
+Copyright 2018-2023 The Khronos Group Inc.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Vulkan-Headers
 
 Vulkan header files and API registry
 
-## Default branch changed to 'main' 2021-09-12
+This repository contains Vulkan header files, include files for C and C++,
+and related scripts and tests.
 
-As discussed in #222, the default branch of this repository is now 'main'. This change should be largely transparent to repository users, since github rewrites many references to the old 'master' branch to 'main'. However, if you have a checked-out local clone, you may wish to take the following steps as recommended by github:
+Most of the files in this repository are sourced from, or generated from,
+other repositories as described in [CONTRIBUTING.md](CONTRIBUTING.md).
+Vulkan-Headers exists as a staging area for these files, most of which are
+then consumed by downstream repositories used to build SDK components such
+as the Vulkan Validation Layers and Conformance Test Suite.
 
-```sh
-git branch -m master main
-git fetch origin
-git branch -u origin/main main
-git remote set-head origin -a
-```
+Developers normally obtain headers from the official
+[Vulkan-SDK](https://www.lunarg.com/vulkan-sdk/).
+They can also use headers from, or packaged from, this repository.
 
-## Repository Content
+In most cases, developers should only need the headers, not the scripts and
+other material in this repository.
+If you need to run the scripts, please use them from their canonical source
+in the [Vulkan Specification
+repository](https://github.com/KhronosGroup/Vulkan-Docs).
 
-The contents of this repository are largely obtained from other repositories
-and are collected, coordinated, and curated here.
+## Contributing
 
-If proposing changes to any file originating from a different repository,
-please propose such changes in that repository, rather than Vulkan-Headers.
-Files in this repository originate from:
+See the [CONTRIBUTING.md](CONTRIBUTING.md)
 
-### Specification repository (https://github.com/KhronosGroup/Vulkan-Docs)
+## Building
 
-* registry/cgenerator.py
-* registry/spec_tools/conventions.py
-* registry/generator.py
-* registry/genvk.py
-* registry/reg.py
-* registry/spec_tools/util.py
-* registry/validusage.json
-* registry/video.xml
-* registry/vk.xml
-* registry/vkconventions.py
-* All files under include/vulkan/ which are *not* listed explicitly as originating from another repository.
+See [BUILD.md](BUILD.md)
 
-### This repository (https://github.com/KhronosGroup/Vulkan-Headers)
+## SDK Support
 
-* .cmake-format.py
-* BUILD.gn
-* BUILD.md
-* CMakeLists.txt
-* CODE_OF_CONDUCT.md
-* LICENSE.txt
-* README.md
-* cmake/Copyright_cmake.txt
-* cmake/cmake_uninstall.cmake.in
-* Non-API headers (report issues to the [Vulkan-Loader/issues](https://github.com/KhronosGroup/Vulkan-Loader/issues) tracker)
-  * include/vulkan/vk_icd.h
-  * include/vulkan/vk_layer.h
-  * include/vulkan/vk_sdk_platform.h
+Vulkan-Headers are shipped as part of the official [Vulkan-SDK](https://www.lunarg.com/vulkan-sdk/)
 
-### Vulkan C++ Binding Repository (https://github.com/KhronosGroup/Vulkan-Hpp)
+## C/C++ Package Manager Support
 
-As of the Vulkan-Docs 1.2.182 spec update, the Vulkan-Hpp headers have been
-split into multiple files. All of those files are now included in this
-repository.
-
-* include/vulkan/vulkan.hpp
-* include/vulkan/vulkan_enums.hpp
-* include/vulkan/vulkan_funcs.hpp
-* include/vulkan/vulkan_handles.hpp
-* include/vulkan/vulkan_raii.hpp
-* include/vulkan/vulkan_structs.hpp
+`Vulkan-Headers` are also supported by both [conan](https://conan.io/) & [vcpkg](https://learn.microsoft.com/en-us/vcpkg/).
 
 ## Version Tagging Scheme
 
-Updates to the `Vulkan-Headers` repository which correspond to a new Vulkan
-specification release are tagged using the following format:
-`v<`_`version`_`>` (e.g., `v1.1.96`).
+Updates to this repository which correspond to a new Vulkan specification release are tagged using the following format: `v<`_`version`_`>` (e.g., `v1.3.266`).
 
-**Note**: Marked version releases have undergone thorough testing but do not
-imply the same quality level as SDK tags. SDK tags follow the
-`sdk-<`_`version`_`>.<`_`patch`_`>` format (e.g., `sdk-1.1.92.0`).
+**Note**: Marked version releases have undergone thorough testing but do not imply the same quality level as SDK tags. SDK tags follow the `vulkan-sdk-<`_`version`_`>.<`_`patch`_`>` format (e.g., `vulkan-sdk-1.3.266.0`).
 
-This scheme was adopted following the 1.1.96 Vulkan specification release.
+This scheme was adopted following the `1.3.266` Vulkan specification release.

@@ -9,8 +9,9 @@
 #define SKSL_TERNARYEXPRESSION
 
 #include "include/core/SkTypes.h"
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 #include "src/sksl/ir/SkSLType.h"
 
 #include <cstdint>
@@ -28,11 +29,11 @@ enum class OperatorPrecedence : uint8_t;
  */
 class TernaryExpression final : public Expression {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kTernary;
+    inline static constexpr Kind kIRNodeKind = Kind::kTernary;
 
     TernaryExpression(Position pos, std::unique_ptr<Expression> test,
             std::unique_ptr<Expression> ifTrue, std::unique_ptr<Expression> ifFalse)
-        : INHERITED(pos, kExpressionKind, &ifTrue->type())
+        : INHERITED(pos, kIRNodeKind, &ifTrue->type())
         , fTest(std::move(test))
         , fIfTrue(std::move(ifTrue))
         , fIfFalse(std::move(ifFalse)) {

@@ -13,6 +13,7 @@ class CSSParserContext;
 
 enum class CSSAtRuleID {
   kCSSAtRuleInvalid,
+  kCSSAtRuleViewTransition,
   kCSSAtRuleCharset,
   kCSSAtRuleFontFace,
   kCSSAtRuleFontPaletteValues,
@@ -27,13 +28,39 @@ enum class CSSAtRuleID {
   kCSSAtRuleContainer,
   kCSSAtRuleCounterStyle,
   kCSSAtRuleScope,
-  kCSSAtRuleScrollTimeline,
+  kCSSAtRuleStartingStyle,
   kCSSAtRuleSupports,
   kCSSAtRuleTry,
   kCSSAtRuleWebkitKeyframes,
+  // Font-feature-values related at-rule ids below:
+  kCSSAtRuleAnnotation,
+  kCSSAtRuleCharacterVariant,
+  kCSSAtRuleFontFeatureValues,
+  kCSSAtRuleOrnaments,
+  kCSSAtRuleStylistic,
+  kCSSAtRuleStyleset,
+  kCSSAtRuleSwash,
+  // https://www.w3.org/TR/css-page-3/#syntax-page-selector
+  kCSSAtRuleTopLeftCorner,
+  kCSSAtRuleTopLeft,
+  kCSSAtRuleTopCenter,
+  kCSSAtRuleTopRight,
+  kCSSAtRuleTopRightCorner,
+  kCSSAtRuleBottomLeftCorner,
+  kCSSAtRuleBottomLeft,
+  kCSSAtRuleBottomCenter,
+  kCSSAtRuleBottomRight,
+  kCSSAtRuleBottomRightCorner,
+  kCSSAtRuleLeftTop,
+  kCSSAtRuleLeftMiddle,
+  kCSSAtRuleLeftBottom,
+  kCSSAtRuleRightTop,
+  kCSSAtRuleRightMiddle,
+  kCSSAtRuleRightBottom,
 };
 
 CSSAtRuleID CssAtRuleID(StringView name);
+StringView CssAtRuleIDToString(CSSAtRuleID id);
 
 void CountAtRule(const CSSParserContext*, CSSAtRuleID);
 

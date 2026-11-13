@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 #include "core/fxcrt/fx_safe_types.h"
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
-#include "third_party/base/cxx17_backports.h"
 
 namespace {
 
@@ -68,12 +67,12 @@ std::pair<size_t, size_t> UTF8Decode(pdfium::span<const uint8_t> pSrc,
   return {iSrcNum, iDstNum};
 }
 
-#if defined(WCHAR_T_IS_UTF32)
+#if defined(WCHAR_T_IS_32_BIT)
 static_assert(sizeof(wchar_t) > 2, "wchar_t is too small");
 
 void UTF16ToWChar(void* pBuffer, size_t iLength) {
   DCHECK(pBuffer);
-  DCHECK_GT(iLength, 0);
+  DCHECK_GT(iLength, 0u);
 
   uint16_t* pSrc = static_cast<uint16_t*>(pBuffer);
   wchar_t* pDst = static_cast<wchar_t*>(pBuffer);
@@ -82,7 +81,7 @@ void UTF16ToWChar(void* pBuffer, size_t iLength) {
   for (size_t i = iLength; i > 0; --i)
     pDst[i - 1] = static_cast<wchar_t>(pSrc[i - 1]);
 }
-#endif  // defined(WCHAR_T_IS_UTF32)
+#endif  // defined(WCHAR_T_IS_32_BIT)
 
 void SwapByteOrder(uint16_t* pStr, size_t iLength) {
   while (iLength-- > 0) {
@@ -156,8 +155,7 @@ void CFX_SeekableStreamProxy::Seek(From eSeek, FX_FILESIZE iOffset) {
           new_pos.ValueOrDefault(std::numeric_limits<FX_FILESIZE>::max());
     } break;
   }
-  m_iPosition =
-      pdfium::clamp(m_iPosition, static_cast<FX_FILESIZE>(0), GetSize());
+  m_iPosition = std::clamp(m_iPosition, static_cast<FX_FILESIZE>(0), GetSize());
 }
 
 void CFX_SeekableStreamProxy::SetCodePage(FX_CodePage wCodePage) {
@@ -175,7 +173,7 @@ size_t CFX_SeekableStreamProxy::ReadData(uint8_t* pBuffer, size_t iBufferSize) {
   if (iBufferSize <= 0)
     return 0;
 
-  if (!m_pStream->ReadBlockAtOffset(pBuffer, m_iPosition, iBufferSize))
+  if (!m_pStream->ReadBlockAtOffset({pBuffer, iBufferSize}, m_iPosition))
     return 0;
 
   FX_SAFE_FILESIZE new_pos = m_iPosition;
@@ -196,7 +194,7 @@ size_t CFX_SeekableStreamProxy::ReadBlock(wchar_t* pStr, size_t size) {
     if (m_wCodePage == FX_CodePage::kUTF16BE)
       SwapByteOrder(reinterpret_cast<uint16_t*>(pStr), size);
 
-#if defined(WCHAR_T_IS_UTF32)
+#if defined(WCHAR_T_IS_32_BIT)
     if (size > 0)
       UTF16ToWChar(pStr, size);
 #endif

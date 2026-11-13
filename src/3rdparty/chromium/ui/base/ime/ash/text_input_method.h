@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
 #include "base/component_export.h"
+#include "base/functional/callback.h"
 #include "build/build_config.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/text_input_mode.h"
@@ -24,7 +24,6 @@ class Rect;
 }  // namespace gfx
 
 namespace ui {
-
 class VirtualKeyboardController;
 class KeyEvent;
 
@@ -34,8 +33,44 @@ enum class KeyEventHandledState {
   kNotHandled = 0,
   kHandledByIME = 1,
   kHandledByAssistiveSuggester = 2,
+  // Same as kNotHandled, except that the autorepeat for this key should be
+  // suppressed.
+  kNotHandledSuppressAutoRepeat = 3,
 };
 }  // namespace ime
+}  // namespace ui
+
+namespace ash {
+
+namespace ime {
+struct AssistiveWindow;
+}
+
+enum class PersonalizationMode {
+  // The input method MUST not use anything from the input field to update any
+  // personalized data (e.g. to improve suggestions quality). Personalization
+  // could be disabled if the content is privacy-sensitive (e.g. incognito mode
+  // in
+  // Chrome browser), or if using personalization does not make sense (e.g.
+  // playing a typing game may pollute the dictionary with uncommon words).
+  kDisabled,
+  // The input method MAY use the input field contents for personalization.
+  kEnabled
+};
+
+enum class AutocompletionMode { kUnspecified, kDisabled, kEnabled };
+
+enum class AutocorrectionMode { kUnspecified, kDisabled, kEnabled };
+
+enum class SpellcheckMode { kUnspecified, kDisabled, kEnabled };
+
+enum class AutocapitalizationMode {
+  kUnspecified,
+  kNone,
+  kCharacters,
+  kWords,
+  kSentences,
+};
 
 // An interface representing an input method that can read and manipulate text
 // in a TextInputTarget. For example, this can represent a Japanese input method
@@ -49,37 +84,31 @@ class COMPONENT_EXPORT(UI_BASE_IME_ASH) TextInputMethod {
   // A type of each member is based on the html spec, but InputContext can be
   // used to specify about a non html text field like Omnibox.
   struct InputContext {
-    InputContext(TextInputType type,
-                 TextInputMode mode,
-                 int flags,
-                 TextInputClient::FocusReason focus_reason,
-                 bool should_do_learning)
-        : type(type),
-          mode(mode),
-          flags(flags),
-          focus_reason(focus_reason),
-          should_do_learning(should_do_learning) {}
-    TextInputType type;
-    TextInputMode mode;
-    // Flags for web input fields. Please refer to WebTextInputType.
-    int flags;
+    explicit InputContext(ui::TextInputType type) : type(type) {}
+
+    ui::TextInputType type = ui::TEXT_INPUT_TYPE_NONE;
+    ui::TextInputMode mode = ui::TEXT_INPUT_MODE_DEFAULT;
+    AutocompletionMode autocompletion_mode = AutocompletionMode::kUnspecified;
+    AutocorrectionMode autocorrection_mode = AutocorrectionMode::kUnspecified;
+    SpellcheckMode spellcheck_mode = SpellcheckMode::kUnspecified;
+    AutocapitalizationMode autocapitalization_mode =
+        AutocapitalizationMode::kUnspecified;
     // How this input field was focused.
-    TextInputClient::FocusReason focus_reason;
+    ui::TextInputClient::FocusReason focus_reason =
+        ui::TextInputClient::FOCUS_REASON_NONE;
     // Whether text entered in this field should be used to improve typing
     // suggestions for the user.
-    bool should_do_learning;
+    PersonalizationMode personalization_mode = PersonalizationMode::kDisabled;
   };
 
   virtual ~TextInputMethod() = default;
 
-  // Called when an input field gains focus.
-  virtual void FocusIn(const InputContext& input_context) = 0;
+  // Informs the input method that an input field has gained focus.
+  // `input_context` contains information about the newly focused input field.
+  virtual void Focus(const InputContext& input_context) = 0;
 
-  // Called on touch inside an input field which already has focus.
-  virtual void OnTouch(ui::EventPointerType pointerType) = 0;
-
-  // Called when the currently focused input field loses the focus.
-  virtual void FocusOut() = 0;
+  // Informs the input method that focus has been lost.
+  virtual void Blur() = 0;
 
   // Called when the IME is enabled.
   virtual void Enable(const std::string& component_id) = 0;
@@ -92,21 +121,17 @@ class COMPONENT_EXPORT(UI_BASE_IME_ASH) TextInputMethod {
 
   // Called when the key event is received.
   // Actual implementation must call |callback| after key event handling.
-  virtual void ProcessKeyEvent(const KeyEvent& key_event,
+  virtual void ProcessKeyEvent(const ui::KeyEvent& key_event,
                                KeyEventDoneCallback callback) = 0;
 
-  // Called when a new surrounding text is set. The |text| is surrounding text
-  // and |cursor_pos| is 0 based index of cursor position in |text|. If there is
-  // selection range, |anchor_pos| represents opposite index from |cursor_pos|.
-  // Otherwise |anchor_pos| is equal to |cursor_pos|. If not all surrounding
-  // text is given |offset_pos| indicates the starting offset of |text|.
+  // Called when the surrounding text has changed. The |text| is surrounding
+  // text and |selection_range| is the range of selection within |text|.
+  // |selection_range| has a direction: the start is also called the 'anchor`
+  // and the end is also called the 'focus'. If not all surrounding text is
+  // given, |offset_pos| indicates the starting offset of |text|.
   virtual void SetSurroundingText(const std::u16string& text,
-                                  uint32_t cursor_pos,
-                                  uint32_t anchor_pos,
+                                  gfx::Range selection_range,
                                   uint32_t offset_pos) = 0;
-
-  // Called when the composition bounds changed.
-  virtual void SetCompositionBounds(const std::vector<gfx::Rect>& bounds) = 0;
 
   // Called when caret bounds changed.
   virtual void SetCaretBounds(const gfx::Rect& caret_bounds) = 0;
@@ -126,14 +151,13 @@ class COMPONENT_EXPORT(UI_BASE_IME_ASH) TextInputMethod {
   virtual void AssistiveWindowButtonClicked(
       const ui::ime::AssistiveWindowButton& button) {}
 
-  // Sets the mirroring/casting enable states.
-  virtual void SetMirroringEnabled(bool mirroring_enabled) = 0;
-  virtual void SetCastingEnabled(bool casting_enabled) = 0;
+  // Called when an input's assistive window state is updated.
+  virtual void AssistiveWindowChanged(const ime::AssistiveWindow& window) = 0;
 
   // Returns whether the IME is ready to accept key events for testing.
   virtual bool IsReadyForTesting() = 0;
 };
 
-}  // namespace ui
+}  // namespace ash
 
 #endif  // UI_BASE_IME_ASH_TEXT_INPUT_METHOD_H_

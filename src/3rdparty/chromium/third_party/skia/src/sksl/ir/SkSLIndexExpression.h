@@ -8,8 +8,9 @@
 #ifndef SKSL_INDEX
 #define SKSL_INDEX
 
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 
 #include <cstdint>
 #include <memory>
@@ -19,25 +20,24 @@
 namespace SkSL {
 
 class Context;
-class SymbolTable;
 class Type;
 enum class OperatorPrecedence : uint8_t;
 
 /**
- * An expression which extracts a value from an array or matrix, as in 'm[2]'.
+ * An expression which extracts a value from an array, vector or matrix, as in 'm[2]'.
  */
-struct IndexExpression final : public Expression {
-    inline static constexpr Kind kExpressionKind = Kind::kIndex;
+class IndexExpression final : public Expression {
+public:
+    inline static constexpr Kind kIRNodeKind = Kind::kIndex;
 
     IndexExpression(const Context& context, Position pos, std::unique_ptr<Expression> base,
                     std::unique_ptr<Expression> index)
-        : INHERITED(pos, kExpressionKind, &IndexType(context, base->type()))
+        : INHERITED(pos, kIRNodeKind, &IndexType(context, base->type()))
         , fBase(std::move(base))
         , fIndex(std::move(index)) {}
 
     // Returns a simplified index-expression; reports errors via the ErrorReporter.
     static std::unique_ptr<Expression> Convert(const Context& context,
-                                               SymbolTable& symbolTable,
                                                Position pos,
                                                std::unique_ptr<Expression> base,
                                                std::unique_ptr<Expression> index);

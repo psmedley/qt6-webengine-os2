@@ -1,16 +1,29 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/d3d12/RenderPipelineD3D12.h"
 
@@ -22,84 +35,18 @@
 #include "dawn/common/Assert.h"
 #include "dawn/common/Log.h"
 #include "dawn/native/CreatePipelineAsyncTask.h"
-#include "dawn/native/d3d12/BlobD3D12.h"
-#include "dawn/native/d3d12/D3D12Error.h"
+#include "dawn/native/d3d/BlobD3D.h"
+#include "dawn/native/d3d/D3DError.h"
 #include "dawn/native/d3d12/DeviceD3D12.h"
 #include "dawn/native/d3d12/PipelineLayoutD3D12.h"
-#include "dawn/native/d3d12/PlatformFunctions.h"
+#include "dawn/native/d3d12/PlatformFunctionsD3D12.h"
 #include "dawn/native/d3d12/ShaderModuleD3D12.h"
 #include "dawn/native/d3d12/TextureD3D12.h"
 #include "dawn/native/d3d12/UtilsD3D12.h"
+#include "dawn/platform/metrics/HistogramMacros.h"
 
 namespace dawn::native::d3d12 {
-
 namespace {
-DXGI_FORMAT VertexFormatType(wgpu::VertexFormat format) {
-    switch (format) {
-        case wgpu::VertexFormat::Uint8x2:
-            return DXGI_FORMAT_R8G8_UINT;
-        case wgpu::VertexFormat::Uint8x4:
-            return DXGI_FORMAT_R8G8B8A8_UINT;
-        case wgpu::VertexFormat::Sint8x2:
-            return DXGI_FORMAT_R8G8_SINT;
-        case wgpu::VertexFormat::Sint8x4:
-            return DXGI_FORMAT_R8G8B8A8_SINT;
-        case wgpu::VertexFormat::Unorm8x2:
-            return DXGI_FORMAT_R8G8_UNORM;
-        case wgpu::VertexFormat::Unorm8x4:
-            return DXGI_FORMAT_R8G8B8A8_UNORM;
-        case wgpu::VertexFormat::Snorm8x2:
-            return DXGI_FORMAT_R8G8_SNORM;
-        case wgpu::VertexFormat::Snorm8x4:
-            return DXGI_FORMAT_R8G8B8A8_SNORM;
-        case wgpu::VertexFormat::Uint16x2:
-            return DXGI_FORMAT_R16G16_UINT;
-        case wgpu::VertexFormat::Uint16x4:
-            return DXGI_FORMAT_R16G16B16A16_UINT;
-        case wgpu::VertexFormat::Sint16x2:
-            return DXGI_FORMAT_R16G16_SINT;
-        case wgpu::VertexFormat::Sint16x4:
-            return DXGI_FORMAT_R16G16B16A16_SINT;
-        case wgpu::VertexFormat::Unorm16x2:
-            return DXGI_FORMAT_R16G16_UNORM;
-        case wgpu::VertexFormat::Unorm16x4:
-            return DXGI_FORMAT_R16G16B16A16_UNORM;
-        case wgpu::VertexFormat::Snorm16x2:
-            return DXGI_FORMAT_R16G16_SNORM;
-        case wgpu::VertexFormat::Snorm16x4:
-            return DXGI_FORMAT_R16G16B16A16_SNORM;
-        case wgpu::VertexFormat::Float16x2:
-            return DXGI_FORMAT_R16G16_FLOAT;
-        case wgpu::VertexFormat::Float16x4:
-            return DXGI_FORMAT_R16G16B16A16_FLOAT;
-        case wgpu::VertexFormat::Float32:
-            return DXGI_FORMAT_R32_FLOAT;
-        case wgpu::VertexFormat::Float32x2:
-            return DXGI_FORMAT_R32G32_FLOAT;
-        case wgpu::VertexFormat::Float32x3:
-            return DXGI_FORMAT_R32G32B32_FLOAT;
-        case wgpu::VertexFormat::Float32x4:
-            return DXGI_FORMAT_R32G32B32A32_FLOAT;
-        case wgpu::VertexFormat::Uint32:
-            return DXGI_FORMAT_R32_UINT;
-        case wgpu::VertexFormat::Uint32x2:
-            return DXGI_FORMAT_R32G32_UINT;
-        case wgpu::VertexFormat::Uint32x3:
-            return DXGI_FORMAT_R32G32B32_UINT;
-        case wgpu::VertexFormat::Uint32x4:
-            return DXGI_FORMAT_R32G32B32A32_UINT;
-        case wgpu::VertexFormat::Sint32:
-            return DXGI_FORMAT_R32_SINT;
-        case wgpu::VertexFormat::Sint32x2:
-            return DXGI_FORMAT_R32G32_SINT;
-        case wgpu::VertexFormat::Sint32x3:
-            return DXGI_FORMAT_R32G32B32_SINT;
-        case wgpu::VertexFormat::Sint32x4:
-            return DXGI_FORMAT_R32G32B32A32_SINT;
-        default:
-            UNREACHABLE();
-    }
-}
 
 D3D12_INPUT_CLASSIFICATION VertexStepModeFunction(wgpu::VertexStepMode mode) {
     switch (mode) {
@@ -108,8 +55,10 @@ D3D12_INPUT_CLASSIFICATION VertexStepModeFunction(wgpu::VertexStepMode mode) {
         case wgpu::VertexStepMode::Instance:
             return D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA;
         case wgpu::VertexStepMode::VertexBufferNotUsed:
-            UNREACHABLE();
+        case wgpu::VertexStepMode::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 D3D12_PRIMITIVE_TOPOLOGY D3D12PrimitiveTopology(wgpu::PrimitiveTopology primitiveTopology) {
@@ -124,7 +73,10 @@ D3D12_PRIMITIVE_TOPOLOGY D3D12PrimitiveTopology(wgpu::PrimitiveTopology primitiv
             return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
         case wgpu::PrimitiveTopology::TriangleStrip:
             return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+        case wgpu::PrimitiveTopology::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 D3D12_PRIMITIVE_TOPOLOGY_TYPE D3D12PrimitiveTopologyType(
@@ -138,7 +90,10 @@ D3D12_PRIMITIVE_TOPOLOGY_TYPE D3D12PrimitiveTopologyType(
         case wgpu::PrimitiveTopology::TriangleList:
         case wgpu::PrimitiveTopology::TriangleStrip:
             return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        case wgpu::PrimitiveTopology::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 D3D12_CULL_MODE D3D12CullMode(wgpu::CullMode mode) {
@@ -149,7 +104,10 @@ D3D12_CULL_MODE D3D12CullMode(wgpu::CullMode mode) {
             return D3D12_CULL_MODE_FRONT;
         case wgpu::CullMode::Back:
             return D3D12_CULL_MODE_BACK;
+        case wgpu::CullMode::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 D3D12_BLEND D3D12Blend(wgpu::BlendFactor factor) {
@@ -180,7 +138,18 @@ D3D12_BLEND D3D12Blend(wgpu::BlendFactor factor) {
             return D3D12_BLEND_BLEND_FACTOR;
         case wgpu::BlendFactor::OneMinusConstant:
             return D3D12_BLEND_INV_BLEND_FACTOR;
+        case wgpu::BlendFactor::Src1:
+            return D3D12_BLEND_SRC1_COLOR;
+        case wgpu::BlendFactor::OneMinusSrc1:
+            return D3D12_BLEND_INV_SRC1_COLOR;
+        case wgpu::BlendFactor::Src1Alpha:
+            return D3D12_BLEND_SRC1_ALPHA;
+        case wgpu::BlendFactor::OneMinusSrc1Alpha:
+            return D3D12_BLEND_INV_SRC1_ALPHA;
+        case wgpu::BlendFactor::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 // When a blend factor is defined for the alpha channel, any of the factors that don't
@@ -196,6 +165,10 @@ D3D12_BLEND D3D12AlphaBlend(wgpu::BlendFactor factor) {
             return D3D12_BLEND_DEST_ALPHA;
         case wgpu::BlendFactor::OneMinusDst:
             return D3D12_BLEND_INV_DEST_ALPHA;
+        case wgpu::BlendFactor::Src1:
+            return D3D12_BLEND_SRC1_ALPHA;
+        case wgpu::BlendFactor::OneMinusSrc1:
+            return D3D12_BLEND_INV_SRC1_ALPHA;
 
         // Other blend factors translate to the same D3D12 enum as the color blend factors.
         default:
@@ -215,7 +188,10 @@ D3D12_BLEND_OP D3D12BlendOperation(wgpu::BlendOperation operation) {
             return D3D12_BLEND_OP_MIN;
         case wgpu::BlendOperation::Max:
             return D3D12_BLEND_OP_MAX;
+        case wgpu::BlendOperation::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 uint8_t D3D12RenderTargetWriteMask(wgpu::ColorWriteMask writeMask) {
@@ -234,16 +210,41 @@ uint8_t D3D12RenderTargetWriteMask(wgpu::ColorWriteMask writeMask) {
     return static_cast<uint8_t>(writeMask);
 }
 
-D3D12_RENDER_TARGET_BLEND_DESC ComputeColorDesc(const ColorTargetState* state) {
+D3D12_RENDER_TARGET_BLEND_DESC ComputeColorDesc(const DeviceBase* device,
+                                                const ColorTargetState* state) {
     D3D12_RENDER_TARGET_BLEND_DESC blendDesc = {};
     blendDesc.BlendEnable = state->blend != nullptr;
     if (blendDesc.BlendEnable) {
         blendDesc.SrcBlend = D3D12Blend(state->blend->color.srcFactor);
+        if (device->GetValidInternalFormat(state->format).componentCount < 4 &&
+            blendDesc.SrcBlend == D3D12_BLEND_DEST_ALPHA) {
+            // According to the D3D SPEC, the default value for missing components in an element
+            // format is "0" for any component except A, which gets "1". So here
+            // D3D12_BLEND_DEST_ALPHA should have same effect as D3D12_BLEND_ONE.
+            // Note that this replacement can be an optimization as using D3D12_BLEND_ONE means the
+            // GPU hardware no longer needs to get pixels from the destination texture. It can also
+            // be served as a workaround against an Intel driver issue about alpha blending (see
+            // http://crbug.com/dawn/1579 for more details).
+            blendDesc.SrcBlend = D3D12_BLEND_ONE;
+        }
+
         blendDesc.DestBlend = D3D12Blend(state->blend->color.dstFactor);
         blendDesc.BlendOp = D3D12BlendOperation(state->blend->color.operation);
         blendDesc.SrcBlendAlpha = D3D12AlphaBlend(state->blend->alpha.srcFactor);
         blendDesc.DestBlendAlpha = D3D12AlphaBlend(state->blend->alpha.dstFactor);
         blendDesc.BlendOpAlpha = D3D12BlendOperation(state->blend->alpha.operation);
+
+        if (device->IsToggleEnabled(
+                Toggle::D3D12ReplaceAddWithMinusWhenDstFactorIsZeroAndSrcFactorIsDstAlpha) &&
+            blendDesc.SrcBlend == D3D12_BLEND_DEST_ALPHA &&
+            blendDesc.SrcBlendAlpha == D3D12_BLEND_DEST_ALPHA &&
+            blendDesc.BlendOp == D3D12_BLEND_OP_ADD &&
+            blendDesc.BlendOpAlpha == D3D12_BLEND_OP_ADD &&
+            blendDesc.DestBlend == D3D12_BLEND_ZERO &&
+            blendDesc.DestBlendAlpha == D3D12_BLEND_ZERO) {
+            blendDesc.BlendOp = D3D12_BLEND_OP_SUBTRACT;
+            blendDesc.BlendOpAlpha = D3D12_BLEND_OP_SUBTRACT;
+        }
     }
     blendDesc.RenderTargetWriteMask = D3D12RenderTargetWriteMask(state->writeMask);
     blendDesc.LogicOpEnable = false;
@@ -269,7 +270,10 @@ D3D12_STENCIL_OP StencilOp(wgpu::StencilOperation op) {
             return D3D12_STENCIL_OP_INCR;
         case wgpu::StencilOperation::DecrementWrap:
             return D3D12_STENCIL_OP_DECR;
+        case wgpu::StencilOperation::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 D3D12_DEPTH_STENCILOP_DESC StencilOpDesc(const StencilFaceState& descriptor) {
@@ -325,7 +329,7 @@ D3D12_INDEX_BUFFER_STRIP_CUT_VALUE ComputeIndexBufferStripCutValue(
 
 Ref<RenderPipeline> RenderPipeline::CreateUninitialized(
     Device* device,
-    const RenderPipelineDescriptor* descriptor) {
+    const UnpackedPtr<RenderPipelineDescriptor>& descriptor) {
     return AcquireRef(new RenderPipeline(device, descriptor));
 }
 
@@ -342,12 +346,19 @@ MaybeError RenderPipeline::Initialize() {
         compileFlags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
     }
 
-    // SPRIV-cross does matrix multiplication expecting row major matrices
+    if (device->IsToggleEnabled(Toggle::UseDXC) &&
+        ((compileFlags & D3DCOMPILE_OPTIMIZATION_LEVEL2) == 0)) {
+        // DXC's default opt level is /O3, unlike FXC's /O1. Set explicitly, otherwise there's no
+        // way to tell if we want /O1 as D3DCOMPILE_OPTIMIZATION_LEVEL1 is defined to 0.
+        compileFlags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    }
+
+    // Tint does matrix multiplication expecting row major matrices
     compileFlags |= D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
 
-    // FXC can miscompile code that depends on special float values (NaN, INF, etc) when IEEE
-    // strictness is not enabled. See crbug.com/tint/976.
-    compileFlags |= D3DCOMPILE_IEEE_STRICTNESS;
+    if (!device->IsToggleEnabled(Toggle::D3DDisableIEEEStrictness)) {
+        compileFlags |= D3DCOMPILE_IEEE_STRICTNESS;
+    }
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC descriptorD3D12 = {};
 
@@ -355,18 +366,30 @@ MaybeError RenderPipeline::Initialize() {
     shaders[SingleShaderStage::Vertex] = &descriptorD3D12.VS;
     shaders[SingleShaderStage::Fragment] = &descriptorD3D12.PS;
 
-    PerStage<CompiledShader> compiledShader;
+    PerStage<d3d::CompiledShader> compiledShader;
+
+    std::optional<dawn::native::d3d::InterStageShaderVariablesMask> usedInterstageVariables;
+    dawn::native::EntryPointMetadata fragmentEntryPoint;
+    if (GetStageMask() & wgpu::ShaderStage::Fragment) {
+        // Now that only fragment shader can have interstage inputs.
+        const ProgrammableStage& programmableStage = GetStage(SingleShaderStage::Fragment);
+        fragmentEntryPoint = programmableStage.module->GetEntryPoint(programmableStage.entryPoint);
+        usedInterstageVariables = dawn::native::d3d::ToInterStageShaderVariablesMask(
+            fragmentEntryPoint.usedInterStageVariables);
+    }
 
     for (auto stage : IterateStages(GetStageMask())) {
         const ProgrammableStage& programmableStage = GetStage(stage);
-        DAWN_TRY_ASSIGN(compiledShader[stage], ToBackend(programmableStage.module)
-                                                   ->Compile(programmableStage, stage,
-                                                             ToBackend(GetLayout()), compileFlags));
-        *shaders[stage] = compiledShader[stage].GetD3D12ShaderBytecode();
+        DAWN_TRY_ASSIGN(compiledShader[stage],
+                        ToBackend(programmableStage.module)
+                            ->Compile(programmableStage, stage, ToBackend(GetLayout()),
+                                      compileFlags, usedInterstageVariables));
+        *shaders[stage] = {compiledShader[stage].shaderBlob.Data(),
+                           compiledShader[stage].shaderBlob.Size()};
     }
 
-    mUsesVertexOrInstanceIndex =
-        compiledShader[SingleShaderStage::Vertex].usesVertexOrInstanceIndex;
+    mUsesVertexOrInstanceIndex = compiledShader[SingleShaderStage::Vertex].usesVertexIndex ||
+                                 compiledShader[SingleShaderStage::Vertex].usesInstanceIndex;
 
     PipelineLayout* layout = ToBackend(GetLayout());
 
@@ -395,7 +418,7 @@ MaybeError RenderPipeline::Initialize() {
     descriptorD3D12.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
     if (HasDepthStencilAttachment()) {
-        descriptorD3D12.DSVFormat = D3D12TextureFormat(GetDepthStencilFormat());
+        descriptorD3D12.DSVFormat = d3d::DXGITextureFormat(GetDepthStencilFormat());
     }
 
     static_assert(kMaxColorAttachments == 8);
@@ -403,15 +426,14 @@ MaybeError RenderPipeline::Initialize() {
         descriptorD3D12.RTVFormats[i] = DXGI_FORMAT_UNKNOWN;
         descriptorD3D12.BlendState.RenderTarget[i].LogicOp = D3D12_LOGIC_OP_NOOP;
     }
-    ColorAttachmentIndex highestColorAttachmentIndexPlusOne =
-        GetHighestBitIndexPlusOne(GetColorAttachmentsMask());
-    for (ColorAttachmentIndex i : IterateBitSet(GetColorAttachmentsMask())) {
+    auto highestColorAttachmentIndexPlusOne = GetHighestBitIndexPlusOne(GetColorAttachmentsMask());
+    for (auto i : IterateBitSet(GetColorAttachmentsMask())) {
         descriptorD3D12.RTVFormats[static_cast<uint8_t>(i)] =
-            D3D12TextureFormat(GetColorAttachmentFormat(i));
+            d3d::DXGITextureFormat(GetColorAttachmentFormat(i));
         descriptorD3D12.BlendState.RenderTarget[static_cast<uint8_t>(i)] =
-            ComputeColorDesc(GetColorTargetState(i));
+            ComputeColorDesc(device, GetColorTargetState(i));
     }
-    ASSERT(highestColorAttachmentIndexPlusOne <= kMaxColorAttachmentsTyped);
+    DAWN_ASSERT(highestColorAttachmentIndexPlusOne <= kMaxColorAttachmentsTyped);
     descriptorD3D12.NumRenderTargets = static_cast<uint8_t>(highestColorAttachmentIndexPlusOne);
 
     descriptorD3D12.BlendState.AlphaToCoverageEnable = IsAlphaToCoverageEnabled();
@@ -430,23 +452,39 @@ MaybeError RenderPipeline::Initialize() {
 
     // Try to see if we have anything in the blob cache.
     Blob blob = device->LoadCachedBlob(GetCacheKey());
-    const bool cacheHit = !blob.Empty();
+    bool cacheHit = !blob.Empty();
     if (cacheHit) {
         // Cache hits, attach cached blob to descriptor.
         descriptorD3D12.CachedPSO.pCachedBlob = blob.Data();
         descriptorD3D12.CachedPSO.CachedBlobSizeInBytes = blob.Size();
     }
 
-    DAWN_TRY(CheckHRESULT(device->GetD3D12Device()->CreateGraphicsPipelineState(
-                              &descriptorD3D12, IID_PPV_ARGS(&mPipelineState)),
-                          "D3D12 create graphics pipeline state"));
+    // We don't use the scoped cache histogram counters for the cache hit here so that we can
+    // condition on whether it fails appropriately.
+    auto* d3d12Device = device->GetD3D12Device();
+    platform::metrics::DawnHistogramTimer cacheTimer(device->GetPlatform());
+    HRESULT result =
+        d3d12Device->CreateGraphicsPipelineState(&descriptorD3D12, IID_PPV_ARGS(&mPipelineState));
+    if (cacheHit && result == D3D12_ERROR_DRIVER_VERSION_MISMATCH) {
+        // See dawn:1878 where it is possible for the PSO creation to fail with this error.
+        cacheHit = false;
+        descriptorD3D12.CachedPSO.pCachedBlob = nullptr;
+        descriptorD3D12.CachedPSO.CachedBlobSizeInBytes = 0;
+        cacheTimer.Reset();
+        result = d3d12Device->CreateGraphicsPipelineState(&descriptorD3D12,
+                                                          IID_PPV_ARGS(&mPipelineState));
+    }
+    DAWN_TRY(CheckHRESULT(result, "D3D12 create graphics pipeline state"));
 
     if (!cacheHit) {
         // Cache misses, need to get pipeline cached blob and store.
+        cacheTimer.RecordMicroseconds("D3D12.CreateGraphicsPipelineState.CacheMiss");
         ComPtr<ID3DBlob> d3dBlob;
         DAWN_TRY(CheckHRESULT(GetPipelineState()->GetCachedBlob(&d3dBlob),
                               "D3D12 render pipeline state get cached blob"));
         device->StoreCachedBlob(GetCacheKey(), CreateBlob(std::move(d3dBlob)));
+    } else {
+        cacheTimer.RecordMicroseconds("D3D12.CreateGraphicsPipelineState.CacheHit");
     }
 
     SetLabelImpl();
@@ -506,7 +544,7 @@ D3D12_INPUT_LAYOUT_DESC RenderPipeline::ComputeInputLayout(
         // SemanticIndex N
         inputElementDescriptor.SemanticName = "TEXCOORD";
         inputElementDescriptor.SemanticIndex = static_cast<uint8_t>(loc);
-        inputElementDescriptor.Format = VertexFormatType(attribute.format);
+        inputElementDescriptor.Format = d3d::DXGIVertexFormat(attribute.format);
         inputElementDescriptor.InputSlot = static_cast<uint8_t>(attribute.vertexBufferSlot);
 
         const VertexBufferInfo& input = GetVertexBuffer(attribute.vertexBufferSlot);

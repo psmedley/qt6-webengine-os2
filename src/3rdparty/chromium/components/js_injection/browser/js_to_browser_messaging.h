@@ -17,6 +17,7 @@
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "third_party/blink/public/common/messaging/message_port_descriptor.h"
+#include "third_party/blink/public/common/messaging/string_message_codec.h"
 
 namespace content {
 class RenderFrameHost;
@@ -47,7 +48,7 @@ class JsToBrowserMessaging : public mojom::JsToBrowserMessaging {
   void OnBackForwardCacheStateChanged();
 
   // mojom::JsToBrowserMessaging implementation.
-  void PostMessage(const std::u16string& message,
+  void PostMessage(blink::WebMessagePayload message,
                    std::vector<blink::MessagePortDescriptor> ports) override;
   void SetBrowserToJsMessaging(
       mojo::PendingAssociatedRemote<mojom::BrowserToJsMessaging>
@@ -63,6 +64,7 @@ class JsToBrowserMessaging : public mojom::JsToBrowserMessaging {
   mojo::AssociatedReceiver<mojom::JsToBrowserMessaging> receiver_{this};
   std::unique_ptr<WebMessageHost> host_;
 #if DCHECK_IS_ON()
+  std::string top_level_origin_string_;
   std::string origin_string_;
   bool is_main_frame_;
 #endif

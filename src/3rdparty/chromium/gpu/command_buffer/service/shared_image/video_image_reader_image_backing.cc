@@ -10,11 +10,10 @@
 #include "base/android/scoped_hardware_buffer_fence_sync.h"
 #include "base/android/scoped_hardware_buffer_handle.h"
 #include "base/task/bind_post_task.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/viz/common/gpu/vulkan_context_provider.h"
-#include "components/viz/common/resources/resource_format_utils.h"
-#include "components/viz/common/resources/resource_sizes.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
+#include "gpu/command_buffer/service/abstract_texture_android.h"
 #include "gpu/command_buffer/service/ahardwarebuffer_utils.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
@@ -25,18 +24,19 @@
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "gpu/command_buffer/service/texture_owner.h"
-#include "gpu/ipc/common/android/android_image_reader_utils.h"
 #include "gpu/vulkan/vulkan_device_queue.h"
 #include "gpu/vulkan/vulkan_fence_helper.h"
 #include "gpu/vulkan/vulkan_function_pointers.h"
 #include "gpu/vulkan/vulkan_image.h"
 #include "gpu/vulkan/vulkan_implementation.h"
 #include "gpu/vulkan/vulkan_util.h"
-#include "third_party/skia/include/core/SkPromiseImageTexture.h"
 #include "third_party/skia/include/gpu/GrBackendSemaphore.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
-#include "ui/gl/gl_image_ahardwarebuffer.h"
+#include "third_party/skia/include/gpu/ganesh/vk/GrVkBackendSurface.h"
+#include "third_party/skia/include/private/chromium/GrPromiseImageTexture.h"
+#include "ui/gl/android/egl_fence_utils.h"
 #include "ui/gl/gl_utils.h"
+#include "ui/gl/scoped_restore_texture.h"
 
 namespace gpu {
 
@@ -45,27 +45,30 @@ void CreateAndBindEglImageFromAHB(AHardwareBuffer* buffer, GLuint service_id) {
   DCHECK(buffer);
 
   AHardwareBuffer_Desc desc;
+
   base::AndroidHardwareBufferCompat::GetInstance().Describe(buffer, &desc);
-  auto egl_image = base::MakeRefCounted<gl::GLImageAHardwareBuffer>(
-      gfx::Size(desc.width, desc.height));
-  if (egl_image->Initialize(buffer, false)) {
+  auto egl_image = CreateEGLImageFromAHardwareBuffer(buffer);
+  if (egl_image.is_valid()) {
+    // We should never alter gl binding without updating state tracking, which
+    // we can't do here, so restore previous after we done.
+    gl::ScopedRestoreTexture scoped_restore(gl::g_current_gl_context,
+                                            GL_TEXTURE_EXTERNAL_OES);
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, service_id);
-    egl_image->BindTexImage(GL_TEXTURE_EXTERNAL_OES);
+    glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, egl_image.get());
   } else {
     LOG(ERROR) << "Failed to create EGL image ";
   }
 }
 
-class VideoImage : public gl::GLImage {
+class VideoImage : public base::RefCounted<VideoImage> {
  public:
   VideoImage() = default;
 
   VideoImage(AHardwareBuffer* buffer)
       : handle_(base::android::ScopedHardwareBufferHandle::Create(buffer)) {}
 
-  // gl::GLImage:
   std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
-  GetAHardwareBuffer() override {
+  GetAHardwareBuffer() {
     if (!handle_.is_valid())
       return nullptr;
 
@@ -76,9 +79,9 @@ class VideoImage : public gl::GLImage {
   base::ScopedFD TakeEndReadFence() { return std::move(end_read_fence_); }
 
  protected:
-  ~VideoImage() override = default;
-
  private:
+  friend class base::RefCounted<VideoImage>;
+
   class ScopedHardwareBufferFenceSyncImpl
       : public base::android::ScopedHardwareBufferFenceSync {
    public:
@@ -92,7 +95,7 @@ class VideoImage : public gl::GLImage {
           image_(std::move(image)) {}
     ~ScopedHardwareBufferFenceSyncImpl() override = default;
 
-    void SetReadFence(base::ScopedFD fence_fd, bool has_context) override {
+    void SetReadFence(base::ScopedFD fence_fd) override {
       image_->end_read_fence_ =
           gl::MergeFDs(std::move(image_->end_read_fence_), std::move(fence_fd));
     }
@@ -100,6 +103,8 @@ class VideoImage : public gl::GLImage {
    private:
     scoped_refptr<VideoImage> image_;
   };
+
+  ~VideoImage() = default;
 
   base::android::ScopedHardwareBufferHandle handle_;
 
@@ -127,7 +132,7 @@ VideoImageReaderImageBacking::VideoImageReaderImageBacking(
                                !!drdc_lock),
       RefCountedLockHelperDrDc(std::move(drdc_lock)),
       stream_texture_sii_(std::move(stream_texture_sii)),
-      gpu_main_task_runner_(base::ThreadTaskRunnerHandle::Get()) {
+      gpu_main_task_runner_(base::SingleThreadTaskRunner::GetCurrentDefault()) {
   DCHECK(stream_texture_sii_);
 
   context_lost_helper_ = std::make_unique<ContextLostObserverHelper>(
@@ -158,14 +163,6 @@ VideoImageReaderImageBacking::~VideoImageReaderImageBacking() {
   }
 }
 
-size_t VideoImageReaderImageBacking::EstimatedSizeForMemTracking() const {
-  base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
-
-  // This backing contributes to gpu memory only if its bound to the texture
-  // and not when the backing is created.
-  return stream_texture_sii_->IsUsingGpuMemory() ? estimated_size() : 0;
-}
-
 // Representation of VideoImageReaderImageBacking as a GL Texture.
 class VideoImageReaderImageBacking::GLTextureVideoImageRepresentation
     : public GLTextureImageRepresentation,
@@ -175,11 +172,17 @@ class VideoImageReaderImageBacking::GLTextureVideoImageRepresentation
       SharedImageManager* manager,
       VideoImageReaderImageBacking* backing,
       MemoryTypeTracker* tracker,
-      std::unique_ptr<gles2::AbstractTexture> texture,
+      std::unique_ptr<AbstractTextureAndroid> texture,
       scoped_refptr<RefCountedLock> drdc_lock)
       : GLTextureImageRepresentation(manager, backing, tracker),
         RefCountedLockHelperDrDc(std::move(drdc_lock)),
         texture_(std::move(texture)) {}
+
+  ~GLTextureVideoImageRepresentation() override {
+    if (!has_context()) {
+      texture_->NotifyOnContextLost();
+    }
+  }
 
   // Disallow copy and assign.
   GLTextureVideoImageRepresentation(const GLTextureVideoImageRepresentation&) =
@@ -218,14 +221,14 @@ class VideoImageReaderImageBacking::GLTextureVideoImageRepresentation
   void EndAccess() override {
     DCHECK(scoped_hardware_buffer_);
 
-    base::ScopedFD sync_fd = CreateEglFenceAndExportFd();
-    scoped_hardware_buffer_->SetReadFence(std::move(sync_fd), true);
+    base::ScopedFD sync_fd = gl::CreateEglFenceAndExportFd();
+    scoped_hardware_buffer_->SetReadFence(std::move(sync_fd));
     base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
     scoped_hardware_buffer_ = nullptr;
   }
 
  private:
-  std::unique_ptr<gles2::AbstractTexture> texture_;
+  std::unique_ptr<AbstractTextureAndroid> texture_;
   std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
       scoped_hardware_buffer_;
 };
@@ -239,7 +242,7 @@ class VideoImageReaderImageBacking::GLTexturePassthroughVideoImageRepresentation
       SharedImageManager* manager,
       VideoImageReaderImageBacking* backing,
       MemoryTypeTracker* tracker,
-      std::unique_ptr<gles2::AbstractTexture> abstract_texture,
+      std::unique_ptr<AbstractTextureAndroid> abstract_texture,
       scoped_refptr<RefCountedLock> drdc_lock)
       : GLTexturePassthroughImageRepresentation(manager, backing, tracker),
         RefCountedLockHelperDrDc(std::move(drdc_lock)),
@@ -248,6 +251,12 @@ class VideoImageReaderImageBacking::GLTexturePassthroughVideoImageRepresentation
             abstract_texture_->GetTextureBase())) {
     // TODO(https://crbug.com/1172769): Remove this CHECK.
     CHECK(passthrough_texture_);
+  }
+
+  ~GLTexturePassthroughVideoImageRepresentation() override {
+    if (!has_context()) {
+      abstract_texture_->NotifyOnContextLost();
+    }
   }
 
   // Disallow copy and assign.
@@ -285,14 +294,14 @@ class VideoImageReaderImageBacking::GLTexturePassthroughVideoImageRepresentation
   void EndAccess() override {
     DCHECK(scoped_hardware_buffer_);
 
-    base::ScopedFD sync_fd = CreateEglFenceAndExportFd();
-    scoped_hardware_buffer_->SetReadFence(std::move(sync_fd), true);
+    base::ScopedFD sync_fd = gl::CreateEglFenceAndExportFd();
+    scoped_hardware_buffer_->SetReadFence(std::move(sync_fd));
     base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
     scoped_hardware_buffer_ = nullptr;
   }
 
  private:
-  std::unique_ptr<gles2::AbstractTexture> abstract_texture_;
+  std::unique_ptr<AbstractTextureAndroid> abstract_texture_;
   scoped_refptr<gles2::TexturePassthrough> passthrough_texture_;
   std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
       scoped_hardware_buffer_;
@@ -314,23 +323,24 @@ class VideoImageReaderImageBacking::SkiaVkVideoImageRepresentation
                                          tracker),
         RefCountedLockHelperDrDc(std::move(drdc_lock)) {}
 
-  sk_sp<SkSurface> BeginWriteAccess(
+  std::vector<sk_sp<SkSurface>> BeginWriteAccess(
       int final_msaa_count,
       const SkSurfaceProps& surface_props,
+      const gfx::Rect& update_rect,
       std::vector<GrBackendSemaphore>* begin_semaphores,
       std::vector<GrBackendSemaphore>* end_semaphores,
-      std::unique_ptr<GrBackendSurfaceMutableState>* end_state) override {
+      std::unique_ptr<skgpu::MutableTextureState>* end_state) override {
     // Writes are not intended to used for video backed representations.
     NOTIMPLEMENTED();
-    return nullptr;
+    return {};
   }
 
-  void EndWriteAccess(sk_sp<SkSurface> surface) override { NOTIMPLEMENTED(); }
+  void EndWriteAccess() override { NOTIMPLEMENTED(); }
 
-  sk_sp<SkPromiseImageTexture> BeginReadAccess(
+  std::vector<sk_sp<GrPromiseImageTexture>> BeginReadAccess(
       std::vector<GrBackendSemaphore>* begin_semaphores,
       std::vector<GrBackendSemaphore>* end_semaphores,
-      std::unique_ptr<GrBackendSurfaceMutableState>* end_state) override {
+      std::unique_ptr<skgpu::MutableTextureState>* end_state) override {
     base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
 
     DCHECK(!scoped_hardware_buffer_);
@@ -343,7 +353,7 @@ class VideoImageReaderImageBacking::SkiaVkVideoImageRepresentation
     scoped_hardware_buffer_ = stream_texture_sii->GetAHardwareBuffer();
     if (!scoped_hardware_buffer_) {
       LOG(ERROR) << "Failed to get the hardware buffer.";
-      return nullptr;
+      return {};
     }
     DCHECK(scoped_hardware_buffer_->buffer());
 
@@ -359,7 +369,7 @@ class VideoImageReaderImageBacking::SkiaVkVideoImageRepresentation
           scoped_hardware_buffer_->TakeBuffer(), context_state(), size(),
           format(), VK_QUEUE_FAMILY_FOREIGN_EXT);
       if (!vulkan_image_)
-        return nullptr;
+        return {};
 
       // We always use VK_IMAGE_TILING_OPTIMAL while creating the vk image in
       // VulkanImplementationAndroid::CreateVkImageAndImportAHB. Hence pass
@@ -374,9 +384,9 @@ class VideoImageReaderImageBacking::SkiaVkVideoImageRepresentation
 
       // TODO(bsalomon): Determine whether it makes sense to attempt to reuse
       // this if the vk_info stays the same on subsequent calls.
-      promise_texture_ = SkPromiseImageTexture::Make(
-          GrBackendTexture(size().width(), size().height(),
-                           CreateGrVkImageInfo(vulkan_image_.get())));
+      promise_texture_ = GrPromiseImageTexture::Make(GrBackendTextures::MakeVk(
+          size().width(), size().height(),
+          CreateGrVkImageInfo(vulkan_image_.get(), color_space())));
       DCHECK(promise_texture_);
     }
 
@@ -393,8 +403,7 @@ class VideoImageReaderImageBacking::SkiaVkVideoImageRepresentation
     // Pass the end read access sync fd to the scoped hardware buffer. This
     // will make sure that the AImage associated with the hardware buffer will
     // be deleted only when the read access is ending.
-    scoped_hardware_buffer_->SetReadFence(android_backing()->TakeReadFence(),
-                                          true);
+    scoped_hardware_buffer_->SetReadFence(android_backing()->TakeReadFence());
     scoped_hardware_buffer_ = nullptr;
   }
 
@@ -444,8 +453,8 @@ VideoImageReaderImageBacking::ProduceGLTexturePassthrough(
       manager, this, tracker, std::move(texture), GetDrDcLock());
 }
 
-std::unique_ptr<SkiaImageRepresentation>
-VideoImageReaderImageBacking::ProduceSkia(
+std::unique_ptr<SkiaGaneshImageRepresentation>
+VideoImageReaderImageBacking::ProduceSkiaGanesh(
     SharedImageManager* manager,
     MemoryTypeTracker* tracker,
     scoped_refptr<SharedContextState> context_state) {
@@ -511,7 +520,9 @@ class VideoImageReaderImageBacking::OverlayVideoImageRepresentation
     base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
     // A |CodecImage| must have TextureOwner() for SurfaceControl overlays.
     // Legacy overlays are handled by LegacyOverlayImageRepresentation.
-    DCHECK(stream_image()->HasTextureOwner());
+    // Unfortunately it's possible that underlying CodecImage has released its
+    // resources due to MediaCodec shutdown, so we don't DCHECK here.
+
     scoped_hardware_buffer_ = stream_image()->GetAHardwareBuffer();
 
     // |scoped_hardware_buffer_| could be null for cases when a buffer is
@@ -521,7 +532,7 @@ class VideoImageReaderImageBacking::OverlayVideoImageRepresentation
       return false;
 
     gfx::GpuFenceHandle handle;
-    handle.owned_fd = scoped_hardware_buffer_->TakeFence();
+    handle.Adopt(scoped_hardware_buffer_->TakeFence());
     if (!handle.is_null())
       acquire_fence = std::move(handle);
 
@@ -529,34 +540,18 @@ class VideoImageReaderImageBacking::OverlayVideoImageRepresentation
   }
 
   void EndReadAccess(gfx::GpuFenceHandle release_fence) override {
-    if (gl_image_) {
+    if (video_image_) {
       DCHECK(release_fence.is_null());
       if (scoped_hardware_buffer_) {
-        scoped_hardware_buffer_->SetReadFence(gl_image_->TakeEndReadFence(),
-                                              true);
+        scoped_hardware_buffer_->SetReadFence(video_image_->TakeEndReadFence());
       }
-      gl_image_.reset();
+      video_image_.reset();
     } else {
-      scoped_hardware_buffer_->SetReadFence(std::move(release_fence.owned_fd),
-                                            true);
+      scoped_hardware_buffer_->SetReadFence(release_fence.Release());
     }
 
     base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
     scoped_hardware_buffer_.reset();
-  }
-
-  gl::GLImage* GetGLImage() override {
-    base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
-    DCHECK(stream_image()->HasTextureOwner())
-        << "The backing is already in a SurfaceView!";
-    DCHECK(scoped_hardware_buffer_);
-
-    if (!gl_image_) {
-      gl_image_ =
-          base::MakeRefCounted<VideoImage>(scoped_hardware_buffer_->buffer());
-      gl_image_->SetColorSpace(color_space());
-    }
-    return gl_image_.get();
   }
 
   AHardwareBuffer* GetAHardwareBuffer() override {
@@ -564,10 +559,26 @@ class VideoImageReaderImageBacking::OverlayVideoImageRepresentation
     return scoped_hardware_buffer_->buffer();
   }
 
+  std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
+  GetAHardwareBufferFenceSync() override {
+    return GetVideoImage()->GetAHardwareBuffer();
+  }
+
  private:
+  VideoImage* GetVideoImage() {
+    base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
+    DCHECK(scoped_hardware_buffer_);
+
+    if (!video_image_) {
+      video_image_ =
+          base::MakeRefCounted<VideoImage>(scoped_hardware_buffer_->buffer());
+    }
+    return video_image_.get();
+  }
+
   std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
       scoped_hardware_buffer_;
-  scoped_refptr<VideoImage> gl_image_;
+  scoped_refptr<VideoImage> video_image_;
 
   StreamTextureSharedImageInterface* stream_image() {
     auto* video_backing = static_cast<VideoImageReaderImageBacking*>(backing());

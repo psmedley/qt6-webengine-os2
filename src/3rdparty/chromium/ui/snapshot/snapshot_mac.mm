@@ -6,25 +6,30 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/callback.h"
+#include "base/apple/scoped_cftyperef.h"
 #include "base/check_op.h"
-#include "base/mac/scoped_cftyperef.h"
+#include "base/functional/callback.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
 
 namespace ui {
 
-bool GrabViewSnapshot(gfx::NativeView native_view,
-                      const gfx::Rect& snapshot_bounds,
-                      gfx::Image* image) {
-  NSView* view = native_view.GetNativeNSView();
-  NSWindow* window = [view window];
-  NSScreen* screen = [[NSScreen screens] firstObject];
-  gfx::Rect screen_bounds = gfx::Rect(NSRectToCGRect([screen frame]));
+namespace {
 
+// This implementation uses the obsolete CGWindowListCreateImage API.
+// TODO(https://crbug.com/1464728): When there is a ScreenCaptureKit API that
+// allows window self-capture without menu chip and without TCC requirements,
+// switch to that API.
+void GrabViewSnapshotImpl(gfx::NativeView native_view,
+                          const gfx::Rect& snapshot_bounds,
+                          gfx::Image* image) {
+  NSView* view = native_view.GetNativeNSView();
+  NSWindow* window = view.window;
+  NSScreen* screen = NSScreen.screens.firstObject;
+  gfx::Rect screen_bounds = gfx::Rect(NSRectToCGRect(screen.frame));
 
   // Get the view bounds relative to the screen
-  NSRect frame = [view convertRect:[view bounds] toView:nil];
+  NSRect frame = [view convertRect:view.bounds toView:nil];
   frame = [window convertRectToScreen:frame];
 
   gfx::Rect view_bounds = gfx::Rect(NSRectToCGRect(frame));
@@ -41,50 +46,39 @@ bool GrabViewSnapshot(gfx::NativeView native_view,
   DCHECK_LE(screen_snapshot_bounds.right(), view_bounds.right());
   DCHECK_LE(screen_snapshot_bounds.bottom(), view_bounds.bottom());
 
-  base::ScopedCFTypeRef<CGImageRef> windowSnapshot(
-      CGWindowListCreateImage(screen_snapshot_bounds.ToCGRect(),
-                              kCGWindowListOptionIncludingWindow,
-                              [window windowNumber],
-                              kCGWindowImageBoundsIgnoreFraming));
-  if (CGImageGetWidth(windowSnapshot) <= 0)
-    return false;
+  base::apple::ScopedCFTypeRef<CGImageRef> windowSnapshot(
+      CGWindowListCreateImage(
+          screen_snapshot_bounds.ToCGRect(), kCGWindowListOptionIncludingWindow,
+          window.windowNumber, kCGWindowImageBoundsIgnoreFraming));
+  if (CGImageGetWidth(windowSnapshot.get()) <= 0) {
+    return;
+  }
 
-  *image =
-      gfx::Image([[[NSImage alloc] initWithCGImage:windowSnapshot
-                                              size:NSZeroSize] autorelease]);
-  return true;
+  *image = gfx::Image([[NSImage alloc] initWithCGImage:windowSnapshot.get()
+                                                  size:NSZeroSize]);
+  return;
 }
 
-bool GrabWindowSnapshot(gfx::NativeWindow native_window,
-                        const gfx::Rect& snapshot_bounds,
-                        gfx::Image* image) {
+}  // namespace
+
+void GrabWindowSnapshotAsync(gfx::NativeWindow native_window,
+                             const gfx::Rect& source_rect,
+                             GrabSnapshotImageCallback callback) {
   // Make sure to grab the "window frame" view so we get current tab +
   // tabstrip.
-  NSWindow* window = native_window.GetNativeNSWindow();
-  return GrabViewSnapshot([[window contentView] superview], snapshot_bounds,
-                          image);
-}
+  NSView* view = native_window.GetNativeNSWindow().contentView.superview;
 
-void GrabWindowSnapshotAndScaleAsync(
-    gfx::NativeWindow window,
-    const gfx::Rect& snapshot_bounds,
-    const gfx::Size& target_size,
-    GrabWindowSnapshotAsyncCallback callback) {
-  std::move(callback).Run(gfx::Image());
+  gfx::Image image;
+  GrabViewSnapshotImpl(view, source_rect, &image);
+  std::move(callback).Run(image);
 }
 
 void GrabViewSnapshotAsync(gfx::NativeView view,
                            const gfx::Rect& source_rect,
-                           GrabWindowSnapshotAsyncCallback callback) {
-  std::move(callback).Run(gfx::Image());
-}
-
-void GrabWindowSnapshotAsync(gfx::NativeWindow native_window,
-                             const gfx::Rect& source_rect,
-                             GrabWindowSnapshotAsyncCallback callback) {
-  NSWindow* window = native_window.GetNativeNSWindow();
-  return GrabViewSnapshotAsync([[window contentView] superview], source_rect,
-                               std::move(callback));
+                           GrabSnapshotImageCallback callback) {
+  gfx::Image image;
+  GrabViewSnapshotImpl(view, source_rect, &image);
+  std::move(callback).Run(image);
 }
 
 }  // namespace ui

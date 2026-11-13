@@ -64,8 +64,7 @@ export function displayNameForURL(url: Platform.DevToolsPath.UrlString): string 
     return uiSourceCode.displayName();
   }
 
-  const mainTarget = SDK.TargetManager.TargetManager.instance().mainTarget();
-  const inspectedURL = mainTarget && mainTarget.inspectedURL();
+  const inspectedURL = SDK.TargetManager.TargetManager.instance().inspectedURL();
   if (!inspectedURL) {
     return Platform.StringUtilities.trimURL(url, '');
   }
@@ -79,7 +78,7 @@ export function displayNameForURL(url: Platform.DevToolsPath.UrlString): string 
   const index = inspectedURL.indexOf(lastPathComponent);
   if (index !== -1 && index + lastPathComponent.length === inspectedURL.length) {
     const baseURL = inspectedURL.substring(0, index);
-    if (url.startsWith(baseURL)) {
+    if (url.startsWith(baseURL) && url.length > index) {
       return url.substring(index);
     }
   }

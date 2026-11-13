@@ -8,7 +8,7 @@
 
 #include "base/check_op.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
+#include "base/types/cxx23_to_underlying.h"
 
 namespace base {
 namespace internal {
@@ -91,7 +91,9 @@ PriorityQueue::~PriorityQueue() {
   while (!container_.empty()) {
     auto task_source = PopTaskSource();
     auto task = task_source.Clear();
-    std::move(task.task).Run();
+    if (task) {
+      std::move(task->task).Run();
+    }
   }
 }
 
@@ -191,6 +193,13 @@ size_t PriorityQueue::Size() const {
 void PriorityQueue::EnableFlushTaskSourcesOnDestroyForTesting() {
   DCHECK(!is_flush_task_sources_on_destroy_enabled_);
   is_flush_task_sources_on_destroy_enabled_ = true;
+}
+
+void PriorityQueue::swap(PriorityQueue& other) {
+  container_.swap(other.container_);
+  num_task_sources_per_priority_.swap(other.num_task_sources_per_priority_);
+  std::swap(is_flush_task_sources_on_destroy_enabled_,
+            other.is_flush_task_sources_on_destroy_enabled_);
 }
 
 void PriorityQueue::DecrementNumTaskSourcesForPriority(TaskPriority priority) {

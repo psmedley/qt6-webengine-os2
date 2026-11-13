@@ -52,7 +52,7 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   Handle<ByteArray> ToSourcePositionTable(IsolateT* isolate);
 
 #ifdef DEBUG
-  int CheckBytecodeMatches(BytecodeArray bytecode);
+  int CheckBytecodeMatches(Tagged<BytecodeArray> bytecode);
 #endif
 
   // Get the number of parameters expected by function.
@@ -83,7 +83,7 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
 
   // Constant loads to accumulator.
   BytecodeArrayBuilder& LoadConstantPoolEntry(size_t entry);
-  BytecodeArrayBuilder& LoadLiteral(Smi value);
+  BytecodeArrayBuilder& LoadLiteral(Tagged<Smi> value);
   BytecodeArrayBuilder& LoadLiteral(double value);
   BytecodeArrayBuilder& LoadLiteral(const AstRawString* raw_string);
   BytecodeArrayBuilder& LoadLiteral(const Scope* scope);
@@ -191,8 +191,9 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   // Define an own property keyed by a value in a register, trigger the
   // defineProperty traps if necessary. The value to be defined should be
   // in the accumulator.
-  BytecodeArrayBuilder& DefineKeyedOwnProperty(Register object, Register key,
-                                               int feedback_slot);
+  BytecodeArrayBuilder& DefineKeyedOwnProperty(
+      Register object, Register key, DefineKeyedOwnPropertyFlags flags,
+      int feedback_slot);
 
   // Store an own element in an array literal. The value to be stored should be
   // in the accumulator.
@@ -329,6 +330,12 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
                                             RegisterList args,
                                             int feedback_slot);
 
+  // Call the Construct operator, forwarding all arguments passed to the current
+  // interpreted frame, including the receiver. The accumulator holds the
+  // |new_target|. The |constructor| is in a register.
+  BytecodeArrayBuilder& ConstructForwardAllArgs(Register constructor,
+                                                int feedback_slot);
+
   // Call the runtime function with |function_id| and arguments |args|.
   BytecodeArrayBuilder& CallRuntime(Runtime::FunctionId function_id,
                                     RegisterList args);
@@ -361,7 +368,7 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
                                         int feedback_slot);
   // Same as above, but lhs in the accumulator and rhs in |literal|.
   BytecodeArrayBuilder& BinaryOperationSmiLiteral(Token::Value binop,
-                                                  Smi literal,
+                                                  Tagged<Smi> literal,
                                                   int feedback_slot);
 
   // Unary and Count Operators (value stored in accumulator).
@@ -405,10 +412,11 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
 
   // Converts accumulator and stores result in register |out|.
   BytecodeArrayBuilder& ToObject(Register out);
-  BytecodeArrayBuilder& ToName(Register out);
-  BytecodeArrayBuilder& ToString();
 
   // Converts accumulator and stores result back in accumulator.
+  BytecodeArrayBuilder& ToName();
+  BytecodeArrayBuilder& ToString();
+  BytecodeArrayBuilder& ToBoolean(ToBooleanMode mode);
   BytecodeArrayBuilder& ToNumber(int feedback_slot);
   BytecodeArrayBuilder& ToNumeric(int feedback_slot);
 

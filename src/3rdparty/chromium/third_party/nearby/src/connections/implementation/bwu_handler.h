@@ -18,16 +18,17 @@
 #include <functional>
 #include <string>
 
+#include "absl/functional/any_invocable.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/offline_frames.h"
 #include "internal/platform/count_down_latch.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
-using BwuNegotiationFrame = BandwidthUpgradeNegotiationFrame;
+using BwuNegotiationFrame =
+    location::nearby::connections::BandwidthUpgradeNegotiationFrame;
 
 // Defines the set of methods that need to be implemented to handle the
 // per-Medium-specific operations needed to upgrade an EndpointChannel.
@@ -47,12 +48,9 @@ class BwuHandler {
     std::unique_ptr<IncomingSocket> socket;
     std::unique_ptr<EndpointChannel> channel;
   };
-
-  struct BwuNotifications {
-    std::function<void(ClientProxy* client,
-                       std::unique_ptr<IncomingSocketConnection> connection)>
-        incoming_connection_cb;
-  };
+  using IncomingConnectionCallback = absl::AnyInvocable<void(
+      ClientProxy* client,
+      std::unique_ptr<IncomingSocketConnection> connection)>;
 
   virtual ~BwuHandler() = default;
 
@@ -98,6 +96,5 @@ class BwuHandler {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_BWU_HANDLER_H_

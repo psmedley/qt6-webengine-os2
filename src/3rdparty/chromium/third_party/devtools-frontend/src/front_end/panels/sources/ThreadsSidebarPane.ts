@@ -2,21 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import threadsSidebarPaneStyles from './threadsSidebarPane.css.js';
 import type * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import * as IconButton from '../../ui/components/icon_button/icon_button.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
+
+import threadsSidebarPaneStyles from './threadsSidebarPane.css.js';
 
 const UIStrings = {
   /**
-  *@description Text in Threads Sidebar Pane of the Sources panel
-  */
+   *@description Text in Threads Sidebar Pane of the Sources panel
+   */
   paused: 'paused',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/sources/ThreadsSidebarPane.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
-let threadsSidebarPaneInstance: ThreadsSidebarPane;
 
 export class ThreadsSidebarPane extends UI.Widget.VBox implements
     SDK.TargetManager.SDKModelObserver<SDK.DebuggerModel.DebuggerModel>,
@@ -25,9 +27,10 @@ export class ThreadsSidebarPane extends UI.Widget.VBox implements
   private readonly list: UI.ListControl.ListControl<SDK.DebuggerModel.DebuggerModel>;
   private selectedModel: SDK.DebuggerModel.DebuggerModel|null;
 
-  private constructor() {
+  constructor() {
     super(true);
 
+    this.contentElement.setAttribute('jslog', `${VisualLogging.pane().context('debugger-threads')}`);
     this.items = new UI.ListModel.ListModel();
     this.list = new UI.ListControl.ListControl(this.items, this, UI.ListControl.ListMode.NonViewport);
     const currentTarget = UI.Context.Context.instance().flavor(SDK.Target.Target);
@@ -36,13 +39,6 @@ export class ThreadsSidebarPane extends UI.Widget.VBox implements
 
     UI.Context.Context.instance().addFlavorChangeListener(SDK.Target.Target, this.targetFlavorChanged, this);
     SDK.TargetManager.TargetManager.instance().observeModels(SDK.DebuggerModel.DebuggerModel, this);
-  }
-
-  static instance(): ThreadsSidebarPane {
-    if (!threadsSidebarPaneInstance) {
-      threadsSidebarPaneInstance = new ThreadsSidebarPane();
-    }
-    return threadsSidebarPaneInstance;
   }
 
   static shouldBeShown(): boolean {
@@ -54,7 +50,15 @@ export class ThreadsSidebarPane extends UI.Widget.VBox implements
     element.classList.add('thread-item');
     const title = element.createChild('div', 'thread-item-title');
     const pausedState = element.createChild('div', 'thread-item-paused-state');
-    element.appendChild(UI.Icon.Icon.create('smallicon-thick-right-arrow', 'selected-thread-icon'));
+    const icon = new IconButton.Icon.Icon();
+    icon.data = {
+      iconName: 'large-arrow-right-filled',
+      color: 'var(--icon-arrow-main-thread)',
+      width: '14px',
+      height: '14px',
+    };
+    icon.classList.add('selected-thread-icon');
+    element.appendChild(icon);
     element.tabIndex = -1;
     self.onInvokeElement(element, event => {
       UI.Context.Context.instance().setFlavor(SDK.Target.Target, debuggerModel.target());
@@ -149,7 +153,7 @@ export class ThreadsSidebarPane extends UI.Widget.VBox implements
       this.focus();
     }
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([threadsSidebarPaneStyles]);
   }

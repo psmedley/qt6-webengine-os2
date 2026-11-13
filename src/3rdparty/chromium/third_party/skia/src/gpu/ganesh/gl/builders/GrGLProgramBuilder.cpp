@@ -8,10 +8,11 @@
 #include "src/gpu/ganesh/gl/builders/GrGLProgramBuilder.h"
 
 #include "include/gpu/GrDirectContext.h"
-#include "src/core/SkAutoMalloc.h"
+#include "src/base/SkAutoMalloc.h"
 #include "src/core/SkReadBuffer.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/core/SkWriteBuffer.h"
+#include "src/gpu/PipelineUtils.h"
 #include "src/gpu/Swizzle.h"
 #include "src/gpu/ganesh/GrAutoLocaleSetter.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
@@ -24,6 +25,8 @@
 #include "src/gpu/ganesh/gl/GrGLGpu.h"
 #include "src/gpu/ganesh/gl/GrGLProgram.h"
 #include "src/gpu/ganesh/gl/builders/GrGLProgramBuilder.h"
+#include "src/sksl/SkSLProgramKind.h"
+#include "src/sksl/SkSLProgramSettings.h"
 #include "src/utils/SkShaderUtils.h"
 
 #include <memory>
@@ -91,20 +94,18 @@ const GrCaps* GrGLProgramBuilder::caps() const {
     return fGpu->caps();
 }
 
-SkSL::Compiler* GrGLProgramBuilder::shaderCompiler() const {
-    return fGpu->shaderCompiler();
-}
-
 bool GrGLProgramBuilder::compileAndAttachShaders(const std::string& glsl,
                                                  GrGLuint programId,
                                                  GrGLenum type,
                                                  SkTDArray<GrGLuint>* shaderIds,
+                                                 bool shaderWasCached,
                                                  GrContextOptions::ShaderErrorHandler* errHandler) {
     GrGLGpu* gpu = this->gpu();
     GrGLuint shaderId = GrGLCompileAndAttachShader(gpu->glContext(),
                                                    programId,
                                                    type,
                                                    glsl,
+                                                   shaderWasCached,
                                                    gpu->pipelineBuilder()->stats(),
                                                    errHandler);
     if (!shaderId) {
@@ -143,8 +144,13 @@ void GrGLProgramBuilder::computeCountsAndStrides(GrGLuint programID,
     SkASSERT(fInstanceStride == geomProc.instanceStride());
 }
 
-void GrGLProgramBuilder::addInputVars(const SkSL::Program::Inputs& inputs) {
-    if (inputs.fUseFlipRTUniform) {
+void GrGLProgramBuilder::addInputVars(const SkSL::Program::Interface& interface) {
+    uint8_t useRTFlip = interface.fRTFlipUniform;
+    if (!this->gpu()->glCaps().shaderCaps()->fCanUseFragCoord) {
+        useRTFlip &= ~SkSL::Program::Interface::kRTFlip_FragCoord;
+    }
+
+    if (useRTFlip != SkSL::Program::Interface::kRTFlip_None) {
         this->addRTFlipUniform(SKSL_RTFLIP_NAME);
     }
 }
@@ -153,8 +159,10 @@ static constexpr SkFourByteTag kSKSL_Tag = SkSetFourByteTag('S', 'K', 'S', 'L');
 static constexpr SkFourByteTag kGLSL_Tag = SkSetFourByteTag('G', 'L', 'S', 'L');
 static constexpr SkFourByteTag kGLPB_Tag = SkSetFourByteTag('G', 'L', 'P', 'B');
 
-void GrGLProgramBuilder::storeShaderInCache(const SkSL::Program::Inputs& inputs, GrGLuint programID,
-                                            const std::string shaders[], bool isSkSL,
+void GrGLProgramBuilder::storeShaderInCache(const SkSL::Program::Interface& interface,
+                                            GrGLuint programID,
+                                            const std::string shaders[],
+                                            bool isSkSL,
                                             SkSL::ProgramSettings* settings) {
     if (!this->gpu()->getContext()->priv().getPersistentCache()) {
         return;
@@ -166,11 +174,11 @@ void GrGLProgramBuilder::storeShaderInCache(const SkSL::Program::Inputs& inputs,
         GrGLsizei length = 0;
         GL_CALL(GetProgramiv(programID, GL_PROGRAM_BINARY_LENGTH, &length));
         if (length > 0) {
-            SkBinaryWriteBuffer writer;
+            SkBinaryWriteBuffer writer({});
             writer.writeInt(GrPersistentCacheUtils::GetCurrentVersion());
             writer.writeUInt(kGLPB_Tag);
 
-            writer.writePad32(&inputs, sizeof(inputs));
+            writer.writePad32(&interface, sizeof(interface));
 
             SkAutoSMalloc<2048> binary(length);
             GrGLenum binaryFormat;
@@ -187,7 +195,6 @@ void GrGLProgramBuilder::storeShaderInCache(const SkSL::Program::Inputs& inputs,
         // source cache, plus metadata to allow for a complete precompile
         GrPersistentCacheUtils::ShaderMetadata meta;
         meta.fSettings = settings;
-        meta.fHasCustomColorOutput = fFS.hasCustomColorOutput();
         meta.fHasSecondaryColorOutput = fFS.hasSecondaryOutput();
         for (auto attr : this->geometryProcessor().vertexAttributes()) {
             meta.fAttributeNames.emplace_back(attr.name());
@@ -197,7 +204,7 @@ void GrGLProgramBuilder::storeShaderInCache(const SkSL::Program::Inputs& inputs,
         }
 
         auto data = GrPersistentCacheUtils::PackCachedShaders(isSkSL ? kSKSL_Tag : kGLSL_Tag,
-                                                              shaders, &inputs, 1, &meta);
+                                                              shaders, &interface, 1, &meta);
         this->gpu()->getContext()->priv().getPersistentCache()->store(*key, *data, description);
     }
 }
@@ -232,15 +239,13 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
     settings.fSharpenTextures = true;
     settings.fFragColorIsInOut = this->fragColorIsInOut();
 
-    SkSL::Program::Inputs inputs;
+    SkSL::Program::Interface interface;
     SkTDArray<GrGLuint> shadersToDelete;
-
-    bool checkLinked = !fGpu->glCaps().skipErrorChecks();
 
     bool cached = fCached.get() != nullptr;
     bool usedProgramBinaries = false;
     std::string glsl[kGrShaderTypeCount];
-    std::string* sksl[kGrShaderTypeCount] = {
+    const std::string* sksl[kGrShaderTypeCount] = {
         &fVS.fCompilerString,
         &fFS.fCompilerString,
     };
@@ -248,7 +253,7 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
     if (precompiledProgram) {
         // This is very similar to when we get program binaries. We even set that flag, as it's
         // used to prevent other compile work later, and to force re-querying uniform locations.
-        this->addInputVars(precompiledProgram->fInputs);
+        this->addInputVars(precompiledProgram->fInterface);
         this->computeCountsAndStrides(programID, geomProc, false);
         usedProgramBinaries = true;
     } else if (cached) {
@@ -264,7 +269,7 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
                     cached = false;
                     break;
                 }
-                reader.readPad32(&inputs, sizeof(inputs));
+                reader.readPad32(&interface, sizeof(interface));
                 GrGLenum binaryFormat = reader.readUInt();
                 GrGLsizei length      = reader.readInt();
                 const void* binary = reader.skip(length);
@@ -276,16 +281,14 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
                     break;
                 }
                 GL_CALL(ProgramBinary(programID, binaryFormat, const_cast<void*>(binary), length));
-                if (checkLinked) {
-                    // Pass nullptr for the error handler. We don't want to treat this as a compile
-                    // failure (we can still recover by compiling the program from source, below).
-                    // Clients won't be directly notified, but they can infer this from the trace
-                    // events, and from the traffic to the persistent cache.
-                    cached = this->checkLinkStatus(
-                            programID, /*errorHandler=*/nullptr, nullptr, nullptr);
-                }
+                // Pass nullptr for the error handler. We don't want to treat this as a compile
+                // failure (we can still recover by compiling the program from source, below).
+                // Clients won't be directly notified, but they can infer this from the trace
+                // events, and from the traffic to the persistent cache.
+                cached = GrGLCheckLinkStatus(fGpu, programID, /*shaderWasCached=*/true,
+                                             /*errorHandler=*/nullptr, nullptr, nullptr);
                 if (cached) {
-                    this->addInputVars(inputs);
+                    this->addInputVars(interface);
                     this->computeCountsAndStrides(programID, geomProc, false);
                 }
                 usedProgramBinaries = cached;
@@ -294,12 +297,13 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
 
             case kGLSL_Tag:
                 // Source cache hit, we don't need to compile the SkSL->GLSL
-                GrPersistentCacheUtils::UnpackCachedShaders(&reader, glsl, &inputs, 1);
+                GrPersistentCacheUtils::UnpackCachedShaders(&reader, glsl, &interface, 1);
                 break;
 
             case kSKSL_Tag:
                 // SkSL cache hit, this should only happen in tools overriding the generated SkSL
-                if (GrPersistentCacheUtils::UnpackCachedShaders(&reader, cached_sksl, &inputs, 1)) {
+                if (GrPersistentCacheUtils::UnpackCachedShaders(
+                            &reader, cached_sksl, &interface, 1)) {
                     for (int i = 0; i < kGrShaderTypeCount; ++i) {
                         sksl[i] = &cached_sksl[i];
                     }
@@ -327,22 +331,25 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
             if (fFS.fForceHighPrecision) {
                 settings.fForceHighPrecision = true;
             }
-            std::unique_ptr<SkSL::Program> fs = GrSkSLtoGLSL(this->gpu(),
-                                                             SkSL::ProgramKind::kFragment,
-                                                             *sksl[kFragment_GrShaderType],
-                                                             settings,
-                                                             &glsl[kFragment_GrShaderType],
-                                                             errorHandler);
-            if (!fs) {
+            if (!skgpu::SkSLToGLSL(this->gpu()->caps()->shaderCaps(),
+                                   *sksl[kFragment_GrShaderType],
+                                   SkSL::ProgramKind::kFragment,
+                                   settings,
+                                   &glsl[kFragment_GrShaderType],
+                                   &interface,
+                                   errorHandler)) {
                 cleanup_program(fGpu, programID, shadersToDelete);
                 return nullptr;
             }
-            inputs = fs->fInputs;
         }
 
-        this->addInputVars(inputs);
-        if (!this->compileAndAttachShaders(glsl[kFragment_GrShaderType], programID,
-                                           GR_GL_FRAGMENT_SHADER, &shadersToDelete, errorHandler)) {
+        this->addInputVars(interface);
+        if (!this->compileAndAttachShaders(glsl[kFragment_GrShaderType],
+                                           programID,
+                                           GR_GL_FRAGMENT_SHADER,
+                                           &shadersToDelete,
+                                           cached,
+                                           errorHandler)) {
             cleanup_program(fGpu, programID, shadersToDelete);
             return nullptr;
         }
@@ -352,19 +359,24 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
         */
         if (glsl[kVertex_GrShaderType].empty()) {
             // Don't have cached GLSL, need to compile SkSL->GLSL
-            std::unique_ptr<SkSL::Program> vs = GrSkSLtoGLSL(this->gpu(),
-                                                             SkSL::ProgramKind::kVertex,
-                                                             *sksl[kVertex_GrShaderType],
-                                                             settings,
-                                                             &glsl[kVertex_GrShaderType],
-                                                             errorHandler);
-            if (!vs) {
+            SkSL::Program::Interface unusedInterface;
+            if (!skgpu::SkSLToGLSL(this->gpu()->caps()->shaderCaps(),
+                                   *sksl[kVertex_GrShaderType],
+                                   SkSL::ProgramKind::kVertex,
+                                   settings,
+                                   &glsl[kVertex_GrShaderType],
+                                   &unusedInterface,
+                                   errorHandler)) {
                 cleanup_program(fGpu, programID, shadersToDelete);
                 return nullptr;
             }
         }
-        if (!this->compileAndAttachShaders(glsl[kVertex_GrShaderType], programID,
-                                           GR_GL_VERTEX_SHADER, &shadersToDelete, errorHandler)) {
+        if (!this->compileAndAttachShaders(glsl[kVertex_GrShaderType],
+                                           programID,
+                                           GR_GL_VERTEX_SHADER,
+                                           &shadersToDelete,
+                                           cached,
+                                           errorHandler)) {
             cleanup_program(fGpu, programID, shadersToDelete);
             return nullptr;
         }
@@ -377,11 +389,9 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
         {
             TRACE_EVENT0_ALWAYS("skia.shaders", "driver_link_program");
             GL_CALL(LinkProgram(programID));
-            if (checkLinked) {
-                if (!this->checkLinkStatus(programID, errorHandler, sksl, glsl)) {
-                    cleanup_program(fGpu, programID, shadersToDelete);
-                    return nullptr;
-                }
+            if (!GrGLCheckLinkStatus(fGpu, programID, cached, errorHandler, sksl, glsl)) {
+                cleanup_program(fGpu, programID, shadersToDelete);
+                return nullptr;
             }
         }
     }
@@ -400,7 +410,7 @@ sk_sp<GrGLProgram> GrGLProgramBuilder::finalize(const GrGLPrecompiledProgram* pr
             }
             isSkSL = true;
         }
-        this->storeShaderInCache(inputs, programID, glsl, isSkSL, &settings);
+        this->storeShaderInCache(interface, programID, glsl, isSkSL, &settings);
     }
     return this->createProgram(programID);
 }
@@ -409,49 +419,15 @@ void GrGLProgramBuilder::bindProgramResourceLocations(GrGLuint programID) {
     fUniformHandler.bindUniformLocations(programID, fGpu->glCaps());
 
     const GrGLCaps& caps = this->gpu()->glCaps();
-    if (fFS.hasCustomColorOutput() && caps.bindFragDataLocationSupport()) {
+    if (caps.bindFragDataLocationSupport()) {
+        SkASSERT(caps.shaderCaps()->mustDeclareFragmentShaderOutput());
         GL_CALL(BindFragDataLocation(programID, 0,
                                      GrGLSLFragmentShaderBuilder::DeclaredColorOutputName()));
-    }
-    if (fFS.hasSecondaryOutput() && caps.shaderCaps()->mustDeclareFragmentShaderOutput()) {
-        GL_CALL(BindFragDataLocationIndexed(programID, 0, 1,
+        if (fFS.hasSecondaryOutput()) {
+            GL_CALL(BindFragDataLocationIndexed(programID, 0, 1,
                                   GrGLSLFragmentShaderBuilder::DeclaredSecondaryColorOutputName()));
+        }
     }
-}
-
-bool GrGLProgramBuilder::checkLinkStatus(GrGLuint programID,
-                                         GrContextOptions::ShaderErrorHandler* errorHandler,
-                                         std::string* sksl[], const std::string glsl[]) {
-    GrGLint linked = GR_GL_INIT_ZERO;
-    GL_CALL(GetProgramiv(programID, GR_GL_LINK_STATUS, &linked));
-    if (!linked && errorHandler) {
-        std::string allShaders;
-        if (sksl) {
-            SkSL::String::appendf(&allShaders, "// Vertex SKSL\n%s\n"
-                                               "// Fragment SKSL\n%s\n",
-                                               sksl[kVertex_GrShaderType]->c_str(),
-                                               sksl[kFragment_GrShaderType]->c_str());
-        }
-        if (glsl) {
-            SkSL::String::appendf(&allShaders, "// Vertex GLSL\n%s\n"
-                                               "// Fragment GLSL\n%s\n",
-                                               glsl[kVertex_GrShaderType].c_str(),
-                                               glsl[kFragment_GrShaderType].c_str());
-        }
-        GrGLint infoLen = GR_GL_INIT_ZERO;
-        GL_CALL(GetProgramiv(programID, GR_GL_INFO_LOG_LENGTH, &infoLen));
-        SkAutoMalloc log(infoLen+1);
-        if (infoLen > 0) {
-            // retrieve length even though we don't need it to workaround
-            // bug in chrome cmd buffer param validation.
-            GrGLsizei length = GR_GL_INIT_ZERO;
-            GL_CALL(GetProgramInfoLog(programID, infoLen+1, &length, (char*)log.get()));
-        }
-        const char* errorMsg = (infoLen > 0) ? (const char*)log.get()
-                                             : "link failed but did not provide an info log";
-        errorHandler->compileError(allShaders.c_str(), errorMsg);
-    }
-    return SkToBool(linked);
 }
 
 void GrGLProgramBuilder::resolveProgramResourceLocations(GrGLuint programID, bool force) {
@@ -495,8 +471,8 @@ bool GrGLProgramBuilder::PrecompileProgram(GrDirectContext* dContext,
     meta.fSettings = &settings;
 
     std::string shaders[kGrShaderTypeCount];
-    SkSL::Program::Inputs inputs;
-    if (!GrPersistentCacheUtils::UnpackCachedShaders(&reader, shaders, &inputs, 1, &meta)) {
+    SkSL::Program::Interface interface;
+    if (!GrPersistentCacheUtils::UnpackCachedShaders(&reader, shaders, &interface, 1, &meta)) {
         return false;
     }
 
@@ -510,13 +486,23 @@ bool GrGLProgramBuilder::PrecompileProgram(GrDirectContext* dContext,
 
     auto compileShader = [&](SkSL::ProgramKind kind, const std::string& sksl, GrGLenum type) {
         std::string glsl;
-        auto program = GrSkSLtoGLSL(glGpu, kind, sksl, settings, &glsl, errorHandler);
-        if (!program) {
+        SkSL::Program::Interface unusedInterface;
+        if (!skgpu::SkSLToGLSL(glGpu->caps()->shaderCaps(),
+                               sksl,
+                               kind,
+                               settings,
+                               &glsl,
+                               &unusedInterface,
+                               errorHandler)) {
             return false;
         }
 
-        if (GrGLuint shaderID = GrGLCompileAndAttachShader(glGpu->glContext(), programID, type,
-                                                           glsl, glGpu->pipelineBuilder()->stats(),
+        if (GrGLuint shaderID = GrGLCompileAndAttachShader(glGpu->glContext(),
+                                                           programID,
+                                                           type,
+                                                           glsl,
+                                                           /*shaderWasCached=*/false,
+                                                           glGpu->pipelineBuilder()->stats(),
                                                            errorHandler)) {
             shadersToDelete.push_back(shaderID);
             return true;
@@ -535,21 +521,23 @@ bool GrGLProgramBuilder::PrecompileProgram(GrDirectContext* dContext,
         return false;
     }
 
-    for (int i = 0; i < meta.fAttributeNames.count(); ++i) {
+    for (int i = 0; i < meta.fAttributeNames.size(); ++i) {
         GR_GL_CALL(glGpu->glInterface(), BindAttribLocation(programID, i,
                                                           meta.fAttributeNames[i].c_str()));
     }
 
     const GrGLCaps& caps = glGpu->glCaps();
-    if (meta.fHasCustomColorOutput && caps.bindFragDataLocationSupport()) {
+    if (caps.bindFragDataLocationSupport()) {
+        SkASSERT(caps.shaderCaps()->mustDeclareFragmentShaderOutput());
         GR_GL_CALL(glGpu->glInterface(),
                    BindFragDataLocation(programID, 0,
                                         GrGLSLFragmentShaderBuilder::DeclaredColorOutputName()));
-    }
-    if (meta.fHasSecondaryColorOutput && caps.shaderCaps()->mustDeclareFragmentShaderOutput()) {
-        GR_GL_CALL(glGpu->glInterface(),
-                   BindFragDataLocationIndexed(programID, 0, 1,
-                               GrGLSLFragmentShaderBuilder::DeclaredSecondaryColorOutputName()));
+
+        if (meta.fHasSecondaryColorOutput) {
+            GR_GL_CALL(glGpu->glInterface(),
+                       BindFragDataLocationIndexed(programID, 0, 1,
+                                  GrGLSLFragmentShaderBuilder::DeclaredSecondaryColorOutputName()));
+        }
     }
 
     GR_GL_CALL(glGpu->glInterface(), LinkProgram(programID));
@@ -563,6 +551,6 @@ bool GrGLProgramBuilder::PrecompileProgram(GrDirectContext* dContext,
     cleanup_shaders(glGpu, shadersToDelete);
 
     precompiledProgram->fProgramID = programID;
-    precompiledProgram->fInputs = inputs;
+    precompiledProgram->fInterface = interface;
     return true;
 }

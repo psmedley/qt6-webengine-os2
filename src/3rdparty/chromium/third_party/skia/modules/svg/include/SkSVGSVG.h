@@ -10,11 +10,11 @@
 
 #include "modules/svg/include/SkSVGContainer.h"
 #include "modules/svg/include/SkSVGTypes.h"
-#include "src/core/SkTLazy.h"
+#include "src/base/SkTLazy.h"
 
 class SkSVGLengthContext;
 
-class SkSVGSVG : public SkSVGContainer {
+class SK_API SkSVGSVG : public SkSVGContainer {
 public:
     enum class Type {
         kRoot,

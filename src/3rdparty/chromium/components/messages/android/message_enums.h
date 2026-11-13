@@ -69,7 +69,8 @@ enum class MessageScopeType {
 //
 // When adding a new message identifier, make corresponding changes in the
 // following locations:
-// - tools/metrics/histograms/enums.xml: <enum name="MessageIdentifier">
+// - tools/metrics/histograms/metadata/android/enums.xml:
+//       <enum name="MessageIdentifier">
 // - tools/metrics/histograms/metadata/android/histograms.xml:
 //       <variants name="MessageIdentifiers">
 // - MessagesMetrics.java: #messageIdentifierToHistogramSuffix()
@@ -104,7 +105,7 @@ enum class MessageIdentifier {
   VR_SERVICES_UPGRADE = 24,
   TAILORED_SECURITY_DISABLED = 25,
   AR_CORE_UPGRADE = 26,
-  INSTANT_APPS = 27,
+  // Removed: INSTANT_APPS = 27,
   ABOUT_THIS_SITE = 28,
   TRANSLATE = 29,
   OFFER_NOTIFICATION = 30,
@@ -114,7 +115,17 @@ enum class MessageIdentifier {
   DESKTOP_SITE_GLOBAL_OPT_IN = 34,
   PASSWORD_MANAGER_ERROR = 35,
   DOWNLOAD_INCOGNITO_WARNING = 36,
-
+  // Removed: RESTORE_CUSTOM_TAB = 37,
+  // Removed: UNDO_CUSTOM_TAB_RESTORATION = 38,
+  CVC_SAVE = 39,
+  TRACKING_PROTECTION_NOTICE = 40,
+  DESKTOP_SITE_WINDOW_SETTING = 41,
+  PROMPT_HATS_LOCATION_CUSTOM_INVITATION = 42,
+  PROMPT_HATS_LOCATION_GENERIC_INVITATION = 43,
+  PROMPT_HATS_CAMERA_CUSTOM_INVITATION = 44,
+  PROMPT_HATS_CAMERA_GENERIC_INVITATION = 45,
+  PROMPT_HATS_MICROPHONE_CUSTOM_INVITATION = 46,
+  PROMPT_HATS_MICROPHONE_GENERIC_INVITATION = 47,
   // Insert new values before this line.
   COUNT
 };

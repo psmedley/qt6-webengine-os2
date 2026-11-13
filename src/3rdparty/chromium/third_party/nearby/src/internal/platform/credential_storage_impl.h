@@ -24,7 +24,6 @@
 #include "internal/platform/implementation/credential_storage.h"
 #include "internal/platform/implementation/platform.h"
 
-namespace location {
 namespace nearby {
 
 /*
@@ -43,30 +42,31 @@ class CredentialStorageImpl : public api::CredentialStorage {
 
   void SaveCredentials(
       absl::string_view manager_app_id, absl::string_view account_name,
-      const std::vector<::nearby::internal::PrivateCredential>&
-          private_credentials,
-      const std::vector<::nearby::internal::PublicCredential>&
-          public_credentials,
-      ::nearby::presence::PublicCredentialType public_credential_type,
-      ::nearby::presence::GenerateCredentialsCallback callback) override;
+      const std::vector<LocalCredential>& private_credentials,
+      const std::vector<SharedCredential>& public_credentials,
+      PublicCredentialType public_credential_type,
+      SaveCredentialsResultCallback callback) override;
+
+  void UpdateLocalCredential(absl::string_view manager_app_id,
+                               absl::string_view account_name,
+                               nearby::internal::LocalCredential credential,
+                               SaveCredentialsResultCallback callback) override;
 
   // Used to fetch private creds when broadcasting.
-  void GetPrivateCredentials(
-      const ::nearby::presence::CredentialSelector& credential_selector,
-      ::nearby::presence::GetPrivateCredentialsResultCallback callback)
-      override;
+  void GetLocalCredentials(
+      const CredentialSelector& credential_selector,
+      GetLocalCredentialsResultCallback callback) override;
 
   // Used to fetch remote public creds when scanning.
   void GetPublicCredentials(
-      const ::nearby::presence::CredentialSelector& credential_selector,
-      ::nearby::presence::PublicCredentialType public_credential_type,
-      ::nearby::presence::GetPublicCredentialsResultCallback callback) override;
+      const CredentialSelector& credential_selector,
+      PublicCredentialType public_credential_type,
+      GetPublicCredentialsResultCallback callback) override;
 
  private:
   std::unique_ptr<api::CredentialStorage> impl_;
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // THIRD_PARTY_NEARBY_INTERNAL_PLATFORM_CREDENTIAL_STORAGE_IMPL_H_

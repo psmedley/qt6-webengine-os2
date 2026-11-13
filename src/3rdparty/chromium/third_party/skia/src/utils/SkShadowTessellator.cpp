@@ -17,9 +17,9 @@
 #include "include/core/SkTypes.h"
 #include "include/core/SkVertices.h"
 #include "include/private/SkColorData.h"
-#include "include/private/SkFloatingPoint.h"
-#include "include/private/SkTDArray.h"
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkFloatingPoint.h"
+#include "include/private/base/SkTDArray.h"
+#include "include/private/base/SkTemplates.h"
 #include "src/core/SkDrawShadowInfo.h"
 #include "src/core/SkGeometry.h"
 #include "src/core/SkPointPriv.h"
@@ -30,10 +30,13 @@
 #include <cstdint>
 
 
-#if SK_SUPPORT_GPU
+#if defined(SK_GANESH)
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 #endif
 
+using namespace skia_private;
+
+#if !defined(SK_ENABLE_OPTIMIZE_SIZE)
 
 /**
  * Base class
@@ -608,7 +611,7 @@ void SkBaseShadowTessellator::stitchConcaveRings(const SkTDArray<SkPoint>& umbra
                                                  const SkTDArray<SkPoint>& penumbraPolygon,
                                                  SkTDArray<int>* penumbraIndices) {
     // TODO: only create and fill indexMap when fTransparent is true?
-    SkAutoSTMalloc<64, uint16_t> indexMap(umbraPolygon.size());
+    AutoSTMalloc<64, uint16_t> indexMap(umbraPolygon.size());
 
     // find minimum indices
     int minIndex = 0;
@@ -738,7 +741,7 @@ void SkBaseShadowTessellator::stitchConcaveRings(const SkTDArray<SkPoint>& umbra
 
 
 // tesselation tolerance values, in device space pixels
-#if SK_SUPPORT_GPU
+#if defined(SK_GANESH)
 static constexpr SkScalar kQuadTolerance = 0.2f;
 static constexpr SkScalar kCubicTolerance = 0.2f;
 static constexpr SkScalar kQuadToleranceSqd = kQuadTolerance * kQuadTolerance;
@@ -786,7 +789,7 @@ void SkBaseShadowTessellator::handleLine(const SkMatrix& m, SkPoint* p) {
 }
 
 void SkBaseShadowTessellator::handleQuad(const SkPoint pts[3]) {
-#if SK_SUPPORT_GPU
+#if defined(SK_GANESH)
     // check for degeneracy
     SkVector v0 = pts[1] - pts[0];
     SkVector v1 = pts[2] - pts[0];
@@ -817,7 +820,7 @@ void SkBaseShadowTessellator::handleQuad(const SkMatrix& m, SkPoint pts[3]) {
 
 void SkBaseShadowTessellator::handleCubic(const SkMatrix& m, SkPoint pts[4]) {
     m.mapPoints(pts, 4);
-#if SK_SUPPORT_GPU
+#if defined(SK_GANESH)
     // TODO: Pull PathUtils out of Ganesh?
     int maxCount = GrPathUtils::cubicPointCount(pts, kCubicTolerance);
     fPointBuffer.resize(maxCount);
@@ -1183,3 +1186,6 @@ sk_sp<SkVertices> SkShadowTessellator::MakeSpot(const SkPath& path, const SkMatr
                                      directional);
     return spotTess.releaseVertices();
 }
+
+#endif // !defined(SK_ENABLE_OPTIMIZE_SIZE)
+

@@ -7,6 +7,8 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/main_thread_scheduler.h"
 
@@ -51,15 +53,19 @@ class SimpleMainThreadScheduler : public MainThreadScheduler {
   // Do nothing.
   void RemoveRAILModeObserver(RAILModeObserver const*) override;
 
+  void ForEachMainThreadIsolate(
+      base::RepeatingCallback<void(v8::Isolate* isolate)> callback) override;
+
   // Return the thread task runner (there's no separate task runner for them).
   scoped_refptr<base::SingleThreadTaskRunner> V8TaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> CleanupTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> NonWakingTaskRunner() override;
 
   // Unsupported. Return nullptr.
-  std::unique_ptr<WebAgentGroupScheduler> CreateAgentGroupScheduler() override;
+  AgentGroupScheduler* CreateAgentGroupScheduler() override;
 
   // Return nullptr
-  WebAgentGroupScheduler* GetCurrentAgentGroupScheduler() override;
+  AgentGroupScheduler* GetCurrentAgentGroupScheduler() override;
 
   // Return the current time.
   base::TimeTicks MonotonicallyIncreasingVirtualTime() override;
@@ -76,8 +82,11 @@ class SimpleMainThreadScheduler : public MainThreadScheduler {
   v8::Isolate* Isolate() override;
   std::unique_ptr<RendererPauseHandle> PauseScheduler() override;
 
+  // Idle tasks are dropped in `PostIdleTask()` and friends, so this is a no-op.
+  void StartIdlePeriodForTesting() override;
+
  private:
-  v8::Isolate* isolate_ = nullptr;
+  raw_ptr<v8::Isolate, ExperimentalRenderer> isolate_ = nullptr;
 };
 
 }  // namespace scheduler

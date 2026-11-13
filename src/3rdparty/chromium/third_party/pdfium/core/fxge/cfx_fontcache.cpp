@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "core/fxge/cfx_font.h"
 #include "core/fxge/cfx_glyphcache.h"
-#include "core/fxge/freetype/fx_freetype.h"
 #include "core/fxge/fx_font.h"
 
 CFX_FontCache::CFX_FontCache() = default;
@@ -28,7 +27,7 @@ RetainPtr<CFX_GlyphCache> CFX_FontCache::GetGlyphCache(const CFX_Font* pFont) {
   return new_cache;
 }
 
-#if defined(_SKIA_SUPPORT_)
+#if defined(PDF_USE_SKIA)
 CFX_TypeFace* CFX_FontCache::GetDeviceCache(const CFX_Font* pFont) {
   return GetGlyphCache(pFont)->GetDeviceCache(pFont);
 }

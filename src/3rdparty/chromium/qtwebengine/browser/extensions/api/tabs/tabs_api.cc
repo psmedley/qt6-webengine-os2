@@ -135,9 +135,9 @@ static bool PrepareURLForNavigation(const std::string& url_string,
 TabsUpdateFunction::TabsUpdateFunction() : web_contents_(nullptr) {}
 
 ExtensionFunction::ResponseAction TabsUpdateFunction::Run() {
-  std::unique_ptr<tabs::Update::Params> params(
-      tabs::Update::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  absl::optional<tabs::Update::Params> params =
+      tabs::Update::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
   int tab_id = -1;
   std::string error;
@@ -211,7 +211,7 @@ ExtensionFunction::ResponseValue TabsUpdateFunction::GetResult() {
 void TabsUpdateFunction::OnExecuteCodeFinished(
     const std::string& error,
     const GURL& url,
-    const base::ListValue& script_result) {
+    const base::Value::List& script_result) {
   if (!error.empty()) {
     Respond(Error(error));
     return;

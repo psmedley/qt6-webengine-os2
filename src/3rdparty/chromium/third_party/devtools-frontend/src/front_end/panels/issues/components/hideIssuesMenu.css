@@ -11,16 +11,13 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  padding: 1px 4px;
+  padding: 0;
+  margin: 0 -2px 0 4px;
   overflow: hidden;
   border-radius: 0;
   border: none;
 
-  --icon-color: var(--color-text-primary);
-
-  opacity: 50%;
-}
-
-.hide-issues-menu-btn:hover {
-  opacity: 100%;
+  &:hover > devtools-icon {
+    color: var(--icon-default-hover);
+  }
 }

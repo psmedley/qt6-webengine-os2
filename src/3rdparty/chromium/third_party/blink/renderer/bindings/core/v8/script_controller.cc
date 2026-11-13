@@ -35,7 +35,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_evaluation_result.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
@@ -68,6 +68,41 @@
 
 namespace blink {
 
+namespace {
+bool IsTrivialScript(const String& script) {
+  if (script.length() > 25) {
+    return false;
+  }
+
+  DEFINE_STATIC_LOCAL(Vector<String>, trivial_scripts,
+                      ({"void(0)",
+                        "void0",
+                        "void(false)",
+                        "void(null)",
+                        "void(-1)",
+                        "false",
+                        "true",
+                        "",
+                        "''",
+                        "\"\"",
+                        "undefined",
+                        "0",
+                        "1",
+                        "'1'",
+                        "print()",
+                        "window.print()",
+                        "close()",
+                        "window.close()",
+                        "history.back()",
+                        "window.history.back()",
+                        "history.go(-1)",
+                        "window.history.go(-1)"}));
+  String processed_script = script.StripWhiteSpace().Replace(";", "");
+  return trivial_scripts.Contains(processed_script);
+}
+
+}  // namespace
+
 void ScriptController::Trace(Visitor* visitor) const {
   visitor->Trace(window_);
   visitor->Trace(window_proxy_manager_);
@@ -86,18 +121,13 @@ TextPosition ScriptController::EventHandlerPosition() const {
   return TextPosition::MinimumPosition();
 }
 
-void ScriptController::EnableEval() {
-  SetEvalForWorld(DOMWrapperWorld::MainWorld(), true /* allow_eval */,
-                  g_empty_string /* error_message */);
-}
-
 void ScriptController::DisableEval(const String& error_message) {
-  SetEvalForWorld(DOMWrapperWorld::MainWorld(), false /* allow_eval */,
-                  error_message);
+  SetEvalForWorld(DOMWrapperWorld::MainWorld(GetIsolate()),
+                  false /* allow_eval */, error_message);
 }
 
 void ScriptController::SetWasmEvalErrorMessage(const String& error_message) {
-  SetWasmEvalErrorMessageForWorld(DOMWrapperWorld::MainWorld(),
+  SetWasmEvalErrorMessageForWorld(DOMWrapperWorld::MainWorld(GetIsolate()),
                                   /*allow_eval=*/false, error_message);
 }
 
@@ -225,10 +255,22 @@ void ScriptController::ExecuteJavaScriptURL(
       SanitizeScriptErrors::kDoNotSanitize);
 
   DCHECK_EQ(&window_->GetScriptController(), this);
-  v8::HandleScope handle_scope(GetIsolate());
+  v8::Isolate* isolate = GetIsolate();
+  v8::HandleScope handle_scope(isolate);
   v8::Local<v8::Value> v8_result =
       script->RunScriptAndReturnValue(window_).GetSuccessValueOrEmpty();
   UseCounter::Count(window_.Get(), WebFeature::kExecutedJavaScriptURL);
+
+  // CSPDisposition::CHECK indicate that the JS URL comes from a site (and not
+  // from bookmarks or extensions). Empty v8_result indicate that the script
+  // had a failure at the time of execution.
+  if (csp_disposition == network::mojom::CSPDisposition::CHECK &&
+      !v8_result.IsEmpty()) {
+    if (!IsTrivialScript(script_source)) {
+      UseCounter::Count(window_.Get(),
+                        WebFeature::kExecutedNonTrivialJavaScriptURL);
+    }
+  }
 
   // If executing script caused this frame to be removed from the page, we
   // don't want to try to replace its document!
@@ -256,7 +298,7 @@ void ScriptController::ExecuteJavaScriptURL(
   DCHECK(previous_document_loader);
   auto params =
       previous_document_loader->CreateWebNavigationParamsToCloneDocument();
-  String result = ToCoreString(v8::Local<v8::String>::Cast(v8_result));
+  String result = ToCoreString(isolate, v8::Local<v8::String>::Cast(v8_result));
   WebNavigationParams::FillStaticResponse(
       params.get(), "text/html", "UTF-8",
       StringUTF8Adaptor(

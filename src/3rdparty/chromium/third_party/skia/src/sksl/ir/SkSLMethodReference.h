@@ -8,6 +8,7 @@
 #ifndef SKSL_METHODREFERENCE
 #define SKSL_METHODREFERENCE
 
+#include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLContext.h"
 #include "src/sksl/ir/SkSLExpression.h"
 
@@ -29,13 +30,13 @@ class FunctionDeclaration;
  */
 class MethodReference final : public Expression {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kMethodReference;
+    inline static constexpr Kind kIRNodeKind = Kind::kMethodReference;
 
     MethodReference(const Context& context,
                     Position pos,
                     std::unique_ptr<Expression> self,
                     const FunctionDeclaration* overloadChain)
-            : INHERITED(pos, kExpressionKind, context.fTypes.fInvalid.get())
+            : INHERITED(pos, kIRNodeKind, context.fTypes.fInvalid.get())
             , fSelf(std::move(self))
             , fOverloadChain(overloadChain) {}
 
@@ -58,7 +59,7 @@ private:
                     std::unique_ptr<Expression> self,
                     const FunctionDeclaration* overloadChain,
                     const Type* type)
-            : INHERITED(pos, kExpressionKind, type)
+            : INHERITED(pos, kIRNodeKind, type)
             , fSelf(std::move(self))
             , fOverloadChain(overloadChain) {}
 

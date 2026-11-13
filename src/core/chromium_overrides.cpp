@@ -17,6 +17,7 @@
 #include "gpu/vulkan/buildflags.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_factory.h"
+#include "ui/base/ozone_buildflags.h"
 
 #include <QGuiApplication>
 #include <QFontDatabase>
@@ -37,19 +38,22 @@
 #endif // defined(USE_OZONE)
 #endif // defined(ENABLE_VULKAN)
 
+#if BUILDFLAG(IS_OZONE_X11)
 void *GetQtXDisplay()
 {
     return GLContextHelper::getXDisplay();
 }
+#endif
 
 namespace content {
 class RenderViewHostDelegateView;
 
-std::unique_ptr<WebContentsView> CreateWebContentsView(WebContentsImpl *web_contents,
-    std::unique_ptr<WebContentsViewDelegate> delegate,
-    RenderViewHostDelegateView **render_view_host_delegate_view)
+std::unique_ptr<WebContentsView> CreateWebContentsView(
+        WebContentsImpl *web_contents,
+        std::unique_ptr<WebContentsViewDelegate> delegate,
+        raw_ptr<RenderViewHostDelegateView>* render_view_host_delegate_view)
 {
-    QtWebEngineCore::WebContentsViewQt* rv = new QtWebEngineCore::WebContentsViewQt(web_contents);
+    QtWebEngineCore::WebContentsViewQt *rv = new QtWebEngineCore::WebContentsViewQt(web_contents);
     *render_view_host_delegate_view = rv;
     return std::unique_ptr<WebContentsView>(rv);
 }
@@ -131,12 +135,6 @@ std::unique_ptr<ui::OSExchangeDataProvider> ui::OSExchangeDataProviderFactory::C
 {
     return nullptr;
 }
-
-#if !BUILDFLAG(ENABLE_EXTENSIONS)
-namespace extensions {
-  const char kExtensionScheme[] = "chrome-extension";
-}
-#endif
 
 #if !QT_CONFIG(webengine_webrtc) && QT_CONFIG(webengine_extensions)
 namespace extensions {

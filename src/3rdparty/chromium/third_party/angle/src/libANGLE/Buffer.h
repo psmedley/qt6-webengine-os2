@@ -31,6 +31,13 @@ namespace gl
 class Buffer;
 class Context;
 
+enum class WebGLBufferType
+{
+    Undefined,
+    ElementArray,
+    OtherData,
+};
+
 class BufferState final : angle::NonCopyable
 {
   public:
@@ -47,6 +54,7 @@ class BufferState final : angle::NonCopyable
     GLint64 getSize() const { return mSize; }
     bool isBoundForTransformFeedback() const { return mTransformFeedbackIndexedBindingCount != 0; }
     std::string getLabel() const { return mLabel; }
+    WebGLBufferType getWebGLType() const { return mWebGLType; }
 
   private:
     friend class Buffer;
@@ -67,18 +75,22 @@ class BufferState final : angle::NonCopyable
     GLboolean mImmutable;
     GLbitfield mStorageExtUsageFlags;
     GLboolean mExternal;
+    WebGLBufferType mWebGLType;
 };
 
-// Some Vertex Array Objects track buffer data updates.
+// Vertex Array and Texture track buffer data updates.
 struct ContentsObserver
 {
-    VertexArray *vertexArray = nullptr;
-    uint32_t bufferIndex     = 0;
+    static constexpr uint32_t kBufferTextureIndex = std::numeric_limits<uint32_t>::max();
+    uint32_t bufferIndex                          = 0;
+
+    // VertexArray* (bufferIndex != kBufferTextureIndex) or Texture*
+    void *observer = nullptr;
 };
 
 ANGLE_INLINE bool operator==(const ContentsObserver &lhs, const ContentsObserver &rhs)
 {
-    return lhs.vertexArray == rhs.vertexArray && lhs.bufferIndex == rhs.bufferIndex;
+    return lhs.bufferIndex == rhs.bufferIndex && lhs.observer == rhs.observer;
 }
 
 class Buffer final : public RefCountObject<BufferID>,
@@ -90,6 +102,8 @@ class Buffer final : public RefCountObject<BufferID>,
     Buffer(rx::GLImplFactory *factory, BufferID id);
     ~Buffer() override;
     void onDestroy(const Context *context) override;
+
+    void onBind(const Context *context, BufferBinding target);
 
     angle::Result setLabel(const Context *context, const std::string &label) override;
     const std::string &getLabel() const override;
@@ -188,6 +202,9 @@ class Buffer final : public RefCountObject<BufferID>,
 
     void addContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex);
     void removeContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex);
+    void addContentsObserver(Texture *texture);
+    void removeContentsObserver(Texture *texture);
+    bool hasContentsObserver(Texture *texture) const;
 
   private:
     angle::Result bufferDataImpl(Context *context,
@@ -203,7 +220,8 @@ class Buffer final : public RefCountObject<BufferID>,
                                          GLbitfield flags);
 
     void onContentsChange();
-    size_t getContentsObserverIndex(VertexArray *vertexArray, uint32_t bufferIndex) const;
+    size_t getContentsObserverIndex(void *observer, uint32_t bufferIndex) const;
+    void removeContentsObserverImpl(void *observer, uint32_t bufferIndex);
 
     BufferState mState;
     rx::BufferImpl *mImpl;

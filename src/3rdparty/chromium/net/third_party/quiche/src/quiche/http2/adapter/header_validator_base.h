@@ -1,10 +1,12 @@
 #ifndef QUICHE_HTTP2_ADAPTER_HEADER_VALIDATOR_BASE_H_
 #define QUICHE_HTTP2_ADAPTER_HEADER_VALIDATOR_BASE_H_
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <string>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "quiche/common/platform/api/quiche_export.h"
 
 namespace http2 {
@@ -23,14 +25,14 @@ enum class ObsTextOption : uint8_t {
   kDisallow,
 };
 
-class QUICHE_EXPORT_PRIVATE HeaderValidatorBase {
+class QUICHE_EXPORT HeaderValidatorBase {
  public:
   HeaderValidatorBase() = default;
   virtual ~HeaderValidatorBase() = default;
 
   virtual void StartHeaderBlock() {
     status_.clear();
-    content_length_ = absl::nullopt;
+    content_length_ = std::nullopt;
   }
 
   enum HeaderStatus {
@@ -48,19 +50,34 @@ class QUICHE_EXPORT_PRIVATE HeaderValidatorBase {
   // For responses, returns the value of the ":status" header, if present.
   absl::string_view status_header() const { return status_; }
 
-  absl::optional<size_t> content_length() const { return content_length_; }
+  std::optional<size_t> content_length() const { return content_length_; }
 
   void SetMaxFieldSize(uint32_t field_size) { max_field_size_ = field_size; }
   void SetObsTextOption(ObsTextOption option) { obs_text_option_ = option; }
   // Allows the "extended CONNECT" syntax described in RFC 8441.
   void SetAllowExtendedConnect() { allow_extended_connect_ = true; }
+  void SetValidatePath() { validate_path_ = true; }
+  void SetAllowFragmentInPath() { allow_fragment_in_path_ = true; }
+  void SetAllowDifferentHostAndAuthority() {
+    allow_different_host_and_authority_ = true;
+  }
+  // If set, allow uppercase characters in header names (except for
+  // pseudo-headers), in violation with RFC 9113 and RFC 9114.
+  // Default behavior is to enforce that header names are lowercase.
+  void SetAllowUppercaseInHeaderNames() {
+    allow_uppercase_in_header_names_ = true;
+  }
 
  protected:
   std::string status_;
-  absl::optional<size_t> max_field_size_;
-  absl::optional<size_t> content_length_;
+  std::optional<size_t> max_field_size_;
+  std::optional<size_t> content_length_;
   ObsTextOption obs_text_option_ = ObsTextOption::kDisallow;
   bool allow_extended_connect_ = false;
+  bool validate_path_ = false;
+  bool allow_fragment_in_path_ = false;
+  bool allow_different_host_and_authority_ = false;
+  bool allow_uppercase_in_header_names_ = false;
 };
 
 }  // namespace adapter

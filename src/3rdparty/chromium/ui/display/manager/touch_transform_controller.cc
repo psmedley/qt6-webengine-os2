@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "base/ranges/algorithm.h"
 #include "ui/display/display_layout.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/managed_display_info.h"
@@ -84,16 +85,16 @@ bool GetCalibratedTransform(
   gfx::Transform product_matrix =
       touch_point_matrix_transpose * touch_point_matrix;
 
-  // Set (3, 3) = 1 so that |determinent| of the matrix is != 0 and the inverse
+  // Set (3, 3) = 1 so that |determinant| of the matrix is != 0 and the inverse
   // can be calculated.
   product_matrix.set_rc(3, 3, 1);
 
   gfx::Transform product_matrix_inverse;
 
-  // NOTE: If the determinent is zero then the inverse cannot be computed. The
+  // NOTE: If the determinant is zero then the inverse cannot be computed. The
   // only solution is to restart touch calibration and get new points from user.
   if (!product_matrix.GetInverse(&product_matrix_inverse)) {
-    NOTREACHED() << "Touch Calibration failed. Determinent is zero.";
+    NOTREACHED() << "Touch Calibration failed. Determinant is zero.";
     return false;
   }
 
@@ -132,7 +133,7 @@ gfx::Transform GetUncalibratedTransform(const gfx::Transform& tm,
   // Take care of panel fitting only if supported. Panel fitting is emulated
   // in software mirroring mode (display != touch_display).
   // If panel fitting is enabled then the aspect ratio is preserved and the
-  // display is scaled acordingly. In this case blank regions would be present
+  // display is scaled accordingly. In this case blank regions would be present
   // in order to center the displayed area.
   if (display.is_aspect_preserving_scaling() ||
       display.id() != touch_display.id()) {
@@ -185,8 +186,8 @@ double TouchTransformController::GetTouchResolutionScale(
       touch_display.bounds_in_native().size().IsEmpty())
     return 1.0;
 
-  double display_area = touch_display.bounds_in_native().size().GetArea();
-  double touch_area = touch_device.size.GetArea();
+  double display_area = touch_display.bounds_in_native().size().Area64();
+  double touch_area = touch_device.size.Area64();
   double ratio = std::sqrt(display_area / touch_area);
 
   VLOG(2) << "Display size: "
@@ -234,7 +235,7 @@ gfx::Transform TouchTransformController::GetTouchTransform(
   // The resolution at which the touch calibration was performed.
   gfx::SizeF touch_calib_size(calibration_data.bounds);
 
-  // Any additional transfomration that needs to be applied to the display
+  // Any additional transformation that needs to be applied to the display
   // points, before we solve for the final transform.
   gfx::Transform pre_transform;
 
@@ -344,10 +345,10 @@ void TouchTransformController::UpdateTouchTransforms(
   }
 
   if (display_manager_->IsInMirrorMode()) {
-    std::size_t primary_display_id_index =
-        std::distance(display_id_list.begin(),
-                      std::find(display_id_list.begin(), display_id_list.end(),
-                                Screen::GetScreen()->GetPrimaryDisplay().id()));
+    std::size_t primary_display_id_index = std::distance(
+        display_id_list.begin(),
+        base::ranges::find(display_id_list,
+                           Screen::GetScreen()->GetPrimaryDisplay().id()));
 
     for (std::size_t index = 0; index < display_id_list.size(); index++) {
       // In extended but software mirroring mode, there is a WindowTreeHost

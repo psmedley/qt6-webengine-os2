@@ -7,37 +7,49 @@
 
 #include "include/core/SkMesh.h"
 
-#ifdef SK_ENABLE_SKSL
+#include "include/core/SkAlphaType.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
-#include "include/core/SkMath.h"
-#include "include/private/SkOpts_spi.h"
-#include "include/private/SkSLProgramElement.h"
-#include "include/private/SkSLProgramKind.h"
+#include "include/private/SkSLSampleUsage.h"
+#include "include/private/base/SkAlign.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkMath.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTo.h"
+#include "src/base/SkSafeMath.h"
+#include "src/core/SkChecksum.h"
 #include "src/core/SkMeshPriv.h"
 #include "src/core/SkRuntimeEffectPriv.h"
-#include "src/core/SkSafeMath.h"
 #include "src/sksl/SkSLAnalysis.h"
 #include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLCompiler.h"
-#include "src/sksl/SkSLUtil.h"
+#include "src/sksl/SkSLContext.h"
+#include "src/sksl/SkSLProgramKind.h"
+#include "src/sksl/SkSLProgramSettings.h"
+#include "src/sksl/analysis/SkSLProgramVisitor.h"
+#include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLFieldAccess.h"
 #include "src/sksl/ir/SkSLFunctionDeclaration.h"
 #include "src/sksl/ir/SkSLFunctionDefinition.h"
+#include "src/sksl/ir/SkSLModifierFlags.h"
 #include "src/sksl/ir/SkSLProgram.h"
+#include "src/sksl/ir/SkSLProgramElement.h"
+#include "src/sksl/ir/SkSLReturnStatement.h"
+#include "src/sksl/ir/SkSLStatement.h"
+#include "src/sksl/ir/SkSLStructDefinition.h"
 #include "src/sksl/ir/SkSLType.h"
 #include "src/sksl/ir/SkSLVarDeclarations.h"
 #include "src/sksl/ir/SkSLVariable.h"
+#include "src/sksl/ir/SkSLVariableReference.h"
 
-#if SK_SUPPORT_GPU
-#include "src/gpu/ganesh/GrGpu.h"
-#include "src/gpu/ganesh/GrStagingBufferManager.h"
-#endif  // SK_SUPPORT_GPU
-
+#include <algorithm>
 #include <locale>
+#include <optional>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <utility>
+
+using namespace skia_private;
 
 using Attribute = SkMeshSpecification::Attribute;
 using Varying   = SkMeshSpecification::Varying;
@@ -52,6 +64,7 @@ using VertexBuffer = SkMesh::VertexBuffer;
 #define RETURN_SUCCESS return std::make_tuple(true, SkString{})
 
 using Uniform = SkMeshSpecification::Uniform;
+using Child = SkMeshSpecification::Child;
 
 static std::vector<Uniform>::iterator find_uniform(std::vector<Uniform>& uniforms,
                                                    std::string_view name) {
@@ -62,6 +75,7 @@ static std::vector<Uniform>::iterator find_uniform(std::vector<Uniform>& uniform
 static std::tuple<bool, SkString>
 gather_uniforms_and_check_for_main(const SkSL::Program& program,
                                    std::vector<Uniform>* uniforms,
+                                   std::vector<Child>* children,
                                    SkMeshSpecification::Uniform::Flags stage,
                                    size_t* offset) {
     bool foundMain = false;
@@ -75,30 +89,41 @@ gather_uniforms_and_check_for_main(const SkSL::Program& program,
         } else if (elem->is<SkSL::GlobalVarDeclaration>()) {
             const SkSL::GlobalVarDeclaration& global = elem->as<SkSL::GlobalVarDeclaration>();
             const SkSL::VarDeclaration& varDecl = global.declaration()->as<SkSL::VarDeclaration>();
-            const SkSL::Variable& var = varDecl.var();
-            if (var.modifiers().fFlags & SkSL::Modifiers::kUniform_Flag) {
-                auto iter = find_uniform(*uniforms, var.name());
-                const auto& context = *program.fContext;
-                if (iter == uniforms->end()) {
-                    uniforms->push_back(SkRuntimeEffectPriv::VarAsUniform(var, context, offset));
-                    uniforms->back().flags |= stage;
+            const SkSL::Variable& var = *varDecl.var();
+            if (var.modifierFlags().isUniform()) {
+                if (var.type().isEffectChild()) {
+                    // This is a child effect; add it to our list of children.
+                    children->push_back(SkRuntimeEffectPriv::VarAsChild(var, children->size()));
                 } else {
-                    // Check that the two declarations are equivalent
-                    size_t ignoredOffset = 0;
-                    auto uniform = SkRuntimeEffectPriv::VarAsUniform(var, context, &ignoredOffset);
-                    if (uniform.isArray() != iter->isArray() ||
-                        uniform.type      != iter->type      ||
-                        uniform.count     != iter->count) {
-                        return {false, SkStringPrintf("Uniform %.*s declared with different types"
-                                                      " in vertex and fragment shaders.",
-                                                      (int)iter->name.size(), iter->name.data())};
+                    // This is a uniform variable; make sure it exists in our list of uniforms, and
+                    // ensure that the type and layout matches between VS and FS.
+                    auto iter = find_uniform(*uniforms, var.name());
+                    const auto& context = *program.fContext;
+                    if (iter == uniforms->end()) {
+                        uniforms->push_back(SkRuntimeEffectPriv::VarAsUniform(var, context,
+                                                                              offset));
+                        uniforms->back().flags |= stage;
+                    } else {
+                        // Check that the two declarations are equivalent
+                        size_t ignoredOffset = 0;
+                        auto uniform = SkRuntimeEffectPriv::VarAsUniform(var, context,
+                                                                         &ignoredOffset);
+                        if (uniform.isArray() != iter->isArray() ||
+                            uniform.type      != iter->type      ||
+                            uniform.count     != iter->count) {
+                            return {false,
+                                    SkStringPrintf("Uniform %.*s declared with different types"
+                                                   " in vertex and fragment shaders.",
+                                                   (int)var.name().size(), var.name().data())};
+                        }
+                        if (uniform.isColor() != iter->isColor()) {
+                            return {false,
+                                    SkStringPrintf("Uniform %.*s declared with different color"
+                                                   " layout in vertex and fragment shaders.",
+                                                   (int)var.name().size(), var.name().data())};
+                        }
+                        (*iter).flags |= stage;
                     }
-                    if (uniform.isColor() != iter->isColor()) {
-                        return {false, SkStringPrintf("Uniform %.*s declared with different color"
-                                                      " layout in vertex and fragment shaders.",
-                                                      (int)iter->name.size(), iter->name.data())};
-                    }
-                    (*iter).flags |= stage;
                 }
             }
         }
@@ -111,33 +136,21 @@ gather_uniforms_and_check_for_main(const SkSL::Program& program,
 
 using ColorType = SkMeshSpecificationPriv::ColorType;
 
-static std::tuple<ColorType, bool>
-get_fs_color_type_and_local_coords(const SkSL::Program& fsProgram) {
+ColorType get_fs_color_type(const SkSL::Program& fsProgram) {
     for (const SkSL::ProgramElement* elem : fsProgram.elements()) {
         if (elem->is<SkSL::FunctionDefinition>()) {
             const SkSL::FunctionDefinition& defn = elem->as<SkSL::FunctionDefinition>();
             const SkSL::FunctionDeclaration& decl = defn.declaration();
             if (decl.isMain()) {
-
-                SkMeshSpecificationPriv::ColorType ct;
                 SkASSERT(decl.parameters().size() == 1 || decl.parameters().size() == 2);
                 if (decl.parameters().size() == 1) {
-                    ct = ColorType::kNone;
-                } else {
-                    const SkSL::Type& paramType = decl.parameters()[1]->type();
-                    SkASSERT(paramType.matches(*fsProgram.fContext->fTypes.fHalf4) ||
-                             paramType.matches(*fsProgram.fContext->fTypes.fFloat4));
-                    ct = paramType.matches(*fsProgram.fContext->fTypes.fHalf4)
-                                 ? ColorType::kHalf4
-                                 : ColorType::kFloat4;
+                    return ColorType::kNone;
                 }
-
-                const SkSL::Type& returnType = decl.returnType();
-                SkASSERT(returnType.matches(*fsProgram.fContext->fTypes.fVoid) ||
-                         returnType.matches(*fsProgram.fContext->fTypes.fFloat2));
-                bool hasLocalCoords = returnType.matches(*fsProgram.fContext->fTypes.fFloat2);
-
-                return std::make_tuple(ct, hasLocalCoords);
+                const SkSL::Type& paramType = decl.parameters()[1]->type();
+                SkASSERT(paramType.matches(*fsProgram.fContext->fTypes.fHalf4) ||
+                         paramType.matches(*fsProgram.fContext->fTypes.fFloat4));
+                return paramType.matches(*fsProgram.fContext->fTypes.fHalf4) ? ColorType::kHalf4
+                                                                             : ColorType::kFloat4;
             }
         }
     }
@@ -168,7 +181,7 @@ static size_t attribute_type_size(Attribute::Type type) {
         case Attribute::Type::kUByte4_unorm:  return 4;
     }
     SkUNREACHABLE;
-};
+}
 
 static const char* attribute_type_string(Attribute::Type type) {
     switch (type) {
@@ -179,7 +192,7 @@ static const char* attribute_type_string(Attribute::Type type) {
         case Attribute::Type::kUByte4_unorm:  return "half4";
     }
     SkUNREACHABLE;
-};
+}
 
 static const char* varying_type_string(Varying::Type type) {
     switch (type) {
@@ -193,7 +206,7 @@ static const char* varying_type_string(Varying::Type type) {
         case Varying::Type::kHalf4:  return "half4";
     }
     SkUNREACHABLE;
-};
+}
 
 std::tuple<bool, SkString>
 check_vertex_offsets_and_stride(SkSpan<const Attribute> attributes,
@@ -238,6 +251,141 @@ check_vertex_offsets_and_stride(SkSpan<const Attribute> attributes,
     RETURN_SUCCESS;
 }
 
+int check_for_passthrough_local_coords_and_dead_varyings(const SkSL::Program& fsProgram,
+                                                         uint32_t* deadVaryingMask) {
+    SkASSERT(deadVaryingMask);
+
+    using namespace SkSL;
+    static constexpr int kFailed = -2;
+
+    class Visitor final : public SkSL::ProgramVisitor {
+    public:
+        Visitor(const Context& context) : fContext(context) {}
+
+        void visit(const Program& program) { ProgramVisitor::visit(program); }
+
+        int passthroughFieldIndex() const { return fPassthroughFieldIndex; }
+
+        uint32_t fieldUseMask() const { return fFieldUseMask; }
+
+    protected:
+        bool visitProgramElement(const ProgramElement& p) override {
+            if (p.is<StructDefinition>()) {
+                const auto& def = p.as<StructDefinition>();
+                if (def.type().name() == "Varyings") {
+                    fVaryingsType = &def.type();
+                }
+                // No reason to keep looking at this type definition.
+                return false;
+            }
+            if (p.is<FunctionDefinition>() && p.as<FunctionDefinition>().declaration().isMain()) {
+                SkASSERT(!fVaryings);
+                fVaryings = p.as<FunctionDefinition>().declaration().parameters()[0];
+
+                SkASSERT(fVaryingsType && fVaryingsType->matches(fVaryings->type()));
+
+                fInMain = true;
+                bool result = ProgramVisitor::visitProgramElement(p);
+                fInMain = false;
+                return result;
+            }
+            return ProgramVisitor::visitProgramElement(p);
+        }
+
+        bool visitStatement(const Statement& s) override {
+            if (!fInMain) {
+                return ProgramVisitor::visitStatement(s);
+            }
+            // We should only get here if are in main and therefore found the varyings parameter.
+            SkASSERT(fVaryings);
+            SkASSERT(fVaryingsType);
+
+            if (fPassthroughFieldIndex == kFailed) {
+                // We've already determined there are return statements that aren't passthrough
+                // or return different fields.
+                return ProgramVisitor::visitStatement(s);
+            }
+            if (!s.is<ReturnStatement>()) {
+                return ProgramVisitor::visitStatement(s);
+            }
+
+            // We just detect simple cases like "return varyings.foo;"
+            const auto& rs = s.as<ReturnStatement>();
+            SkASSERT(rs.expression());
+            if (!rs.expression()->is<FieldAccess>()) {
+                this->passthroughFailed();
+                return ProgramVisitor::visitStatement(s);
+            }
+            const auto& fa = rs.expression()->as<FieldAccess>();
+            if (!fa.base()->is<VariableReference>()) {
+                this->passthroughFailed();
+                return ProgramVisitor::visitStatement(s);
+            }
+            const auto& baseRef = fa.base()->as<VariableReference>();
+            if (baseRef.variable() != fVaryings) {
+                this->passthroughFailed();
+                return ProgramVisitor::visitStatement(s);
+            }
+            if (fPassthroughFieldIndex >= 0) {
+                // We already found an OK return statement. Check if this one returns the same
+                // field.
+                if (fa.fieldIndex() != fPassthroughFieldIndex) {
+                    this->passthroughFailed();
+                    return ProgramVisitor::visitStatement(s);
+                }
+                // We don't call our base class here because we don't want to hit visitExpression
+                // and mark the returned field as used.
+                return false;
+            }
+            const Field& field = fVaryings->type().fields()[fa.fieldIndex()];
+            if (!field.fType->matches(*fContext.fTypes.fFloat2)) {
+                this->passthroughFailed();
+                return ProgramVisitor::visitStatement(s);
+            }
+            fPassthroughFieldIndex = fa.fieldIndex();
+            // We don't call our base class here because we don't want to hit visitExpression and
+            // mark the returned field as used.
+            return false;
+        }
+
+        bool visitExpression(const Expression& e) override {
+            // Anything before the Varyings struct is defined doesn't matter.
+            if (!fVaryingsType) {
+                return false;
+            }
+            if (!e.is<FieldAccess>()) {
+                return ProgramVisitor::visitExpression(e);
+            }
+            const auto& fa = e.as<FieldAccess>();
+            if (!fa.base()->type().matches(*fVaryingsType)) {
+                return ProgramVisitor::visitExpression(e);
+            }
+            fFieldUseMask |= 1 << fa.fieldIndex();
+            return false;
+        }
+
+    private:
+        void passthroughFailed() {
+            if (fPassthroughFieldIndex >= 0) {
+                fFieldUseMask |= 1 << fPassthroughFieldIndex;
+            }
+            fPassthroughFieldIndex = kFailed;
+        }
+
+        const Context&  fContext;
+        const Type*     fVaryingsType          = nullptr;
+        const Variable* fVaryings              = nullptr;
+        int             fPassthroughFieldIndex = -1;
+        bool            fInMain                = false;
+        uint32_t        fFieldUseMask          = 0;
+    };
+
+    Visitor v(*fsProgram.fContext);
+    v.visit(fsProgram);
+    *deadVaryingMask = ~v.fieldUseMask();
+    return v.passthroughFieldIndex();
+}
+
 SkMeshSpecification::Result SkMeshSpecification::Make(SkSpan<const Attribute> attributes,
                                                       size_t vertexStride,
                                                       SkSpan<const Varying> varyings,
@@ -274,13 +422,33 @@ SkMeshSpecification::Result SkMeshSpecification::Make(SkSpan<const Attribute> at
     }
     attributesStruct.append("};\n");
 
+    bool userProvidedPositionVarying = false;
+    for (const auto& v : varyings) {
+        if (v.name.equals("position")) {
+            if (v.type != Varying::Type::kFloat2) {
+                return {nullptr, SkString("Varying \"position\" must have type float2.")};
+            }
+            userProvidedPositionVarying = true;
+        }
+    }
+
+    STArray<kMaxVaryings, Varying> tempVaryings;
+    if (!userProvidedPositionVarying) {
+        // Even though we check the # of varyings in MakeFromSourceWithStructs we check here, too,
+        // to avoid overflow with + 1.
+        if (varyings.size() > kMaxVaryings - 1) {
+            RETURN_FAILURE("A maximum of %zu varyings is allowed.", kMaxVaryings);
+        }
+        for (const auto& v : varyings) {
+            tempVaryings.push_back(v);
+        }
+        tempVaryings.push_back(Varying{Varying::Type::kFloat2, SkString("position")});
+        varyings = tempVaryings;
+    }
+
     SkString varyingStruct("struct Varyings {\n");
     for (const auto& v : varyings) {
         varyingStruct.appendf("  %s %s;\n", varying_type_string(v.type), v.name.c_str());
-    }
-    // Throw in an unused variable to avoid an empty struct, which is illegal.
-    if (varyings.empty()) {
-        varyingStruct.append("  bool _empty_;\n");
     }
     varyingStruct.append("};\n");
 
@@ -331,9 +499,10 @@ SkMeshSpecification::Result SkMeshSpecification::MakeFromSourceWithStructs(
     }
 
     std::vector<Uniform> uniforms;
+    std::vector<Child> children;
     size_t offset = 0;
 
-    SkSL::Compiler compiler(SkSL::ShaderCapsFactory::Standalone());
+    SkSL::Compiler compiler;
 
     // Disable memory pooling; this might slow down compilation slightly, but it will ensure that a
     // long-lived mesh specification doesn't waste memory.
@@ -352,6 +521,7 @@ SkMeshSpecification::Result SkMeshSpecification::MakeFromSourceWithStructs(
     if (auto [result, error] = gather_uniforms_and_check_for_main(
                 *vsProgram,
                 &uniforms,
+                &children,
                 SkMeshSpecification::Uniform::Flags::kVertex_Flag,
                 &offset);
         !result) {
@@ -374,6 +544,7 @@ SkMeshSpecification::Result SkMeshSpecification::MakeFromSourceWithStructs(
     if (auto [result, error] = gather_uniforms_and_check_for_main(
                 *fsProgram,
                 &uniforms,
+                &children,
                 SkMeshSpecification::Uniform::Flags::kFragment_Flag,
                 &offset);
         !result) {
@@ -384,7 +555,7 @@ SkMeshSpecification::Result SkMeshSpecification::MakeFromSourceWithStructs(
         RETURN_FAILURE("Color transform intrinsics are not permitted in custom mesh shaders");
     }
 
-    auto [ct, hasLocalCoords] = get_fs_color_type_and_local_coords(*fsProgram);
+    ColorType ct = get_fs_color_type(*fsProgram);
 
     if (ct == ColorType::kNone) {
         cs = nullptr;
@@ -398,14 +569,24 @@ SkMeshSpecification::Result SkMeshSpecification::MakeFromSourceWithStructs(
         }
     }
 
+    uint32_t deadVaryingMask;
+    int passthroughLocalCoordsVaryingIndex =
+            check_for_passthrough_local_coords_and_dead_varyings(*fsProgram, &deadVaryingMask);
+
+    if (passthroughLocalCoordsVaryingIndex >= 0) {
+        SkASSERT(varyings[passthroughLocalCoordsVaryingIndex].type == Varying::Type::kFloat2);
+    }
+
     return {sk_sp<SkMeshSpecification>(new SkMeshSpecification(attributes,
                                                                stride,
                                                                varyings,
+                                                               passthroughLocalCoordsVaryingIndex,
+                                                               deadVaryingMask,
                                                                std::move(uniforms),
+                                                               std::move(children),
                                                                std::move(vsProgram),
                                                                std::move(fsProgram),
                                                                ct,
-                                                               hasLocalCoords,
                                                                std::move(cs),
                                                                at)),
             /*error=*/{}};
@@ -413,44 +594,49 @@ SkMeshSpecification::Result SkMeshSpecification::MakeFromSourceWithStructs(
 
 SkMeshSpecification::~SkMeshSpecification() = default;
 
-SkMeshSpecification::SkMeshSpecification(SkSpan<const Attribute>              attributes,
-                                         size_t                               stride,
-                                         SkSpan<const Varying>                varyings,
-                                         std::vector<Uniform>                 uniforms,
-                                         std::unique_ptr<const SkSL::Program> vs,
-                                         std::unique_ptr<const SkSL::Program> fs,
-                                         ColorType                            ct,
-                                         bool                                 hasLocalCoords,
-                                         sk_sp<SkColorSpace>                  cs,
-                                         SkAlphaType                          at)
+SkMeshSpecification::SkMeshSpecification(
+        SkSpan<const Attribute>              attributes,
+        size_t                               stride,
+        SkSpan<const Varying>                varyings,
+        int                                  passthroughLocalCoordsVaryingIndex,
+        uint32_t                             deadVaryingMask,
+        std::vector<Uniform>                 uniforms,
+        std::vector<Child>                   children,
+        std::unique_ptr<const SkSL::Program> vs,
+        std::unique_ptr<const SkSL::Program> fs,
+        ColorType                            ct,
+        sk_sp<SkColorSpace>                  cs,
+        SkAlphaType                          at)
         : fAttributes(attributes.begin(), attributes.end())
         , fVaryings(varyings.begin(), varyings.end())
         , fUniforms(std::move(uniforms))
+        , fChildren(std::move(children))
         , fVS(std::move(vs))
         , fFS(std::move(fs))
         , fStride(stride)
+        , fPassthroughLocalCoordsVaryingIndex(passthroughLocalCoordsVaryingIndex)
+        , fDeadVaryingMask(deadVaryingMask)
         , fColorType(ct)
-        , fHasLocalCoords(hasLocalCoords)
         , fColorSpace(std::move(cs))
         , fAlphaType(at) {
-    fHash = SkOpts::hash_fn(fVS->fSource->c_str(), fVS->fSource->size(), 0);
-    fHash = SkOpts::hash_fn(fFS->fSource->c_str(), fFS->fSource->size(), fHash);
+    fHash = SkChecksum::Hash32(fVS->fSource->c_str(), fVS->fSource->size(), 0);
+    fHash = SkChecksum::Hash32(fFS->fSource->c_str(), fFS->fSource->size(), fHash);
 
     // The attributes and varyings SkSL struct declarations are included in the program source.
     // However, the attribute offsets and types need to be included, the latter because the SkSL
     // struct definition has the GPU type but not the CPU data format.
     for (const auto& a : fAttributes) {
-        fHash = SkOpts::hash_fn(&a.offset, sizeof(a.offset), fHash);
-        fHash = SkOpts::hash_fn(&a.type,   sizeof(a.type),   fHash);
+        fHash = SkChecksum::Hash32(&a.offset, sizeof(a.offset), fHash);
+        fHash = SkChecksum::Hash32(&a.type,   sizeof(a.type),   fHash);
     }
 
-    fHash = SkOpts::hash_fn(&stride, sizeof(stride), fHash);
+    fHash = SkChecksum::Hash32(&stride, sizeof(stride), fHash);
 
     uint64_t csHash = fColorSpace ? fColorSpace->hash() : 0;
-    fHash = SkOpts::hash_fn(&csHash, sizeof(csHash), fHash);
+    fHash = SkChecksum::Hash32(&csHash, sizeof(csHash), fHash);
 
     auto atInt = static_cast<uint32_t>(fAlphaType);
-    fHash = SkOpts::hash_fn(&atInt, sizeof(atInt), fHash);
+    fHash = SkChecksum::Hash32(&atInt, sizeof(atInt), fHash);
 }
 
 size_t SkMeshSpecification::uniformSize() const {
@@ -459,24 +645,39 @@ size_t SkMeshSpecification::uniformSize() const {
 }
 
 const Uniform* SkMeshSpecification::findUniform(std::string_view name) const {
-    auto iter = std::find_if(fUniforms.begin(), fUniforms.end(), [name] (const Uniform& u) {
-        return u.name == name;
-    });
-    return iter == fUniforms.end() ? nullptr : &(*iter);
+    for (const Uniform& uniform : fUniforms) {
+        if (uniform.name == name) {
+            return &uniform;
+        }
+    }
+    return nullptr;
+}
+
+const Child* SkMeshSpecification::findChild(std::string_view name) const {
+    for (const Child& child : fChildren) {
+        if (child.name == name) {
+            return &child;
+        }
+    }
+    return nullptr;
 }
 
 const Attribute* SkMeshSpecification::findAttribute(std::string_view name) const {
-    auto iter = std::find_if(fAttributes.begin(), fAttributes.end(), [name](const Attribute& a) {
-        return name.compare(a.name.c_str()) == 0;
-    });
-    return iter == fAttributes.end() ? nullptr : &(*iter);
+    for (const Attribute& attr : fAttributes) {
+        if (name == attr.name.c_str()) {
+            return &attr;
+        }
+    }
+    return nullptr;
 }
 
 const Varying* SkMeshSpecification::findVarying(std::string_view name) const {
-    auto iter = std::find_if(fVaryings.begin(), fVaryings.end(), [name](const Varying& v) {
-        return name.compare(v.name.c_str()) == 0;
-    });
-    return iter == fVaryings.end() ? nullptr : &(*iter);
+    for (const Varying& varying : fVaryings) {
+        if (name == varying.name.c_str()) {
+            return &varying;
+        }
+    }
+    return nullptr;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -490,85 +691,68 @@ SkMesh::SkMesh(SkMesh&&)      = default;
 SkMesh& SkMesh::operator=(const SkMesh&) = default;
 SkMesh& SkMesh::operator=(SkMesh&&)      = default;
 
-sk_sp<IndexBuffer> SkMesh::MakeIndexBuffer(GrDirectContext* dc, const void* data, size_t size) {
-    if (!dc) {
-        return SkMeshPriv::CpuIndexBuffer::Make(data, size);
+SkMesh::Result SkMesh::Make(sk_sp<SkMeshSpecification> spec,
+                            Mode mode,
+                            sk_sp<VertexBuffer> vb,
+                            size_t vertexCount,
+                            size_t vertexOffset,
+                            sk_sp<const SkData> uniforms,
+                            SkSpan<ChildPtr> children,
+                            const SkRect& bounds) {
+    SkMesh mesh;
+    mesh.fSpec     = std::move(spec);
+    mesh.fMode     = mode;
+    mesh.fVB       = std::move(vb);
+    mesh.fUniforms = std::move(uniforms);
+    mesh.fChildren.push_back_n(children.size(), children.data());
+    mesh.fVCount   = vertexCount;
+    mesh.fVOffset  = vertexOffset;
+    mesh.fBounds   = bounds;
+    auto [valid, msg] = mesh.validate();
+    if (!valid) {
+        mesh = {};
     }
-#if SK_SUPPORT_GPU
-    return SkMeshPriv::GpuIndexBuffer::Make(dc, data, size);
-#endif
-    return nullptr;
+    return {std::move(mesh), std::move(msg)};
 }
 
-sk_sp<IndexBuffer> SkMesh::MakeIndexBuffer(GrDirectContext* dc, sk_sp<const SkData> data) {
-    if (!data) {
-        return nullptr;
+SkMesh::Result SkMesh::MakeIndexed(sk_sp<SkMeshSpecification> spec,
+                                   Mode mode,
+                                   sk_sp<VertexBuffer> vb,
+                                   size_t vertexCount,
+                                   size_t vertexOffset,
+                                   sk_sp<IndexBuffer> ib,
+                                   size_t indexCount,
+                                   size_t indexOffset,
+                                   sk_sp<const SkData> uniforms,
+                                   SkSpan<ChildPtr> children,
+                                   const SkRect& bounds) {
+    if (!ib) {
+        // We check this before calling validate to disambiguate from a non-indexed mesh where
+        // IB is expected to be null.
+        return {{}, SkString{"An index buffer is required."}};
     }
-    return MakeIndexBuffer(dc, data->data(), data->size());
-}
-
-sk_sp<VertexBuffer> SkMesh::MakeVertexBuffer(GrDirectContext* dc, const void* data, size_t size) {
-    if (!dc) {
-        return SkMeshPriv::CpuVertexBuffer::Make(data, size);
+    SkMesh mesh;
+    mesh.fSpec     = std::move(spec);
+    mesh.fMode     = mode;
+    mesh.fVB       = std::move(vb);
+    mesh.fVCount   = vertexCount;
+    mesh.fVOffset  = vertexOffset;
+    mesh.fIB       = std::move(ib);
+    mesh.fUniforms = std::move(uniforms);
+    mesh.fChildren.push_back_n(children.size(), children.data());
+    mesh.fICount   = indexCount;
+    mesh.fIOffset  = indexOffset;
+    mesh.fBounds   = bounds;
+    auto [valid, msg] = mesh.validate();
+    if (!valid) {
+        mesh = {};
     }
-#if SK_SUPPORT_GPU
-    return SkMeshPriv::GpuVertexBuffer::Make(dc, data, size);
-#endif
-    return nullptr;
-}
-
-sk_sp<VertexBuffer> SkMesh::MakeVertexBuffer(GrDirectContext* dc, sk_sp<const SkData> data) {
-    if (!data) {
-        return nullptr;
-    }
-    return MakeVertexBuffer(dc, data->data(), data->size());
-}
-
-SkMesh SkMesh::Make(sk_sp<SkMeshSpecification> spec,
-                    Mode mode,
-                    sk_sp<VertexBuffer> vb,
-                    size_t vertexCount,
-                    size_t vertexOffset,
-                    sk_sp<const SkData> uniforms,
-                    const SkRect& bounds) {
-    SkMesh cm;
-    cm.fSpec     = std::move(spec);
-    cm.fMode     = mode;
-    cm.fVB       = std::move(vb);
-    cm.fUniforms = std::move(uniforms);
-    cm.fVCount   = vertexCount;
-    cm.fVOffset  = vertexOffset;
-    cm.fBounds   = bounds;
-    return cm.validate() ? cm : SkMesh{};
-}
-
-SkMesh SkMesh::MakeIndexed(sk_sp<SkMeshSpecification> spec,
-                           Mode mode,
-                           sk_sp<VertexBuffer> vb,
-                           size_t vertexCount,
-                           size_t vertexOffset,
-                           sk_sp<IndexBuffer> ib,
-                           size_t indexCount,
-                           size_t indexOffset,
-                           sk_sp<const SkData> uniforms,
-                           const SkRect& bounds) {
-    SkMesh cm;
-    cm.fSpec     = std::move(spec);
-    cm.fMode     = mode;
-    cm.fVB       = std::move(vb);
-    cm.fVCount   = vertexCount;
-    cm.fVOffset  = vertexOffset;
-    cm.fIB       = std::move(ib);
-    cm.fUniforms = std::move(uniforms);
-    cm.fICount   = indexCount;
-    cm.fIOffset  = indexOffset;
-    cm.fBounds   = bounds;
-    return cm.validate() ? cm : SkMesh{};
+    return {std::move(mesh), std::move(msg)};
 }
 
 bool SkMesh::isValid() const {
     bool valid = SkToBool(fSpec);
-    SkASSERT(valid == this->validate());
+    SkASSERT(valid == std::get<0>(this->validate()));
     return valid;
 }
 
@@ -580,17 +764,33 @@ static size_t min_vcount_for_mode(SkMesh::Mode mode) {
     SkUNREACHABLE;
 }
 
-bool SkMesh::validate() const {
+std::tuple<bool, SkString> SkMesh::validate() const {
+#define FAIL_MESH_VALIDATE(...)  return std::make_tuple(false, SkStringPrintf(__VA_ARGS__))
     if (!fSpec) {
-        return false;
+        FAIL_MESH_VALIDATE("SkMeshSpecification is required.");
     }
 
     if (!fVB) {
-        return false;
+        FAIL_MESH_VALIDATE("A vertex buffer is required.");
     }
 
-    if (!fVCount) {
-        return false;
+    if (fSpec->children().size() != SkToSizeT(fChildren.size())) {
+        FAIL_MESH_VALIDATE("The mesh specification declares %zu child effects, "
+                           "but the mesh supplies %d.",
+                           fSpec->children().size(),
+                           fChildren.size());
+    }
+
+    for (int index = 0; index < fChildren.size(); ++index) {
+        const SkRuntimeEffect::Child& meshSpecChild = fSpec->children()[index];
+        if (fChildren[index].type().has_value()) {
+            if (meshSpecChild.type != fChildren[index].type()) {
+                FAIL_MESH_VALIDATE("Child effect '%.*s' was specified as a %s, but passed as a %s.",
+                                   (int)meshSpecChild.name.size(), meshSpecChild.name.data(),
+                                   SkRuntimeEffectPriv::ChildTypeToStr(meshSpecChild.type),
+                                   SkRuntimeEffectPriv::ChildTypeToStr(*fChildren[index].type()));
+            }
+        }
     }
 
     auto vb = static_cast<SkMeshPriv::VB*>(fVB.get());
@@ -599,41 +799,64 @@ bool SkMesh::validate() const {
     SkSafeMath sm;
     size_t vsize = sm.mul(fSpec->stride(), fVCount);
     if (sm.add(vsize, fVOffset) > vb->size()) {
-        return false;
+        FAIL_MESH_VALIDATE("The vertex buffer offset and vertex count reads beyond the end of the"
+                           " vertex buffer.");
     }
 
     if (fVOffset%fSpec->stride() != 0) {
-        return false;
+        FAIL_MESH_VALIDATE("The vertex offset (%zu) must be a multiple of the vertex stride (%zu).",
+                           fVOffset,
+                           fSpec->stride());
     }
 
     if (size_t uniformSize = fSpec->uniformSize()) {
         if (!fUniforms || fUniforms->size() < uniformSize) {
-            return false;
+            FAIL_MESH_VALIDATE("The uniform data is %zu bytes but must be at least %zu.",
+                               fUniforms->size(),
+                               uniformSize);
         }
     }
 
+    auto modeToStr = [](Mode m) {
+        switch (m) {
+            case Mode::kTriangles:     return "triangles";
+            case Mode::kTriangleStrip: return "triangle-strip";
+        }
+        SkUNREACHABLE;
+    };
     if (ib) {
         if (fICount < min_vcount_for_mode(fMode)) {
-            return false;
+            FAIL_MESH_VALIDATE("%s mode requires at least %zu indices but index count is %zu.",
+                               modeToStr(fMode),
+                               min_vcount_for_mode(fMode),
+                               fICount);
         }
         size_t isize = sm.mul(sizeof(uint16_t), fICount);
         if (sm.add(isize, fIOffset) > ib->size()) {
-            return false;
+            FAIL_MESH_VALIDATE("The index buffer offset and index count reads beyond the end of the"
+                               " index buffer.");
+
         }
         // If we allow 32 bit indices then this should enforce 4 byte alignment in that case.
         if (!SkIsAlign2(fIOffset)) {
-            return false;
+            FAIL_MESH_VALIDATE("The index offset must be a multiple of 2.");
         }
     } else {
         if (fVCount < min_vcount_for_mode(fMode)) {
-            return false;
+            FAIL_MESH_VALIDATE("%s mode requires at least %zu vertices but vertex count is %zu.",
+                               modeToStr(fMode),
+                               min_vcount_for_mode(fMode),
+                               fICount);
         }
-        if (fICount || fIOffset) {
-            return false;
-        }
+        SkASSERT(!fICount);
+        SkASSERT(!fIOffset);
     }
 
-    return sm.ok();
+    if (!sm.ok()) {
+        FAIL_MESH_VALIDATE("Overflow");
+    }
+#undef FAIL_MESH_VALIDATE
+    return {true, {}};
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -662,58 +885,36 @@ bool SkMesh::VertexBuffer::update(GrDirectContext* dc,
     return check_update(data, offset, size, this->size()) && this->onUpdate(dc, data, offset, size);
 }
 
-#if SK_SUPPORT_GPU
-bool SkMeshPriv::UpdateGpuBuffer(GrDirectContext* dc,
-                                 sk_sp<GrGpuBuffer> buffer,
-                                 const void* data,
-                                 size_t offset,
-                                 size_t size) {
-    if (!dc || dc != buffer->getContext()) {
-        return false;
-    }
-    SkASSERT(!dc->abandoned()); // If dc is abandoned then buffer->getContext() should be null.
-
-    if (!dc->priv().caps()->transferFromBufferToBufferSupport()) {
-        auto ownedData = SkData::MakeWithCopy(data, size);
-        dc->priv().drawingManager()->newBufferUpdateTask(std::move(ownedData),
-                                                         std::move(buffer),
-                                                         offset);
-        return true;
-    }
-
-    sk_sp<GrGpuBuffer> tempBuffer;
-    size_t tempOffset = 0;
-    if (auto* sbm = dc->priv().getGpu()->stagingBufferManager()) {
-        auto alignment = dc->priv().caps()->transferFromBufferToBufferAlignment();
-        auto [sliceBuffer, sliceOffset, ptr] = sbm->allocateStagingBufferSlice(size, alignment);
-        if (sliceBuffer) {
-            std::memcpy(ptr, data, size);
-            tempBuffer.reset(SkRef(sliceBuffer));
-            tempOffset = sliceOffset;
-        }
-    }
-
-    if (!tempBuffer) {
-        tempBuffer = dc->priv().resourceProvider()->createBuffer(size,
-                                                                 GrGpuBufferType::kXferCpuToGpu,
-                                                                 kDynamic_GrAccessPattern,
-                                                                 GrResourceProvider::ZeroInit::kNo);
-        if (!tempBuffer) {
-            return false;
-        }
-        if (!tempBuffer->updateData(data, 0, size, /*preserve=*/false)) {
-            return false;
-        }
-    }
-
-    dc->priv().drawingManager()->newBufferTransferTask(std::move(tempBuffer),
-                                                       tempOffset,
-                                                       std::move(buffer),
-                                                       offset,
-                                                       size);
-
-    return true;
+namespace SkMeshes {
+sk_sp<IndexBuffer> MakeIndexBuffer(const void* data, size_t size) {
+    return SkMeshPriv::CpuIndexBuffer::Make(data, size);
 }
-#endif  // SK_SUPPORT_GPU
 
-#endif  // SK_ENABLE_SKSL
+sk_sp<IndexBuffer> CopyIndexBuffer(const sk_sp<IndexBuffer>& src) {
+    if (!src) {
+        return nullptr;
+    }
+    auto* ib = static_cast<SkMeshPriv::IB*>(src.get());
+    const void* data = ib->peek();
+    if (!data) {
+        return nullptr;
+    }
+    return MakeIndexBuffer(data, ib->size());
+}
+
+sk_sp<VertexBuffer> MakeVertexBuffer(const void* data, size_t size) {
+    return SkMeshPriv::CpuVertexBuffer::Make(data, size);
+}
+
+sk_sp<VertexBuffer> CopyVertexBuffer(const sk_sp<VertexBuffer>& src) {
+    if (!src) {
+        return nullptr;
+    }
+    auto* vb = static_cast<SkMeshPriv::VB*>(src.get());
+    const void* data = vb->peek();
+    if (!data) {
+        return nullptr;
+    }
+    return MakeVertexBuffer(data, vb->size());
+}
+}  // namespace SkMeshes

@@ -4,19 +4,19 @@
 
 #include "ui/views/accessibility/view_ax_platform_node_delegate_auralinux.h"
 
-#include <algorithm>
 #include <memory>
 #include <vector>
 
 #include "base/containers/contains.h"
 #include "base/memory/raw_ptr.h"
 #include "base/no_destructor.h"
+#include "base/ranges/algorithm.h"
 #include "base/scoped_multi_source_observation.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/platform/ax_platform_node_auralinux.h"
-#include "ui/accessibility/platform/ax_platform_node_delegate_base.h"
+#include "ui/accessibility/platform/ax_platform_node_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/accessibility/views_utilities_aura.h"
@@ -64,7 +64,7 @@ Widget* GetToplevelWidgetIncludingTransientWindows(Widget* widget) {
 // object. Every time we create an accessibility object for a View, we add its
 // top-level widget to a vector so we can return the list of all top-level
 // windows as children of this application object.
-class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
+class AuraLinuxApplication : public ui::AXPlatformNodeDelegate,
                              public WidgetObserver,
                              public aura::WindowObserver {
  public:
@@ -85,8 +85,10 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
       return;
 
     widget = GetToplevelWidgetIncludingTransientWindows(widget);
-    if (!widget || base::Contains(widgets_, widget))
+    if (!widget || !widget->native_widget() ||
+        base::Contains(widgets_, widget)) {
       return;
+    }
 
     widgets_.push_back(widget);
     widget_observations_.AddObservation(widget);
@@ -111,7 +113,7 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
     if (window && window_observations_.IsObservingSource(window))
       window_observations_.RemoveObservation(window);
 
-    auto iter = std::find(widgets_.begin(), widgets_.end(), widget);
+    auto iter = base::ranges::find(widgets_, widget);
     if (iter != widgets_.end())
       widgets_.erase(iter);
   }
@@ -149,7 +151,7 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
 
   size_t GetChildCount() const override { return widgets_.size(); }
 
-  gfx::NativeViewAccessible ChildAtIndex(size_t index) override {
+  gfx::NativeViewAccessible ChildAtIndex(size_t index) const override {
     if (index >= GetChildCount())
       return nullptr;
 
@@ -187,7 +189,7 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
   raw_ptr<ui::AXPlatformNode> ax_platform_node_;
   ui::AXUniqueId unique_id_;
   mutable ui::AXNodeData data_;
-  std::vector<Widget*> widgets_;
+  std::vector<raw_ptr<Widget, VectorExperimental>> widgets_;
   base::ScopedMultiSourceObservation<Widget, WidgetObserver>
       widget_observations_{this};
   base::ScopedMultiSourceObservation<aura::Window, aura::WindowObserver>

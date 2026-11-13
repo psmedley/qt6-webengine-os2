@@ -5,7 +5,7 @@
 #ifndef COMPONENTS_REPORTING_HEALTH_HEALTH_MODULE_DELEGATE_H_
 #define COMPONENTS_REPORTING_HEALTH_HEALTH_MODULE_DELEGATE_H_
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/thread_annotations.h"
@@ -14,7 +14,7 @@
 
 namespace reporting {
 
-using HealthCallback = base::OnceCallback<void(const ERPHealthData)>;
+using HealthCallback = base::OnceCallback<void(ERPHealthData)>;
 
 // Interface between the Health Module and the underlying data that needs to
 // be stored. Fully implemented for production, overridden for testing.
@@ -36,7 +36,7 @@ class HealthModuleDelegate {
 
   bool IsInitialized() const;
 
-  base::WeakPtr<HealthModuleDelegate> GetWeakPtr() const;
+  base::WeakPtr<HealthModuleDelegate> GetWeakPtr();
 
  protected:
   // Checker should be used by subclass too.

@@ -9,11 +9,58 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_cue.h"
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_cue_box.h"
+#include "third_party/blink/renderer/core/layout/inline/inline_cursor.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
-#include "third_party/blink/renderer/core/layout/layout_vtt_cue.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
 
 namespace blink {
+
+namespace {
+
+// We use this helper to make sure all (bounding) boxes used for comparisons
+// are relative to the same coordinate space. If we didn't the (bounding) boxes
+// could be affect by transforms on an ancestor et.c, which could yield
+// incorrect results.
+gfx::Rect BorderBoxRelativeToAncestor(const LayoutBox& box,
+                                      const LayoutBoxModelObject& ancestor) {
+  PhysicalRect border_box = box.PhysicalBorderBoxRect();
+  // We pass UseTransforms here primarily because we use a transform for
+  // non-snap-to-lines positioning (see vtt_cue.cc.)
+  return ToEnclosingRect(box.LocalToAncestorRect(border_box, &ancestor));
+}
+
+gfx::Rect ComputeControlsRect(const LayoutObject& container) {
+  // Determine the area covered by the media controls, if any. For this, the
+  // LayoutVTTCue will walk the tree up to the HTMLMediaElement, then ask for
+  // the MediaControls.
+  DCHECK(container.GetNode()->IsTextTrackContainer());
+
+  auto* media_element = To<HTMLMediaElement>(container.Parent()->GetNode());
+  DCHECK(media_element);
+
+  MediaControls* controls = media_element->GetMediaControls();
+  if (!controls || !controls->ContainerLayoutObject())
+    return gfx::Rect();
+
+  // Only a part of the media controls is used for overlap avoidance.
+  const auto* button_panel_layout_object = controls->ButtonPanelLayoutObject();
+  const auto* timeline_layout_object = controls->TimelineLayoutObject();
+
+  if (!button_panel_layout_object || !button_panel_layout_object->IsBox() ||
+      !timeline_layout_object || !timeline_layout_object->IsBox()) {
+    return gfx::Rect();
+  }
+
+  const auto& container_box = *To<LayoutBox>(controls->ContainerLayoutObject());
+  gfx::Rect button_panel_box = BorderBoxRelativeToAncestor(
+      To<LayoutBox>(*button_panel_layout_object), container_box);
+  gfx::Rect timeline_box = BorderBoxRelativeToAncestor(
+      To<LayoutBox>(*timeline_layout_object), container_box);
+
+  button_panel_box.Union(timeline_box);
+  return button_panel_box;
+}
+
+}  // namespace
 
 VttCueLayoutAlgorithm::VttCueLayoutAlgorithm(VTTCueBox& cue)
     : cue_(cue), snap_to_lines_position_(cue.SnapToLinesPosition()) {}
@@ -37,13 +84,8 @@ void VttCueLayoutAlgorithm::Layout() {
 // static
 PhysicalSize VttCueLayoutAlgorithm::FirstInlineBoxSize(
     const LayoutBox& cue_box) {
-  if (!cue_box.IsLayoutNGObject()) {
-    if (auto* first_inline = DynamicTo<LayoutInline>(cue_box.SlowFirstChild()))
-      return PhysicalSize(first_inline->FirstLineBox()->Size());
-    return {};
-  }
-
-  NGInlineCursor cursor(To<LayoutBlockFlow>(cue_box));
+  DCHECK(cue_box.IsLayoutNGObject());
+  InlineCursor cursor(To<LayoutBlockFlow>(cue_box));
   cursor.MoveToFirstLine();
   if (cursor.IsNull())
     return {};
@@ -53,7 +95,7 @@ PhysicalSize VttCueLayoutAlgorithm::FirstInlineBoxSize(
   cursor.MoveToNext();
   if (cursor.IsNull())
     return {};
-  const NGFragmentItem& first_item = *cursor.CurrentItem();
+  const FragmentItem& first_item = *cursor.CurrentItem();
   DCHECK(first_item.GetLayoutObject());
   DCHECK(IsA<VTTCueBackgroundBox>(first_item.GetLayoutObject()->GetNode()));
   return first_item.Size();
@@ -79,7 +121,7 @@ LayoutUnit VttCueLayoutAlgorithm::ComputeInitialPositionAdjustment(
   // 8. Vertical Growing Left: Decrease position by the width of the
   // bounding box of the boxes in boxes, then increase position by step.
   if (cue_box.HasFlippedBlocksWritingMode()) {
-    position -= cue_box.FrameRect().Width();
+    position -= cue_box.Size().width;
     position += step_;
   }
 
@@ -109,12 +151,12 @@ gfx::Rect VttCueLayoutAlgorithm::CueBoundingBox(const LayoutBox& cue_box) {
   const LayoutBlock* container = cue_box.ContainingBlock();
   PhysicalRect border_box =
       cue_box.LocalToAncestorRect(cue_box.PhysicalBorderBoxRect(), container);
-  const LayoutSize size = container->Size();
+  const PhysicalSize size = container->Size();
   const auto* cue_dom = To<VTTCueBox>(cue_box.GetNode());
   if (cue_box.IsHorizontalWritingMode())
-    border_box.SetY(cue_dom->AdjustedPosition(size.Height(), PassKey()));
+    border_box.SetY(cue_dom->AdjustedPosition(size.height, PassKey()));
   else
-    border_box.SetX(cue_dom->AdjustedPosition(size.Width(), PassKey()));
+    border_box.SetX(cue_dom->AdjustedPosition(size.width, PassKey()));
   return ToEnclosingRect(border_box);
 }
 
@@ -165,7 +207,7 @@ void VttCueLayoutAlgorithm::AdjustPositionWithSnapToLines() {
   // 1. Horizontal: Let full dimension be the height of video’s rendering area.
   //    Vertical: Let full dimension be the width of video’s rendering area.
   const LayoutUnit full_dimension =
-      is_horizontal ? container.Size().Height() : container.Size().Width();
+      is_horizontal ? container.Size().height : container.Size().width;
 
   // https://www.w3.org/TR/2017/WD-webvtt1-20170808/#apply-webvtt-cue-settings
   // 11.1. Horizontal: Let margin be a user-agent-defined vertical length which
@@ -199,7 +241,7 @@ void VttCueLayoutAlgorithm::AdjustPositionWithSnapToLines() {
   if (!cue_box.Parent() || !cue_box.Parent()->Parent())
     return;
   // Step 4-9
-  const gfx::Rect controls_rect = LayoutVTTCue::ComputeControlsRect(*cue_box.Parent());
+  const gfx::Rect controls_rect = ComputeControlsRect(*cue_box.Parent());
   LayoutUnit position =
       ComputeInitialPositionAdjustment(max_dimension, controls_rect);
 

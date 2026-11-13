@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <time.h>
+
 #include "libavutil/parseutils.h"
 #include "avio_internal.h"
 #include "avformat.h"
@@ -242,7 +244,7 @@ static int64_t get_duration(AVFormatContext *s)
     avio_seek(s->pb, avio_size(s->pb) - 8, SEEK_SET);
     while (avio_tell(s->pb) > 12 && max_interations--) {
         if (avio_rl32(s->pb) == MKTAG('d','h','a','v')) {
-            int seek_back = avio_rl32(s->pb);
+            int64_t seek_back = avio_rl32(s->pb);
 
             avio_seek(s->pb, -seek_back, SEEK_CUR);
             read_chunk(s);

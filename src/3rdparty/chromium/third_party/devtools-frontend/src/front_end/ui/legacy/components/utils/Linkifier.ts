@@ -33,40 +33,42 @@ import * as Host from '../../../../core/host/host.js';
 import * as i18n from '../../../../core/i18n/i18n.js';
 import * as Platform from '../../../../core/platform/platform.js';
 import * as SDK from '../../../../core/sdk/sdk.js';
+import type * as Protocol from '../../../../generated/protocol.js';
 import * as Bindings from '../../../../models/bindings/bindings.js';
+import * as Breakpoints from '../../../../models/breakpoints/breakpoints.js';
 import * as TextUtils from '../../../../models/text_utils/text_utils.js';
 import * as Workspace from '../../../../models/workspace/workspace.js';
-import type * as Protocol from '../../../../generated/protocol.js';
+import type * as IconButton from '../../../components/icon_button/icon_button.js';
 import * as UI from '../../legacy.js';
 
 const UIStrings = {
   /**
-  *@description Text in Linkifier
-  */
+   *@description Text in Linkifier
+   */
   unknown: '(unknown)',
   /**
-  *@description Text short for automatic
-  */
+   *@description Text short for automatic
+   */
   auto: 'auto',
   /**
-  *@description Text in Linkifier
-  *@example {Sources panel} PH1
-  */
+   *@description Text in Linkifier
+   *@example {Sources panel} PH1
+   */
   revealInS: 'Reveal in {PH1}',
   /**
-  *@description Text for revealing an item in its destination
-  */
+   *@description Text for revealing an item in its destination
+   */
   reveal: 'Reveal',
   /**
-  *@description A context menu item in the Linkifier
-  *@example {Extension} PH1
-  */
+   *@description A context menu item in the Linkifier
+   *@example {Extension} PH1
+   */
   openUsingS: 'Open using {PH1}',
   /**
-  * @description The name of a setting which controls how links are handled in the UI. 'Handling'
-  * refers to the ability of extensions to DevTools to be able to intercept link clicks so that they
-  * can react to them.
-  */
+   * @description The name of a setting which controls how links are handled in the UI. 'Handling'
+   * refers to the ability of extensions to DevTools to be able to intercept link clicks so that they
+   * can react to them.
+   */
   linkHandling: 'Link handling:',
 };
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/components/utils/Linkifier.ts', UIStrings);
@@ -85,20 +87,17 @@ const linkHandlers = new Map<string, LinkHandler>();
 
 let linkHandlerSettingInstance: Common.Settings.Setting<string>;
 
-export class Linkifier implements SDK.TargetManager.Observer {
+export class Linkifier extends Common.ObjectWrapper.ObjectWrapper<EventTypes> implements SDK.TargetManager.Observer {
   private readonly maxLength: number;
   private readonly anchorsByTarget: Map<SDK.Target.Target, Element[]>;
   private readonly locationPoolByTarget: Map<SDK.Target.Target, Bindings.LiveLocation.LiveLocationPool>;
-  private onLiveLocationUpdate: (() => void)|undefined;
   private useLinkDecorator: boolean;
 
-  constructor(
-      maxLengthForDisplayedURLs?: number, useLinkDecorator?: boolean,
-      onLiveLocationUpdate: (() => void) = (): void => {}) {
+  constructor(maxLengthForDisplayedURLs?: number, useLinkDecorator?: boolean) {
+    super();
     this.maxLength = maxLengthForDisplayedURLs || UI.UIUtils.MaxLengthForDisplayedURLs;
     this.anchorsByTarget = new Map();
     this.locationPoolByTarget = new Map();
-    this.onLiveLocationUpdate = onLiveLocationUpdate;
     this.useLinkDecorator = Boolean(useLinkDecorator);
     instances.add(this);
     SDK.TargetManager.TargetManager.instance().observeTargets(this);
@@ -161,6 +160,33 @@ export class Linkifier implements SDK.TargetManager.Observer {
     }
   }
 
+  /**
+   * When we link to a breakpoint condition, we need to stash the BreakpointLocation as the revealable
+   * in the LinkInfo.
+   */
+  private static bindBreakpoint(anchor: Element, uiLocation: Workspace.UISourceCode.UILocation): void {
+    const info = Linkifier.linkInfo(anchor);
+    if (!info) {
+      return;
+    }
+
+    const breakpoint = Breakpoints.BreakpointManager.BreakpointManager.instance().findBreakpoint(uiLocation);
+    if (breakpoint) {
+      info.revealable = breakpoint;
+    }
+  }
+
+  /**
+   * When we link to a breakpoint condition, we store the BreakpointLocation in the revealable.
+   * Clear it when the LiveLocation updates.
+   */
+  private static unbindBreakpoint(anchor: Element): void {
+    const info = Linkifier.linkInfo(anchor);
+    if (info && info.revealable) {
+      info.revealable = null;
+    }
+  }
+
   targetAdded(target: SDK.Target.Target): void {
     this.anchorsByTarget.set(target, []);
     this.locationPoolByTarget.set(target, new Bindings.LiveLocation.LiveLocationPool());
@@ -205,6 +231,7 @@ export class Linkifier implements SDK.TargetManager.Observer {
       className: options?.className,
       tabStop: options?.tabStop,
       inlineFrameIndex: options?.inlineFrameIndex ?? 0,
+      userMetric: options?.userMetric,
     };
     const {columnNumber, className = ''} = linkifyURLOptions;
     if (sourceURL) {
@@ -232,31 +259,31 @@ export class Linkifier implements SDK.TargetManager.Observer {
     const createLinkOptions: _CreateLinkOptions = {
       tabStop: options?.tabStop,
     };
-    // Not initialising the anchor element with 'zero width space' (\u200b) causes a crash
-    // in the layout engine.
-    // TODO(szuend): Remove comment and workaround once the crash is fixed.
     const {link, linkInfo} = Linkifier.createLink(
-        fallbackAnchor && fallbackAnchor.textContent ? fallbackAnchor.textContent : '\u200b', className,
-        createLinkOptions);
+        fallbackAnchor && fallbackAnchor.textContent ? fallbackAnchor.textContent : '', className, createLinkOptions);
     linkInfo.enableDecorator = this.useLinkDecorator;
     linkInfo.fallback = fallbackAnchor;
+    linkInfo.userMetric = options?.userMetric;
 
     const pool = this.locationPoolByTarget.get(rawLocation.debuggerModel.target());
     if (!pool) {
       return fallbackAnchor;
     }
 
-    const linkDisplayOptions = {showColumnNumber: linkifyURLOptions.showColumnNumber};
+    const linkDisplayOptions: LinkDisplayOptions = {
+      showColumnNumber: linkifyURLOptions.showColumnNumber ?? false,
+      revealBreakpoint: options?.revealBreakpoint,
+    };
 
-    const currentOnLiveLocationUpdate = this.onLiveLocationUpdate;
+    const updateDelegate = async(liveLocation: Bindings.LiveLocation.LiveLocation): Promise<void> => {
+      await this.updateAnchor(link, linkDisplayOptions, liveLocation);
+      this.dispatchEventToListeners(Events.LiveLocationUpdated, liveLocation);
+    };
     void Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance()
-        .createLiveLocation(rawLocation, this.updateAnchor.bind(this, link, linkDisplayOptions), pool)
+        .createLiveLocation(rawLocation, updateDelegate.bind(this), pool)
         .then(liveLocation => {
           if (liveLocation) {
             linkInfo.liveLocation = liveLocation;
-            // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
-            // @ts-expect-error
-            currentOnLiveLocationUpdate();
           }
         });
 
@@ -277,6 +304,7 @@ export class Linkifier implements SDK.TargetManager.Observer {
       showColumnNumber: Boolean(options?.showColumnNumber),
       inlineFrameIndex: options?.inlineFrameIndex ?? 0,
       tabStop: options?.tabStop,
+      userMetric: options?.userMetric,
     };
 
     return scriptLink || Linkifier.linkifyURL(sourceURL, linkifyURLOptions);
@@ -297,24 +325,20 @@ export class Linkifier implements SDK.TargetManager.Observer {
       target: SDK.Target.Target|null, callFrame: Protocol.Runtime.CallFrame, options?: LinkifyOptions): HTMLElement
       |null {
     const linkifyOptions: LinkifyOptions = {
+      ...options,
       columnNumber: callFrame.columnNumber,
-      showColumnNumber: Boolean(options?.showColumnNumber),
       inlineFrameIndex: options?.inlineFrameIndex ?? 0,
-      tabStop: options?.tabStop,
-      className: options?.className,
     };
     return this.maybeLinkifyScriptLocation(
         target, callFrame.scriptId, callFrame.url as Platform.DevToolsPath.UrlString, callFrame.lineNumber,
         linkifyOptions);
   }
 
-  linkifyStackTraceTopFrame(
-      target: SDK.Target.Target|null, stackTrace: Protocol.Runtime.StackTrace, className?: string): HTMLElement {
+  linkifyStackTraceTopFrame(target: SDK.Target.Target|null, stackTrace: Protocol.Runtime.StackTrace): HTMLElement {
     console.assert(stackTrace.callFrames.length > 0);
 
     const {url, lineNumber, columnNumber} = stackTrace.callFrames[0];
     const fallbackAnchor = Linkifier.linkifyURL(url as Platform.DevToolsPath.UrlString, {
-      className,
       lineNumber,
       columnNumber,
       showColumnNumber: false,
@@ -341,25 +365,21 @@ export class Linkifier implements SDK.TargetManager.Observer {
     // All targets that can report stack traces also have a debugger model.
     const debuggerModel = target.model(SDK.DebuggerModel.DebuggerModel) as SDK.DebuggerModel.DebuggerModel;
 
-    // Not initialising the anchor element with 'zero width space' (\u200b) causes a crash
-    // in the layout engine.
-    // TODO(szuend): Remove comment and workaround once the crash is fixed.
-    const {link, linkInfo} = Linkifier.createLink('\u200b', className ?? '');
+    const {link, linkInfo} = Linkifier.createLink('', '');
     linkInfo.enableDecorator = this.useLinkDecorator;
     linkInfo.fallback = fallbackAnchor;
 
     const linkDisplayOptions = {showColumnNumber: false};
 
-    const currentOnLiveLocationUpdate = this.onLiveLocationUpdate;
+    const updateDelegate = async(liveLocation: Bindings.LiveLocation.LiveLocation): Promise<void> => {
+      await this.updateAnchor(link, linkDisplayOptions, liveLocation);
+      this.dispatchEventToListeners(Events.LiveLocationUpdated, liveLocation);
+    };
     void Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance()
         .createStackTraceTopFrameLiveLocation(
-            debuggerModel.createRawLocationsByStackTrace(stackTrace),
-            this.updateAnchor.bind(this, link, linkDisplayOptions), pool)
+            debuggerModel.createRawLocationsByStackTrace(stackTrace), updateDelegate.bind(this), pool)
         .then(liveLocation => {
           linkInfo.liveLocation = liveLocation;
-          // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
-          // @ts-expect-error
-          currentOnLiveLocationUpdate();
         });
 
     const anchors = (this.anchorsByTarget.get(target) as Element[]);
@@ -371,10 +391,7 @@ export class Linkifier implements SDK.TargetManager.Observer {
     const createLinkOptions: _CreateLinkOptions = {
       tabStop: true,
     };
-    // Not initialising the anchor element with 'zero width space' (\u200b) causes a crash
-    // in the layout engine.
-    // TODO(szuend): Remove comment and workaround once the crash is fixed.
-    const {link, linkInfo} = Linkifier.createLink('\u200b', classes || '', createLinkOptions);
+    const {link, linkInfo} = Linkifier.createLink('', classes || '', createLinkOptions);
     linkInfo.enableDecorator = this.useLinkDecorator;
 
     const pool = this.locationPoolByTarget.get(rawLocation.cssModel().target());
@@ -384,14 +401,14 @@ export class Linkifier implements SDK.TargetManager.Observer {
 
     const linkDisplayOptions = {showColumnNumber: false};
 
-    const currentOnLiveLocationUpdate = this.onLiveLocationUpdate;
+    const updateDelegate = async(liveLocation: Bindings.LiveLocation.LiveLocation): Promise<void> => {
+      await this.updateAnchor(link, linkDisplayOptions, liveLocation);
+      this.dispatchEventToListeners(Events.LiveLocationUpdated, liveLocation);
+    };
     void Bindings.CSSWorkspaceBinding.CSSWorkspaceBinding.instance()
-        .createLiveLocation(rawLocation, this.updateAnchor.bind(this, link, linkDisplayOptions), pool)
+        .createLiveLocation(rawLocation, updateDelegate.bind(this), pool)
         .then(liveLocation => {
           linkInfo.liveLocation = liveLocation;
-          // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
-          // @ts-expect-error
-          currentOnLiveLocationUpdate();
         });
 
     const anchors = (this.anchorsByTarget.get(rawLocation.cssModel().target()) as Element[]);
@@ -420,6 +437,9 @@ export class Linkifier implements SDK.TargetManager.Observer {
       anchor: HTMLElement, options: LinkDisplayOptions,
       liveLocation: Bindings.LiveLocation.LiveLocation): Promise<void> {
     Linkifier.unbindUILocation(anchor);
+    if (options.revealBreakpoint) {
+      Linkifier.unbindBreakpoint(anchor);
+    }
     const uiLocation = await liveLocation.uiLocation();
     if (!uiLocation) {
       if (liveLocation instanceof Bindings.CSSWorkspaceBinding.LiveLocation) {
@@ -437,10 +457,16 @@ export class Linkifier implements SDK.TargetManager.Observer {
                   'style>');
         }
       }
+
+      anchor.classList.add('invalid-link');
+      anchor.removeAttribute('role');
       return;
     }
 
     Linkifier.bindUILocation(anchor, uiLocation);
+    if (options.revealBreakpoint) {
+      Linkifier.bindBreakpoint(anchor, uiLocation);
+    }
     const text = uiLocation.linkText(true /* skipTrim */, options.showColumnNumber);
     Linkifier.setTrimmedText(anchor, text, this.maxLength);
 
@@ -460,10 +486,6 @@ export class Linkifier implements SDK.TargetManager.Observer {
     UI.Tooltip.Tooltip.install(anchor, titleText);
     anchor.classList.toggle('ignore-list-link', await liveLocation.isIgnoreListed());
     Linkifier.updateLinkDecorations(anchor);
-  }
-
-  setLiveLocationUpdateCallback(callback: () => void): void {
-    this.onLiveLocationUpdate = callback;
   }
 
   private static updateLinkDecorations(anchor: Element): void {
@@ -499,7 +521,7 @@ export class Linkifier implements SDK.TargetManager.Observer {
     const preventClick = options.preventClick;
     const maxLength = options.maxLength || UI.UIUtils.MaxLengthForDisplayedURLs;
     const bypassURLTrimming = options.bypassURLTrimming;
-    if (!url || url.trim().toLowerCase().startsWith('javascript:')) {
+    if (!url || Common.ParsedURL.schemeIs(url, 'javascript:')) {
       const element = document.createElement('span');
       if (className) {
         element.className = className;
@@ -525,6 +547,7 @@ export class Linkifier implements SDK.TargetManager.Observer {
     if (columnNumber) {
       linkInfo.columnNumber = columnNumber;
     }
+    linkInfo.userMetric = options?.userMetric;
     return link;
   }
 
@@ -674,6 +697,9 @@ export class Linkifier implements SDK.TargetManager.Observer {
     const actions = Linkifier.linkActions(linkInfo);
     if (actions.length) {
       void actions[0].handler.call(null);
+      if (linkInfo.userMetric) {
+        Host.userMetrics.actionTaken(linkInfo.userMetric);
+      }
       return true;
     }
     return false;
@@ -738,7 +764,13 @@ export class Linkifier implements SDK.TargetManager.Observer {
       result.push({
         section: 'reveal',
         title: destination ? i18nString(UIStrings.revealInS, {PH1: destination}) : i18nString(UIStrings.reveal),
-        handler: (): Promise<void> => Common.Revealer.reveal(revealable),
+        handler: (): Promise<void> => {
+          if (revealable instanceof Breakpoints.BreakpointManager.BreakpointLocation) {
+            Host.userMetrics.breakpointEditDialogRevealedFrom(
+                Host.UserMetrics.BreakpointEditDialogRevealedFrom.Linkifier);
+          }
+          return Common.Revealer.reveal(revealable);
+        },
       });
     }
     if (contentProvider) {
@@ -788,13 +820,11 @@ export class Linkifier implements SDK.TargetManager.Observer {
 }
 
 export interface LinkDecorator extends Common.EventTarget.EventTarget<LinkDecorator.EventTypes> {
-  linkIcon(uiSourceCode: Workspace.UISourceCode.UISourceCode): UI.Icon.Icon|null;
+  linkIcon(uiSourceCode: Workspace.UISourceCode.UISourceCode): IconButton.Icon.Icon|null;
 }
 
 export namespace LinkDecorator {
-  // TODO(crbug.com/1167717): Make this a const enum again
-  // eslint-disable-next-line rulesdir/const_enum
-  export enum Events {
+  export const enum Events {
     LinkIconChanged = 'LinkIconChanged',
   }
 
@@ -803,21 +833,9 @@ export namespace LinkDecorator {
   };
 }
 
-let linkContextMenuProviderInstance: LinkContextMenuProvider;
-
-export class LinkContextMenuProvider implements UI.ContextMenu.Provider {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): LinkContextMenuProvider {
-    const {forceNew} = opts;
-    if (!linkContextMenuProviderInstance || forceNew) {
-      linkContextMenuProviderInstance = new LinkContextMenuProvider();
-    }
-
-    return linkContextMenuProviderInstance;
-  }
-  appendApplicableItems(event: Event, contextMenu: UI.ContextMenu.ContextMenu, target: Object): void {
-    let targetNode: (Node|null) = (target as Node | null);
+export class LinkContextMenuProvider implements UI.ContextMenu.Provider<Node> {
+  appendApplicableItems(_event: Event, contextMenu: UI.ContextMenu.ContextMenu, target: Node): void {
+    let targetNode: Node|null = target;
     while (targetNode && !infoByAnchor.get(targetNode)) {
       targetNode = targetNode.parentNodeOrShadowHost();
     }
@@ -904,33 +922,26 @@ function listenForNewComponentLinkifierEvents(): void {
 
 listenForNewComponentLinkifierEvents();
 
-let contentProviderContextMenuProviderInstance: ContentProviderContextMenuProvider;
-
-export class ContentProviderContextMenuProvider implements UI.ContextMenu.Provider {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): ContentProviderContextMenuProvider {
-    const {forceNew} = opts;
-    if (!contentProviderContextMenuProviderInstance || forceNew) {
-      contentProviderContextMenuProviderInstance = new ContentProviderContextMenuProvider();
-    }
-
-    return contentProviderContextMenuProviderInstance;
-  }
-
-  appendApplicableItems(event: Event, contextMenu: UI.ContextMenu.ContextMenu, target: Object): void {
-    const contentProvider = (target as Workspace.UISourceCode.UISourceCode);
+export class ContentProviderContextMenuProvider implements
+    UI.ContextMenu
+        .Provider<Workspace.UISourceCode.UISourceCode|SDK.Resource.Resource|SDK.NetworkRequest.NetworkRequest> {
+  appendApplicableItems(
+      _event: Event, contextMenu: UI.ContextMenu.ContextMenu,
+      contentProvider: Workspace.UISourceCode.UISourceCode|SDK.Resource.Resource|
+      SDK.NetworkRequest.NetworkRequest): void {
     const contentUrl = contentProvider.contentURL();
     if (!contentUrl) {
       return;
     }
 
-    contextMenu.revealSection().appendItem(
-        UI.UIUtils.openLinkExternallyLabel(),
-        () => Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(
-            contentUrl.endsWith(':formatted') ?
-                Common.ParsedURL.ParsedURL.slice(contentUrl, 0, contentUrl.lastIndexOf(':')) :
-                contentUrl));
+    if (!Common.ParsedURL.schemeIs(contentUrl, 'file:')) {
+      contextMenu.revealSection().appendItem(
+          UI.UIUtils.openLinkExternallyLabel(),
+          () => Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(
+              contentUrl.endsWith(':formatted') ?
+                  Common.ParsedURL.ParsedURL.slice(contentUrl, 0, contentUrl.lastIndexOf(':')) :
+                  contentUrl));
+    }
     for (const title of linkHandlers.keys()) {
       const handler = linkHandlers.get(title);
       if (!handler) {
@@ -947,16 +958,23 @@ export class ContentProviderContextMenuProvider implements UI.ContextMenu.Provid
         UI.UIUtils.copyLinkAddressLabel(),
         () => Host.InspectorFrontendHost.InspectorFrontendHostInstance.copyText(contentUrl));
 
-    contextMenu.clipboardSection().appendItem(
-        UI.UIUtils.copyFileNameLabel(),
-        () => Host.InspectorFrontendHost.InspectorFrontendHostInstance.copyText(contentProvider.displayName()));
+    // TODO(bmeurer): `displayName` should be an accessor/data property consistently.
+    if (contentProvider instanceof Workspace.UISourceCode.UISourceCode) {
+      contextMenu.clipboardSection().appendItem(
+          UI.UIUtils.copyFileNameLabel(),
+          () => Host.InspectorFrontendHost.InspectorFrontendHostInstance.copyText(contentProvider.displayName()));
+    } else {
+      contextMenu.clipboardSection().appendItem(
+          UI.UIUtils.copyFileNameLabel(),
+          () => Host.InspectorFrontendHost.InspectorFrontendHostInstance.copyText(contentProvider.displayName));
+    }
   }
 }
 
 // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export interface _LinkInfo {
-  icon: UI.Icon.Icon|null;
+  icon: IconButton.Icon.Icon|null;
   enableDecorator: boolean;
   uiLocation: Workspace.UISourceCode.UILocation|null;
   liveLocation: Bindings.LiveLocation.LiveLocation|null;
@@ -966,6 +984,7 @@ export interface _LinkInfo {
   inlineFrameIndex: number;
   revealable: Object|null;
   fallback: Element|null;
+  userMetric?: Host.UserMetrics.Action;
 }
 
 export interface LinkifyURLOptions {
@@ -973,12 +992,13 @@ export interface LinkifyURLOptions {
   className?: string;
   lineNumber?: number;
   columnNumber?: number;
-  showColumnNumber: boolean;
-  inlineFrameIndex: number;
+  showColumnNumber?: boolean;
+  inlineFrameIndex?: number;
   preventClick?: boolean;
   maxLength?: number;
   tabStop?: boolean;
   bypassURLTrimming?: boolean;
+  userMetric?: Host.UserMetrics.Action;
 }
 
 export interface LinkifyOptions {
@@ -987,6 +1007,12 @@ export interface LinkifyOptions {
   showColumnNumber?: boolean;
   inlineFrameIndex: number;
   tabStop?: boolean;
+  userMetric?: Host.UserMetrics.Action;
+
+  /**
+   * {@link LinkDisplayOptions.revealBreakpoint}
+   */
+  revealBreakpoint?: boolean;
 }
 
 // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
@@ -1002,6 +1028,22 @@ export interface _CreateLinkOptions {
 
 interface LinkDisplayOptions {
   showColumnNumber: boolean;
+
+  /**
+   * If true, we'll check if there is a breakpoint at the UILocation we get
+   * from the LiveLocation. If we find a breakpoint, we'll reveal the corresponding
+   * {@link Breakpoints.BreakpointManager.BreakpointLocation}. Which opens the
+   * breakpoint edit dialog.
+   */
+  revealBreakpoint?: boolean;
 }
 
 export type LinkHandler = (arg0: TextUtils.ContentProvider.ContentProvider, arg1: number) => void;
+
+export const enum Events {
+  LiveLocationUpdated = 'liveLocationUpdated',
+}
+
+export type EventTypes = {
+  [Events.LiveLocationUpdated]: Bindings.LiveLocation.LiveLocation,
+};

@@ -7,189 +7,192 @@
 
 #include "src/gpu/graphite/Image_Graphite.h"
 
+#include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
-#include "include/core/SkImageInfo.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkSurface.h"
 #include "include/gpu/graphite/BackendTexture.h"
+#include "include/gpu/graphite/Image.h"
 #include "include/gpu/graphite/Recorder.h"
+#include "include/gpu/graphite/Surface.h"
+#include "src/gpu/RefCntedCallback.h"
+#include "src/gpu/SkBackingFit.h"
 #include "src/gpu/graphite/Caps.h"
 #include "src/gpu/graphite/Log.h"
 #include "src/gpu/graphite/RecorderPriv.h"
 #include "src/gpu/graphite/ResourceProvider.h"
 #include "src/gpu/graphite/Texture.h"
-#include "src/gpu/graphite/TextureUtils.h"
-
-#if SK_SUPPORT_GPU
-#include "src/gpu/ganesh/GrFragmentProcessor.h"
-#endif
 
 namespace skgpu::graphite {
 
 Image::Image(uint32_t uniqueID,
              TextureProxyView view,
              const SkColorInfo& info)
-    : SkImage_Base(SkImageInfo::Make(view.proxy()->dimensions(), info), uniqueID)
-    , fTextureProxyView(std::move(view)) {
-}
-
-Image::Image(TextureProxyView view,
-             const SkColorInfo& info)
-    : SkImage_Base(SkImageInfo::Make(view.proxy()->dimensions(), info), kNeedNewImageUniqueID)
+    : Image_Base(SkImageInfo::Make(view.proxy()->dimensions(), info), uniqueID)
     , fTextureProxyView(std::move(view)) {
 }
 
 Image::~Image() {}
 
-bool Image::testingOnly_ReadPixels(Context* context,
-                                   Recorder* recorder,
-                                   const SkImageInfo& dstInfo,
-                                   void* dstPixels,
-                                   size_t dstRowBytes,
-                                   int srcX,
-                                   int srcY) {
-    return ReadPixelsHelper([recorder]() {
-                                recorder->priv().flushTrackedDevices();
-                            },
-                            context,
-                            recorder,
-                            fTextureProxyView.proxy(),
-                            dstInfo,
-                            dstPixels,
-                            dstRowBytes,
-                            srcX,
-                            srcY);
+size_t Image::textureSize() const {
+    if (!fTextureProxyView.proxy()) {
+        return 0;
+    }
+
+    if (!fTextureProxyView.proxy()->texture()) {
+        return fTextureProxyView.proxy()->uninstantiatedGpuMemorySize();
+    }
+
+    return fTextureProxyView.proxy()->texture()->gpuMemorySize();
 }
 
-sk_sp<SkImage> Image::onMakeColorTypeAndColorSpace(SkColorType,
-                                                   sk_sp<SkColorSpace>,
-                                                   GrDirectContext*) const {
-    return nullptr;
+sk_sp<SkImage> Image::onMakeSubset(Recorder* recorder,
+                                   const SkIRect& subset,
+                                   RequiredProperties requiredProps) const {
+    const SkIRect bounds = SkIRect::MakeWH(this->width(), this->height());
+
+    // optimization : return self if the subset == our bounds and requirements met
+    if (bounds == subset && (!requiredProps.fMipmapped || this->hasMipmaps())) {
+        const SkImage* image = this;
+        return sk_ref_sp(const_cast<SkImage*>(image));
+    }
+
+    return this->copyImage(subset, recorder, requiredProps);
 }
 
-sk_sp<SkImage> Image::onReinterpretColorSpace(sk_sp<SkColorSpace>) const {
-    return nullptr;
+sk_sp<SkImage> Image::makeTextureImage(Recorder* recorder, RequiredProperties requiredProps) const {
+    if (!requiredProps.fMipmapped || this->hasMipmaps()) {
+        const SkImage* image = this;
+        return sk_ref_sp(const_cast<SkImage*>(image));
+    }
+
+    const SkIRect bounds = SkIRect::MakeWH(this->width(), this->height());
+    return this->copyImage(bounds, recorder, requiredProps);
 }
 
-void Image::onAsyncReadPixels(const SkImageInfo& info,
-                              SkIRect srcRect,
-                              ReadPixelsCallback callback,
-                              ReadPixelsContext context) const {
-    // TODO
-    callback(context, nullptr);
+sk_sp<SkImage> Image::copyImage(const SkIRect& subset,
+                                Recorder* recorder,
+                                RequiredProperties requiredProps) const {
+    const TextureProxyView& srcView = this->textureProxyView();
+    if (!srcView) {
+        return nullptr;
+    }
+
+    auto mm = requiredProps.fMipmapped ? skgpu::Mipmapped::kYes : skgpu::Mipmapped::kNo;
+    TextureProxyView copiedView = TextureProxyView::Copy(
+            recorder, this->imageInfo().colorInfo(), srcView, subset, mm, SkBackingFit::kExact);
+    if (!copiedView) {
+        return nullptr;
+    }
+
+    return sk_sp<Image>(new Image(kNeedNewImageUniqueID,
+                                  std::move(copiedView),
+                                  this->imageInfo().colorInfo()));
 }
 
-void Image::onAsyncRescaleAndReadPixels(const SkImageInfo& info,
-                                        SkIRect srcRect,
-                                        RescaleGamma rescaleGamma,
-                                        RescaleMode rescaleMode,
-                                        ReadPixelsCallback callback,
-                                        ReadPixelsContext context) const {
-    // TODO
-    callback(context, nullptr);
+sk_sp<SkImage> Image::onReinterpretColorSpace(sk_sp<SkColorSpace> newCS) const {
+    return sk_make_sp<Image>(kNeedNewImageUniqueID,
+                             fTextureProxyView,
+                             this->imageInfo().colorInfo().makeColorSpace(std::move(newCS)));
 }
 
-void Image::onAsyncRescaleAndReadPixelsYUV420(SkYUVColorSpace yuvColorSpace,
-                                              sk_sp<SkColorSpace> dstColorSpace,
-                                              const SkIRect srcRect,
-                                              const SkISize dstSize,
-                                              RescaleGamma rescaleGamma,
-                                              RescaleMode rescaleMode,
-                                              ReadPixelsCallback callback,
-                                              ReadPixelsContext context) const {
-    // TODO
-    callback(context, nullptr);
-}
+sk_sp<SkImage> Image::makeColorTypeAndColorSpace(Recorder* recorder,
+                                                 SkColorType targetCT,
+                                                 sk_sp<SkColorSpace> targetCS,
+                                                 RequiredProperties requiredProps) const {
+    SkAlphaType at = (this->alphaType() == kOpaque_SkAlphaType) ? kPremul_SkAlphaType
+                                                                : this->alphaType();
 
-#if SK_SUPPORT_GPU
-std::unique_ptr<GrFragmentProcessor> Image::onAsFragmentProcessor(
-        GrRecordingContext*,
-        SkSamplingOptions,
-        const SkTileMode[2],
-        const SkMatrix&,
-        const SkRect* subset,
-        const SkRect* domain) const {
-    return nullptr;
-}
-#endif
+    SkImageInfo ii = SkImageInfo::Make(this->dimensions(), targetCT, at, std::move(targetCS));
 
-sk_sp<SkImage> Image::onMakeTextureImage(Recorder*, RequiredImageProperties requiredProps) const {
-    SkASSERT(requiredProps.fMipmapped == Mipmapped::kYes && !this->hasMipmaps());
-    // TODO: copy the base layer into a new image that has mip levels. For now we just return
-    // the un-mipmapped version and allow the sampling to be downgraded to linear
-    SKGPU_LOG_W("Graphite does not yet allow explicit mipmap level addition");
-    return sk_ref_sp(this);
+    auto mm = requiredProps.fMipmapped ? skgpu::Mipmapped::kYes : skgpu::Mipmapped::kNo;
+    sk_sp<SkSurface> s = SkSurfaces::RenderTarget(recorder, ii, mm);
+    if (!s) {
+        return nullptr;
+    }
+
+    s->getCanvas()->drawImage(this, 0, 0);
+    return SkSurfaces::AsImage(s);
 }
 
 } // namespace skgpu::graphite
 
 using namespace skgpu::graphite;
+using SkImages::GraphitePromiseImageFulfillProc;
+using SkImages::GraphitePromiseTextureReleaseProc;
 
-namespace {
+sk_sp<TextureProxy> Image::MakePromiseImageLazyProxy(
+        const Caps* caps,
+        SkISize dimensions,
+        TextureInfo textureInfo,
+        Volatile isVolatile,
+        GraphitePromiseImageFulfillProc fulfillProc,
+        sk_sp<skgpu::RefCntedCallback> releaseHelper,
+        GraphitePromiseTextureReleaseProc textureReleaseProc) {
+    SkASSERT(!dimensions.isEmpty());
+    SkASSERT(releaseHelper);
 
-bool validate_backend_texture(const Caps* caps,
-                              const BackendTexture& texture,
-                              const SkColorInfo& info) {
-    if (!texture.isValid() ||
-        texture.dimensions().width() <= 0 ||
-        texture.dimensions().height() <= 0) {
-        return false;
-    }
-
-    if (!SkColorInfoIsValid(info)) {
-        return false;
-    }
-
-    if (!caps->isTexturable(texture.info())) {
-        return false;
-    }
-
-    return caps->areColorTypeAndTextureInfoCompatible(info.colorType(), texture.info());
-}
-
-} // anonymous namespace
-
-sk_sp<SkImage> SkImage::makeTextureImage(Recorder* recorder,
-                                         RequiredImageProperties requiredProps) const {
-    if (!recorder) {
+    if (!fulfillProc) {
         return nullptr;
     }
-    if (this->dimensions().area() <= 1) {
-        requiredProps.fMipmapped = Mipmapped::kNo;
-    }
 
-    if (as_IB(this)->isGraphiteBacked()) {
-        if (requiredProps.fMipmapped == Mipmapped::kNo || this->hasMipmaps()) {
-            const SkImage* image = this;
-            return sk_ref_sp(const_cast<SkImage*>(image));
+    /**
+     * This class is the lazy instantiation callback for promise images. It manages calling the
+     * client's Fulfill, ImageRelease, and TextureRelease procs.
+     */
+    class PromiseLazyInstantiateCallback {
+    public:
+        PromiseLazyInstantiateCallback(GraphitePromiseImageFulfillProc fulfillProc,
+                                       sk_sp<skgpu::RefCntedCallback> releaseHelper,
+                                       GraphitePromiseTextureReleaseProc textureReleaseProc)
+                : fFulfillProc(fulfillProc)
+                , fReleaseHelper(std::move(releaseHelper))
+                , fTextureReleaseProc(textureReleaseProc) {
         }
-    }
-    return as_IB(this)->onMakeTextureImage(recorder, requiredProps);
-}
+        PromiseLazyInstantiateCallback(PromiseLazyInstantiateCallback&&) = default;
+        PromiseLazyInstantiateCallback(const PromiseLazyInstantiateCallback&) {
+            // Because we get wrapped in std::function we must be copyable. But we should never
+            // be copied.
+            SkASSERT(false);
+        }
+        PromiseLazyInstantiateCallback& operator=(PromiseLazyInstantiateCallback&&) = default;
+        PromiseLazyInstantiateCallback& operator=(const PromiseLazyInstantiateCallback&) {
+            SkASSERT(false);
+            return *this;
+        }
 
-sk_sp<SkImage> SkImage::MakeGraphiteFromBackendTexture(Recorder* recorder,
-                                                       const BackendTexture& backendTex,
-                                                       SkColorType ct,
-                                                       SkAlphaType at,
-                                                       sk_sp<SkColorSpace> cs) {
-    if (!recorder) {
-        return nullptr;
-    }
+        sk_sp<Texture> operator()(ResourceProvider* resourceProvider) {
 
-    const Caps* caps = recorder->priv().caps();
+            auto [ backendTexture, textureReleaseCtx ] = fFulfillProc(fReleaseHelper->context());
+            if (!backendTexture.isValid()) {
+                SKGPU_LOG_W("FulFill Proc failed");
+                return nullptr;
+            }
 
-    SkColorInfo info(ct, at, std::move(cs));
+            sk_sp<RefCntedCallback> textureReleaseCB = RefCntedCallback::Make(fTextureReleaseProc,
+                                                                              textureReleaseCtx);
 
-    if (!validate_backend_texture(caps, backendTex, info)) {
-        return nullptr;
-    }
+            sk_sp<Texture> texture = resourceProvider->createWrappedTexture(backendTexture);
+            if (!texture) {
+                SKGPU_LOG_W("Texture creation failed");
+                return nullptr;
+            }
 
-    sk_sp<Texture> texture = recorder->priv().resourceProvider()->createWrappedTexture(backendTex);
-    if (!texture) {
-        return nullptr;
-    }
+            texture->setReleaseCallback(std::move(textureReleaseCB));
+            return texture;
+        }
 
-    sk_sp<TextureProxy> proxy(new TextureProxy(std::move(texture)));
+    private:
+        GraphitePromiseImageFulfillProc fFulfillProc;
+        sk_sp<skgpu::RefCntedCallback> fReleaseHelper;
+        GraphitePromiseTextureReleaseProc fTextureReleaseProc;
 
-    skgpu::Swizzle swizzle = caps->getReadSwizzle(ct, backendTex.info());
-    TextureProxyView view(std::move(proxy), swizzle);
-    return sk_make_sp<Image>(view, info);
+    } callback(fulfillProc, std::move(releaseHelper), textureReleaseProc);
+
+    return TextureProxy::MakeLazy(caps,
+                                  dimensions,
+                                  textureInfo,
+                                  skgpu::Budgeted::kNo,  // This is destined for a user's SkImage
+                                  isVolatile,
+                                  std::move(callback));
 }

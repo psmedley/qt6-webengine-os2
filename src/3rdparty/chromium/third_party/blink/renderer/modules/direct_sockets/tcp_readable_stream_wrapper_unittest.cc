@@ -4,17 +4,18 @@
 
 #include "third_party/blink/renderer/modules/direct_sockets/tcp_readable_stream_wrapper.h"
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/test/mock_callback.h"
 #include "net/base/net_errors.h"
+#include "third_party/blink/renderer/bindings/core/v8/iterable.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_iterator_result_value.h"
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
 #include "third_party/blink/renderer/modules/direct_sockets/stream_wrapper.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
@@ -29,14 +30,10 @@ using ::testing::ElementsAre;
 class StreamCreator : public GarbageCollected<StreamCreator> {
  public:
   StreamCreator() = default;
-  ~StreamCreator() {
-    // Let the TCPReadableStreamWrapper object respond to the closure if it
-    // needs to.
-    test::RunPendingTasks();
-  }
+  ~StreamCreator() = default;
 
   // The default value of |capacity| means some sensible value selected by mojo.
-  TCPReadableStreamWrapper* Create(const V8TestingScope& scope,
+  TCPReadableStreamWrapper* Create(V8TestingScope& scope,
                                    uint32_t capacity = 0) {
     MojoCreateDataPipeOptions options;
     options.struct_size = sizeof(MojoCreateDataPipeOptions);
@@ -56,7 +53,11 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
         script_state,
         WTF::BindOnce(&StreamCreator::Close, WrapWeakPersistent(this)),
         std::move(data_pipe_consumer));
-    return stream_wrapper_;
+
+    scope.PerformMicrotaskCheckpoint();
+    test::RunPendingTasks();
+
+    return stream_wrapper_.Get();
   }
 
   void ResetPipe() { data_pipe_producer_.reset(); }
@@ -109,11 +110,11 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
     CHECK(result->IsObject());
     Iterator ret;
     v8::Local<v8::Value> v8value;
-    if (!V8UnpackIteratorResult(scope.GetScriptState(), result.As<v8::Object>(),
-                                &ret.done)
-             .ToLocal(&v8value)) {
+    if (!V8UnpackIterationResult(scope.GetScriptState(),
+                                 result.As<v8::Object>(), &v8value,
+                                 &ret.done)) {
       ADD_FAILURE() << "Couldn't unpack iterator";
-      return ret;
+      return {};
     }
     if (ret.done) {
       EXPECT_TRUE(v8value->IsUndefined());
@@ -128,6 +129,8 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
 
   void Trace(Visitor* visitor) const { visitor->Trace(stream_wrapper_); }
 
+  void Cleanup() { data_pipe_producer_.reset(); }
+
  private:
   void Close(ScriptValue exception) {
     close_called_with_ = !exception.IsEmpty();
@@ -138,19 +141,34 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
   Member<TCPReadableStreamWrapper> stream_wrapper_;
 };
 
+class ScopedStreamCreator {
+ public:
+  explicit ScopedStreamCreator(StreamCreator* stream_creator)
+      : stream_creator_(stream_creator) {}
+
+  ~ScopedStreamCreator() { stream_creator_->Cleanup(); }
+
+  StreamCreator* operator->() const { return stream_creator_; }
+
+ private:
+  Persistent<StreamCreator> stream_creator_;
+};
+
 TEST(TCPReadableStreamWrapperTest, Create) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
-  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  ScopedStreamCreator stream_creator(MakeGarbageCollected<StreamCreator>());
   auto* tcp_readable_stream_wrapper = stream_creator->Create(scope);
 
   EXPECT_TRUE(tcp_readable_stream_wrapper->Readable());
 }
 
 TEST(TCPReadableStreamWrapperTest, ReadArrayBuffer) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
-  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  ScopedStreamCreator stream_creator(MakeGarbageCollected<StreamCreator>());
   auto* tcp_readable_stream_wrapper = stream_creator->Create(scope);
 
   auto* script_state = scope.GetScriptState();
@@ -165,9 +183,10 @@ TEST(TCPReadableStreamWrapperTest, ReadArrayBuffer) {
 }
 
 TEST(TCPReadableStreamWrapperTest, WriteToPipeWithPendingRead) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
-  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  ScopedStreamCreator stream_creator(MakeGarbageCollected<StreamCreator>());
   auto* tcp_readable_stream_wrapper = stream_creator->Create(scope);
 
   auto* script_state = scope.GetScriptState();
@@ -176,8 +195,6 @@ TEST(TCPReadableStreamWrapperTest, WriteToPipeWithPendingRead) {
           script_state, ASSERT_NO_EXCEPTION);
   ScriptPromise read_promise = reader->read(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(script_state, read_promise);
-
-  test::RunPendingTasks();
 
   stream_creator->WriteToPipe({'A'});
 
@@ -198,9 +215,10 @@ INSTANTIATE_TEST_SUITE_P(/**/,
                          testing::Bool());
 
 TEST_P(TCPReadableStreamWrapperCloseTest, TriggerClose) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
-  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  ScopedStreamCreator stream_creator(MakeGarbageCollected<StreamCreator>());
   auto* tcp_readable_stream_wrapper = stream_creator->Create(scope);
 
   auto* script_state = scope.GetScriptState();
@@ -210,7 +228,6 @@ TEST_P(TCPReadableStreamWrapperCloseTest, TriggerClose) {
   ScriptPromise read_promise = reader->read(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(script_state, read_promise);
 
-  test::RunPendingTasks();
   stream_creator->WriteToPipe({'A'});
 
   bool graceful = GetParam();
@@ -232,9 +249,10 @@ TEST_P(TCPReadableStreamWrapperCloseTest, TriggerClose) {
 }
 
 TEST_P(TCPReadableStreamWrapperCloseTest, TriggerCloseInReverseOrder) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
-  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  ScopedStreamCreator stream_creator(MakeGarbageCollected<StreamCreator>());
   auto* tcp_readable_stream_wrapper = stream_creator->Create(scope);
 
   auto* script_state = scope.GetScriptState();
@@ -244,7 +262,6 @@ TEST_P(TCPReadableStreamWrapperCloseTest, TriggerCloseInReverseOrder) {
   ScriptPromise read_promise = reader->read(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(script_state, read_promise);
 
-  test::RunPendingTasks();
   stream_creator->WriteToPipe({'A'});
 
   bool graceful = GetParam();
@@ -267,9 +284,10 @@ TEST_P(TCPReadableStreamWrapperCloseTest, TriggerCloseInReverseOrder) {
 }
 
 TEST_P(TCPReadableStreamWrapperCloseTest, ErrorCancelReset) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
-  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  ScopedStreamCreator stream_creator(MakeGarbageCollected<StreamCreator>());
   auto* tcp_readable_stream_wrapper = stream_creator->Create(scope);
 
   auto* script_state = scope.GetScriptState();
@@ -297,9 +315,10 @@ TEST_P(TCPReadableStreamWrapperCloseTest, ErrorCancelReset) {
 }
 
 TEST_P(TCPReadableStreamWrapperCloseTest, ResetCancelError) {
+  test::TaskEnvironment task_environment;
   V8TestingScope scope;
 
-  auto* stream_creator = MakeGarbageCollected<StreamCreator>();
+  ScopedStreamCreator stream_creator(MakeGarbageCollected<StreamCreator>());
   auto* tcp_readable_stream_wrapper = stream_creator->Create(scope);
 
   auto* script_state = scope.GetScriptState();
@@ -323,9 +342,9 @@ TEST_P(TCPReadableStreamWrapperCloseTest, ResetCancelError) {
 
   stream_creator->ResetPipe();
 
+  // cancel() always has priority.
   ASSERT_EQ(tcp_readable_stream_wrapper->GetState(),
-            graceful ? StreamWrapper::State::kClosed
-                     : StreamWrapper::State::kAborted);
+            StreamWrapper::State::kClosed);
 }
 
 }  // namespace

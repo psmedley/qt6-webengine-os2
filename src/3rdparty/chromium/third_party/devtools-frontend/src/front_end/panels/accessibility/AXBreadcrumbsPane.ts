@@ -7,40 +7,39 @@ import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import type * as Protocol from '../../generated/protocol.js';
 import * as Feedback from '../../ui/components/panel_feedback/panel_feedback.js';
 import * as UI from '../../ui/legacy/legacy.js';
-
-import axBreadcrumbsStyles from './axBreadcrumbs.css.js';
-
-import type * as Protocol from '../../generated/protocol.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import {type AccessibilitySidebarView} from './AccessibilitySidebarView.js';
 import {AccessibilitySubPane} from './AccessibilitySubPane.js';
+import axBreadcrumbsStyles from './axBreadcrumbs.css.js';
 
 const UIStrings = {
   /**
-  *@description Text in AXBreadcrumbs Pane of the Accessibility panel
-  */
+   *@description Text in AXBreadcrumbs Pane of the Accessibility panel
+   */
   accessibilityTree: 'Accessibility Tree',
   /**
-  *@description Text to scroll the displayed content into view
-  */
+   *@description Text to scroll the displayed content into view
+   */
   scrollIntoView: 'Scroll into view',
   /**
-  *@description Ignored node element text content in AXBreadcrumbs Pane of the Accessibility panel
-  */
+   *@description Ignored node element text content in AXBreadcrumbs Pane of the Accessibility panel
+   */
   ignored: 'Ignored',
   /**
-  *@description Name for experimental tree toggle.
-  */
+   *@description Name for experimental tree toggle.
+   */
   fullTreeExperimentName: 'Enable full-page accessibility tree',
   /**
-  *@description Description text for experimental tree toggle.
-  */
+   *@description Description text for experimental tree toggle.
+   */
   fullTreeExperimentDescription: 'The accessibility tree moved to the top right corner of the DOM tree.',
   /**
-  *@description Message saying that DevTools must be restarted before the experiment is enabled.
-  */
+   *@description Message saying that DevTools must be restarted before the experiment is enabled.
+   */
   reloadRequired: 'Reload required before the change takes effect.',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/accessibility/AXBreadcrumbsPane.ts', UIStrings);
@@ -70,6 +69,7 @@ export class AXBreadcrumbsPane extends AccessibilitySubPane {
 
     this.hoveredBreadcrumb = null;
     const previewToggle = new Feedback.PreviewToggle.PreviewToggle();
+    previewToggle.setAttribute('jslog', `${VisualLogging.toggle().context('full-accessibility-tree')}`);
     const name = i18nString(UIStrings.fullTreeExperimentName);
     const experiment = Root.Runtime.ExperimentName.FULL_ACCESSIBILITY_TREE;
     const onChangeCallback: (checked: boolean) => void = checked => {
@@ -102,7 +102,7 @@ export class AXBreadcrumbsPane extends AccessibilitySubPane {
     this.rootElement.addEventListener('focusout', this.onFocusOut.bind(this), false);
   }
 
-  focus(): void {
+  override focus(): void {
     if (this.inspectedNodeBreadcrumb) {
       this.inspectedNodeBreadcrumb.nodeElement().focus();
     } else {
@@ -110,7 +110,7 @@ export class AXBreadcrumbsPane extends AccessibilitySubPane {
     }
   }
 
-  setAXNode(axNode: SDK.AccessibilityModel.AccessibilityNode|null): void {
+  override setAXNode(axNode: SDK.AccessibilityModel.AccessibilityNode|null): void {
     if (this.#legacyTreeDisabled) {
       return;
     }
@@ -181,7 +181,7 @@ export class AXBreadcrumbsPane extends AccessibilitySubPane {
     this.collapsingBreadcrumbId = -1;
   }
 
-  willHide(): void {
+  override willHide(): void {
     this.setPreselectedBreadcrumb(null);
   }
 
@@ -338,12 +338,14 @@ export class AXBreadcrumbsPane extends AccessibilitySubPane {
       // This will collapse and preselect/focus the breadcrumb.
       this.collapseBreadcrumb(breadcrumb);
       breadcrumb.nodeElement().focus();
+      void VisualLogging.logClick(breadcrumb.expandLoggable, event);
       return;
     }
     if (!breadcrumb.isDOMNode()) {
       return;
     }
     this.inspectDOMNode(breadcrumb.axNode());
+    void VisualLogging.logClick(breadcrumb.expandLoggable, event);
   }
 
   private setHoveredBreadcrumb(breadcrumb: AXBreadcrumb|null): void {
@@ -421,7 +423,7 @@ export class AXBreadcrumbsPane extends AccessibilitySubPane {
     }
     void contextMenu.show();
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([axBreadcrumbsStyles]);
   }
@@ -441,11 +443,13 @@ export class AXBreadcrumb {
   private preselectedInternal: boolean;
   private parent: AXBreadcrumb|null;
   private inspectedInternal: boolean;
+  expandLoggable = {};
   constructor(axNode: SDK.AccessibilityModel.AccessibilityNode, depth: number, inspected: boolean) {
     this.axNodeInternal = axNode;
 
     this.elementInternal = document.createElement('div');
     this.elementInternal.classList.add('ax-breadcrumb');
+    this.elementInternal.setAttribute('jslog', `${VisualLogging.treeItem().track({click: true})}`);
     elementsToAXBreadcrumb.set(this.elementInternal, this);
 
     this.nodeElementInternal = document.createElement('div');
@@ -491,6 +495,7 @@ export class AXBreadcrumb {
     if (!this.axNodeInternal.ignored() && this.axNodeInternal.hasOnlyUnloadedChildren()) {
       this.nodeElementInternal.classList.add('children-unloaded');
       UI.ARIAUtils.setExpanded(this.nodeElementInternal, false);
+      VisualLogging.registerLoggable(this.expandLoggable, `${VisualLogging.treeItemExpand()}`, this.elementInternal);
     }
 
     if (!this.axNodeInternal.isDOMNode()) {
@@ -512,6 +517,7 @@ export class AXBreadcrumb {
     this.nodeElementInternal.classList.add('parent');
     UI.ARIAUtils.setExpanded(this.nodeElementInternal, true);
     this.childrenGroupElement.appendChild(breadcrumb.element());
+    VisualLogging.registerLoggable(this.expandLoggable, `${VisualLogging.treeItemExpand()}`, this.elementInternal);
   }
 
   hasExpandedChildren(): number {

@@ -11,6 +11,7 @@
 #include "src/gpu/graphite/SharedContext.h"
 
 #include "include/gpu/vk/VulkanTypes.h"
+#include "src/gpu/graphite/vk/VulkanCaps.h"
 
 namespace skgpu {
 struct VulkanBackendContext;
@@ -28,6 +29,8 @@ public:
     static sk_sp<SharedContext> Make(const VulkanBackendContext&, const ContextOptions&);
     ~VulkanSharedContext() override;
 
+    const VulkanCaps& vulkanCaps() const { return static_cast<const VulkanCaps&>(*this->caps()); }
+
     const skgpu::VulkanInterface* interface() const { return fInterface.get(); }
 
     skgpu::VulkanMemoryAllocator* memoryAllocator() const { return fMemoryAllocator.get(); }
@@ -35,7 +38,11 @@ public:
     VkDevice device() const { return fDevice; }
     uint32_t  queueIndex() const { return fQueueIndex; }
 
-    std::unique_ptr<ResourceProvider> makeResourceProvider(SingleOwner*) override;
+    std::unique_ptr<ResourceProvider> makeResourceProvider(SingleOwner*,
+                                                           uint32_t recorderID,
+                                                           size_t resourceBudget) override;
+
+    bool checkVkResult(VkResult result) const;
 
 private:
     VulkanSharedContext(const VulkanBackendContext&,
@@ -48,10 +55,8 @@ private:
 
     VkDevice fDevice;
     uint32_t fQueueIndex;
-
 };
 
 } // namespace skgpu::graphite
 
 #endif // skgpu_graphite_VulkanSharedContext_DEFINED
-

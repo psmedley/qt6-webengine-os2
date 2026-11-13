@@ -4,12 +4,12 @@
 
 #include "ui/views/accessibility/views_ax_tree_manager.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/check.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/location.h"
 #include "base/notreached.h"
-#include "base/threading/sequenced_task_runner_handle.h"
+#include "base/task/sequenced_task_runner.h"
 #include "ui/accessibility/accessibility_features.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -23,13 +23,15 @@
 namespace views {
 
 ViewsAXTreeManager::ViewsAXTreeManager(Widget* widget)
-    : ui::AXTreeManager(ui::AXTreeID::CreateNewAXTreeID(),
-                        std::make_unique<ui::AXTree>()),
+    : ui::AXTreeManager(std::make_unique<ui::AXTree>()),
       widget_(widget),
-      tree_source_(cache_.GetOrCreate(widget), ax_tree_id_, &cache_),
+      tree_source_(cache_.GetOrCreate(widget)->GetUniqueId(),
+                   ui::AXTreeID::CreateNewAXTreeID(),
+                   &cache_),
       tree_serializer_(&tree_source_) {
   DCHECK(widget);
-  views::WidgetAXTreeIDMap::GetInstance().AddWidget(ax_tree_id_, widget);
+  views::WidgetAXTreeIDMap::GetInstance().AddWidget(tree_source_.tree_id(),
+                                                    widget);
   views_event_observer_.Observe(AXEventManager::Get());
   widget_observer_.Observe(widget);
 
@@ -38,7 +40,7 @@ ViewsAXTreeManager::ViewsAXTreeManager(Widget* widget)
   // synchronously) will create *another* |ViewsAXTreeManager| for the same
   // widget, since the wrapper that created this |ViewsAXTreeManager| hasn't
   // been added to the cache yet.
-  base::SequencedTaskRunnerHandle::Get()->PostTask(
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(&ViewsAXTreeManager::FireLoadComplete,
                                 weak_factory_.GetWeakPtr()));
 }
@@ -57,16 +59,6 @@ void ViewsAXTreeManager::UnsetGeneratedEventCallbackForTesting() {
   generated_event_callback_for_testing_.Reset();
 }
 
-ui::AXNode* ViewsAXTreeManager::GetNodeFromTree(
-    const ui::AXTreeID& tree_id,
-    const ui::AXNodeID node_id) const {
-  if (!widget_ || !widget_->GetRootView())
-    return nullptr;
-
-  const ui::AXTreeManager* manager = ui::AXTreeManager::FromID(tree_id);
-  return manager ? manager->GetNode(node_id) : nullptr;
-}
-
 ui::AXNode* ViewsAXTreeManager::GetNode(
     const ui::AXNodeID node_id) const {
   if (!widget_ || !widget_->GetRootView() || !ax_tree_)
@@ -81,7 +73,7 @@ ui::AXTreeID ViewsAXTreeManager::GetParentTreeID() const {
   return ui::AXTreeIDUnknown();
 }
 
-ui::AXNode* ViewsAXTreeManager::GetParentNodeFromParentTreeAsAXNode() const {
+ui::AXNode* ViewsAXTreeManager::GetParentNodeFromParentTree() const {
   // TODO(nektar): Implement stiching of AXTrees, e.g. a dialog to the main
   // window.
   return nullptr;
@@ -97,7 +89,7 @@ void ViewsAXTreeManager::OnViewEvent(View* view, ax::mojom::Event event) {
   if (waiting_to_serialize_)
     return;
   waiting_to_serialize_ = true;
-  base::SequencedTaskRunnerHandle::Get()->PostTask(
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(&ViewsAXTreeManager::SerializeTreeUpdates,
                                 weak_factory_.GetWeakPtr()));
 }
@@ -138,12 +130,13 @@ void ViewsAXTreeManager::SerializeTreeUpdates() {
       continue;
 
     ui::AXTreeUpdate update;
+    // TODO(pbos): Consider rewriting this as a CHECK now that this is fatally
+    // aborting.
     if (!tree_serializer_.SerializeChanges(wrapper, &update)) {
       std::string error;
       ui::AXTreeSourceChecker<AXAuraObjWrapper*> checker(&tree_source_);
       checker.CheckAndGetErrorString(&error);
-      NOTREACHED() << error << '\n' << update.ToString();
-      return;
+      NOTREACHED_NORETURN() << error << '\n' << update.ToString();
     }
 
     updates.push_back(update);
@@ -158,10 +151,7 @@ void ViewsAXTreeManager::UnserializeTreeUpdates(
     return;
 
   for (const ui::AXTreeUpdate& update : updates) {
-    if (!ax_tree_->Unserialize(update)) {
-      NOTREACHED() << ax_tree_->error();
-      return;
-    }
+    CHECK(ax_tree_->Unserialize(update)) << ax_tree_->error();
   }
 
   // Unserializing the updates into our AXTree should have prompted our
@@ -169,7 +159,7 @@ void ViewsAXTreeManager::UnserializeTreeUpdates(
   for (const ui::AXEventGenerator::TargetedEvent& targeted_event :
        event_generator_) {
     if (ui::AXNode* node = ax_tree_->GetFromId(targeted_event.node_id))
-      FireGeneratedEvent(targeted_event.event_params.event, node);
+      FireGeneratedEvent(targeted_event.event_params->event, node);
   }
   event_generator_.ClearEvents();
 }

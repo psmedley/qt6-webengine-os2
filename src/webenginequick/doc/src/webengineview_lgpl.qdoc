@@ -8,7 +8,7 @@
 
 /*!
     \qmltype WebEngineView
-    \instantiates QQuickWebEngineView
+    \nativetype QQuickWebEngineView
     \inherits Item
     \inqmlmodule QtWebEngine
     \since QtWebEngine 1.0
@@ -111,10 +111,9 @@
     \section2 Platform Features
 
     Web pages can request access to platform features, such as geolocation or audio and video
-    capture devices. The \l featurePermissionRequested() signal is emitted when a web page requests
-    to make use of a resource. The supported platform features are described by the \l Feature
-    property. If users grant the permission, the \l grantFeaturePermission() method is used to set
-    it to \e granted.
+    capture devices. The \l permissionRequested() signal is emitted when a web page requests
+    to make use of a resource. The supported platform features are described by the QWebEnginePermission::Feature
+    property.
 
     \section2 Rendering to OpenGL Surface
 
@@ -356,9 +355,8 @@
     This method offers a lower-level alternative to the \c{url} property,
     which references HTML pages via URL.
 
-    External objects, such as stylesheets or images referenced in the HTML
-    document, should be located relative to \a baseUrl. For external objects to
-    be loaded, \c baseUrl cannot be empty. For example, if \a html
+    \a baseUrl is optional and used to resolve relative URLs in the document,
+    such as referenced images or stylesheets. For example, if \a html
     is retrieved from \c http://www.example.com/documents/overview.html, which
     is the base URL, then an image referenced with the relative URL, \c diagram.png,
     should be at \c{http://www.example.com/documents/diagram.png}.
@@ -368,6 +366,8 @@
 
 /*!
     \qmlmethod void WebEngineView::runJavaScript(string script, variant callback)
+    \qmlmethod void WebEngineView::runJavaScript(string script, int worldId, variant callback)
+
     Runs the specified \a script in the content of the web view.
 
     The \a callback parameter is optional. If a callback function is provided,
@@ -382,8 +382,10 @@
     example, \c{Date} and \c{ArrayBuffer}. Unsupported data types include, for
     example, \c{Function} and \c{Promise}.
 
-    The script will run in the same \e world as other scripts that are
-    part of the loaded site.
+    To avoid conflicts with other scripts executed on the page, the world in
+    which the script is run can be specified by \a worldId. The world ID must be
+    between \c 0 and \c 256. If you leave out the \c world ID, the script is
+    run in the \c MainWorld.
 
     \warning Do not execute lengthy routines in the callback function, because it might block the
     rendering of the web content.
@@ -442,6 +444,7 @@
 /*!
     \qmlmethod void WebEngineView::grantFeaturePermission(url securityOrigin, Feature feature, bool granted)
     \since QtWebEngine 1.1
+    \deprecated [6.8] Use webEnginePermission.grant() or webEnginePermission.deny() instead.
 
     Sets or unsets the permission, depending on \a granted, for the web site
     identified by \a securityOrigin to use \a feature.
@@ -498,11 +501,21 @@
 /*!
     \qmlsignal WebEngineView::featurePermissionRequested(url securityOrigin, Feature feature)
     \since QtWebEngine 1.1
+    \deprecated [6.8] Use \l permissionRequested() instead.
 
     This signal is emitted when the web site identified by \a securityOrigin requests
     to make use of the resource or device identified by \a feature.
 
     \sa grantFeaturePermission()
+*/
+
+/*!
+    \qmlsignal WebEngineView::permissionRequested(webEnginePermission permission)
+    \since QtWebEngine 6.8
+
+    This signal is emitted when a web site fires a permission request (e.g. geolocation access,
+    permission to send notifications). The \a permission object can queried for the requesting URL
+    and the \c{WebEnginePermission.PermissionType} it's asking for, as well as to grant or deny permission.
 */
 
 /*!
@@ -787,6 +800,7 @@
             Exit the fullscreen mode. (Added in Qt 5.6)
     \value  WebEngineView.SavePage
             Save the current web page to disk. (Added in Qt 5.7)
+    \omitvalue WebEngineView.OpenLinkInNewBackgroundTab
     \value  WebEngineView.ViewSource
             Show the source of the current page in a new tab. Requires a handler for the
             \l newWindowRequested() signal. (Added in Qt 5.8)
@@ -831,11 +845,16 @@
             Inserts an unordered list at the current cursor position,
             deleting the current selection.
             Requires \c contenteditable="true". (Added in Qt 5.10)
+    \value  WebEngineView.ChangeTextDirectionLTR
+            Changes text direction to left-to-right in the focused input element. (Added in Qt 6.6)
+    \value  WebEngineView.ChangeTextDirectionRTL
+            Changes text direction to right-to-left in the focused input element. (Added in Qt 6.6)
     \omitvalue WebActionCount
 */
 
 /*!
     \qmlproperty enumeration WebEngineView::Feature
+    \deprecated [6.8] Replaced by WebEnginePermission.PermissionType.
 
     Describes the platform feature access categories that the user may be asked to grant or deny
     access to:
@@ -848,13 +867,22 @@
             Video devices, such as cameras.
     \value  WebEngineView.MediaAudioVideoCapture
             Both audio and video capture devices.
-    \value  DesktopVideoCapture
+    \value  WebEngineView.DesktopVideoCapture
             Video output capture, that is, the capture of the user's display.
             (Added in Qt 5.10)
-    \value  DesktopAudioVideoCapture
+    \value  WebEngineView.DesktopAudioVideoCapture
             Both audio and video output capture. (Added in Qt 5.10)
-    \value  WebEnginView.Notifications
+    \value  WebEngineView.Notifications
             Web notifications for the end-user.
+    \value  WebEngineView.ClipboardReadWrite
+            Read and write access for the clipboard. If both \l{WebEngineSettings::}
+            {javascriptCanPaste} and \l{WebEngineSettings::}
+            {javascriptCanAccessClipboard} settings are enabled, this permission will always be granted
+            automatically and no feature requests will be made.
+            (Added in Qt 6.8)
+    \value  WebEngineView.LocalFontsAccess
+            Access to the fonts installed on the user's machine. Only available on desktop platforms.
+            (Added in Qt 6.8)
 
     \sa featurePermissionRequested(), grantFeaturePermission()
 */
@@ -996,8 +1024,6 @@
     \value WebEngineView.EnvelopePrc10
     \value WebEngineView.EnvelopeYou4
     \value WebEngineView.LastPageSize = \c EnvelopeYou4
-    \omitvalue NPageSize
-    \omitvalue NPaperSize
 
     \sa WebEngineView::printToPdf()
 */
@@ -1300,6 +1326,20 @@
 */
 
 /*!
+    \qmlproperty WebEngineView WebEngineView::devToolsId
+    \since QtWebEngine 6.6
+    \readonly
+
+    The id of the developer tools host associated with this page.
+
+    If remote debugging is enabled (see \l{Qt WebEngine Developer Tools}), the id can be used to
+    build the URL to connect to the developer tool websocket:
+    \c{ws://localhost:<debugggin-port>/devtools/page/<id>)}. The websocket can be used to to interact
+    with the page using the \l{https://chromedevtools.github.io/devtools-protocol/}{DevTools
+    Protocol}.
+*/
+
+/*!
     \qmlmethod WebEngineAction WebEngineView::action(WebAction action)
     \since 5.12
 
@@ -1318,11 +1358,24 @@
     \qmlsignal WebEngineView::printRequested
     \since QtWebEngine 1.8
 
-    This signal is emitted when the JavaScript \c{window.print()} method is called or the user pressed the print
-    button of PDF viewer plugin.
+    This signal is emitted when the JavaScript \c{window.print()} method is called on the main
+    frame, or the user pressed the print button of PDF viewer plugin.
     Typically, the signal handler can simply call printToPdf().
 
+    Since QtWebEngine 6.8, this signal is only emitted for the main frame, instead of being emitted
+    for any frame that requests printing.
+
     \sa printToPdf
+*/
+
+/*!
+    \qmlsignal WebEngineView::printRequestedByFrame(webEngineFrame frame)
+    \since QtWebEngine 6.8
+
+    This signal is emitted when the JavaScript \c{window.print()} method is called on \a frame.
+    If the frame is the main frame, \c{printRequested} is emitted instead.
+
+    \sa printRequested
 */
 
 /*!
@@ -1407,7 +1460,7 @@
 
 /*!
     \qmltype FindTextResult
-    \instantiates QWebEngineFindTextResult
+    \nativetype QWebEngineFindTextResult
     \inqmlmodule QtWebEngine
     \since QtWebEngine 1.10
 
@@ -1523,6 +1576,74 @@
 
     \note If no delegate is provided, Chromium's default touch handles will appear.
 
+*/
+
+/*!
+    \qmlproperty webEngineFrame WebEngineView::mainFrame
+    \since QtWebEngine 6.8
+
+    The main, top-level frame of the page. All other frames on this page are accessible
+    as children of the main frame.
+ */
+
+/*!
+    \qmlmethod webEngineFrame WebEngineView::findFrameByName(string name)
+    \since QtWebEngine 6.8
+
+    Returns the frame with the given \a name. If there are multiple frames with the same
+    name, which one is returned is arbitrary. If no frame was found, returns an
+    \l{webEngineFrame::isValid}{invalid} frame.
+*/
+
+/*!
+    \qmlmethod void WebEngineView::save(const QString &filePath, QWebEngineDownloadRequest::SavePageFormat format)
+    \since QtWebEngine 6.6
+
+    Save the current web page to disk.
+
+    The web page is saved to \a filePath in the specified \a{format}.
+
+    This is a shortcut for the following actions:
+    \list
+    \li Trigger the Save web action.
+    \li Accept the next download item and set the specified file path and save format.
+    \endlist
+
+    This function issues an asynchronous download request for the web page and returns immediately.
+
+    \sa QWebEngineDownloadRequest::SavePageFormat
+*/
+
+/*!
+    \qmlsignal WebEngineView::webAuthUxRequested(QWebEngineWebAuthUxRequest *request);
+    \since QtWebEngine 6.7
+
+    This signal is emitted when a WebAuth authenticator requires user interaction
+    during the authentication process. These requests are handled by displaying a dialog to the user.
+
+    The \a request contains the information and API required to complete the WebAuth UX request.
+
+    \sa QWebEngineWebAuthUxRequest
+*/
+
+/*!
+    \qmlsignal WebEngineView::desktopMediaRequested(WebEngineDesktopMediaRequest request)
+    \since QtWebEngine 6.7
+
+    This signal is emitted when a web application requests access to the contents of a display.
+
+    The \a request argument holds references to data models for windows and screens available
+    for capturing. To accept the request, the signal handler can call either
+    WebEngineDesktopMediaRequest::selectScreen() or WebEngineDesktopMediaRequest::selectWindow().
+*/
+
+/*!
+    \qmlsignal WebEngineView::zoomFactorChanged(qreal factor);
+    \since QtWebEngine 6.8
+
+    This signal is emitted whenever the zoom \a factor for the page changes.
+
+    \sa zoomFactor
 */
 
     \sa {WebEngine Qt Quick Custom Touch Handle Example}

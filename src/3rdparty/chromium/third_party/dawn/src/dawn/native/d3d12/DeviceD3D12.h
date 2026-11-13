@@ -1,16 +1,29 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_D3D12_DEVICED3D12_H_
 #define SRC_DAWN_NATIVE_D3D12_DEVICED3D12_H_
@@ -18,18 +31,21 @@
 #include <memory>
 #include <vector>
 
+#include "dawn/common/MutexProtected.h"
 #include "dawn/common/SerialQueue.h"
-#include "dawn/native/Device.h"
+#include "dawn/native/d3d/DeviceD3D.h"
 #include "dawn/native/d3d12/CommandRecordingContext.h"
 #include "dawn/native/d3d12/D3D12Info.h"
 #include "dawn/native/d3d12/Forward.h"
 #include "dawn/native/d3d12/TextureD3D12.h"
 
+namespace dawn::native::d3d {
+class ExternalImageDXGIImpl;
+}  // namespace dawn::native::d3d
+
 namespace dawn::native::d3d12 {
 
 class CommandAllocatorManager;
-struct ExternalImageDescriptorDXGISharedHandle;
-class ExternalImageDXGIImpl;
 class PlatformFunctions;
 class ResidencyManager;
 class ResourceAllocatorManager;
@@ -37,21 +53,21 @@ class SamplerHeapCache;
 class ShaderVisibleDescriptorAllocator;
 class StagingDescriptorAllocator;
 
-#define ASSERT_SUCCESS(hr)            \
-    do {                              \
-        HRESULT succeeded = hr;       \
-        ASSERT(SUCCEEDED(succeeded)); \
+#define ASSERT_SUCCESS(hr)                 \
+    do {                                   \
+        HRESULT succeeded = hr;            \
+        DAWN_ASSERT(SUCCEEDED(succeeded)); \
     } while (0)
 
 // Definition of backend types
-class Device final : public DeviceBase {
+class Device final : public d3d::Device {
   public:
-    static ResultOrError<Ref<Device>> Create(Adapter* adapter,
-                                             const DeviceDescriptor* descriptor,
-                                             const TripleStateTogglesSet& userProvidedToggles);
+    static ResultOrError<Ref<Device>> Create(AdapterBase* adapter,
+                                             const UnpackedPtr<DeviceDescriptor>& descriptor,
+                                             const TogglesState& deviceToggles);
     ~Device() override;
 
-    MaybeError Initialize(const DeviceDescriptor* descriptor);
+    MaybeError Initialize(const UnpackedPtr<DeviceDescriptor>& descriptor);
 
     ResultOrError<Ref<CommandBufferBase>> CreateCommandBuffer(
         CommandEncoder* encoder,
@@ -60,24 +76,14 @@ class Device final : public DeviceBase {
     MaybeError TickImpl() override;
 
     ID3D12Device* GetD3D12Device() const;
-    ComPtr<ID3D12CommandQueue> GetCommandQueue() const;
-    ID3D12SharingContract* GetSharingContract() const;
-    HANDLE GetFenceHandle() const;
 
     ComPtr<ID3D12CommandSignature> GetDispatchIndirectSignature() const;
     ComPtr<ID3D12CommandSignature> GetDrawIndirectSignature() const;
     ComPtr<ID3D12CommandSignature> GetDrawIndexedIndirectSignature() const;
 
-    CommandAllocatorManager* GetCommandAllocatorManager() const;
-    ResidencyManager* GetResidencyManager() const;
+    MutexProtected<ResidencyManager>& GetResidencyManager() const;
 
     const PlatformFunctions* GetFunctions() const;
-    ComPtr<IDXGIFactory4> GetFactory() const;
-    ComPtr<IDxcLibrary> GetDxcLibrary() const;
-    ComPtr<IDxcCompiler> GetDxcCompiler() const;
-    ComPtr<IDxcValidator> GetDxcValidator() const;
-
-    ResultOrError<CommandRecordingContext*> GetPendingCommandContext();
 
     MaybeError ClearBufferToZero(CommandRecordingContext* commandContext,
                                  BufferBase* destination,
@@ -86,68 +92,63 @@ class Device final : public DeviceBase {
 
     const D3D12DeviceInfo& GetDeviceInfo() const;
 
-    MaybeError NextSerial();
-    MaybeError WaitForSerial(ExecutionSerial serial);
-
     void ReferenceUntilUnused(ComPtr<IUnknown> object);
 
-    MaybeError ExecutePendingCommandContext();
+    MaybeError CopyFromStagingToBufferImpl(BufferBase* source,
+                                           uint64_t sourceOffset,
+                                           BufferBase* destination,
+                                           uint64_t destinationOffset,
+                                           uint64_t size) override;
 
-    ResultOrError<std::unique_ptr<StagingBufferBase>> CreateStagingBuffer(size_t size) override;
-    MaybeError CopyFromStagingToBuffer(StagingBufferBase* source,
+    void CopyFromStagingToBufferHelper(CommandRecordingContext* commandContext,
+                                       BufferBase* source,
                                        uint64_t sourceOffset,
                                        BufferBase* destination,
                                        uint64_t destinationOffset,
-                                       uint64_t size) override;
+                                       uint64_t size);
 
-    void CopyFromStagingToBufferImpl(CommandRecordingContext* commandContext,
-                                     StagingBufferBase* source,
-                                     uint64_t sourceOffset,
-                                     BufferBase* destination,
-                                     uint64_t destinationOffset,
-                                     uint64_t size);
-
-    MaybeError CopyFromStagingToTexture(const StagingBufferBase* source,
-                                        const TextureDataLayout& src,
-                                        TextureCopy* dst,
-                                        const Extent3D& copySizePixels) override;
+    MaybeError CopyFromStagingToTextureImpl(const BufferBase* source,
+                                            const TextureDataLayout& src,
+                                            const TextureCopy& dst,
+                                            const Extent3D& copySizePixels) override;
 
     ResultOrError<ResourceHeapAllocation> AllocateMemory(
         D3D12_HEAP_TYPE heapType,
         const D3D12_RESOURCE_DESC& resourceDescriptor,
         D3D12_RESOURCE_STATES initialUsage,
-        uint32_t formatBytesPerBlock);
+        uint32_t formatBytesPerBlock,
+        bool forceAllocateAsCommittedResource = false);
 
     void DeallocateMemory(ResourceHeapAllocation& allocation);
 
-    ShaderVisibleDescriptorAllocator* GetViewShaderVisibleDescriptorAllocator() const;
-    ShaderVisibleDescriptorAllocator* GetSamplerShaderVisibleDescriptorAllocator() const;
+    MutexProtected<ShaderVisibleDescriptorAllocator>& GetViewShaderVisibleDescriptorAllocator()
+        const;
+    MutexProtected<ShaderVisibleDescriptorAllocator>& GetSamplerShaderVisibleDescriptorAllocator()
+        const;
 
     // Returns nullptr when descriptor count is zero.
-    StagingDescriptorAllocator* GetViewStagingDescriptorAllocator(uint32_t descriptorCount) const;
+    MutexProtected<StagingDescriptorAllocator>* GetViewStagingDescriptorAllocator(
+        uint32_t descriptorCount) const;
 
-    StagingDescriptorAllocator* GetSamplerStagingDescriptorAllocator(
+    MutexProtected<StagingDescriptorAllocator>* GetSamplerStagingDescriptorAllocator(
         uint32_t descriptorCount) const;
 
     SamplerHeapCache* GetSamplerHeapCache();
 
-    StagingDescriptorAllocator* GetRenderTargetViewAllocator() const;
+    MutexProtected<StagingDescriptorAllocator>& GetRenderTargetViewAllocator() const;
 
-    StagingDescriptorAllocator* GetDepthStencilViewAllocator() const;
+    MutexProtected<StagingDescriptorAllocator>& GetDepthStencilViewAllocator() const;
 
-    std::unique_ptr<ExternalImageDXGIImpl> CreateExternalImageDXGIImpl(
-        const ExternalImageDescriptorDXGISharedHandle* descriptor);
+    ResultOrError<FenceAndSignalValue> CreateFence(
+        const d3d::ExternalImageDXGIFenceDescriptor* descriptor) override;
+    ResultOrError<std::unique_ptr<d3d::ExternalImageDXGIImpl>> CreateExternalImageDXGIImplImpl(
+        const ExternalImageDescriptor* descriptor) override;
 
-    Ref<TextureBase> CreateD3D12ExternalTexture(const TextureDescriptor* descriptor,
-                                                ComPtr<ID3D12Resource> d3d12Texture,
-                                                std::vector<Ref<Fence>> waitFences,
-                                                Ref<D3D11on12ResourceCacheEntry> d3d11on12Resource,
-                                                bool isSwapChainTexture,
-                                                bool isInitialized);
-
-    ComPtr<ID3D11On12Device> GetOrCreateD3D11on12Device();
-
-    void InitTogglesFromDriver();
+    Ref<TextureBase> CreateD3DExternalTexture(const UnpackedPtr<TextureDescriptor>& descriptor,
+                                              ComPtr<IUnknown> d3dTexture,
+                                              std::vector<FenceAndSignalValue> waitFences,
+                                              bool isSwapChainTexture,
+                                              bool isInitialized) override;
 
     uint32_t GetOptimalBytesPerRowAlignment() const override;
     uint64_t GetOptimalBufferToTextureCopyOffsetAlignment() const override;
@@ -167,38 +168,45 @@ class Device final : public DeviceBase {
     // Dawn APIs
     void SetLabelImpl() override;
 
+    // Those DXC methods are needed by d3d12::ShaderModule
+    ComPtr<IDxcLibrary> GetDxcLibrary() const;
+    ComPtr<IDxcCompiler3> GetDxcCompiler() const;
+
   private:
-    using DeviceBase::DeviceBase;
+    using Base = d3d::Device;
+
+    Device(AdapterBase* adapter,
+           const UnpackedPtr<DeviceDescriptor>& descriptor,
+           const TogglesState& deviceToggles);
 
     ResultOrError<Ref<BindGroupBase>> CreateBindGroupImpl(
         const BindGroupDescriptor* descriptor) override;
-    ResultOrError<Ref<BindGroupLayoutBase>> CreateBindGroupLayoutImpl(
-        const BindGroupLayoutDescriptor* descriptor,
-        PipelineCompatibilityToken pipelineCompatibilityToken) override;
-    ResultOrError<Ref<BufferBase>> CreateBufferImpl(const BufferDescriptor* descriptor) override;
+    ResultOrError<Ref<BindGroupLayoutInternalBase>> CreateBindGroupLayoutImpl(
+        const BindGroupLayoutDescriptor* descriptor) override;
+    ResultOrError<Ref<BufferBase>> CreateBufferImpl(
+        const UnpackedPtr<BufferDescriptor>& descriptor) override;
     ResultOrError<Ref<PipelineLayoutBase>> CreatePipelineLayoutImpl(
-        const PipelineLayoutDescriptor* descriptor) override;
+        const UnpackedPtr<PipelineLayoutDescriptor>& descriptor) override;
     ResultOrError<Ref<QuerySetBase>> CreateQuerySetImpl(
         const QuerySetDescriptor* descriptor) override;
     ResultOrError<Ref<SamplerBase>> CreateSamplerImpl(const SamplerDescriptor* descriptor) override;
     ResultOrError<Ref<ShaderModuleBase>> CreateShaderModuleImpl(
-        const ShaderModuleDescriptor* descriptor,
+        const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
         ShaderModuleParseResult* parseResult,
         OwnedCompilationMessages* compilationMessages) override;
     ResultOrError<Ref<SwapChainBase>> CreateSwapChainImpl(
-        const SwapChainDescriptor* descriptor) override;
-    ResultOrError<Ref<NewSwapChainBase>> CreateSwapChainImpl(
         Surface* surface,
-        NewSwapChainBase* previousSwapChain,
+        SwapChainBase* previousSwapChain,
         const SwapChainDescriptor* descriptor) override;
-    ResultOrError<Ref<TextureBase>> CreateTextureImpl(const TextureDescriptor* descriptor) override;
+    ResultOrError<Ref<TextureBase>> CreateTextureImpl(
+        const UnpackedPtr<TextureDescriptor>& descriptor) override;
     ResultOrError<Ref<TextureViewBase>> CreateTextureViewImpl(
         TextureBase* texture,
         const TextureViewDescriptor* descriptor) override;
     Ref<ComputePipelineBase> CreateUninitializedComputePipelineImpl(
-        const ComputePipelineDescriptor* descriptor) override;
+        const UnpackedPtr<ComputePipelineDescriptor>& descriptor) override;
     Ref<RenderPipelineBase> CreateUninitializedRenderPipelineImpl(
-        const RenderPipelineDescriptor* descriptor) override;
+        const UnpackedPtr<RenderPipelineDescriptor>& descriptor) override;
     void InitializeComputePipelineAsyncImpl(Ref<ComputePipelineBase> computePipeline,
                                             WGPUCreateComputePipelineAsyncCallback callback,
                                             void* userdata) override;
@@ -206,39 +214,31 @@ class Device final : public DeviceBase {
                                            WGPUCreateRenderPipelineAsyncCallback callback,
                                            void* userdata) override;
 
+    ResultOrError<Ref<SharedTextureMemoryBase>> ImportSharedTextureMemoryImpl(
+        const SharedTextureMemoryDescriptor* descriptor) override;
+    ResultOrError<Ref<SharedFenceBase>> ImportSharedFenceImpl(
+        const SharedFenceDescriptor* descriptor) override;
+
     void DestroyImpl() override;
-    MaybeError WaitForIdleForDestruction() override;
 
     MaybeError CheckDebugLayerAndGenerateErrors();
     void AppendDebugLayerMessages(ErrorData* error) override;
+    void AppendDeviceLostMessage(ErrorData* error) override;
 
-    MaybeError ApplyUseDxcToggle();
+    MaybeError EnsureDXCIfRequired();
 
     MaybeError CreateZeroBuffer();
 
-    ComPtr<ID3D12Fence> mFence;
-    HANDLE mFenceEvent = nullptr;
-    HANDLE mFenceHandle = nullptr;
-    ResultOrError<ExecutionSerial> CheckAndUpdateCompletedSerials() override;
-
     ComPtr<ID3D12Device> mD3d12Device;  // Device is owned by adapter and will not be outlived.
-    ComPtr<ID3D12CommandQueue> mCommandQueue;
-    ComPtr<ID3D12SharingContract> mD3d12SharingContract;
-
-    // 11on12 device corresponding to mCommandQueue
-    ComPtr<ID3D11On12Device> mD3d11On12Device;
 
     ComPtr<ID3D12CommandSignature> mDispatchIndirectSignature;
     ComPtr<ID3D12CommandSignature> mDrawIndirectSignature;
     ComPtr<ID3D12CommandSignature> mDrawIndexedIndirectSignature;
 
-    CommandRecordingContext mPendingCommands;
+    MutexProtected<SerialQueue<ExecutionSerial, ComPtr<IUnknown>>> mUsedComObjectRefs;
 
-    SerialQueue<ExecutionSerial, ComPtr<IUnknown>> mUsedComObjectRefs;
-
-    std::unique_ptr<CommandAllocatorManager> mCommandAllocatorManager;
-    std::unique_ptr<ResourceAllocatorManager> mResourceAllocatorManager;
-    std::unique_ptr<ResidencyManager> mResidencyManager;
+    std::unique_ptr<MutexProtected<ResourceAllocatorManager>> mResourceAllocatorManager;
+    std::unique_ptr<MutexProtected<ResidencyManager>> mResidencyManager;
 
     static constexpr uint32_t kMaxSamplerDescriptorsPerBindGroup = 3 * kMaxSamplersPerShaderStage;
     static constexpr uint32_t kMaxViewDescriptorsPerBindGroup =
@@ -251,21 +251,25 @@ class Device final : public DeviceBase {
 
     // Index corresponds to Log2Ceil(descriptorCount) where descriptorCount is in
     // the range [0, kMaxSamplerDescriptorsPerBindGroup].
-    std::array<std::unique_ptr<StagingDescriptorAllocator>, kNumViewDescriptorAllocators + 1>
+    std::array<std::unique_ptr<MutexProtected<StagingDescriptorAllocator>>,
+               kNumViewDescriptorAllocators + 1>
         mViewAllocators;
 
     // Index corresponds to Log2Ceil(descriptorCount) where descriptorCount is in
     // the range [0, kMaxViewDescriptorsPerBindGroup].
-    std::array<std::unique_ptr<StagingDescriptorAllocator>, kNumSamplerDescriptorAllocators + 1>
+    std::array<std::unique_ptr<MutexProtected<StagingDescriptorAllocator>>,
+               kNumSamplerDescriptorAllocators + 1>
         mSamplerAllocators;
 
-    std::unique_ptr<StagingDescriptorAllocator> mRenderTargetViewAllocator;
+    std::unique_ptr<MutexProtected<StagingDescriptorAllocator>> mRenderTargetViewAllocator;
 
-    std::unique_ptr<StagingDescriptorAllocator> mDepthStencilViewAllocator;
+    std::unique_ptr<MutexProtected<StagingDescriptorAllocator>> mDepthStencilViewAllocator;
 
-    std::unique_ptr<ShaderVisibleDescriptorAllocator> mViewShaderVisibleDescriptorAllocator;
+    std::unique_ptr<MutexProtected<ShaderVisibleDescriptorAllocator>>
+        mViewShaderVisibleDescriptorAllocator;
 
-    std::unique_ptr<ShaderVisibleDescriptorAllocator> mSamplerShaderVisibleDescriptorAllocator;
+    std::unique_ptr<MutexProtected<ShaderVisibleDescriptorAllocator>>
+        mSamplerShaderVisibleDescriptorAllocator;
 
     // Sampler cache needs to be destroyed before the CPU sampler allocator to ensure the final
     // release is called.
@@ -277,9 +281,6 @@ class Device final : public DeviceBase {
 
     // The number of nanoseconds required for a timestamp query to be incremented by 1
     float mTimestampPeriod = 1.0f;
-
-    // List of external image resources opened using this device.
-    LinkedList<ExternalImageDXGIImpl> mExternalImageList;
 };
 
 }  // namespace dawn::native::d3d12

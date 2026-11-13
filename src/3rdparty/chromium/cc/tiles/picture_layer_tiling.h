@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "cc/base/region.h"
 #include "cc/base/tiling_data.h"
 #include "cc/cc_export.h"
@@ -108,7 +109,9 @@ class CC_EXPORT PictureLayerTiling {
 
   PictureLayerTilingClient* client() const { return client_; }
 
-  void SetRasterSourceAndResize(scoped_refptr<RasterSource> raster_source);
+  // Returns true if the current tiling needs to update tile priority rects and
+  // tiles.
+  bool SetRasterSourceAndResize(scoped_refptr<RasterSource> raster_source);
   void Invalidate(const Region& layer_invalidation);
   void CreateMissingTilesInLiveTilesRect();
   void TakeTilesAndPropertiesFrom(PictureLayerTiling* pending_twin,
@@ -250,7 +253,7 @@ class CC_EXPORT PictureLayerTiling {
     bool AtEnd() const;
 
    private:
-    PictureLayerTiling* tiling_;
+    raw_ptr<PictureLayerTiling> tiling_;
     PictureLayerTiling::TileMap::iterator iter_;
   };
 
@@ -286,16 +289,16 @@ class CC_EXPORT PictureLayerTiling {
    private:
     gfx::Rect ComputeGeometryRect() const;
 
-    // `tiling_` is not a raw_ptr<...> for performance reasons (based on
-    // analysis of sampling profiler data and tab_search:top100:2020).
+    // RAW_PTR_EXCLUSION: Performance reasons: based on analysis of sampling
+    // profiler data and tab_search:top100:2020.
     RAW_PTR_EXCLUSION const PictureLayerTiling* tiling_ = nullptr;
 
     gfx::Size coverage_rect_max_bounds_;
     gfx::Rect coverage_rect_;
     gfx::AxisTransform2d coverage_to_content_;
 
-    // `current_tile_` is not a raw_ptr<...> for performance reasons (based on
-    // analysis of sampling profiler data and tab_search:top100:2020).
+    // RAW_PTR_EXCLUSION: Performance reasons: based on analysis of sampling
+    // profiler data and tab_search:top100:2020.
     RAW_PTR_EXCLUSION Tile* current_tile_ = nullptr;
 
     gfx::Rect current_geometry_rect_;
@@ -505,6 +508,8 @@ class CC_EXPORT PictureLayerTiling {
       const gfx::Rect& layer_rect) const;
   gfx::Rect EnclosingLayerRectFromContentsRect(
       const gfx::Rect& contents_rect) const;
+
+  void SetTilingSize(const gfx::Size& tiling_size);
 
   // Given properties.
   const gfx::AxisTransform2d raster_transform_;

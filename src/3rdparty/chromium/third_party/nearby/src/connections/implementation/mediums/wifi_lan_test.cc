@@ -20,13 +20,12 @@
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
-#include "internal/platform/medium_environment.h"
-#include "internal/platform/nsd_service_info.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/medium_environment.h"
+#include "internal/platform/nsd_service_info.h"
 #include "internal/platform/wifi_lan.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace {
@@ -52,8 +51,6 @@ class WifiLanTest : public ::testing::TestWithParam<FeatureFlags> {
  protected:
   using DiscoveredServiceCallback = WifiLanMedium::DiscoveredServiceCallback;
 
-  WifiLanTest() { env_.Stop(); }
-
   MediumEnvironment& env_{MediumEnvironment::Instance()};
 };
 
@@ -71,14 +68,9 @@ TEST_P(WifiLanTest, CanConnect) {
 
   WifiLanSocket socket_for_server;
   EXPECT_TRUE(wifi_lan_server.StartAcceptingConnections(
-      service_id,
-      {
-          .accepted_cb =
-              [&socket_for_server, &accept_latch](const std::string& service_id,
-                                                  WifiLanSocket socket) {
-                socket_for_server = std::move(socket);
-                accept_latch.CountDown();
-              },
+      service_id, [&](const std::string& service_id, WifiLanSocket socket) {
+        socket_for_server = std::move(socket);
+        accept_latch.CountDown();
       }));
 
   NsdServiceInfo nsd_service_info;
@@ -128,14 +120,9 @@ TEST_P(WifiLanTest, CanCancelConnect) {
 
   WifiLanSocket socket_for_server;
   EXPECT_TRUE(wifi_lan_server.StartAcceptingConnections(
-      service_id,
-      {
-          .accepted_cb =
-              [&socket_for_server, &accept_latch](const std::string& service_id,
-                                                  WifiLanSocket socket) {
-                socket_for_server = std::move(socket);
-                accept_latch.CountDown();
-              },
+      service_id, [&](const std::string& service_id, WifiLanSocket socket) {
+        socket_for_server = std::move(socket);
+        accept_latch.CountDown();
       }));
 
   NsdServiceInfo nsd_service_info;
@@ -347,4 +334,3 @@ TEST_F(WifiLanTest, CanDiscoverThatOtherMediumAdvertise) {
 }  // namespace
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

@@ -15,36 +15,32 @@
 #ifndef CORE_INTERNAL_OFFLINE_FRAMES_VALIDATOR_H_
 #define CORE_INTERNAL_OFFLINE_FRAMES_VALIDATOR_H_
 
+#include <string>
+#include <vector>
+
+#include "absl/strings/string_view.h"
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "internal/platform/exception.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace parser {
 
-#ifdef NEARBY_CHROMIUM
-const std::vector<std::string> kIllegalFileNamePatterns{
-    "/", "\\", "?",  "*",  "\"", "<",  ">",
-    "|", ":",  "..", "\n", "\r", "\t", "\f"};
+constexpr absl::string_view kIllegalFileNamePatterns[] = {":", "/", "\\"};
 
-const std::vector<std::string> kIllegalParentFolderPatterns{
-    "\\", "?", "*", "\"", "<", ">", "|", ":", "..", "\n", "\r", "\t", "\f"};
-#else
-const std::vector<std::string> kIllegalFileNamePatterns{
-    "/", "\\", "?", "*", "\"", "<",  ">",  "|",  "[",
-    "]", ":",  ",", ";", "..", "\n", "\r", "\t", "\f"};
+constexpr absl::string_view kIllegalParentFolderPatterns[] = {":", ".."};
 
-const std::vector<std::string> kIllegalParentFolderPatterns{
-    "\\", "?", "*", "\"", "<",  ">",  "|",  "[", "]",
-    ":",  ",", ";", "..", "\n", "\r", "\t", "\f"};
-#endif
+const size_t kIllegalFileNamePatternsSize =
+    sizeof(kIllegalFileNamePatterns) / sizeof(*kIllegalFileNamePatterns);
+const size_t kIllegalParentFolderPatternsSize =
+    sizeof(kIllegalParentFolderPatterns) /
+    sizeof(*kIllegalParentFolderPatterns);
 
-Exception EnsureValidOfflineFrame(const OfflineFrame& offline_frame);
+Exception EnsureValidOfflineFrame(
+    const location::nearby::connections::OfflineFrame& offline_frame);
 
 }  // namespace parser
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_OFFLINE_FRAMES_VALIDATOR_H_

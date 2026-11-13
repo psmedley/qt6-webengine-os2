@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/task/single_thread_task_runner.h"
@@ -18,8 +18,8 @@
 
 namespace media {
 
-static const SampleFormat kSampleFormat = kSampleFormatS16;
-static const snd_pcm_format_t kAlsaSampleFormat = SND_PCM_FORMAT_S16;
+static const SampleFormat kSampleFormatAI = kSampleFormatS16;
+static const snd_pcm_format_t kAlsaSampleFormatAI = SND_PCM_FORMAT_S16;
 
 static const int kNumPacketsInRingBuffer = 3;
 
@@ -35,7 +35,7 @@ AlsaPcmInputStream::AlsaPcmInputStream(AudioManagerBase* audio_manager,
     : audio_manager_(audio_manager),
       device_name_(device_name),
       params_(params),
-      bytes_per_buffer_(params.GetBytesPerBuffer(kSampleFormat)),
+      bytes_per_buffer_(params.GetBytesPerBuffer(kSampleFormatAI)),
       wrapper_(wrapper),
       buffer_duration_(base::Microseconds(
           params.frames_per_buffer() * base::Time::kMicrosecondsPerSecond /
@@ -66,7 +66,7 @@ AudioInputStream::OpenOutcome AlsaPcmInputStream::Open() {
     for (size_t i = 0; i < std::size(device_names); ++i) {
       device_handle_ = alsa_util::OpenCaptureDevice(
           wrapper_, device_names[i], params_.channels(), params_.sample_rate(),
-          kAlsaSampleFormat, buffer_us, packet_us);
+          kAlsaSampleFormatAI, buffer_us, packet_us);
 
       if (device_handle_) {
         device_name_ = device_names[i];
@@ -76,7 +76,7 @@ AudioInputStream::OpenOutcome AlsaPcmInputStream::Open() {
   } else {
     device_handle_ = alsa_util::OpenCaptureDevice(
         wrapper_, device_name_.c_str(), params_.channels(),
-        params_.sample_rate(), kAlsaSampleFormat, buffer_us, packet_us);
+        params_.sample_rate(), kAlsaSampleFormatAI, buffer_us, packet_us);
   }
 
   if (device_handle_) {
@@ -224,7 +224,7 @@ void AlsaPcmInputStream::ReadAudio() {
 
       callback_->OnData(audio_bus_.get(),
                         base::TimeTicks::Now() - hardware_delay,
-                        normalized_volume);
+                        normalized_volume, {});
     } else if (frames_read < 0) {
       bool success = Recover(frames_read);
       LOG(WARNING) << "PcmReadi failed with error "
@@ -274,17 +274,21 @@ void AlsaPcmInputStream::Stop() {
 void AlsaPcmInputStream::Close() {
   if (device_handle_) {
     Stop();
-    int error = alsa_util::CloseDevice(wrapper_, device_handle_);
-    if (error < 0)
-      HandleError("PcmClose", error);
+    int error =
+        alsa_util::CloseDevice(wrapper_, device_handle_.ExtractAsDangling());
 
-    if (mixer_handle_)
-      alsa_util::CloseMixer(wrapper_, mixer_handle_, device_name_);
+    if (error < 0) {
+      HandleError("PcmClose", error);
+    }
+
+    mixer_element_handle_ = nullptr;
+
+    if (mixer_handle_) {
+      alsa_util::CloseMixer(wrapper_, mixer_handle_.ExtractAsDangling(),
+                            device_name_);
+    }
 
     audio_buffer_.reset();
-    device_handle_ = nullptr;
-    mixer_handle_ = nullptr;
-    mixer_element_handle_ = nullptr;
   }
 
   audio_manager_->ReleaseInputStream(this);

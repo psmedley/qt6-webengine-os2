@@ -52,9 +52,15 @@ typedef struct CafContext {
 
 static int probe(const AVProbeData *p)
 {
-    if (AV_RB32(p->buf) == MKBETAG('c','a','f','f') && AV_RB16(&p->buf[4]) == 1)
-        return AVPROBE_SCORE_MAX;
-    return 0;
+    if (AV_RB32(p->buf) != MKBETAG('c','a','f','f'))
+        return 0;
+    if (AV_RB16(&p->buf[4]) != 1)
+        return 0;
+    if (AV_RB32(p->buf + 8) != MKBETAG('d','e','s','c'))
+        return 0;
+    if (AV_RB64(p->buf + 12) != 32)
+        return 0;
+    return AVPROBE_SCORE_MAX;
 }
 
 /** Read audio description chunk */
@@ -387,7 +393,7 @@ static int read_header(AVFormatContext *s)
 
 found_data:
     if (caf->bytes_per_packet > 0 && caf->frames_per_packet > 0) {
-        if (caf->data_size > 0)
+        if (caf->data_size > 0 && caf->data_size / caf->bytes_per_packet < INT64_MAX / caf->frames_per_packet)
             st->nb_frames = (caf->data_size / caf->bytes_per_packet) * caf->frames_per_packet;
     } else if (ffstream(st)->nb_index_entries && st->duration > 0) {
         if (st->codecpar->sample_rate && caf->data_size / st->duration > INT64_MAX / st->codecpar->sample_rate / 8) {

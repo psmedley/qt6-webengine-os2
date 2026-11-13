@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -41,21 +42,18 @@ public:
     typedef base::OnceCallback<void(bool success)> PrintToPDFFileCallback;
 
     // Method to print a page to a Pdf document with page size \a pageSize in location \a filePath.
-    void PrintToPDFFileWithCallback(const QPageLayout &pageLayout,
-                                    const QPageRanges &pageRanges,
-                                    bool printInColor,
-                                    const QString &filePath,
+    void PrintToPDFFileWithCallback(const QPageLayout &pageLayout, const QPageRanges &pageRanges,
+                                    bool printInColor, const QString &filePath, quint64 frameId,
                                     PrintToPDFFileCallback callback);
-    void PrintToPDFWithCallback(const QPageLayout &pageLayout,
-                                const QPageRanges &pageRanges,
-                                bool printInColor,
-                                bool useCustomMargins,
+    void PrintToPDFWithCallback(const QPageLayout &pageLayout, const QPageRanges &pageRanges,
+                                bool printInColor, bool useCustomMargins, quint64 frameId,
                                 PrintToPDFCallback callback);
 
 protected:
     explicit PrintViewManagerQt(content::WebContents*);
 
-    bool PrintToPDFInternal(const QPageLayout &, const QPageRanges &, bool printInColor, bool useCustomMargins = true);
+    bool PrintToPDFInternal(const QPageLayout &, const QPageRanges &, bool printInColor,
+                            bool useCustomMargins, quint64 frameId);
 
     // content::WebContentsObserver implementation.
     // Cancels the print job.

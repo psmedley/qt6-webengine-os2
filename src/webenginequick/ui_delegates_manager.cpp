@@ -1,7 +1,7 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
-#include "ui_delegates_manager.h"
+#include "ui_delegates_manager_p.h"
 
 #include "api/qquickwebengineaction_p.h"
 #include "api/qquickwebengineview_p_p.h"
@@ -14,6 +14,7 @@
 #include <touch_selection_menu_controller.h>
 #include <web_contents_adapter_client.h>
 
+#include <QtCore/qdiriterator.h>
 #include <QtCore/qfileinfo.h>
 #include <QtCore/qlist.h>
 #include <QtCore/qtimer.h>
@@ -110,6 +111,10 @@ UIDelegatesManager::~UIDelegatesManager()
 bool UIDelegatesManager::ensureComponentLoaded(ComponentType type)
 {
     QQmlEngine* engine = qmlEngine(m_view);
+
+    if (!engine)
+        return false;
+
     if (m_importDirs.isEmpty() && !initializeImportDirs(m_importDirs, engine))
         return false;
 
@@ -127,8 +132,6 @@ bool UIDelegatesManager::ensureComponentLoaded(ComponentType type)
 #else // Unconditionally reload the components each time.
     fprintf(stderr, "%s: %s\n", Q_FUNC_INFO, qPrintable(fileName));
 #endif
-    if (!engine)
-        return false;
 
     for (const QString &importDir : std::as_const(m_importDirs)) {
         const QString componentFilePath = importDir % QLatin1Char('/') % fileName;
@@ -152,6 +155,7 @@ bool UIDelegatesManager::ensureComponentLoaded(ComponentType type)
         }
         return true;
     }
+    qWarning("Default ui delegate %s can not be found.", qPrintable(fileName));
     return false;
 }
 
@@ -333,12 +337,17 @@ void UIDelegatesManager::showDialog(QSharedPointer<AuthenticationDialogControlle
 
     QQmlProperty acceptSignal(authenticationDialog, QStringLiteral("onAccepted"));
     QQmlProperty rejectSignal(authenticationDialog, QStringLiteral("onRejected"));
+    QQmlProperty credentialsSignal(authenticationDialog, QStringLiteral("onCredentials"));
     CHECK_QML_SIGNAL_PROPERTY(acceptSignal, authenticationDialogComponent->url());
     CHECK_QML_SIGNAL_PROPERTY(rejectSignal, authenticationDialogComponent->url());
 
-    static int acceptIndex = dialogController->metaObject()->indexOfSlot("accept(QString,QString)");
+    static int acceptIndex = dialogController->metaObject()->indexOfSlot("accept()");
+    static int credentialsIndex =
+            dialogController->metaObject()->indexOfSlot("credentials(QString,QString)");
     static int deleteLaterIndex = authenticationDialog->metaObject()->indexOfSlot("deleteLater()");
     QObject::connect(authenticationDialog, acceptSignal.method(), dialogController.data(), dialogController->metaObject()->method(acceptIndex));
+    QObject::connect(authenticationDialog, credentialsSignal.method(), dialogController.data(),
+                     dialogController->metaObject()->method(credentialsIndex));
     QObject::connect(authenticationDialog, acceptSignal.method(), authenticationDialog, authenticationDialog->metaObject()->method(deleteLaterIndex));
     static int rejectIndex = dialogController->metaObject()->indexOfSlot("reject()");
     QObject::connect(authenticationDialog, rejectSignal.method(), dialogController.data(), dialogController->metaObject()->method(rejectIndex));
@@ -731,8 +740,14 @@ bool UIDelegatesManager::initializeImportDirs(QStringList &dirs, QQmlEngine *eng
         }
 
         QFileInfo fi(controlsImportPath);
-        if (fi.exists())
+        if (fi.exists()) {
             dirs << fi.absolutePath();
+
+            // add subdirectories
+            QDirIterator it(controlsImportPath, QDir::AllDirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+            while (it.hasNext())
+                dirs << QFileInfo(it.next()).absoluteFilePath();
+        }
     }
     return !dirs.isEmpty();
 }

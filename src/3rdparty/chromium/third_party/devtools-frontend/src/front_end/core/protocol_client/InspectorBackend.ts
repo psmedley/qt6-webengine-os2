@@ -36,7 +36,7 @@ import type * as Protocol from '../../generated/protocol.js';
 export const DevToolsStubErrorCode = -32015;
 // TODO(dgozman): we are not reporting generic errors in tests, but we should
 // instead report them and just have some expected errors in test expectations.
-const GenericError = -32000;
+const GenericErrorCode = -32000;
 const ConnectionClosedErrorCode = -32001;
 
 type MessageParams = {
@@ -88,6 +88,7 @@ interface CommandParameter {
   name: string;
   type: string;
   optional: boolean;
+  description: string;
 }
 
 type Callback = (error: MessageError|null, arg1: Object|null) => void;
@@ -101,6 +102,8 @@ export class InspectorBackend {
   readonly agentPrototypes: Map<ProtocolDomainName, _AgentPrototype> = new Map();
   #initialized: boolean = false;
   #eventParameterNamesForDomain = new Map<ProtocolDomainName, EventParameterNames>();
+  readonly typeMap = new Map<QualifiedName, CommandParameter[]>();
+  readonly enumMap = new Map<QualifiedName, Record<string, string>>();
 
   private getOrCreateEventParameterNamesForDomain(domain: ProtocolDomainName): EventParameterNames {
     let map = this.#eventParameterNamesForDomain.get(domain);
@@ -115,7 +118,7 @@ export class InspectorBackend {
     return this.getOrCreateEventParameterNamesForDomain(domain);
   }
 
-  getEventParamterNames(): ReadonlyMap<ProtocolDomainName, ReadonlyEventParameterNames> {
+  getEventParameterNames(): ReadonlyMap<ProtocolDomainName, ReadonlyEventParameterNames> {
     return this.#eventParameterNamesForDomain;
   }
 
@@ -140,13 +143,14 @@ export class InspectorBackend {
     return prototype;
   }
 
-  registerCommand(method: QualifiedName, parameters: CommandParameter[], replyArgs: string[]): void {
+  registerCommand(method: QualifiedName, parameters: CommandParameter[], replyArgs: string[], description: string):
+      void {
     const [domain, command] = splitQualifiedName(method);
-    this.agentPrototype(domain as ProtocolDomainName).registerCommand(command, parameters, replyArgs);
+    this.agentPrototype(domain as ProtocolDomainName).registerCommand(command, parameters, replyArgs, description);
     this.#initialized = true;
   }
 
-  registerEnum(type: QualifiedName, values: Object): void {
+  registerEnum(type: QualifiedName, values: Record<string, string>): void {
     const [domain, name] = splitQualifiedName(type);
     // @ts-ignore globalThis global namespace pollution
     if (!globalThis.Protocol[domain]) {
@@ -156,6 +160,12 @@ export class InspectorBackend {
 
     // @ts-ignore globalThis global namespace pollution
     globalThis.Protocol[domain][name] = values;
+    this.enumMap.set(type, values);
+    this.#initialized = true;
+  }
+
+  registerType(method: QualifiedName, parameters: CommandParameter[]): void {
+    this.typeMap.set(method, parameters);
     this.#initialized = true;
   }
 
@@ -353,9 +363,10 @@ export class SessionRouter {
     this.#connectionInternal.sendRawMessage(JSON.stringify(messageObject));
   }
 
-  private sendRawMessageForTesting(method: QualifiedName, params: Object|null, callback: Callback|null): void {
+  private sendRawMessageForTesting(method: QualifiedName, params: Object|null, callback: Callback|null, sessionId = ''):
+      void {
     const domain = method.split('.')[0];
-    this.sendMessage('', domain, method, params, callback || ((): void => {}));
+    this.sendMessage(sessionId, domain, method, params, callback || ((): void => {}));
   }
 
   private onMessage(message: string|Object): void {
@@ -486,18 +497,18 @@ export class SessionRouter {
 }
 
 /**
-  * Make sure that `Domain` in get/set is only ever instantiated with one protocol domain
-  * name, because if `Domain` allows multiple domains, the type is unsound.
-  */
+ * Make sure that `Domain` in get/set is only ever instantiated with one protocol domain
+ * name, because if `Domain` allows multiple domains, the type is unsound.
+ */
 interface AgentsMap extends Map<ProtocolDomainName, ProtocolProxyApi.ProtocolApi[ProtocolDomainName]> {
   get<Domain extends ProtocolDomainName>(key: Domain): ProtocolProxyApi.ProtocolApi[Domain]|undefined;
   set<Domain extends ProtocolDomainName>(key: Domain, value: ProtocolProxyApi.ProtocolApi[Domain]): this;
 }
 
 /**
-  * Make sure that `Domain` in get/set is only ever instantiated with one protocol domain
-  * name, because if `Domain` allows multiple domains, the type is unsound.
-  */
+ * Make sure that `Domain` in get/set is only ever instantiated with one protocol domain
+ * name, because if `Domain` allows multiple domains, the type is unsound.
+ */
 interface DispatcherMap extends Map<ProtocolDomainName, ProtocolProxyApi.ProtocolDispatchers[ProtocolDomainName]> {
   get<Domain extends ProtocolDomainName>(key: Domain): DispatcherManager<Domain>|undefined;
   set<Domain extends ProtocolDomainName>(key: Domain, value: DispatcherManager<Domain>): this;
@@ -538,7 +549,7 @@ export class TargetBase {
       this.#agents.set(domain, agent);
     }
 
-    for (const [domain, eventParameterNames] of inspectorBackend.getEventParamterNames().entries()) {
+    for (const [domain, eventParameterNames] of inspectorBackend.getEventParameterNames().entries()) {
       this.#dispatchers.set(domain, new DispatcherManager(eventParameterNames));
     }
   }
@@ -599,6 +610,10 @@ export class TargetBase {
 
   auditsAgent(): ProtocolProxyApi.AuditsApi {
     return this.getAgent('Audits');
+  }
+
+  autofillAgent(): ProtocolProxyApi.AutofillApi {
+    return this.getAgent('Autofill');
   }
 
   browserAgent(): ProtocolProxyApi.BrowserApi {
@@ -705,6 +720,10 @@ export class TargetBase {
     return this.getAgent('Page');
   }
 
+  preloadAgent(): ProtocolProxyApi.PreloadApi {
+    return this.getAgent('Preload');
+  }
+
   profilerAgent(): ProtocolProxyApi.ProfilerApi {
     return this.getAgent('Profiler');
   }
@@ -727,6 +746,10 @@ export class TargetBase {
 
   storageAgent(): ProtocolProxyApi.StorageApi {
     return this.getAgent('Storage');
+  }
+
+  systemInfo(): ProtocolProxyApi.SystemInfoApi {
+    return this.getAgent('SystemInfo');
   }
 
   targetAgent(): ProtocolProxyApi.TargetApi {
@@ -775,6 +798,10 @@ export class TargetBase {
 
   registerAccessibilityDispatcher(dispatcher: ProtocolProxyApi.AccessibilityDispatcher): void {
     this.registerDispatcher('Accessibility', dispatcher);
+  }
+
+  registerAutofillDispatcher(dispatcher: ProtocolProxyApi.AutofillDispatcher): void {
+    this.registerDispatcher('Autofill', dispatcher);
   }
 
   registerAnimationDispatcher(dispatcher: ProtocolProxyApi.AnimationDispatcher): void {
@@ -849,6 +876,10 @@ export class TargetBase {
     this.registerDispatcher('Page', dispatcher);
   }
 
+  registerPreloadDispatcher(dispatcher: ProtocolProxyApi.PreloadDispatcher): void {
+    this.registerDispatcher('Preload', dispatcher);
+  }
+
   registerProfilerDispatcher(dispatcher: ProtocolProxyApi.ProfilerDispatcher): void {
     this.registerDispatcher('Profiler', dispatcher);
   }
@@ -881,6 +912,10 @@ export class TargetBase {
     this.registerDispatcher('WebAudio', dispatcher);
   }
 
+  registerWebAuthnDispatcher(dispatcher: ProtocolProxyApi.WebAuthnDispatcher): void {
+    this.registerDispatcher('WebAuthn', dispatcher);
+  }
+
   getNeedsNodeJSPatching(): boolean {
     return this.needsNodeJSPatching;
   }
@@ -901,22 +936,25 @@ class _AgentPrototype {
   replyArgs: {
     [x: string]: string[],
   };
+  description = '';
+  metadata: {[commandName: string]: {parameters: CommandParameter[], description: string, replyArgs: string[]}};
   readonly domain: string;
   target!: TargetBase;
   constructor(domain: string) {
     this.replyArgs = {};
     this.domain = domain;
+    this.metadata = {};
   }
 
-  registerCommand(methodName: UnqualifiedName, parameters: CommandParameter[], replyArgs: string[]): void {
+  registerCommand(
+      methodName: UnqualifiedName, parameters: CommandParameter[], replyArgs: string[], description: string): void {
     const domainAndMethod = qualifyName(this.domain, methodName);
-
     function sendMessagePromise(this: _AgentPrototype, ...args: unknown[]): Promise<unknown> {
       return _AgentPrototype.prototype.sendMessageToBackendPromise.call(this, domainAndMethod, parameters, args);
     }
-
     // @ts-ignore Method code generation
     this[methodName] = sendMessagePromise;
+    this.metadata[domainAndMethod] = {parameters, description, replyArgs};
 
     function invoke(
         this: _AgentPrototype, request: Object|undefined = {}): Promise<Protocol.ProtocolResponseWithError> {
@@ -925,7 +963,6 @@ class _AgentPrototype {
 
     // @ts-ignore Method code generation
     this['invoke_' + methodName] = invoke;
-
     this.replyArgs[domainAndMethod] = replyArgs;
   }
 
@@ -951,8 +988,8 @@ class _AgentPrototype {
       if (optionalFlag && typeof value === 'undefined') {
         continue;
       }
-
-      if (typeof value !== typeName) {
+      const expectedJSType = typeName === 'array' ? 'object' : typeName;
+      if (typeof value !== expectedJSType) {
         errorCallback(
             `Protocol Error: Invalid type of argument '${paramName}' for method '${method}' call. ` +
             `It must be '${typeName}' but it is '${typeof value}'.`);
@@ -988,7 +1025,7 @@ class _AgentPrototype {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const callback: Callback = (error: MessageError|null, result: any|null): void => {
         if (error) {
-          if (!test.suppressRequestErrors && error.code !== DevToolsStubErrorCode && error.code !== GenericError &&
+          if (!test.suppressRequestErrors && error.code !== DevToolsStubErrorCode && error.code !== GenericErrorCode &&
               error.code !== ConnectionClosedErrorCode) {
             console.error('Request ' + method + ' failed. ' + JSON.stringify(error));
           }
@@ -1014,7 +1051,7 @@ class _AgentPrototype {
     return new Promise(fulfill => {
       const callback: Callback = (error: MessageError|undefined|null, result: Object|null): void => {
         if (error && !test.suppressRequestErrors && error.code !== DevToolsStubErrorCode &&
-            error.code !== GenericError && error.code !== ConnectionClosedErrorCode) {
+            error.code !== GenericErrorCode && error.code !== ConnectionClosedErrorCode) {
           console.error('Request ' + method + ' failed. ' + JSON.stringify(error));
         }
 

@@ -27,6 +27,8 @@
 #include "perfetto/tracing/traced_value_forward.h"
 
 #include <memory>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -145,6 +147,7 @@ class PERFETTO_EXPORT_COMPONENT TracedValue {
   void WriteString(const char*) &&;
   void WriteString(const char*, size_t len) &&;
   void WriteString(const std::string&) &&;
+  void WriteString(std::string_view) &&;
   void WritePointer(const void* value) &&;
   template <typename MessageType>
   TracedProto<MessageType> WriteProto() &&;
@@ -154,7 +157,7 @@ class PERFETTO_EXPORT_COMPONENT TracedValue {
   // active at the same time. It's only allowed to call methods on the active
   // scope.
   // - When a scope creates a nested scope, the new scope becomes active.
-  // - When a scope is destroyed, it's parent scope becomes active again.
+  // - When a scope is destroyed, its parent scope becomes active again.
   //
   // Typically users will have to create a scope only at the beginning of a
   // conversion function and this scope should be destroyed at the end of it.
@@ -177,9 +180,9 @@ class PERFETTO_EXPORT_COMPONENT TracedValue {
   static TracedValue CreateFromProto(protos::pbzero::DebugAnnotation* proto,
                                      EventContext* event_context = nullptr);
 
-  inline explicit TracedValue(protos::pbzero::DebugAnnotation* annotation,
-                              EventContext* event_context,
-                              internal::CheckedScope* parent_scope)
+  inline TracedValue(protos::pbzero::DebugAnnotation* annotation,
+                     EventContext* event_context,
+                     internal::CheckedScope* parent_scope)
       : annotation_(annotation),
         event_context_(event_context),
         checked_scope_(parent_scope) {}
@@ -228,9 +231,9 @@ class PERFETTO_EXPORT_COMPONENT TracedArray {
  private:
   friend class TracedValue;
 
-  inline explicit TracedArray(protos::pbzero::DebugAnnotation* annotation,
-                              EventContext* event_context,
-                              internal::CheckedScope* parent_scope)
+  inline TracedArray(protos::pbzero::DebugAnnotation* annotation,
+                     EventContext* event_context,
+                     internal::CheckedScope* parent_scope)
       : annotation_(annotation),
         event_context_(event_context),
         checked_scope_(parent_scope) {}
@@ -286,11 +289,10 @@ class PERFETTO_EXPORT_COMPONENT TracedDictionary {
   // Create a |TracedDictionary| which will populate the given field of the
   // given |message|.
   template <typename MessageType, typename FieldMetadata>
-  inline explicit TracedDictionary(
-      MessageType* message,
-      protozero::proto_utils::internal::FieldMetadataHelper<FieldMetadata>,
-      EventContext* event_context,
-      internal::CheckedScope* parent_scope)
+  inline TracedDictionary(MessageType* message,
+                          FieldMetadata,
+                          EventContext* event_context,
+                          internal::CheckedScope* parent_scope)
       : message_(message),
         field_id_(FieldMetadata::kFieldId),
         event_context_(event_context),
@@ -624,6 +626,15 @@ template <>
 struct TraceFormatTraits<std::string> {
   inline static void WriteIntoTrace(TracedValue context,
                                     const std::string& value) {
+    std::move(context).WriteString(value);
+  }
+};
+
+// Specialisation for C++ string_views.
+template <>
+struct TraceFormatTraits<std::string_view> {
+  inline static void WriteIntoTrace(TracedValue context,
+                                    std::string_view value) {
     std::move(context).WriteString(value);
   }
 };

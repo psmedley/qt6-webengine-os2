@@ -6,21 +6,24 @@
 #define GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_SHARED_IMAGE_FACTORY_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/containers/flat_set.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "components/viz/common/resources/resource_format.h"
 #include "components/viz/common/resources/shared_image_format.h"
 #include "gpu/command_buffer/common/mailbox.h"
+#include "gpu/command_buffer/common/shared_image_capabilities.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_manager.h"
-#include "gpu/command_buffer/service/texture_manager.h"
+#include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/config/gpu_preferences.h"
 #include "gpu/gpu_gles2_export.h"
+#include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "ui/gfx/buffer_types.h"
+#include "ui/gfx/gpu_extra_info.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gl/gl_bindings.h"
 
@@ -29,8 +32,6 @@ class VulkanContextProvider;
 }  // namespace viz
 
 namespace gpu {
-class GpuDriverBugWorkarounds;
-class ImageFactory;
 class MemoryTracker;
 class SharedContextState;
 class SharedImageBackingFactory;
@@ -38,12 +39,6 @@ class D3DImageBackingFactory;
 struct GpuFeatureInfo;
 struct GpuPreferences;
 
-#if BUILDFLAG(IS_FUCHSIA)
-class SysmemBufferCollection;
-#endif  // BUILDFLAG(IS_FUCHSIA)
-
-// TODO(ericrk): Make this a very thin wrapper around SharedImageManager like
-// SharedImageRepresentationFactory.
 class GPU_GLES2_EXPORT SharedImageFactory {
  public:
   // All objects passed are expected to outlive this class.
@@ -52,7 +47,6 @@ class GPU_GLES2_EXPORT SharedImageFactory {
                      const GpuFeatureInfo& gpu_feature_info,
                      SharedContextState* context_state,
                      SharedImageManager* manager,
-                     ImageFactory* image_factory,
                      MemoryTracker* tracker,
                      bool is_for_display_compositor);
   ~SharedImageFactory();
@@ -63,8 +57,19 @@ class GPU_GLES2_EXPORT SharedImageFactory {
                          const gfx::ColorSpace& color_space,
                          GrSurfaceOrigin surface_origin,
                          SkAlphaType alpha_type,
-                         gpu::SurfaceHandle surface_handle,
-                         uint32_t usage);
+                         SurfaceHandle surface_handle,
+                         uint32_t usage,
+                         std::string debug_label);
+  bool CreateSharedImage(const Mailbox& mailbox,
+                         viz::SharedImageFormat si_format,
+                         const gfx::Size& size,
+                         const gfx::ColorSpace& color_space,
+                         GrSurfaceOrigin surface_origin,
+                         SkAlphaType alpha_type,
+                         SurfaceHandle surface_handle,
+                         uint32_t usage,
+                         std::string debug_label,
+                         gfx::BufferUsage buffer_usage);
   bool CreateSharedImage(const Mailbox& mailbox,
                          viz::SharedImageFormat si_format,
                          const gfx::Size& size,
@@ -72,29 +77,39 @@ class GPU_GLES2_EXPORT SharedImageFactory {
                          GrSurfaceOrigin surface_origin,
                          SkAlphaType alpha_type,
                          uint32_t usage,
+                         std::string debug_label,
                          base::span<const uint8_t> pixel_data);
   bool CreateSharedImage(const Mailbox& mailbox,
-                         int client_id,
-                         gfx::GpuMemoryBufferHandle handle,
-                         gfx::BufferFormat format,
-                         gfx::BufferPlane plane,
-                         SurfaceHandle surface_handle,
+                         viz::SharedImageFormat si_format,
                          const gfx::Size& size,
                          const gfx::ColorSpace& color_space,
                          GrSurfaceOrigin surface_origin,
                          SkAlphaType alpha_type,
-                         uint32_t usage);
+                         uint32_t usage,
+                         std::string debug_label,
+                         gfx::GpuMemoryBufferHandle buffer_handle);
+  bool CreateSharedImage(const Mailbox& mailbox,
+                         gfx::GpuMemoryBufferHandle handle,
+                         gfx::BufferFormat format,
+                         gfx::BufferPlane plane,
+                         const gfx::Size& size,
+                         const gfx::ColorSpace& color_space,
+                         GrSurfaceOrigin surface_origin,
+                         SkAlphaType alpha_type,
+                         uint32_t usage,
+                         std::string debug_label);
   bool UpdateSharedImage(const Mailbox& mailbox);
   bool UpdateSharedImage(const Mailbox& mailbox,
                          std::unique_ptr<gfx::GpuFence> in_fence);
   bool DestroySharedImage(const Mailbox& mailbox);
+  bool SetSharedImagePurgeable(const Mailbox& mailbox, bool purgeable);
   bool HasImages() const { return !shared_images_.empty(); }
   void DestroyAllSharedImages(bool have_context);
 
 #if BUILDFLAG(IS_WIN)
   bool CreateSwapChain(const Mailbox& front_buffer_mailbox,
                        const Mailbox& back_buffer_mailbox,
-                       viz::ResourceFormat format,
+                       viz::SharedImageFormat format,
                        const gfx::Size& size,
                        const gfx::ColorSpace& color_space,
                        GrSurfaceOrigin surface_origin,
@@ -104,15 +119,19 @@ class GPU_GLES2_EXPORT SharedImageFactory {
 #endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_FUCHSIA)
-  bool RegisterSysmemBufferCollection(gfx::SysmemBufferCollectionId id,
-                                      zx::channel token,
+  void RegisterSysmemBufferCollection(zx::eventpair service_handle,
+                                      zx::channel sysmem_token,
                                       gfx::BufferFormat format,
                                       gfx::BufferUsage usage,
                                       bool register_with_image_pipe);
-  bool ReleaseSysmemBufferCollection(gfx::SysmemBufferCollectionId id);
 #endif  // BUILDFLAG(IS_FUCHSIA)
 
   bool RegisterBacking(std::unique_ptr<SharedImageBacking> backing);
+  bool AddSecondaryReference(const gpu::Mailbox& mailbox);
+
+  // Returns the usage for the shared image backing. If no backing is registered
+  // for `mailbox` this will return 0.
+  uint32_t GetUsageForMailbox(const Mailbox& mailbox);
 
   SharedContextState* GetSharedContextState() const {
     return shared_context_state_;
@@ -122,8 +141,19 @@ class GPU_GLES2_EXPORT SharedImageFactory {
   bool CopyToGpuMemoryBuffer(const Mailbox& mailbox);
 #endif
 
+  void SetGpuExtraInfo(const gfx::GpuExtraInfo& gpu_info);
+  bool GetGpuMemoryBufferHandleInfo(const Mailbox& mailbox,
+                                    gfx::GpuMemoryBufferHandle& handle,
+                                    viz::SharedImageFormat& format,
+                                    gfx::Size& size,
+                                    gfx::BufferUsage& buffer_usage);
+
   void RegisterSharedImageBackingFactoryForTesting(
       SharedImageBackingFactory* factory);
+
+  gpu::SharedImageCapabilities MakeCapabilities();
+
+  bool HasSharedImage(const Mailbox& mailbox) const;
 
  private:
   bool IsSharedBetweenThreads(uint32_t usage);
@@ -136,7 +166,10 @@ class GPU_GLES2_EXPORT SharedImageFactory {
       gfx::GpuMemoryBufferType gmb_type);
   void LogGetFactoryFailed(uint32_t usage,
                            viz::SharedImageFormat format,
-                           gfx::GpuMemoryBufferType gmb_type);
+                           gfx::GpuMemoryBufferType gmb_type,
+                           const std::string& debug_label);
+  bool IsNativeBufferSupported(gfx::BufferFormat format,
+                               gfx::BufferUsage usage);
 
   raw_ptr<SharedImageManager> shared_image_manager_;
   raw_ptr<SharedContextState> shared_context_state_;
@@ -167,10 +200,13 @@ class GPU_GLES2_EXPORT SharedImageFactory {
 
 #if BUILDFLAG(IS_FUCHSIA)
   viz::VulkanContextProvider* vulkan_context_provider_;
-  base::flat_map<gfx::SysmemBufferCollectionId,
-                 std::unique_ptr<gpu::SysmemBufferCollection>>
-      buffer_collections_;
 #endif  // BUILDFLAG(IS_FUCHSIA)
+
+  gfx::GpuExtraInfo gpu_extra_info_;
+  gpu::GpuMemoryBufferConfigurationSet supported_gmb_configurations_;
+  bool supported_gmb_configurations_inited_ = false;
+  gpu::GpuPreferences gpu_preferences_;
+  gpu::GpuDriverBugWorkarounds workarounds_;
 
   raw_ptr<SharedImageBackingFactory> backing_factory_for_testing_ = nullptr;
 };
@@ -189,8 +225,6 @@ class GPU_GLES2_EXPORT SharedImageRepresentationFactory {
   // their destruction process.
   std::unique_ptr<GLTextureImageRepresentation> ProduceGLTexture(
       const Mailbox& mailbox);
-  std::unique_ptr<GLTextureImageRepresentation> ProduceRGBEmulationGLTexture(
-      const Mailbox& mailbox);
   std::unique_ptr<GLTexturePassthroughImageRepresentation>
   ProduceGLTexturePassthrough(const Mailbox& mailbox);
   std::unique_ptr<SkiaImageRepresentation> ProduceSkia(
@@ -198,8 +232,10 @@ class GPU_GLES2_EXPORT SharedImageRepresentationFactory {
       scoped_refptr<SharedContextState> context_State);
   std::unique_ptr<DawnImageRepresentation> ProduceDawn(
       const Mailbox& mailbox,
-      WGPUDevice device,
-      WGPUBackendType backend_type);
+      const wgpu::Device& device,
+      wgpu::BackendType backend_type,
+      std::vector<wgpu::TextureFormat> view_formats,
+      scoped_refptr<SharedContextState> context_state);
   std::unique_ptr<OverlayImageRepresentation> ProduceOverlay(
       const Mailbox& mailbox);
   std::unique_ptr<MemoryImageRepresentation> ProduceMemory(

@@ -14,7 +14,7 @@
 
 #include <windows.h>
 
-#include <functional>
+#include <exception>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,7 +24,6 @@
 #include "internal/platform/implementation/windows/wifi_lan.h"
 #include "internal/platform/logging.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
 namespace {
@@ -40,16 +39,16 @@ WifiLanServerSocket::~WifiLanServerSocket() { Close(); }
 // Returns the first IP address.
 std::string WifiLanServerSocket::GetIPAddress() const {
   if (stream_socket_listener_ == nullptr) {
-    return {};
+    NEARBY_LOGS(ERROR) << "Failed to get IP address due to no server socket.";
+    return "";
   }
 
   if (ip_addresses_.empty()) {
-    auto ip_addr = GetIpAddresses();
-    if (ip_addr.empty()) {
-      return {};
-    }
-    return ip_addr.front();
+    NEARBY_LOGS(ERROR)
+        << "Failed to get IP address due to no avaible IP addresses.";
+    return "";
   }
+
   return ip_addresses_.front();
 }
 
@@ -84,7 +83,8 @@ std::unique_ptr<api::WifiLanSocket> WifiLanServerSocket::Accept() {
   return std::make_unique<WifiLanSocket>(wifi_lan_socket);
 }
 
-void WifiLanServerSocket::SetCloseNotifier(std::function<void()> notifier) {
+void WifiLanServerSocket::SetCloseNotifier(
+    absl::AnyInvocable<void()> notifier) {
   close_notifier_ = std::move(notifier);
 }
 
@@ -118,18 +118,28 @@ Exception WifiLanServerSocket::Close() {
 
     NEARBY_LOGS(INFO) << __func__ << ": Close completed succesfully.";
     return {Exception::kSuccess};
+  } catch (std::exception exception) {
+    closed_ = true;
+    cond_.SignalAll();
+    NEARBY_LOGS(ERROR) << __func__ << ": Exception: " << exception.what();
+    return {Exception::kIo};
+  } catch (const winrt::hresult_error& error) {
+    closed_ = true;
+    cond_.SignalAll();
+    NEARBY_LOGS(ERROR) << __func__ << ": WinRT exception: " << error.code()
+                       << ": " << winrt::to_string(error.message());
+    return {Exception::kIo};
   } catch (...) {
     closed_ = true;
     cond_.SignalAll();
-
-    NEARBY_LOGS(INFO) << __func__ << ": Failed to close server socket.";
+    NEARBY_LOGS(ERROR) << __func__ << ": Unknown exeption.";
     return {Exception::kIo};
   }
 }
 
 bool WifiLanServerSocket::listen() {
   // Get current IP addresses of the device.
-  ip_addresses_ = GetIpAddresses();
+  ip_addresses_ = Get4BytesIpv4Addresses();
 
   if (ip_addresses_.empty()) {
     NEARBY_LOGS(WARNING) << "failed to start accepting connection without IP "
@@ -158,9 +168,18 @@ bool WifiLanServerSocket::listen() {
     }
 
     return true;
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR)
+        << __func__
+        << ": Cannot accept connection on preferred port. Exception: "
+        << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    NEARBY_LOGS(ERROR)
+        << __func__
+        << ": Cannot accept connection on preferred port. WinRT exception: "
+        << error.code() << ": " << winrt::to_string(error.message());
   } catch (...) {
-    // Cannot bind to the preferred port, will let system to assign port.
-    NEARBY_LOGS(WARNING) << "cannot accept connection on preferred port.";
+    NEARBY_LOGS(ERROR) << __func__ << ": Unknown exeption.";
   }
 
   try {
@@ -170,9 +189,16 @@ bool WifiLanServerSocket::listen() {
     port_ =
         std::stoi(stream_socket_listener_.Information().LocalPort().c_str());
     return true;
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR) << __func__ << ": Cannot bind to any port. Exception: "
+                       << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    NEARBY_LOGS(ERROR) << __func__
+                       << ": Cannot bind to any port. WinRT exception: "
+                       << error.code() << ": "
+                       << winrt::to_string(error.message());
   } catch (...) {
-    // Cannot bind to the preferred port, will let system to assign port.
-    NEARBY_LOGS(ERROR) << "cannot bind to any port.";
+    NEARBY_LOGS(ERROR) << __func__ << ": Unknown exeption.";
   }
 
   return false;
@@ -193,32 +219,5 @@ fire_and_forget WifiLanServerSocket::Listener_ConnectionReceived(
   return fire_and_forget{};
 }
 
-// Retrieves IP addresses from local machine.
-std::vector<std::string> WifiLanServerSocket::GetIpAddresses() const {
-  std::vector<std::string> result{};
-  auto host_names = NetworkInformation::GetHostNames();
-  for (auto host_name : host_names) {
-    if (host_name.IPInformation() != nullptr &&
-        host_name.IPInformation().NetworkAdapter() != nullptr &&
-        host_name.Type() == HostNameType::Ipv4) {
-      std::string ipv4_s = winrt::to_string(host_name.ToString());
-      // Converts ip address from x.x.x.x to 4 bytes format.
-      in_addr address;
-      address.S_un.S_addr = inet_addr(ipv4_s.c_str());
-      char ipv4_b[5];
-      ipv4_b[0] = address.S_un.S_un_b.s_b1;
-      ipv4_b[1] = address.S_un.S_un_b.s_b2;
-      ipv4_b[2] = address.S_un.S_un_b.s_b3;
-      ipv4_b[3] = address.S_un.S_un_b.s_b4;
-      ipv4_b[4] = 0;
-      std::string ipv4_b_s = std::string(ipv4_b, 4);
-
-      result.push_back(ipv4_b_s);
-    }
-  }
-  return result;
-}
-
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location

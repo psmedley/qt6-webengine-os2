@@ -39,6 +39,11 @@ class ReduceAcceptLanguageService
   void PersistReducedLanguage(const url::Origin& origin,
                               const std::string& language) override;
 
+  void ClearReducedLanguage(const url::Origin& origin) override;
+
+  // KeyedService:
+  void Shutdown() override;
+
  private:
   // Forwards changes to `pref_accept_language_` to `user_accept_languages_`,
   // after formatting them as appropriate.

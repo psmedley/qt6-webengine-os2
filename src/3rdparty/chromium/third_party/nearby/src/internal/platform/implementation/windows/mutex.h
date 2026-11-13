@@ -13,7 +13,6 @@
 // limitations under the License.
 #ifndef PLATFORM_IMPL_WINDOWS_MUTEX_H_
 #define PLATFORM_IMPL_WINDOWS_MUTEX_H_
-#include <windows.h>
 #include <stdio.h>
 #include <synchapi.h>
 
@@ -23,7 +22,7 @@
 #include "absl/memory/memory.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/implementation/mutex.h"
-namespace location {
+
 namespace nearby {
 namespace windows {
 
@@ -60,7 +59,7 @@ class ABSL_LOCKABLE Mutex : public api::Mutex {
   std::recursive_mutex& GetRecursiveMutex() { return recursive_mutex_; }
 
  private:
-  friend class ConditionVariable;
+  friend class ::nearby::ConditionVariable;
   absl::Mutex mutex_;
   std::recursive_mutex recursive_mutex_;  //  The actual mutex allocation
   Mode mode_;
@@ -68,5 +67,5 @@ class ABSL_LOCKABLE Mutex : public api::Mutex {
 
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location
+
 #endif  // PLATFORM_IMPL_WINDOWS_MUTEX_H_

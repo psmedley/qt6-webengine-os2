@@ -5,17 +5,16 @@
  * found in the LICENSE file.
  */
 
-#include "include/sksl/SkSLOperator.h"
+#include "src/sksl/SkSLOperator.h"
 
 #include "include/core/SkTypes.h"
-#include "include/private/SkStringView.h"
+#include "src/base/SkStringView.h"
 #include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLContext.h"
 #include "src/sksl/SkSLProgramSettings.h"
 #include "src/sksl/ir/SkSLType.h"
 
 #include <memory>
-#include <utility>
 
 namespace SkSL {
 
@@ -125,6 +124,10 @@ bool Operator::isAssignment() const {
         default:
             return false;
     }
+}
+
+bool Operator::isCompoundAssignment() const {
+    return this->isAssignment() && this->kind() != Kind::EQ;
 }
 
 Operator Operator::removeAssignment() const {

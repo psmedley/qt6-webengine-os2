@@ -7,7 +7,7 @@ Rules for building C++ flatbuffers with Bazel.
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
-flatc_path = "@com_github_google_flatbuffers//:flatc"
+TRUE_FLATC_PATH = "@com_github_google_flatbuffers//:flatc"
 
 DEFAULT_INCLUDE_PATHS = [
     "./",
@@ -15,6 +15,14 @@ DEFAULT_INCLUDE_PATHS = [
     "$(BINDIR)",
     "$(execpath @com_github_google_flatbuffers//:flatc).runfiles/com_github_google_flatbuffers",
 ]
+
+def default_include_paths(flatc_path):
+    return [
+        "./",
+        "$(GENDIR)",
+        "$(BINDIR)",
+        "$(execpath %s).runfiles/com_github_google_flatbuffers" % (flatc_path),
+    ]
 
 DEFAULT_FLATC_ARGS = [
     "--gen-object-api",
@@ -32,14 +40,18 @@ def flatbuffer_library_public(
         language_flag,
         out_prefix = "",
         includes = [],
-        include_paths = DEFAULT_INCLUDE_PATHS,
+        include_paths = None,
         flatc_args = DEFAULT_FLATC_ARGS,
         reflection_name = "",
         reflection_visibility = None,
         compatible_with = None,
         restricted_to = None,
         target_compatible_with = None,
-        output_to_bindir = False):
+        flatc_path = "@com_github_google_flatbuffers//:flatc",
+        output_to_bindir = False,
+        tools = None,
+        extra_env = None,
+        **kwargs):
     """Generates code files for reading/writing the given flatbuffers in the requested language using the public compiler.
 
     Args:
@@ -62,14 +74,25 @@ def flatbuffer_library_public(
         for, instead of default-supported environments.
       target_compatible_with: Optional, The list of target platform constraints
         to use.
+      flatc_path: Bazel target corresponding to the flatc compiler to use.
       output_to_bindir: Passed to genrule for output to bin directory.
+      tools: Optional, passed to genrule for list of tools to make available
+        during the action.
+      extra_env: Optional, must be a string of "VAR1=VAL1 VAR2=VAL2". These get
+        set as environment variables that "flatc_path" sees.
+      **kwargs: Passed to the underlying genrule.
 
 
     This rule creates a filegroup(name) with all generated source files, and
     optionally a Fileset([reflection_name]) with all generated reflection
     binaries.
     """
+    reflection_include_paths = include_paths
+    if include_paths == None:
+        include_paths = default_include_paths(flatc_path)
     include_paths_cmd = ["-I %s" % (s) for s in include_paths]
+
+    extra_env = extra_env or ""
 
     # '$(@D)' when given a single source target will give the appropriate
     # directory. Appending 'out_prefix' is only necessary when given a build
@@ -80,7 +103,7 @@ def flatbuffer_library_public(
     genrule_cmd = " ".join([
         "SRCS=($(SRCS));",
         "for f in $${SRCS[@]:0:%s}; do" % len(srcs),
-        "$(location %s)" % (flatc_path),
+        "OUTPUT_FILE=\"$(OUTS)\" %s $(location %s)" % (extra_env, flatc_path),
         " ".join(include_paths_cmd),
         " ".join(flatc_args),
         language_flag,
@@ -93,21 +116,25 @@ def flatbuffer_library_public(
         srcs = srcs + includes,
         outs = outs,
         output_to_bindir = output_to_bindir,
-        tools = [flatc_path],
+        tools = (tools or []) + [flatc_path],
         cmd = genrule_cmd,
         compatible_with = compatible_with,
         target_compatible_with = target_compatible_with,
         restricted_to = restricted_to,
         message = "Generating flatbuffer files for %s:" % (name),
+        **kwargs
     )
     if reflection_name:
+        if reflection_include_paths == None:
+            reflection_include_paths = default_include_paths(TRUE_FLATC_PATH)
+        reflection_include_paths_cmd = ["-I %s" % (s) for s in reflection_include_paths]
         reflection_genrule_cmd = " ".join([
             "SRCS=($(SRCS));",
             "for f in $${SRCS[@]:0:%s}; do" % len(srcs),
-            "$(location %s)" % (flatc_path),
+            "$(location %s)" % (TRUE_FLATC_PATH),
             "-b --schema",
             " ".join(flatc_args),
-            " ".join(include_paths_cmd),
+            " ".join(reflection_include_paths_cmd),
             language_flag,
             output_directory,
             "$$f;",
@@ -122,7 +149,7 @@ def flatbuffer_library_public(
             srcs = srcs + includes,
             outs = reflection_outs,
             output_to_bindir = output_to_bindir,
-            tools = [flatc_path],
+            tools = [TRUE_FLATC_PATH],
             compatible_with = compatible_with,
             restricted_to = restricted_to,
             target_compatible_with = target_compatible_with,
@@ -142,10 +169,11 @@ def flatbuffer_cc_library(
         name,
         srcs,
         srcs_filegroup_name = "",
+        outs = [],
         out_prefix = "",
         deps = [],
         includes = [],
-        include_paths = DEFAULT_INCLUDE_PATHS,
+        include_paths = None,
         cc_include_paths = [],
         flatc_args = DEFAULT_FLATC_ARGS,
         visibility = None,
@@ -162,6 +190,7 @@ def flatbuffer_cc_library(
       srcs_filegroup_name: Name of the output filegroup that holds srcs. Pass this
           filegroup into the `includes` parameter of any other
           flatbuffer_cc_library that depends on this one's schemas.
+      outs: Additional outputs expected to be generated by flatc.
       out_prefix: Prepend this path to the front of all generated files. Usually
           is a directory name.
       deps: Optional, list of other flatbuffer_cc_library's to depend on. Cannot be specified
@@ -209,7 +238,7 @@ def flatbuffer_cc_library(
     flatbuffer_library_public(
         name = srcs_lib,
         srcs = srcs,
-        outs = output_headers,
+        outs = outs + output_headers,
         language_flag = "-c",
         out_prefix = out_prefix,
         includes = includes,

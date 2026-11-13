@@ -1,10 +1,10 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef COMPOSITOR_H
 #define COMPOSITOR_H
 
-#include <QtGui/qtguiglobal.h>
 #include <QtWebEngineCore/private/qtwebenginecoreglobal_p.h>
 
 QT_BEGIN_NAMESPACE
@@ -19,11 +19,13 @@ class FrameSinkId;
 
 namespace QtWebEngineCore {
 
+Q_DECLARE_LOGGING_CATEGORY(lcWebEngineCompositor);
+
 // Produces composited frames for display.
 //
 // Used by quick/widgets libraries for accessing the frames and
 // controlling frame swapping.
-class Q_WEBENGINECORE_PRIVATE_EXPORT Compositor
+class Q_WEBENGINECORE_EXPORT Compositor
 {
     struct Binding;
 
@@ -31,9 +33,8 @@ public:
     // Identifies the implementation type.
     enum class Type {
         Software,
-        OpenGL,
-        Vulkan,
-        NativeBuffer
+        OpenGL, // TODO: Legacy, remove it with DisplaySkiaOutputDevice!
+        Native
     };
 
     // Identifies a compositor.
@@ -77,7 +78,7 @@ public:
     // Observes the compositor corresponding to the given id.
     //
     // Only one observer can exist per compositor.
-    class Q_WEBENGINECORE_PRIVATE_EXPORT Observer
+    class Q_WEBENGINECORE_EXPORT Observer
     {
     public:
         // Binding to compositor
@@ -92,7 +93,7 @@ public:
 
     protected:
         Observer() = default;
-        ~Observer() { if (m_binding) unbind(); }
+        ~Observer();
 
     private:
         Binding *m_binding = nullptr;
@@ -134,14 +135,15 @@ public:
     // Is the texture produced upside down?
     virtual bool textureIsFlipped();
 
-#if QT_CONFIG(webengine_vulkan)
-    // (Vulkan) Release Vulkan resources created by Qt's Vulkan instance.
-    virtual void releaseVulkanResources(QQuickWindow *win);
-#endif
+    // Are there resources to be released?
+    virtual bool hasResources() { return false; }
+
+    // Release resources created in texture()
+    virtual void releaseResources();
 
 protected:
-    Compositor(Type type) : m_type(type) { }
-    virtual ~Compositor() { if (m_binding) unbind(); }
+    Compositor(Type type);
+    virtual ~Compositor();
 
 private:
     template<typename T>

@@ -8,28 +8,16 @@
   white-space: nowrap;
 }
 
-.shadow-swatch-icon {
-  --override-swatch-background-color: #9c27b0;
-
+devtools-icon.shadow-swatch-icon {
+  color: var(--icon-css);
+  transform: scale(0.7);
   position: relative;
-  margin-left: 1px;
-  margin-right: 2px;
-  top: 1px;
+  margin: -5px -2px -5px -4px;
   user-select: none;
-  line-height: 10px;
-  background-color: var(--override-swatch-background-color);
-}
+  vertical-align: baseline;
+  cursor: pointer;
 
-.shadow-swatch-icon:hover {
-  --override-swatch-background-color: #800080;
-}
-
-.-theme-with-dark-background .shadow-swatch-icon,
-:host-context(.-theme-with-dark-background) .shadow-swatch-icon {
-  --override-swatch-background-color: rgb(196 79 216);
-}
-
-.-theme-with-dark-background .shadow-swatch-icon:hover,
-:host-context(.-theme-with-dark-background) .shadow-swatch-icon:hover {
-  --override-swatch-background-color: rgb(255 127 255);
+  &:hover {
+    color: var(--icon-css-hover);
+  }
 }

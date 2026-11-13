@@ -7,9 +7,11 @@
 
 #include "base/dcheck_is_on.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/types/pass_key.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialization_tag.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_color_params.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/serialization/trailer_writer.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -36,6 +38,7 @@ class CORE_EXPORT V8ScriptValueSerializer
 
  public:
   using Options = SerializedScriptValue::SerializeOptions;
+  using PassKey = base::PassKey<V8ScriptValueSerializer>;
 
   // |object_index| is for use in exceptiun messages.
   static bool ExtractTransferable(v8::Isolate*,
@@ -73,6 +76,11 @@ class CORE_EXPORT V8ScriptValueSerializer
   void WriteUnguessableToken(const base::UnguessableToken& token);
   void WriteUTF8String(const String&);
 
+  void WriteAndRequireInterfaceTag(SerializationTag tag) {
+    GetTrailerWriter().RequireExposedInterface(tag);
+    WriteTag(tag);
+  }
+
   template <typename E>
   void WriteUint32Enum(E value) {
     static_assert(
@@ -90,6 +98,8 @@ class CORE_EXPORT V8ScriptValueSerializer
   bool IsForStorage() const { return for_storage_; }
 
   const Transferables* GetTransferables() const { return transferables_; }
+
+  TrailerWriter& GetTrailerWriter() { return trailer_writer_; }
 
  private:
   // Transfer is split into two phases: scanning the transferables so that we
@@ -128,18 +138,22 @@ class CORE_EXPORT V8ScriptValueSerializer
   ScriptState* script_state_;
   scoped_refptr<SerializedScriptValue> serialized_script_value_;
   v8::ValueSerializer serializer_;
+  TrailerWriter trailer_writer_;
   const Transferables* transferables_ = nullptr;
   const ExceptionState* exception_state_ = nullptr;
   WebBlobInfoArray* blob_info_array_ = nullptr;
   SharedArrayBufferArray shared_array_buffers_;
   Options::WasmSerializationPolicy wasm_policy_;
   bool for_storage_ = false;
+  bool skip_wrapped_objects_ = false;
 #if DCHECK_IS_ON()
   bool serialize_invoked_ = false;
 #endif
 };
 
-// For code testing V8ScriptValueSerializer
+// For code testing V8ScriptValueSerializer. Behaves the same as
+// SerializedScriptValue::Create, except it can be called on an initializer
+// list.
 scoped_refptr<SerializedScriptValue> SerializedValue(
     const Vector<uint8_t>& bytes);
 

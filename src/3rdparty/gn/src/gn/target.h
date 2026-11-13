@@ -14,7 +14,6 @@
 #include "gn/action_values.h"
 #include "gn/bundle_data.h"
 #include "gn/config_values.h"
-#include "gn/inherited_libraries.h"
 #include "gn/item.h"
 #include "gn/label_pattern.h"
 #include "gn/label_ptr.h"
@@ -99,6 +98,9 @@ class Target : public Item {
   // propagated. Treating these as data only decreases superfluous rebuilds and
   // increases parallelism.
   bool IsDataOnly() const;
+
+  // Return true if this target should be generated in the final build graph.
+  bool ShouldGenerate() const;
 
   // Will be the empty string to use the target label as the output name.
   // See GetComputedOutputName().
@@ -243,7 +245,7 @@ class Target : public Item {
     return output_type_ == ACTION || output_type_ == ACTION_FOREACH ||
            output_type_ == COPY_FILES || output_type_ == CREATE_BUNDLE ||
            output_type_ == BUNDLE_DATA || output_type_ == GENERATED_FILE ||
-           (IsBinary() && has_swift_values() && swift_values().builds_module());
+           builds_swift_module();
   }
 
   // Returns the iterator range which can be used in range-based for loops
@@ -298,9 +300,9 @@ class Target : public Item {
     return allow_circular_includes_from_;
   }
 
-  const InheritedLibraries& inherited_libraries() const {
-    return inherited_libraries_;
-  }
+  // Pool option
+  const LabelPtrPair<Pool>& pool() const { return pool_; }
+  void set_pool(LabelPtrPair<Pool> pool) { pool_ = std::move(pool); }
 
   // This config represents the configuration set directly on this target.
   ConfigValues& config_values();
@@ -315,30 +317,14 @@ class Target : public Item {
   const SwiftValues& swift_values() const;
   bool has_swift_values() const { return swift_values_.get(); }
 
+  // Return true if this targets builds a SwiftModule
+  bool builds_swift_module() const {
+    return IsBinary() && source_types_used().SwiftSourceUsed();
+  }
+
   RustValues& rust_values();
   const RustValues& rust_values() const;
   bool has_rust_values() const { return rust_values_.get(); }
-
-  // Transitive closure of libraries that are depended on by this target
-  InheritedLibraries& rust_transitive_libs() { return rust_transitive_libs_; }
-  const InheritedLibraries& rust_transitive_libs() const {
-    return rust_transitive_libs_;
-  }
-
-  const UniqueVector<SourceDir>& all_lib_dirs() const { return all_lib_dirs_; }
-  const UniqueVector<LibFile>& all_libs() const { return all_libs_; }
-
-  const UniqueVector<SourceDir>& all_framework_dirs() const {
-    return all_framework_dirs_;
-  }
-  const UniqueVector<std::string>& all_frameworks() const {
-    return all_frameworks_;
-  }
-  const UniqueVector<std::string>& all_weak_frameworks() const {
-    return all_weak_frameworks_;
-  }
-
-  const TargetSet& recursive_hard_deps() const { return recursive_hard_deps_; }
 
   std::vector<LabelPattern>& friends() { return friends_; }
   const std::vector<LabelPattern>& friends() const { return friends_; }
@@ -491,24 +477,7 @@ class Target : public Item {
 
   std::set<Label> allow_circular_includes_from_;
 
-  // Static libraries, shared libraries, and source sets from transitive deps
-  // that need to be linked.
-  InheritedLibraries inherited_libraries_;
-
-  // These libs and dirs are inherited from statically linked deps and all
-  // configs applying to this target.
-  UniqueVector<SourceDir> all_lib_dirs_;
-  UniqueVector<LibFile> all_libs_;
-
-  // These frameworks and dirs are inherited from statically linked deps and
-  // all configs applying to this target.
-  UniqueVector<SourceDir> all_framework_dirs_;
-  UniqueVector<std::string> all_frameworks_;
-  UniqueVector<std::string> all_weak_frameworks_;
-
-  // All hard deps from this target and all dependencies. Filled in when this
-  // target is marked resolved. This will not include the current target.
-  TargetSet recursive_hard_deps_;
+  LabelPtrPair<Pool> pool_;
 
   std::vector<LabelPattern> friends_;
   std::vector<LabelPattern> assert_no_deps_;
@@ -523,9 +492,6 @@ class Target : public Item {
 
   // Used for Rust targets.
   std::unique_ptr<RustValues> rust_values_;
-
-  // Used by all targets, only useful to generate Rust targets though.
-  InheritedLibraries rust_transitive_libs_;
 
   // User for Swift targets.
   std::unique_ptr<SwiftValues> swift_values_;

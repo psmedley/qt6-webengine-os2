@@ -44,7 +44,7 @@ def split_ukernel_name(name):
   tile_height = int(match.group(3))
   tile_width = int(match.group(4))
 
-  arch, isa = xnncommon.parse_target_name(target_name=match.group(5))
+  arch, isa, assembly = xnncommon.parse_target_name(target_name=match.group(5))
   return tile_height, tile_width, element_size, arch, isa
 
 
@@ -59,14 +59,14 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH}) {
     .block_height(${TILE_HEIGHT})
     .element_size(${ELEMENT_SIZE})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 
 TEST(${TEST_NAME}, bh_1_${TILE_HEIGHT * 2}_bw_1_${TILE_WIDTH * 2}) {
   $if ISA_CHECK:
     ${ISA_CHECK};
-  for(size_t i = 1; i <= ${TILE_HEIGHT * 2}; ++i){
-    for(size_t j = 1; j <= ${TILE_WIDTH * 2}; ++j){
+  for (size_t i = 1; i <= ${TILE_HEIGHT * 2}; ++i) {
+    for (size_t j = 1; j <= ${TILE_WIDTH * 2}; ++j) {
       TransposeMicrokernelTester()
         .input_stride(j * 3)
         .output_stride(i * 7)
@@ -74,7 +74,7 @@ TEST(${TEST_NAME}, bh_1_${TILE_HEIGHT * 2}_bw_1_${TILE_WIDTH * 2}) {
         .block_height(i)
         .element_size(${ELEMENT_SIZE})
         .iterations(1)
-        .Test(${KERNEL});
+        .Test(${", ".join(TEST_ARGS)});
     }
   }
 }
@@ -89,13 +89,13 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH * 2}) {
     .block_height(${TILE_HEIGHT})
     .element_size(${ELEMENT_SIZE})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 
 TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH + 1}_${TILE_WIDTH * 2}) {
   $if ISA_CHECK:
     ${ISA_CHECK};
-  for(size_t i = ${TILE_WIDTH + 1}; i < ${TILE_WIDTH * 2}; ++i){
+  for (size_t i = ${TILE_WIDTH + 1}; i < ${TILE_WIDTH * 2}; ++i) {
     TransposeMicrokernelTester()
       .input_stride(i)
       .output_stride(${TILE_HEIGHT * 2})
@@ -103,14 +103,14 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH + 1}_${TILE_WIDTH * 2}) {
       .block_height(${TILE_HEIGHT})
       .element_size(${ELEMENT_SIZE})
       .iterations(1)
-      .Test(${KERNEL});
+      .Test(${", ".join(TEST_ARGS)});
   }
 }
 
 TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH + 1}_${TILE_WIDTH * 2}) {
   $if ISA_CHECK:
     ${ISA_CHECK};
-  for(size_t i = ${TILE_WIDTH + 1}; i < ${TILE_WIDTH * 2}; ++i){
+  for (size_t i = ${TILE_WIDTH + 1}; i < ${TILE_WIDTH * 2}; ++i) {
     TransposeMicrokernelTester()
       .input_stride(i)
       .output_stride(${TILE_HEIGHT * 2})
@@ -118,7 +118,7 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH + 1}_${TILE_WIDTH * 2})
       .block_height(${TILE_HEIGHT * 2})
       .element_size(${ELEMENT_SIZE})
       .iterations(1)
-      .Test(${KERNEL});
+      .Test(${", ".join(TEST_ARGS)});
   }
 }
 
@@ -132,13 +132,13 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH}) {
     .block_height(${TILE_HEIGHT * 2})
     .element_size(${ELEMENT_SIZE})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 
-TEST(${TEST_NAME}, bh_${TILE_HEIGHT + 1}_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH}){
+TEST(${TEST_NAME}, bh_${TILE_HEIGHT + 1}_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH}) {
   $if ISA_CHECK:
     ${ISA_CHECK};
-  for(size_t i = ${TILE_HEIGHT + 1}; i < ${TILE_HEIGHT * 2}; ++i){
+  for (size_t i = ${TILE_HEIGHT + 1}; i < ${TILE_HEIGHT * 2}; ++i) {
     TransposeMicrokernelTester()
       .input_stride(${TILE_WIDTH + 17})
       .output_stride(i)
@@ -146,14 +146,14 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT + 1}_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH}){
       .block_height(i)
       .element_size(${ELEMENT_SIZE})
       .iterations(1)
-      .Test(${KERNEL});
+      .Test(${", ".join(TEST_ARGS)});
   }
 }
 
-TEST(${TEST_NAME}, bh_${TILE_HEIGHT + 1}_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH * 2}){
+TEST(${TEST_NAME}, bh_${TILE_HEIGHT + 1}_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH * 2}) {
   $if ISA_CHECK:
     ${ISA_CHECK};
-  for(size_t i = ${TILE_HEIGHT + 1}; i < ${TILE_HEIGHT * 2}; ++i){
+  for (size_t i = ${TILE_HEIGHT + 1}; i < ${TILE_HEIGHT * 2}; ++i) {
     TransposeMicrokernelTester()
       .input_stride(${TILE_WIDTH * 2})
       .output_stride(i)
@@ -161,15 +161,15 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT + 1}_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH * 2}
       .block_height(i)
       .element_size(${ELEMENT_SIZE})
       .iterations(1)
-      .Test(${KERNEL});
+      .Test(${", ".join(TEST_ARGS)});
   }
 }
 
 TEST(${TEST_NAME}, bh_${TILE_HEIGHT + 1}_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH + 1}_${TILE_WIDTH * 2}) {
   $if ISA_CHECK:
     ${ISA_CHECK};
-  for(size_t i = ${TILE_HEIGHT + 1}; i < ${TILE_HEIGHT * 2}; ++i){
-    for(size_t j = ${TILE_WIDTH + 1}; j < ${TILE_WIDTH * 2}; ++j){
+  for (size_t i = ${TILE_HEIGHT + 1}; i < ${TILE_HEIGHT * 2}; ++i) {
+    for (size_t j = ${TILE_WIDTH + 1}; j < ${TILE_WIDTH * 2}; ++j) {
       TransposeMicrokernelTester()
         .input_stride(j)
         .output_stride(i)
@@ -177,7 +177,7 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT + 1}_${TILE_HEIGHT * 2}_bw_${TILE_WIDTH + 1}
         .block_height(i)
         .element_size(${ELEMENT_SIZE})
         .iterations(1)
-        .Test(${KERNEL});
+        .Test(${", ".join(TEST_ARGS)});
     }
   }
 }
@@ -192,7 +192,7 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH}_is_${TILE_WIDTH * 2}) {
     .block_height(${TILE_HEIGHT})
     .element_size(${ELEMENT_SIZE})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 
 TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH}_os_${TILE_HEIGHT * 2}) {
@@ -205,7 +205,7 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH}_os_${TILE_HEIGHT * 2}) {
     .block_height(${TILE_HEIGHT})
     .element_size(${ELEMENT_SIZE})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 
 TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH}_is_${TILE_WIDTH * 2}_os_${TILE_HEIGHT * 2}) {
@@ -218,7 +218,7 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT}_bw_${TILE_WIDTH}_is_${TILE_WIDTH * 2}_os_${
     .block_height(${TILE_HEIGHT})
     .element_size(${ELEMENT_SIZE})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 
 TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 17}_bw_${TILE_WIDTH * 19}_ies_${ELEMENT_SIZE + 11}) {
@@ -232,7 +232,7 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 17}_bw_${TILE_WIDTH * 19}_ies_${ELEMENT_SI
     .element_size(${ELEMENT_SIZE})
     .input_element_stride(${ELEMENT_SIZE + 11})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 
 TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 3}_bw_${TILE_WIDTH * 5}_oes_${ELEMENT_SIZE + 11}) {
@@ -246,7 +246,7 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 3}_bw_${TILE_WIDTH * 5}_oes_${ELEMENT_SIZE
     .element_size(${ELEMENT_SIZE})
     .output_element_stride(${ELEMENT_SIZE + 11})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 
 TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 7}_bw_${TILE_WIDTH * 23}_ies_${ELEMENT_SIZE + 17}_oes_${ELEMENT_SIZE + 13}) {
@@ -261,12 +261,12 @@ TEST(${TEST_NAME}, bh_${TILE_HEIGHT * 7}_bw_${TILE_WIDTH * 23}_ies_${ELEMENT_SIZ
     .input_element_stride(${ELEMENT_SIZE + 17})
     .output_element_stride(${ELEMENT_SIZE + 13})
     .iterations(1)
-    .Test(${KERNEL});
+    .Test(${", ".join(TEST_ARGS)});
 }
 """
 
 
-def generate_test_cases(ukernel, tile_height, tile_width, element_size, isa):
+def generate_test_cases(ukernel, tile_height, tile_width, element_size, isa, init_fn):
   """Generates all tests cases for a Vector Convert Operation micro-kernel.
 
   Args:
@@ -276,19 +276,23 @@ def generate_test_cases(ukernel, tile_height, tile_width, element_size, isa):
     element_size: Size of each element in bytes.
     isa: instruction set required to run the micro-kernel. Generated unit test
       will skip execution if the host processor doesn't support this ISA.
+    init_fn: C name of the function to initialize microkernel parameters.
 
   Returns:
     Code for the test case.
   """
   _, test_name = ukernel.split("_", 1)
   test_args = [ukernel]
+  if init_fn:
+    test_args.append(init_fn)
+
   return xngen.preprocess(
       TRANSPOSE_TEST_TEMPLATE, {
           "TEST_NAME": test_name.upper().replace("UKERNEL_", "") + '_' + str(element_size),
-          "KERNEL": ukernel,
           "TILE_HEIGHT": tile_height,
           "TILE_WIDTH": tile_width,
           "ELEMENT_SIZE": element_size,
+          "TEST_ARGS": test_args,
           "ISA_CHECK": xnncommon.generate_isa_check_macro(isa),
       })
 
@@ -346,27 +350,19 @@ def main(args):
 
     for ukernel_spec in spec_yaml:
       name = ukernel_spec["name"]
+      init_fn = ukernel_spec.get("init")
+
       tile_height, tile_width, element_size, arch, isa = split_ukernel_name(name)
 
-      # specification can override architecture
-      arch = ukernel_spec.get("arch", arch)
-
       if element_size is not None:
-        test_case = generate_test_cases(name, tile_height, tile_width, element_size, isa)
+        test_case = generate_test_cases(name, tile_height, tile_width, element_size, isa, init_fn)
       else:
-        test_case = generate_test_cases(name, tile_height, tile_width, 1, isa)
-        test_case += generate_test_cases(name, tile_height, tile_width, 3, isa)
-        test_case += generate_test_cases(name, tile_height, tile_width, 5, isa)
-      tests += "\n\n" + xnncommon.postprocess_test_case(test_case, arch, isa)
+        test_case = generate_test_cases(name, tile_height, tile_width, 1, isa, init_fn)
+        test_case += generate_test_cases(name, tile_height, tile_width, 3, isa, init_fn)
+        test_case += generate_test_cases(name, tile_height, tile_width, 5, isa, init_fn)
+      tests += "\n\n" + xnncommon.postprocess_test_case(test_case, arch, isa, init_fn)
 
-    txt_changed = True
-    if os.path.exists(options.output):
-      with codecs.open(options.output, "r", encoding="utf-8") as output_file:
-        txt_changed = output_file.read() != tests
-
-    if txt_changed:
-      with codecs.open(options.output, "w", encoding="utf-8") as output_file:
-        output_file.write(tests)
+    xnncommon.overwrite_if_changed(options.output, tests)
 
 
 if __name__ == "__main__":

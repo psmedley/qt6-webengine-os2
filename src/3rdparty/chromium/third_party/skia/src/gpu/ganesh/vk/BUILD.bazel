@@ -1,10 +1,14 @@
-load("//bazel:macros.bzl", "exports_files_legacy", "split_srcs_and_hdrs")
+load("//bazel:flags.bzl", "bool_flag")
+load("//bazel:skia_rules.bzl", "exports_files_legacy", "skia_filegroup", "split_srcs_and_hdrs")
 
 licenses(["notice"])
 
 exports_files_legacy()
 
 VK_FILES = [
+    "GrVkBackendSemaphore.cpp",
+    "GrVkBackendSurface.cpp",
+    "GrVkBackendSurfacePriv.h",
     "GrVkBuffer.cpp",
     "GrVkBuffer.h",
     "GrVkCaps.cpp",
@@ -13,12 +17,15 @@ VK_FILES = [
     "GrVkCommandBuffer.h",
     "GrVkCommandPool.cpp",
     "GrVkCommandPool.h",
+    "GrVkContextThreadSafeProxy.cpp",
+    "GrVkContextThreadSafeProxy.h",
     "GrVkDescriptorPool.cpp",
     "GrVkDescriptorPool.h",
     "GrVkDescriptorSet.cpp",
     "GrVkDescriptorSet.h",
     "GrVkDescriptorSetManager.cpp",
     "GrVkDescriptorSetManager.h",
+    "GrVkDirectContext.cpp",
     "GrVkFramebuffer.cpp",
     "GrVkFramebuffer.h",
     "GrVkGpu.cpp",
@@ -28,11 +35,9 @@ VK_FILES = [
     "GrVkImageLayout.h",
     "GrVkImageView.cpp",
     "GrVkImageView.h",
+    "GrVkManagedResource.h",
     "GrVkMSAALoadManager.cpp",
     "GrVkMSAALoadManager.h",
-    "GrVkManagedResource.h",
-    "GrVkMemory.cpp",
-    "GrVkMemory.h",
     "GrVkOpsRenderPass.cpp",
     "GrVkOpsRenderPass.h",
     "GrVkPipeline.cpp",
@@ -54,8 +59,6 @@ VK_FILES = [
     "GrVkSampler.h",
     "GrVkSamplerYcbcrConversion.cpp",
     "GrVkSamplerYcbcrConversion.h",
-    "GrVkSecondaryCBDrawContext.cpp",
-    "GrVkSecondaryCBDrawContext_impl.h",
     "GrVkSemaphore.cpp",
     "GrVkSemaphore.h",
     "GrVkTexture.cpp",
@@ -63,6 +66,7 @@ VK_FILES = [
     "GrVkTextureRenderTarget.cpp",
     "GrVkTextureRenderTarget.h",
     "GrVkTypesPriv.cpp",
+    "GrVkTypesPriv.h",
     "GrVkUniformHandler.cpp",
     "GrVkUniformHandler.h",
     "GrVkUtil.cpp",
@@ -76,13 +80,34 @@ split_srcs_and_hdrs(
     files = VK_FILES,
 )
 
-filegroup(
+bool_flag(
+    name = "enable_secondary_draw_context",
+    default = False,
+)
+
+skia_filegroup(
+    name = "vk_chromium_srcs",
+    srcs = ["GrVkSecondaryCBDrawContext.cpp"],
+)
+
+skia_filegroup(
+    name = "android_srcs",
+    srcs = ["AHardwareBufferVk.cpp"],
+)
+
+skia_filegroup(
     name = "srcs",
-    srcs = [":vk_srcs"],
+    srcs = [
+        ":android_srcs",
+        ":vk_srcs",
+    ] + select({
+        ":enable_secondary_draw_context_true": [":vk_chromium_srcs"],
+        "//conditions:default": [],
+    }),
     visibility = ["//src/gpu/ganesh:__pkg__"],
 )
 
-filegroup(
+skia_filegroup(
     name = "private_hdrs",
     srcs = [":vk_hdrs"],
     visibility = ["//src/gpu/ganesh:__pkg__"],

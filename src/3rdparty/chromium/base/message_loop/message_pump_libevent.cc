@@ -12,7 +12,6 @@
 
 #include "base/auto_reset.h"
 #include "base/compiler_specific.h"
-#include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/notreached.h"
@@ -39,17 +38,18 @@
 
 namespace base {
 
-namespace {
-
 #if BUILDFLAG(ENABLE_MESSAGE_PUMP_EPOLL)
+namespace {
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)
+bool g_use_epoll = true;
+#else
+// TODO(crbug.com/1243354): Enable by default on chromeos.
 bool g_use_epoll = false;
-
-BASE_FEATURE(kMessagePumpEpoll,
-             "MessagePumpEpoll",
-             FEATURE_DISABLED_BY_DEFAULT);
-#endif
-
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)
 }  // namespace
+
+BASE_FEATURE(kMessagePumpEpoll, "MessagePumpEpoll", FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(ENABLE_MESSAGE_PUMP_EPOLL)
 
 MessagePumpLibevent::FdWatchController::FdWatchController(
     const Location& from_here)
@@ -155,9 +155,7 @@ MessagePumpLibevent::MessagePumpLibevent() {
 
 #if BUILDFLAG(ENABLE_MESSAGE_PUMP_EPOLL)
 MessagePumpLibevent::MessagePumpLibevent(decltype(kUseEpoll))
-    : epoll_pump_(std::make_unique<MessagePumpEpoll>()) {
-  epoll_pump_ = std::make_unique<MessagePumpEpoll>();
-}
+    : epoll_pump_(std::make_unique<MessagePumpEpoll>()) {}
 #endif
 
 MessagePumpLibevent::~MessagePumpLibevent() {

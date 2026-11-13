@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,13 +110,13 @@ bool CPDF_StitchFunc::v_Call(pdfium::span<const float> inputs,
                              pdfium::span<float> results) const {
   float input = inputs[0];
   size_t i;
-  for (i = 0; i < m_pSubFunctions.size() - 1; i++) {
+  for (i = 0; i + 1 < m_pSubFunctions.size(); i++) {
     if (input < m_bounds[i + 1])
       break;
   }
   input = Interpolate(input, m_bounds[i], m_bounds[i + 1], m_encode[i * 2],
                       m_encode[i * 2 + 1]);
   return m_pSubFunctions[i]
-      ->Call(pdfium::make_span(&input, 1), results)
+      ->Call(pdfium::span_from_ref(input), results)
       .has_value();
 }

@@ -148,7 +148,7 @@ class LoadHandler final : public DataHandler {
   static_assert(ExportsIndexBits::kLastUsedBit < kSmiValueSize);
 
   // Decodes kind from Smi-handler.
-  static inline Kind GetHandlerKind(Smi smi_handler);
+  static inline Kind GetHandlerKind(Tagged<Smi> smi_handler);
 
   // Creates a Smi-handler for loading a property from a slow object.
   static inline Handle<Smi> LoadNormal(Isolate* isolate);
@@ -206,7 +206,7 @@ class LoadHandler final : public DataHandler {
   // by given Smi-handler that encoded a load from the holder.
   static Handle<Object> LoadFromPrototype(
       Isolate* isolate, Handle<Map> receiver_map, Handle<JSReceiver> holder,
-      Handle<Smi> smi_handler,
+      Tagged<Smi> smi_handler,
       MaybeObjectHandle maybe_data1 = MaybeObjectHandle(),
       MaybeObjectHandle maybe_data2 = MaybeObjectHandle());
 
@@ -228,8 +228,15 @@ class LoadHandler final : public DataHandler {
   // Decodes the KeyedAccessLoadMode from a {handler}.
   static KeyedAccessLoadMode GetKeyedAccessLoadMode(MaybeObject handler);
 
+  // Decodes the ConverHole bit from a {handler}
+  static bool GetConvertHole(MaybeObject handler);
+
+  // Returns true iff the handler can be used in the "holder != lookup start
+  // object" case.
+  static bool CanHandleHolderNotLookupStart(Tagged<Object> handler);
+
 #if defined(OBJECT_PRINT)
-  static void PrintHandler(Object handler, std::ostream& os);
+  static void PrintHandler(Tagged<Object> handler, std::ostream& os);
 #endif  // defined(OBJECT_PRINT)
 
   OBJECT_CONSTRUCTORS(LoadHandler, DataHandler);
@@ -328,7 +335,7 @@ class StoreHandler final : public DataHandler {
 
   static Handle<Object> StoreThroughPrototype(
       Isolate* isolate, Handle<Map> receiver_map, Handle<JSReceiver> holder,
-      Handle<Smi> smi_handler,
+      Tagged<Smi> smi_handler,
       MaybeObjectHandle maybe_data1 = MaybeObjectHandle(),
       MaybeObjectHandle maybe_data2 = MaybeObjectHandle());
 
@@ -354,26 +361,27 @@ class StoreHandler final : public DataHandler {
   // Creates a Smi-handler for storing a property to an interceptor.
   static inline Handle<Smi> StoreInterceptor(Isolate* isolate);
 
-  static inline Handle<CodeT> StoreSloppyArgumentsBuiltin(
+  static inline Handle<Code> StoreSloppyArgumentsBuiltin(
       Isolate* isolate, KeyedAccessStoreMode mode);
-  static inline Handle<CodeT> StoreFastElementBuiltin(
-      Isolate* isolate, KeyedAccessStoreMode mode);
-  static inline Handle<CodeT> ElementsTransitionAndStoreBuiltin(
+  static inline Handle<Code> StoreFastElementBuiltin(Isolate* isolate,
+                                                     KeyedAccessStoreMode mode);
+  static inline Handle<Code> ElementsTransitionAndStoreBuiltin(
       Isolate* isolate, KeyedAccessStoreMode mode);
 
   // Creates a Smi-handler for storing a property.
   static inline Handle<Smi> StoreSlow(
-      Isolate* isolate, KeyedAccessStoreMode store_mode = STANDARD_STORE);
+      Isolate* isolate,
+      KeyedAccessStoreMode store_mode = KeyedAccessStoreMode::kInBounds);
 
   // Creates a Smi-handler for storing a property on a proxy.
   static inline Handle<Smi> StoreProxy(Isolate* isolate);
-  static inline Smi StoreProxy();
+  static inline Tagged<Smi> StoreProxy();
 
   // Decodes the KeyedAccessStoreMode from a {handler}.
   static KeyedAccessStoreMode GetKeyedAccessStoreMode(MaybeObject handler);
 
 #if defined(OBJECT_PRINT)
-  static void PrintHandler(Object handler, std::ostream& os);
+  static void PrintHandler(Tagged<Object> handler, std::ostream& os);
 #endif  // defined(OBJECT_PRINT)
 
  private:

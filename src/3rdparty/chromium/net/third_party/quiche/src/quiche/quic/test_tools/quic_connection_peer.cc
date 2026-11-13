@@ -30,12 +30,6 @@ void QuicConnectionPeer::SetLossAlgorithm(
 }
 
 // static
-void QuicConnectionPeer::PopulateStopWaitingFrame(
-    QuicConnection* connection, QuicStopWaitingFrame* stop_waiting) {
-  connection->PopulateStopWaitingFrame(stop_waiting);
-}
-
-// static
 QuicPacketCreator* QuicConnectionPeer::GetPacketCreator(
     QuicConnection* connection) {
   return &connection->packet_creator_;
@@ -57,23 +51,6 @@ QuicTime::Delta QuicConnectionPeer::GetNetworkTimeout(
 QuicTime::Delta QuicConnectionPeer::GetHandshakeTimeout(
     QuicConnection* connection) {
   return connection->idle_network_detector_.handshake_timeout_;
-}
-
-// static
-QuicTime::Delta QuicConnectionPeer::GetBandwidthUpdateTimeout(
-    QuicConnection* connection) {
-  return connection->idle_network_detector_.bandwidth_update_timeout_;
-}
-
-// static
-void QuicConnectionPeer::DisableBandwidthUpdate(QuicConnection* connection) {
-  if (connection->idle_network_detector_.bandwidth_update_timeout_
-          .IsInfinite()) {
-    return;
-  }
-  connection->idle_network_detector_.bandwidth_update_timeout_ =
-      QuicTime::Delta::Infinite();
-  connection->idle_network_detector_.SetAlarm();
 }
 
 // static
@@ -146,10 +123,7 @@ QuicAlarm* QuicConnectionPeer::GetAckAlarm(QuicConnection* connection) {
 
 // static
 QuicAlarm* QuicConnectionPeer::GetPingAlarm(QuicConnection* connection) {
-  if (GetQuicReloadableFlag(quic_use_ping_manager2)) {
-    return connection->ping_manager_.alarm_.get();
-  }
-  return connection->ping_alarm_.get();
+  return connection->ping_manager_.alarm_.get();
 }
 
 // static
@@ -279,17 +253,6 @@ bool QuicConnectionPeer::HasRetransmittableFrames(QuicConnection* connection,
 }
 
 // static
-bool QuicConnectionPeer::GetNoStopWaitingFrames(QuicConnection* connection) {
-  return connection->no_stop_waiting_frames_;
-}
-
-// static
-void QuicConnectionPeer::SetNoStopWaitingFrames(QuicConnection* connection,
-                                                bool no_stop_waiting_frames) {
-  connection->no_stop_waiting_frames_ = no_stop_waiting_frames;
-}
-
-// static
 void QuicConnectionPeer::SetMaxTrackedPackets(
     QuicConnection* connection, QuicPacketCount max_tracked_packets) {
   connection->max_tracked_packets_ = max_tracked_packets;
@@ -298,11 +261,6 @@ void QuicConnectionPeer::SetMaxTrackedPackets(
 // static
 void QuicConnectionPeer::SetNegotiatedVersion(QuicConnection* connection) {
   connection->version_negotiated_ = true;
-  if (connection->perspective() == Perspective::IS_SERVER &&
-      !QuicFramerPeer::infer_packet_header_type_from_version(
-          &connection->framer_)) {
-    connection->framer_.InferPacketHeaderTypeFromVersion();
-  }
 }
 
 // static
@@ -506,6 +464,13 @@ QuicConnection::PathState* QuicConnectionPeer::GetDefaultPath(
 }
 
 // static
+bool QuicConnectionPeer::IsDefaultPath(QuicConnection* connection,
+                                       const QuicSocketAddress& self_address,
+                                       const QuicSocketAddress& peer_address) {
+  return connection->IsDefaultPath(self_address, peer_address);
+}
+
+// static
 QuicConnection::PathState* QuicConnectionPeer::GetAlternativePath(
     QuicConnection* connection) {
   return &connection->alternative_path_;
@@ -558,6 +523,75 @@ QuicCoalescedPacket& QuicConnectionPeer::GetCoalescedPacket(
 // static
 void QuicConnectionPeer::FlushCoalescedPacket(QuicConnection* connection) {
   connection->FlushCoalescedPacket();
+}
+
+// static
+void QuicConnectionPeer::SetInProbeTimeOut(QuicConnection* connection,
+                                           bool value) {
+  connection->in_probe_time_out_ = value;
+}
+
+// static
+QuicSocketAddress QuicConnectionPeer::GetReceivedServerPreferredAddress(
+    QuicConnection* connection) {
+  return connection->received_server_preferred_address_;
+}
+
+// static
+QuicSocketAddress QuicConnectionPeer::GetSentServerPreferredAddress(
+    QuicConnection* connection) {
+  return connection->sent_server_preferred_address_;
+}
+
+// static
+bool QuicConnectionPeer::TestLastReceivedPacketInfoDefaults() {
+  QuicConnection::ReceivedPacketInfo info{QuicTime::Zero()};
+  QUIC_DVLOG(2)
+      << "QuicConnectionPeer::TestLastReceivedPacketInfoDefaults"
+      << " dest_addr passed: "
+      << (info.destination_address == QuicSocketAddress())
+      << " source_addr passed: " << (info.source_address == QuicSocketAddress())
+      << " receipt_time passed: " << (info.receipt_time == QuicTime::Zero())
+      << " received_bytes_counted passed: " << !info.received_bytes_counted
+      << " destination_connection_id passed: "
+      << (info.destination_connection_id == QuicConnectionId())
+      << " length passed: " << (info.length == 0)
+      << " decrypted passed: " << !info.decrypted << " decrypted_level passed: "
+      << (info.decrypted_level == ENCRYPTION_INITIAL)
+      << " frames.empty passed: " << info.frames.empty()
+      << " ecn_codepoint passed: " << (info.ecn_codepoint == ECN_NOT_ECT)
+      << " sizeof(ReceivedPacketInfo) passed: "
+      << (sizeof(size_t) != 8 ||
+          sizeof(QuicConnection::ReceivedPacketInfo) == 280);
+  return info.destination_address == QuicSocketAddress() &&
+         info.source_address == QuicSocketAddress() &&
+         info.receipt_time == QuicTime::Zero() &&
+         !info.received_bytes_counted && info.length == 0 &&
+         info.destination_connection_id == QuicConnectionId() &&
+         !info.decrypted && info.decrypted_level == ENCRYPTION_INITIAL &&
+         // There's no simple way to compare all the values of QuicPacketHeader.
+         info.frames.empty() && info.ecn_codepoint == ECN_NOT_ECT &&
+         info.actual_destination_address == QuicSocketAddress() &&
+         // If the condition below fails, the contents of ReceivedPacketInfo
+         // have changed. Please add the relevant conditions and update the
+         // length below.
+         (sizeof(size_t) != 8 ||
+          sizeof(QuicConnection::ReceivedPacketInfo) == 280);
+}
+
+// static
+void QuicConnectionPeer::DisableEcnCodepointValidation(
+    QuicConnection* connection) {
+  // disable_ecn_codepoint_validation_ doesn't work correctly if the flag
+  // isn't set; all tests that don't set the flag should hit this bug.
+  QUIC_BUG_IF(quic_bug_518619343_03, !GetQuicRestartFlag(quic_support_ect1))
+      << "Test disables ECN validation without setting quic_support_ect1";
+  connection->disable_ecn_codepoint_validation_ = true;
+}
+
+// static
+void QuicConnectionPeer::OnForwardProgressMade(QuicConnection* connection) {
+  connection->OnForwardProgressMade();
 }
 
 }  // namespace test

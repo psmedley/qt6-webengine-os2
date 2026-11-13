@@ -15,12 +15,12 @@
 #ifndef THIRD_PARTY_NEARBY_INTERNAL_PLATFORM_UUID_H_
 #define THIRD_PARTY_NEARBY_INTERNAL_PLATFORM_UUID_H_
 
+#include <array>
 #include <cstdint>
 #include <string>
 
 #include "absl/strings/string_view.h"
 
-namespace location {
 namespace nearby {
 
 // A type 3 name-based
@@ -57,8 +57,10 @@ class Uuid final {
   std::uint64_t GetMostSigBits() const { return most_sig_bits_; }
   std::uint64_t GetLeastSigBits() const { return least_sig_bits_; }
 
+  bool operator<(const Uuid &rhs) const;
   // Hashable
   bool operator==(const Uuid &rhs) const;
+  bool operator!=(const Uuid &rhs) const;
   template <typename H>
   friend H AbslHashValue(H h, const Uuid &b) {
     return H::combine(std::move(h), b.most_sig_bits_, b.least_sig_bits_);
@@ -68,13 +70,12 @@ class Uuid final {
   bool IsEmpty() const { return most_sig_bits_ == 0 && least_sig_bits_ == 0; }
 
  private:
-  std::string ToCanonicalString(const std::array<char, 16>& data) const;
+  std::string ToCanonicalString(const std::array<char, 16> &data) const;
 
   std::uint64_t most_sig_bits_{0};
   std::uint64_t least_sig_bits_{0};
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // THIRD_PARTY_NEARBY_INTERNAL_PLATFORM_UUID_H_

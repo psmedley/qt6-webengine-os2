@@ -18,28 +18,6 @@
       }
     }
   },
-  'baremetal-pool': {
-    'swarming': {
-      'dimensions': {
-        'pool': 'WebRTC-baremetal'
-      }
-    }
-  },
-  'baremetal-try-pool': {
-    'swarming': {
-      'dimensions': {
-        'pool': 'WebRTC-baremetal-try'
-      }
-    }
-  },
-  'bullhead': {
-    'swarming': {
-      'dimensions': {
-        'device_type': 'bullhead',
-        'os': 'Android'
-      }
-    }
-  },
   'chrome-tester-service-account': {
     'swarming': {
       'service_account':
@@ -59,13 +37,20 @@
       }
     }
   },
-  'hammerhead': {
+  'crosshatch': {
     'swarming': {
       'dimensions': {
-        'device_type': 'hammerhead',
+        'device_type': 'crosshatch',
         'os': 'Android'
       }
     }
+  },
+  'fuchsia-gtest-output': {
+    'args': [
+      '--test-launcher-summary-output=${ISOLATED_OUTDIR}/gtest_output.json',
+      '--test-arg=--gtest_output=json:/custom_artifacts/gtest_output.json',
+      '--test-arg=--undefok=test_launcher_summary_output'
+    ]
   },
   'has_native_resultdb_integration': {
     'resultdb': {
@@ -73,11 +58,12 @@
       'has_native_resultdb_integration': True
     }
   },
-  'ios-device-15.7': {
+  'ios-device-16.6': {
     'swarming': {
       'dimensions': {
-        'os': 'iOS-15.7',
-        'pool': 'chrome.tests'
+        'os': 'iOS-16.6',
+        'pool': 'chrome.tests',
+        'device_status': 'available'
       }
     }
   },
@@ -85,43 +71,43 @@
     'swarming': {
       'idempotent': False,
       'dimensions': {
-        'os': 'iOS-12.4.1',
+        'os': 'iOS-15.7.8',
         'pool': 'WebRTC',
-        'id': 'build15-a7'
+        'id': 'mac-254-e504',
+        'device_status': 'available'
       }
     }
   },
-  'ios-simulator-12.4': {
-    '$mixin_append': {
-      'args': ['--platform', 'iPhone X', '--version', '12.4'],
-      'swarming': {
-        'named_caches': [{
-          'name': 'runtime_ios_12_4',
-          'path': 'Runtime-ios-12.4'
-        }]
-      }
+  'ios_runtime_cache_15_5': {
+    'swarming': {
+      'named_caches': [{
+        'name': 'runtime_ios_15_5',
+        'path': 'Runtime-ios-15.5'
+      }]
     }
   },
-  'ios-simulator-13.6': {
-    '$mixin_append': {
-      'args': ['--platform', 'iPhone X', '--version', '13.6'],
-      'swarming': {
-        'named_caches': [{
-          'name': 'runtime_ios_13_6',
-          'path': 'Runtime-ios-13.6'
-        }]
-      }
+  'ios_runtime_cache_16_4': {
+    'swarming': {
+      'named_caches': [{
+        'name': 'runtime_ios_16_4',
+        'path': 'Runtime-ios-16.4'
+      }]
     }
   },
-  'ios-simulator-14.5': {
-    '$mixin_append': {
-      'args': ['--platform', 'iPhone X', '--version', '14.5'],
-      'swarming': {
-        'named_caches': [{
-          'name': 'runtime_ios_14_5',
-          'path': 'Runtime-ios-14.5'
-        }]
-      }
+  'ios_runtime_cache_17_0': {
+    'swarming': {
+      'named_caches': [{
+        'name': 'runtime_ios_17_0',
+        'path': 'Runtime-ios-17.0'
+      }]
+    }
+  },
+  'isolate_profile_data': {
+    'isolate_profile_data': True
+  },
+  'limited-capacity': {
+    'swarming': {
+      'expiration': 10800
     }
   },
   'linux-bionic': {
@@ -131,16 +117,11 @@
       }
     }
   },
-  'logdog-butler': {
+  'linux-focal': {
     'swarming': {
-      'cipd_packages': [{
-        'cipd_package':
-        'infra/tools/luci/logdog/butler/${platform}',
-        'location':
-        'bin',
-        'revision':
-        'git_revision:ff387eadf445b24c935f1cf7d6ddd279f8a6b04c'
-      }]
+      'dimensions': {
+        'os': 'Ubuntu-20.04'
+      }
     }
   },
   'mac-m1-cpu': {
@@ -173,6 +154,14 @@
       }
     }
   },
+  'mac_13_x64': {
+    'swarming': {
+      'dimensions': {
+        'cpu': 'x86-64',
+        'os': 'Mac-13'
+      }
+    }
+  },
   'mac_toolchain': {
     'swarming': {
       'cipd_packages': [{
@@ -181,48 +170,40 @@
         'location':
         '.',
         'revision':
-        'git_revision:723fc1a6c8cdf2631a57851f5610e598db0c1de1'
+        'git_revision:b28cf90d462a7bbd45c28f2d931960c2b9404cb0'
       }]
     }
   },
-  'marshmallow': {
-    'swarming': {
-      'dimensions': {
-        'device_os': 'MMB29Q'
-      }
-    }
-  },
-  'marshmallow_generic': {
-    'swarming': {
-      'dimensions': {
-        'device_os': 'M'
-      }
-    }
-  },
   'out_dir_arg': {
-    '$mixin_append': {
-      'args': ['--out-dir', '${ISOLATED_OUTDIR}']
-    }
-  },
-  'perf-low-bandwidth-audio-perf-test': {
-    'merge': {
-      'script': '//tools_webrtc/perf/process_perf_results.py',
-      'args': ['--test-suite', 'low_bandwidth_audio_perf_test']
-    }
+    'args': ['--out-dir', '${ISOLATED_OUTDIR}']
   },
   'perf-output': {
-    '$mixin_append': {
-      'args': [
-        '--isolated-script-test-perf-output=${ISOLATED_OUTDIR}/perftest-output.pb'
-      ]
-    }
+    'args': [
+      '--isolated-script-test-perf-output=${ISOLATED_OUTDIR}/perftest-output.pb'
+    ]
   },
   'perf-pool': {
     'swarming': {
       'idempotent': False,
       'dimensions': {
-        'pool': 'WebRTC-perf'
+        'pool': 'WebRTC-perf',
+        'gce': '0'
       }
+    }
+  },
+  'perf-pool-vm': {
+    'swarming': {
+      'idempotent': False,
+      'dimensions': {
+        'pool': 'WebRTC-perf',
+        'gce': '1'
+      }
+    }
+  },
+  'perf-video-codec-perf-tests': {
+    'merge': {
+      'script': '//tools_webrtc/perf/process_perf_results.py',
+      'args': ['--test-suite', 'video_codec_perf_tests']
     }
   },
   'perf-webrtc-perf-tests': {
@@ -230,20 +211,21 @@
       'script': '//tools_webrtc/perf/process_perf_results.py',
       'args': ['--test-suite', 'webrtc_perf_tests']
     },
-    '$mixin_append': {
-      'args': ['--nologs']
-    }
+    'args': ['--nologs']
   },
   'quick-perf-tests': {
-    '$mixin_append': {
-      'args':
-      ['--force_fieldtrials=WebRTC-QuickPerfTest/Enabled/', '--nologs']
+    'args': ['--webrtc_quick_perf_test', '--nologs']
+  },
+  'redfin': {
+    'swarming': {
+      'dimensions': {
+        'device_type': 'redfin',
+        'os': 'Android'
+      }
     }
   },
   'resultdb-gtest-json-format': {
-    '$mixin_append': {
-      'args': ['--gtest_output=json:${ISOLATED_OUTDIR}/gtest_output.json']
-    },
+    'args': ['--gtest_output=json:${ISOLATED_OUTDIR}/gtest_output.json'],
     'resultdb': {
       'result_format': 'gtest_json',
       'result_file': '${ISOLATED_OUTDIR}/gtest_output.json'
@@ -252,14 +234,6 @@
   'resultdb-json-format': {
     'resultdb': {
       'result_format': 'json'
-    }
-  },
-  'shamu': {
-    'swarming': {
-      'dimensions': {
-        'device_type': 'shamu',
-        'os': 'Android'
-      }
     }
   },
   'shards-2': {
@@ -275,6 +249,11 @@
   'shards-6': {
     'swarming': {
       'shards': 6
+    }
+  },
+  'shards-8': {
+    'swarming': {
+      'shards': 8
     }
   },
   'timeout-2h': {
@@ -298,14 +277,12 @@
     }
   },
   'webrtc-xctest': {
-    '$mixin_append': {
-      'args': ['--xctest', '--undefok=enable-run-ios-unittests-with-xctest']
-    }
+    'args': ['--xctest']
   },
   'win10': {
     'swarming': {
       'dimensions': {
-        'os': 'Windows-10-19042'
+        'os': 'Windows-10-19045'
       }
     }
   },
@@ -316,6 +293,13 @@
       }
     }
   },
+  'win11': {
+    'swarming': {
+      'dimensions': {
+        'os': 'Windows-11-22000'
+      }
+    }
+  },
   'x86-64': {
     'swarming': {
       'dimensions': {
@@ -323,31 +307,28 @@
       }
     }
   },
-  'xcode_12d4e': {
-    '$mixin_append': {
-      'args': ['--xcode-build-version', '12d4e'],
-      'swarming': {
-        'named_caches': [{
-          'name': 'xcode_ios_12d4e',
-          'path': 'Xcode.app'
-        }]
-      }
-    }
-  },
-  'xcode_13_main': {
-    '$mixin_append': {
-      'args': ['--xcode-build-version', '13c100']
-    },
+  'xcode_14_main': {
+    'args': ['--xcode-build-version', '14c18'],
     'swarming': {
+      'dimensions': {
+        'caches': 'xcode_ios_14c18'
+      },
       'named_caches': [{
-        'name': 'xcode_ios_13c100',
+        'name': 'xcode_ios_14c18',
         'path': 'Xcode.app'
       }]
     }
   },
-  'xcode_parallelization': {
-    '$mixin_append': {
-      'args': ['--xcode-parallelization']
+  'xcode_15_main': {
+    'args': ['--xcode-build-version', '15a507'],
+    'swarming': {
+      'named_caches': [{
+        'name': 'xcode_ios_15a507',
+        'path': 'Xcode.app'
+      }]
     }
+  },
+  'xcodebuild_sim_runner': {
+    'args': ['--xcodebuild-sim-runner']
   }
 }

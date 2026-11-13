@@ -17,7 +17,6 @@ from .code_node import SymbolNode
 from .code_node import SymbolScopeNode
 from .code_node import TextNode
 from .code_node_cxx import CxxClassDefNode
-from .code_node_cxx import CxxFuncDeclNode
 from .code_node_cxx import CxxFuncDefNode
 from .code_node_cxx import CxxLikelyIfNode
 from .code_node_cxx import CxxNamespaceNode
@@ -88,6 +87,7 @@ class _DictionaryMember(object):
             self._default_expr = None
 
         self._exposure = dict_member.exposure
+        self._extended_attributes = dict_member.extended_attributes
 
     @property
     def identifier(self):
@@ -198,6 +198,10 @@ class _DictionaryMember(object):
     def exposure(self):
         return self._exposure
 
+    @property
+    def extended_attributes(self):
+        return self._extended_attributes
+
 
 def bind_local_vars(code_node, cg_context):
     assert isinstance(code_node, SymbolScopeNode)
@@ -214,10 +218,11 @@ def bind_local_vars(code_node, cg_context):
                               "${isolate}->GetCurrentContext();")),
         S("is_cross_origin_isolated",
           ("const bool ${is_cross_origin_isolated} = "
-           "${execution_context}->CrossOriginIsolatedCapability();")),
-        S("is_isolated_application",
-          ("const bool ${is_isolated_application} = "
-           "${execution_context}->IsolatedApplicationCapability();")),
+           "${execution_context}"
+           "->CrossOriginIsolatedCapabilityOrDisabledWebSecurity();")),
+        S("is_in_isolated_context",
+          ("const bool ${is_in_isolated_context} = "
+           "${execution_context}->IsIsolatedContext();")),
         S("is_in_secure_context",
           ("const bool ${is_in_secure_context} = "
            "${execution_context}->IsSecureContext();")),
@@ -277,15 +282,6 @@ def make_factory_methods(cg_context):
     func_def.body.append(
         TextNode("return MakeGarbageCollected<${class_name}>(${isolate});"))
 
-    func_decl = CxxFuncDeclNode(name="Create",
-                                arg_decls=[
-                                    "v8::Isolate* isolate",
-                                    "v8::Local<v8::Value> v8_value",
-                                    "ExceptionState& exception_state",
-                                ],
-                                return_type="${class_name}*",
-                                static=True)
-    decls.append(func_decl)
     func_def = CxxFuncDefNode(name="Create",
                               arg_decls=[
                                   "v8::Isolate* isolate",
@@ -294,6 +290,8 @@ def make_factory_methods(cg_context):
                               ],
                               return_type="${class_name}*",
                               class_name=cg_context.class_name)
+    decls.append(func_def.make_decl(static=True))
+
     defs.append(func_def)
     func_def.set_base_template_vars(cg_context.template_bindings())
     body = func_def.body
@@ -352,10 +350,6 @@ def make_constructors(cg_context):
     ]
 
     if not _constructor_needs_v8_isolate(cg_context.dictionary):
-        func_decl = CxxFuncDeclNode(name=cg_context.class_name,
-                                    arg_decls=[],
-                                    return_type="",
-                                    explicit=True)
         func_def = CxxFuncDefNode(
             name=cg_context.class_name,
             arg_decls=[],
@@ -363,17 +357,13 @@ def make_constructors(cg_context):
             class_name=cg_context.class_name,
             member_initializer_list=member_initializer_list)
         func_def.set_base_template_vars(cg_context.template_bindings())
-        decls.append(func_decl)
+        decls.append(func_def.make_decl(explicit=True))
         defs.append(func_def)
         defs.append(EmptyNode())
 
     if cg_context.dictionary.inherited:
         member_initializer_list = ["${base_class_name}(isolate)"
                                    ] + member_initializer_list
-    func_decl = CxxFuncDeclNode(name=cg_context.class_name,
-                                arg_decls=["v8::Isolate* isolate"],
-                                return_type="",
-                                explicit=True)
     func_def = CxxFuncDefNode(name=cg_context.class_name,
                               arg_decls=["v8::Isolate* isolate"],
                               return_type="",
@@ -381,7 +371,7 @@ def make_constructors(cg_context):
                               member_initializer_list=member_initializer_list)
     func_def.set_base_template_vars(cg_context.template_bindings())
     func_def.add_template_vars({"isolate": "isolate"})
-    decls.append(func_decl)
+    decls.append(func_def.make_decl(explicit=True))
     defs.append(func_def)
 
     return decls, defs
@@ -418,7 +408,9 @@ def make_accessor_functions(cg_context):
         func_def.set_base_template_vars(cg_context.template_bindings())
         if not member.is_always_present:
             func_def.body.append(F("DCHECK({}());", member.api_has))
-        func_def.body.append(F("return {};", member.value_var))
+        func_def.body.append(
+            F("return {};",
+              member.type_info.member_var_to_ref_expr(member.value_var)))
         return func_def, None
 
     def make_api_get_or(member):
@@ -433,18 +425,12 @@ def make_accessor_functions(cg_context):
         func_def.body.extend([
             CxxUnlikelyIfNode(cond="!{}()".format(member.api_has),
                               body=T("return fallback_value;")),
-            F("return {};", member.value_var),
+            F("return {};",
+              member.type_info.member_var_to_ref_expr(member.value_var)),
         ])
         return func_def, None
 
     def make_api_get_or_copy_and_move(member):
-        copy_func_decl = CxxFuncDeclNode(name=member.api_get_or,
-                                         arg_decls=[
-                                             "{} fallback_value".format(
-                                                 member.type_info.member_ref_t)
-                                         ],
-                                         return_type=member.type_info.value_t,
-                                         const=True)
         copy_func_def = CxxFuncDefNode(name=member.api_get_or,
                                        arg_decls=[
                                            "{} fallback_value".format(
@@ -457,14 +443,10 @@ def make_accessor_functions(cg_context):
         copy_func_def.body.extend([
             CxxUnlikelyIfNode(cond="!{}()".format(member.api_has),
                               body=T("return fallback_value;")),
-            F("return {};", member.value_var),
+            F("return {};",
+              member.type_info.member_var_to_ref_expr(member.value_var)),
         ])
 
-        move_func_decl = CxxFuncDeclNode(
-            name=member.api_get_or,
-            arg_decls=["{}&& fallback_value".format(member.type_info.value_t)],
-            return_type=member.type_info.value_t,
-            const=True)
         move_func_def = CxxFuncDefNode(
             name=member.api_get_or,
             arg_decls=["{}&& fallback_value".format(member.type_info.value_t)],
@@ -475,10 +457,13 @@ def make_accessor_functions(cg_context):
         move_func_def.body.extend([
             CxxUnlikelyIfNode(cond="!{}()".format(member.api_has),
                               body=T("return std::move(fallback_value);")),
-            F("return {};", member.value_var),
+            F("return {};",
+              member.type_info.member_var_to_ref_expr(member.value_var)),
         ])
 
-        decls = ListNode([copy_func_decl, move_func_decl])
+        decls = ListNode(
+            [copy_func_def.make_decl(),
+             move_func_def.make_decl()])
         defs = ListNode([copy_func_def, EmptyNode(), move_func_def])
         return decls, defs
 
@@ -496,7 +481,8 @@ def make_accessor_functions(cg_context):
         func_def.body.extend([
             CxxUnlikelyIfNode(cond="!{}()".format(member.api_has),
                               body=T("return fallback_value;")),
-            F("return {};", member.value_var),
+            F("return {};",
+              member.type_info.member_var_to_ref_expr(member.value_var)),
         ])
         return func_def, None
 
@@ -517,10 +503,6 @@ def make_accessor_functions(cg_context):
     def make_api_set_copy_and_move(member, type_info=None):
         if type_info is None:
             type_info = member.type_info
-        copy_func_decl = CxxFuncDeclNode(
-            name=member.api_set,
-            arg_decls=["{} value".format(type_info.member_ref_t)],
-            return_type="void")
         copy_func_def = CxxFuncDefNode(
             name=member.api_set,
             arg_decls=["{} value".format(type_info.member_ref_t)],
@@ -532,10 +514,6 @@ def make_accessor_functions(cg_context):
             copy_func_def.body.append(F("{} = true;", member.presence_var))
         copy_func_def.body.append(make_check_assigned_value(member))
 
-        move_func_decl = CxxFuncDeclNode(
-            name=member.api_set,
-            arg_decls=["{}&& value".format(type_info.value_t)],
-            return_type="void")
         move_func_def = CxxFuncDefNode(
             name=member.api_set,
             arg_decls=["{}&& value".format(type_info.value_t)],
@@ -548,7 +526,9 @@ def make_accessor_functions(cg_context):
             move_func_def.body.append(F("{} = true;", member.presence_var))
         move_func_def.body.append(make_check_assigned_value(member))
 
-        decls = ListNode([copy_func_decl, move_func_decl])
+        decls = ListNode(
+            [copy_func_def.make_decl(),
+             move_func_def.make_decl()])
         defs = ListNode([copy_func_def, EmptyNode(), move_func_def])
         return decls, defs
 
@@ -690,12 +670,6 @@ def make_backward_compatible_accessors(cg_context):
 def make_trace_function(cg_context):
     assert isinstance(cg_context, CodeGenContext)
 
-    func_decl = CxxFuncDeclNode(name="Trace",
-                                arg_decls=["Visitor* visitor"],
-                                return_type="void",
-                                const=True,
-                                override=True)
-
     func_def = CxxFuncDefNode(name="Trace",
                               arg_decls=["Visitor* visitor"],
                               return_type="void",
@@ -710,7 +684,7 @@ def make_trace_function(cg_context):
                 member.type_info.member_t, member.value_var)))
     body.append(TextNode("${base_class_name}::Trace(visitor);"))
 
-    return func_decl, func_def
+    return func_def.make_decl(override=True), func_def
 
 
 def make_blink_to_v8_function(cg_context):
@@ -719,15 +693,6 @@ def make_blink_to_v8_function(cg_context):
     S = SymbolNode
     T = TextNode
     F = FormatNode
-
-    func_decl = CxxFuncDeclNode(name="FillV8ObjectWithMembers",
-                                arg_decls=[
-                                    "ScriptState* script_state",
-                                    "v8::Local<v8::Object> v8_dictionary",
-                                ],
-                                return_type="bool",
-                                const=True,
-                                override=True)
 
     func_def = CxxFuncDefNode(name="FillV8ObjectWithMembers",
                               arg_decls=[
@@ -764,22 +729,18 @@ def make_blink_to_v8_function(cg_context):
         node = CxxLikelyIfNode(
             cond="{}()".format(member.api_has),
             body=[
-                CxxUnlikelyIfNode(  #
-                    cond=_format(
-                        "!ToV8Traits<{native_value_tag}>::"
-                        "ToV8(${script_state}, {blink_value})"
-                        ".ToLocal(&${v8_value})",
-                        native_value_tag=native_value_tag(member.idl_type),
-                        blink_value=member.value_var),
-                    body=T("return false;")),
-                CxxUnlikelyIfNode(  #
-                    cond=_format(
-                        "!${v8_dictionary}->CreateDataProperty("
-                        "${current_context}, "
-                        "${v8_own_member_names}[{index}].Get(${isolate}), "
-                        "${v8_value}).To(&${was_property_created})",
-                        index=index),
-                    body=T("return false;")),
+                F(
+                    "${v8_value} = ToV8Traits<{native_value_tag}>::"
+                    "ToV8(${script_state}, {blink_value});",
+                    native_value_tag=native_value_tag(member.idl_type),
+                    blink_value=member.type_info.member_var_to_ref_expr(
+                        member.value_var)),
+                F(
+                    "${v8_dictionary}->CreateDataProperty("
+                    "${current_context}, "
+                    "${v8_own_member_names}[{index}].Get(${isolate}), "
+                    "${v8_value}).ToChecked();",
+                    index=index)
             ])
 
         conditional = expr_from_exposure(member.exposure)
@@ -790,7 +751,7 @@ def make_blink_to_v8_function(cg_context):
 
     body.append(TextNode("return true;"))
 
-    return func_decl, func_def
+    return func_def.make_decl(override=True), func_def
 
 
 def make_v8_to_blink_function(cg_context):
@@ -799,14 +760,6 @@ def make_v8_to_blink_function(cg_context):
     S = SymbolNode
     T = TextNode
     F = FormatNode
-
-    func_decl = CxxFuncDeclNode(name="FillMembersFromV8Object",
-                                arg_decls=[
-                                    "v8::Isolate* isolate",
-                                    "v8::Local<v8::Object> v8_dictionary",
-                                    "ExceptionState& exception_state",
-                                ],
-                                return_type="void")
 
     func_def = CxxFuncDefNode(name="FillMembersFromV8Object",
                               arg_decls=[
@@ -827,10 +780,11 @@ def make_v8_to_blink_function(cg_context):
         S("exception_context_scope",
           ("ExceptionState::ContextScope ${exception_context_scope}("
            "ExceptionContext("
-           "ExceptionContext::Context::kDictionaryMemberGet, "
+           "ExceptionContextType::kDictionaryMemberGet, "
            "${class_like_name}, \"\"), "
            "${exception_state});")),
         S("fallback_presence_var", "bool ${fallback_presence_var};"),
+        S("has_deprecated", "bool ${has_deprecated};"),
         S("is_optional", "constexpr bool ${is_optional} = false;"),
         S("is_required", "constexpr bool ${is_required} = true;"),
         S("try_block", "v8::TryCatch ${try_block}(${isolate});"),
@@ -870,23 +824,40 @@ def make_v8_to_blink_function(cg_context):
             CxxUnlikelyIfNode(cond=cond, body=T("return;")),
         ])
 
+        # [DeprecateAs]
+        deprecate_as = member.extended_attributes.value_of("DeprecateAs")
+        if deprecate_as:
+            node.extend([
+                T("// [DeprecateAs]"),
+                CxxUnlikelyIfNode(cond=_format(
+                    "!${v8_dictionary}->Has("
+                    "${current_context}, "
+                    "${v8_own_member_names}[{index}].Get(${isolate}))"
+                    ".To(&${has_deprecated})",
+                    index=index),
+                                  body=T("return;")),
+                CxxUnlikelyIfNode(cond="${has_deprecated}",
+                                  body=F(("Deprecation::CountDeprecation("
+                                          "${execution_context}, "
+                                          "WebFeature::k{deprecate_as});"),
+                                         deprecate_as=deprecate_as)),
+            ])
+            node.accumulate(
+                CodeGenAccumulator.require_include_headers([
+                    "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
+                ]))
+
         conditional = expr_from_exposure(member.exposure)
         if not conditional.is_always_true:
             node = CxxLikelyIfNode(cond=conditional, body=node)
 
         body.append(node)
 
-    return func_decl, func_def
+    return func_def.make_decl(), func_def
 
 
 def make_v8_own_member_names_function(cg_context):
     assert isinstance(cg_context, CodeGenContext)
-
-    func_decl = CxxFuncDeclNode(
-        name="GetV8OwnMemberNames",
-        arg_decls=["v8::Isolate* isolate"],
-        return_type="const base::span<const v8::Eternal<v8::Name>>",
-        static=True)
 
     func_def = CxxFuncDefNode(
         name="GetV8OwnMemberNames",
@@ -896,6 +867,7 @@ def make_v8_own_member_names_function(cg_context):
     func_def.set_base_template_vars(cg_context.template_bindings())
     body = func_def.body
     func_def.body.add_template_vars({"isolate": "isolate"})
+    func_decl = func_def.make_decl(static=True)
 
     if not cg_context.dictionary.own_members:
         body.append(TextNode("return {};"))

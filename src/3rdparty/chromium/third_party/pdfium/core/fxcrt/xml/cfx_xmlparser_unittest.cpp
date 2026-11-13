@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -289,6 +289,27 @@ TEST_F(CFX_XMLParserTest, EntityOverflowDecimal) {
 TEST_F(CFX_XMLParserTest, IsXMLNameChar) {
   EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L'-', true));
   EXPECT_TRUE(CFX_XMLParser::IsXMLNameChar(L'-', false));
+
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L'.', true));
+  EXPECT_TRUE(CFX_XMLParser::IsXMLNameChar(L'.', false));
+
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L'0', true));
+  EXPECT_TRUE(CFX_XMLParser::IsXMLNameChar(L'0', false));
+
+  EXPECT_TRUE(CFX_XMLParser::IsXMLNameChar(L'a', true));
+  EXPECT_TRUE(CFX_XMLParser::IsXMLNameChar(L'a', false));
+
+  EXPECT_TRUE(CFX_XMLParser::IsXMLNameChar(L'A', true));
+  EXPECT_TRUE(CFX_XMLParser::IsXMLNameChar(L'A', false));
+
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L'(', false));
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L'(', true));
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L')', false));
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L')', true));
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L'[', false));
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L'[', true));
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L']', false));
+  EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(L']', true));
 
   EXPECT_FALSE(CFX_XMLParser::IsXMLNameChar(0x2069, true));
   EXPECT_TRUE(CFX_XMLParser::IsXMLNameChar(0x2070, true));

@@ -16,7 +16,11 @@
 #include "src/gpu/ganesh/tessellate/GrPathTessellationShader.h"
 #include "src/gpu/ganesh/tessellate/PathTessellator.h"
 
-namespace skgpu::v1 {
+using namespace skia_private;
+
+#if !defined(SK_ENABLE_OPTIMIZE_SIZE)
+
+namespace skgpu::ganesh {
 
 namespace {
 
@@ -39,8 +43,8 @@ public:
             fInstanceAttribs.emplace_back("curveType", kFloat_GrVertexAttribType, SkSLType::kFloat);
         }
         this->setInstanceAttributesWithImplicitOffsets(fInstanceAttribs.data(),
-                                                       fInstanceAttribs.count());
-        SkASSERT(fInstanceAttribs.count() <= kMaxInstanceAttribCount);
+                                                       fInstanceAttribs.size());
+        SkASSERT(fInstanceAttribs.size() <= kMaxInstanceAttribCount);
 
         if (!shaderCaps.fVertexIDSupport) {
             constexpr static Attribute kVertexIdxAttrib("vertexidx", kFloat_GrVertexAttribType,
@@ -55,7 +59,7 @@ private:
     std::unique_ptr<ProgramImpl> makeProgramImpl(const GrShaderCaps&) const final;
 
     constexpr static int kMaxInstanceAttribCount = 3;
-    SkSTArray<kMaxInstanceAttribCount, Attribute> fInstanceAttribs;
+    STArray<kMaxInstanceAttribCount, Attribute> fInstanceAttribs;
 };
 
 std::unique_ptr<GrGeometryProcessor::ProgramImpl> HullShader::makeProgramImpl(
@@ -471,4 +475,6 @@ void PathInnerTriangulateOp::onExecute(GrOpFlushState* flushState, const SkRect&
     }
 }
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh
+
+#endif // SK_ENABLE_OPTIMIZE_SIZE

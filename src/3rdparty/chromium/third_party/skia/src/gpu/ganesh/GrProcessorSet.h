@@ -8,7 +8,7 @@
 #ifndef GrProcessorSet_DEFINED
 #define GrProcessorSet_DEFINED
 
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkTemplates.h"
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
 #include "src/gpu/ganesh/GrPaint.h"
 #include "src/gpu/ganesh/GrProcessorAnalysis.h"
@@ -150,7 +150,7 @@ public:
     static GrProcessorSet MakeEmptySet();
     static constexpr Analysis EmptySetAnalysis() { return Analysis(Empty::kEmpty); }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     SkString dumpProcessors() const;
 #endif
 

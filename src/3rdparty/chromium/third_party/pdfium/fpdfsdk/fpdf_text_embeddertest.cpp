@@ -1,4 +1,4 @@
-// Copyright 2015 PDFium Authors. All rights reserved.
+// Copyright 2015 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -492,6 +492,115 @@ TEST_F(FPDFTextEmbedderTest, TextSearchConsecutive) {
   UnloadPage(page);
 }
 
+TEST_F(FPDFTextEmbedderTest, TextSearchTermAtEnd) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+    ASSERT_TRUE(textpage);
+
+    ScopedFPDFWideString search_term = GetFPDFWideString(L"world!");
+    ScopedFPDFTextFind search(
+        FPDFText_FindStart(textpage.get(), search_term.get(), 0, 0));
+    ASSERT_TRUE(search);
+    EXPECT_EQ(0, FPDFText_GetSchResultIndex(search.get()));
+    EXPECT_EQ(0, FPDFText_GetSchCount(search.get()));
+
+    EXPECT_TRUE(FPDFText_FindNext(search.get()));
+    EXPECT_EQ(7, FPDFText_GetSchResultIndex(search.get()));
+    EXPECT_EQ(6, FPDFText_GetSchCount(search.get()));
+
+    EXPECT_TRUE(FPDFText_FindNext(search.get()));
+    EXPECT_EQ(24, FPDFText_GetSchResultIndex(search.get()));
+    EXPECT_EQ(6, FPDFText_GetSchCount(search.get()));
+  }
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbedderTest, TextSearchLeadingSpace) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+    ASSERT_TRUE(textpage);
+
+    ScopedFPDFWideString search_term = GetFPDFWideString(L" Good");
+    ScopedFPDFTextFind search(
+        FPDFText_FindStart(textpage.get(), search_term.get(), 0, 0));
+    ASSERT_TRUE(search);
+    EXPECT_EQ(0, FPDFText_GetSchResultIndex(search.get()));
+    EXPECT_EQ(0, FPDFText_GetSchCount(search.get()));
+
+    EXPECT_TRUE(FPDFText_FindNext(search.get()));
+    EXPECT_EQ(14, FPDFText_GetSchResultIndex(search.get()));
+    EXPECT_EQ(5, FPDFText_GetSchCount(search.get()));
+
+    EXPECT_FALSE(FPDFText_FindNext(search.get()));
+  }
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbedderTest, TextSearchTrailingSpace) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+    ASSERT_TRUE(textpage);
+
+    ScopedFPDFWideString search_term = GetFPDFWideString(L"ld! ");
+    ScopedFPDFTextFind search(
+        FPDFText_FindStart(textpage.get(), search_term.get(), 0, 0));
+    ASSERT_TRUE(search);
+    EXPECT_EQ(0, FPDFText_GetSchResultIndex(search.get()));
+    EXPECT_EQ(0, FPDFText_GetSchCount(search.get()));
+
+    EXPECT_TRUE(FPDFText_FindNext(search.get()));
+    EXPECT_EQ(10, FPDFText_GetSchResultIndex(search.get()));
+    EXPECT_EQ(4, FPDFText_GetSchCount(search.get()));
+
+    EXPECT_FALSE(FPDFText_FindNext(search.get()));
+  }
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbedderTest, TextSearchSpaceInSearchTerm) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+    ASSERT_TRUE(textpage);
+
+    ScopedFPDFWideString search_term = GetFPDFWideString(L"ld! G");
+    ScopedFPDFTextFind search(
+        FPDFText_FindStart(textpage.get(), search_term.get(), 0, 0));
+    ASSERT_TRUE(search);
+    EXPECT_EQ(0, FPDFText_GetSchResultIndex(search.get()));
+    EXPECT_EQ(0, FPDFText_GetSchCount(search.get()));
+
+    EXPECT_TRUE(FPDFText_FindNext(search.get()));
+    EXPECT_EQ(10, FPDFText_GetSchResultIndex(search.get()));
+    // Note: Even though `search_term` contains 5 characters,
+    // FPDFText_FindNext() matched "\r\n" in `textpage` against the space in
+    // `search_term`.
+    EXPECT_EQ(6, FPDFText_GetSchCount(search.get()));
+
+    EXPECT_FALSE(FPDFText_FindNext(search.get()));
+  }
+
+  UnloadPage(page);
+}
+
 // Fails on Windows. https://crbug.com/pdfium/1370
 #if BUILDFLAG(IS_WIN)
 #define MAYBE_TextSearchLatinExtended DISABLED_TextSearchLatinExtended
@@ -949,6 +1058,98 @@ TEST_F(FPDFTextEmbedderTest, ToUnicode) {
   EXPECT_EQ(0U, FPDFText_GetUnicode(textpage, 0));
 
   FPDFText_ClosePage(textpage);
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbedderTest, IsGenerated) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+    ASSERT_TRUE(textpage);
+
+    EXPECT_EQ(static_cast<unsigned int>('H'),
+              FPDFText_GetUnicode(textpage.get(), 0));
+    EXPECT_EQ(0, FPDFText_IsGenerated(textpage.get(), 0));
+    EXPECT_EQ(static_cast<unsigned int>(' '),
+              FPDFText_GetUnicode(textpage.get(), 6));
+    EXPECT_EQ(0, FPDFText_IsGenerated(textpage.get(), 6));
+
+    EXPECT_EQ(static_cast<unsigned int>('\r'),
+              FPDFText_GetUnicode(textpage.get(), 13));
+    EXPECT_EQ(1, FPDFText_IsGenerated(textpage.get(), 13));
+    EXPECT_EQ(static_cast<unsigned int>('\n'),
+              FPDFText_GetUnicode(textpage.get(), 14));
+    EXPECT_EQ(1, FPDFText_IsGenerated(textpage.get(), 14));
+
+    EXPECT_EQ(-1, FPDFText_IsGenerated(textpage.get(), -1));
+    EXPECT_EQ(-1, FPDFText_IsGenerated(textpage.get(), kHelloGoodbyeTextSize));
+    EXPECT_EQ(-1, FPDFText_IsGenerated(nullptr, 6));
+  }
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbedderTest, IsHyphen) {
+  ASSERT_TRUE(OpenDocument("bug_781804.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+    ASSERT_TRUE(textpage);
+
+    EXPECT_EQ(static_cast<unsigned int>('V'),
+              FPDFText_GetUnicode(textpage.get(), 0));
+    EXPECT_EQ(0, FPDFText_IsHyphen(textpage.get(), 0));
+    EXPECT_EQ(static_cast<unsigned int>('\2'),
+              FPDFText_GetUnicode(textpage.get(), 6));
+    EXPECT_EQ(1, FPDFText_IsHyphen(textpage.get(), 6));
+
+    EXPECT_EQ(static_cast<unsigned int>('U'),
+              FPDFText_GetUnicode(textpage.get(), 14));
+    EXPECT_EQ(0, FPDFText_IsHyphen(textpage.get(), 14));
+    EXPECT_EQ(static_cast<unsigned int>(L'\u2010'),
+              FPDFText_GetUnicode(textpage.get(), 18));
+    EXPECT_EQ(0, FPDFText_IsHyphen(textpage.get(), 18));
+
+    EXPECT_EQ(-1, FPDFText_IsHyphen(textpage.get(), -1));
+    EXPECT_EQ(-1, FPDFText_IsHyphen(textpage.get(), 1000));
+    EXPECT_EQ(-1, FPDFText_IsHyphen(nullptr, 6));
+  }
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbedderTest, IsInvalidUnicode) {
+  ASSERT_TRUE(OpenDocument("bug_1388_2.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    constexpr int kExpectedCharCount = 5;
+    ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+    ASSERT_TRUE(textpage);
+    EXPECT_EQ(kExpectedCharCount, FPDFText_CountChars(textpage.get()));
+
+    EXPECT_EQ(static_cast<unsigned int>('X'),
+              FPDFText_GetUnicode(textpage.get(), 0));
+    EXPECT_EQ(0, FPDFText_HasUnicodeMapError(textpage.get(), 0));
+    EXPECT_EQ(static_cast<unsigned int>(' '),
+              FPDFText_GetUnicode(textpage.get(), 1));
+    EXPECT_EQ(0, FPDFText_HasUnicodeMapError(textpage.get(), 1));
+
+    EXPECT_EQ(31u, FPDFText_GetUnicode(textpage.get(), 2));
+    EXPECT_EQ(1, FPDFText_HasUnicodeMapError(textpage.get(), 2));
+
+    EXPECT_EQ(-1, FPDFText_HasUnicodeMapError(textpage.get(), -1));
+    EXPECT_EQ(-1,
+              FPDFText_HasUnicodeMapError(textpage.get(), kExpectedCharCount));
+    EXPECT_EQ(-1, FPDFText_HasUnicodeMapError(nullptr, 0));
+  }
+
   UnloadPage(page);
 }
 

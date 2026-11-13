@@ -43,18 +43,18 @@ import {
 
 const UIStrings = {
   /**
-  *@description Label for layers sidepanel tree
-  */
+   *@description Label for layers sidepanel tree
+   */
   layersTreePane: 'Layers Tree Pane',
   /**
-  *@description A context menu item in the DView of the Layers panel
-  */
+   *@description A context menu item in the DView of the Layers panel
+   */
   showPaintProfiler: 'Show Paint Profiler',
   /**
-  *@description Details text content in Layer Tree Outline of the Layers panel
-  *@example {10} PH1
-  *@example {10} PH2
-  */
+   *@description Details text content in Layer Tree Outline of the Layers panel
+   *@example {10} PH1
+   *@example {10} PH2
+   */
   updateChildDimension: ' ({PH1} × {PH2})',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/layer_viewer/LayerTreeOutline.ts', UIStrings);
@@ -64,7 +64,7 @@ export class LayerTreeOutline extends Common.ObjectWrapper.eventMixin<EventTypes
   private layerViewHost: LayerViewHost;
   private treeOutline: UI.TreeOutline.TreeOutlineInShadow;
   private lastHoveredNode: LayerTreeElement|null;
-  element: HTMLElement;
+  override element: HTMLElement;
   private layerTree?: SDK.LayerTreeBase.LayerTreeBase|null;
   private layerSnapshotMap?: Map<SDK.LayerTreeBase.Layer, SnapshotSelection>;
 
@@ -78,14 +78,14 @@ export class LayerTreeOutline extends Common.ObjectWrapper.eventMixin<EventTypes
     this.treeOutline.element.addEventListener('mousemove', this.onMouseMove.bind(this) as EventListener, false);
     this.treeOutline.element.addEventListener('mouseout', this.onMouseMove.bind(this) as EventListener, false);
     this.treeOutline.element.addEventListener('contextmenu', this.onContextMenu.bind(this) as EventListener, true);
-    UI.ARIAUtils.setAccessibleName(this.treeOutline.contentElement, i18nString(UIStrings.layersTreePane));
+    UI.ARIAUtils.setLabel(this.treeOutline.contentElement, i18nString(UIStrings.layersTreePane));
 
     this.lastHoveredNode = null;
     this.element = this.treeOutline.element;
     this.layerViewHost.showInternalLayersSetting().addChangeListener(this.update, this);
   }
 
-  focus(): void {
+  override focus(): void {
     this.treeOutline.focus();
   }
 
@@ -225,7 +225,7 @@ export class LayerTreeOutline extends Common.ObjectWrapper.eventMixin<EventTypes
       if (this.layerSnapshotMap.has(layer)) {
         contextMenu.defaultSection().appendItem(
             i18nString(UIStrings.showPaintProfiler),
-            () => this.dispatchEventToListeners(Events.PaintProfilerRequested, selection as Selection), false);
+            () => this.dispatchEventToListeners(Events.PaintProfilerRequested, selection as Selection));
       }
     }
     this.layerViewHost.showContextMenu(contextMenu, selection);
@@ -268,7 +268,7 @@ export class LayerTreeElement extends UI.TreeOutline.TreeElement {
     this.title = title;
   }
 
-  onselect(): boolean {
+  override onselect(): boolean {
     this.treeOutlineInternal.selectedNodeChanged(this);
     return false;
   }

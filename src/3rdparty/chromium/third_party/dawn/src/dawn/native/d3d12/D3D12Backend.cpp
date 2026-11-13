@@ -1,16 +1,29 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // D3D12Backend.cpp: contains the definition of symbols exported by D3D12Backend.h so that they
 // can be compiled twice: once export (shared library), once not exported (static library)
@@ -22,85 +35,14 @@
 
 #include "dawn/common/Log.h"
 #include "dawn/common/Math.h"
-#include "dawn/common/SwapChainUtils.h"
-#include "dawn/native/d3d12/D3D11on12Util.h"
 #include "dawn/native/d3d12/DeviceD3D12.h"
-#include "dawn/native/d3d12/ExternalImageDXGIImpl.h"
-#include "dawn/native/d3d12/NativeSwapChainImplD3D12.h"
 #include "dawn/native/d3d12/ResidencyManagerD3D12.h"
 #include "dawn/native/d3d12/TextureD3D12.h"
 
 namespace dawn::native::d3d12 {
 
-ComPtr<ID3D12Device> GetD3D12Device(WGPUDevice device) {
+Microsoft::WRL::ComPtr<ID3D12Device> GetD3D12Device(WGPUDevice device) {
     return ToBackend(FromAPI(device))->GetD3D12Device();
-}
-
-DawnSwapChainImplementation CreateNativeSwapChainImpl(WGPUDevice device, HWND window) {
-    Device* backendDevice = ToBackend(FromAPI(device));
-
-    DawnSwapChainImplementation impl;
-    impl = CreateSwapChainImplementation(new NativeSwapChainImpl(backendDevice, window));
-    impl.textureUsage = WGPUTextureUsage_Present;
-
-    return impl;
-}
-
-WGPUTextureFormat GetNativeSwapChainPreferredFormat(const DawnSwapChainImplementation* swapChain) {
-    NativeSwapChainImpl* impl = reinterpret_cast<NativeSwapChainImpl*>(swapChain->userData);
-    return static_cast<WGPUTextureFormat>(impl->GetPreferredFormat());
-}
-
-ExternalImageDescriptorDXGISharedHandle::ExternalImageDescriptorDXGISharedHandle()
-    : ExternalImageDescriptor(ExternalImageType::DXGISharedHandle) {}
-
-ExternalImageDXGI::ExternalImageDXGI(std::unique_ptr<ExternalImageDXGIImpl> impl)
-    : mImpl(std::move(impl)) {
-    ASSERT(mImpl != nullptr);
-}
-
-ExternalImageDXGI::~ExternalImageDXGI() = default;
-
-bool ExternalImageDXGI::IsValid() const {
-    return mImpl->IsValid();
-}
-
-WGPUTexture ExternalImageDXGI::ProduceTexture(
-    WGPUDevice device,
-    const ExternalImageDXGIBeginAccessDescriptor* descriptor) {
-    return BeginAccess(descriptor);
-}
-
-WGPUTexture ExternalImageDXGI::BeginAccess(
-    const ExternalImageDXGIBeginAccessDescriptor* descriptor) {
-    if (!IsValid()) {
-        dawn::ErrorLog() << "Cannot use external image after device destruction";
-        return nullptr;
-    }
-    return mImpl->BeginAccess(descriptor);
-}
-
-void ExternalImageDXGI::EndAccess(WGPUTexture texture,
-                                  ExternalImageDXGIFenceDescriptor* signalFence) {
-    if (!IsValid()) {
-        dawn::ErrorLog() << "Cannot use external image after device destruction";
-        return;
-    }
-    mImpl->EndAccess(texture, signalFence);
-}
-
-// static
-std::unique_ptr<ExternalImageDXGI> ExternalImageDXGI::Create(
-    WGPUDevice device,
-    const ExternalImageDescriptorDXGISharedHandle* descriptor) {
-    Device* backendDevice = ToBackend(FromAPI(device));
-    std::unique_ptr<ExternalImageDXGIImpl> impl =
-        backendDevice->CreateExternalImageDXGIImpl(descriptor);
-    if (!impl) {
-        dawn::ErrorLog() << "Failed to create DXGI external image";
-        return nullptr;
-    }
-    return std::unique_ptr<ExternalImageDXGI>(new ExternalImageDXGI(std::move(impl)));
 }
 
 uint64_t SetExternalMemoryReservation(WGPUDevice device,
@@ -108,13 +50,10 @@ uint64_t SetExternalMemoryReservation(WGPUDevice device,
                                       MemorySegment memorySegment) {
     Device* backendDevice = ToBackend(FromAPI(device));
 
+    auto deviceLock(backendDevice->GetScopedLock());
+
     return backendDevice->GetResidencyManager()->SetExternalMemoryReservation(
         memorySegment, requestedReservationSize);
 }
 
-AdapterDiscoveryOptions::AdapterDiscoveryOptions()
-    : AdapterDiscoveryOptionsBase(WGPUBackendType_D3D12), dxgiAdapter(nullptr) {}
-
-AdapterDiscoveryOptions::AdapterDiscoveryOptions(ComPtr<IDXGIAdapter> adapter)
-    : AdapterDiscoveryOptionsBase(WGPUBackendType_D3D12), dxgiAdapter(std::move(adapter)) {}
 }  // namespace dawn::native::d3d12

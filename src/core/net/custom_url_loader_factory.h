@@ -1,5 +1,6 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -17,6 +18,9 @@
 
 #include "mojo/public/cpp/bindings/pending_remote.h"
 
+namespace content {
+class WebContents;
+}
 namespace network {
 namespace mojom {
 class URLLoaderFactory;
@@ -26,7 +30,7 @@ class URLLoaderFactory;
 namespace QtWebEngineCore {
 class ProfileAdapter;
 
-mojo::PendingRemote<network::mojom::URLLoaderFactory> CreateCustomURLLoaderFactory(ProfileAdapter *profileAdapter);
+mojo::PendingRemote<network::mojom::URLLoaderFactory> CreateCustomURLLoaderFactory(ProfileAdapter *profileAdapter, content::WebContents *webContents);
 
 } // namespace QtWebEngineCore
 

@@ -1,5 +1,5 @@
 # Copyright (C) 2018-2019 The ANGLE Project Authors.
-# Copyright (C) 2019 LunarG, Inc.
+# Copyright (C) 2019-2023 LunarG, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -43,7 +43,6 @@ config("vulkan_internal_config") {
     cflags = [
       "-Wno-conversion",
       "-Wno-extra-semi",
-      "-Wno-implicit-fallthrough",
       "-Wno-sign-compare",
       "-Wno-unreachable-code",
       "-Wno-unused-function",
@@ -63,6 +62,9 @@ config("vulkan_internal_config") {
       "FALLBACK_DATA_DIRS=\"/usr/local/share:/usr/share\"",
     ]
   }
+  if (is_apple && !vulkan_loader_shared) {
+    defines += [ "APPLE_STATIC_LOADER" ]
+  }
 }
 
 # Vulkan loader
@@ -74,8 +76,7 @@ config("vulkan_loader_config") {
     "loader",
   ]
   defines = [
-    "API_NAME=\"Vulkan\"",
-    "USE_UNSAFE_FILE_SEARCH=1",
+    "LOADER_USE_UNSAFE_FILE_SEARCH=1",
   ]
 
   if (is_win) {
@@ -104,7 +105,6 @@ if (!is_android) {
       "loader/adapters.h",
       "loader/allocation.c",
       "loader/allocation.h",
-      "loader/asm_offset.c",
       "loader/cJSON.c",
       "loader/cJSON.h",
       "loader/debug_utils.c",
@@ -112,19 +112,21 @@ if (!is_android) {
       "loader/dev_ext_trampoline.c",
       "loader/extension_manual.c",
       "loader/extension_manual.h",
-      "loader/get_environment.c",
-      "loader/get_environment.h",
       "loader/generated/vk_layer_dispatch_table.h",
       "loader/generated/vk_loader_extensions.h",
       "loader/generated/vk_object_types.h",
       "loader/gpa_helper.h",
       "loader/gpa_helper.c",
       "loader/loader_common.h",
+      "loader/loader_environment.c",
+      "loader/loader_environment.h",
       "loader/loader.c",
       "loader/loader.h",
       "loader/log.c",
       "loader/log.h",
       "loader/phys_dev_ext.c",
+      "loader/settings.c",
+      "loader/settings.h",
       "loader/stack_allocation.h",
       "loader/terminator.c",
       "loader/trampoline.c",
@@ -218,16 +220,10 @@ if (!is_android) {
 }
 
 if (is_fuchsia) {
-  config("fuchsia_config") {
-    include_dirs = [ "fuchsia" ]
-  }
-
   source_set("dlopen_fuchsia") {
-    public_configs = [ ":fuchsia_config" ]
-
     sources = [
-      "fuchsia/dlopen_fuchsia.c",
-      "fuchsia/dlopen_fuchsia.h",
+      "loader/dlopen_fuchsia.c",
+      "loader/dlopen_fuchsia.h",
     ]
 
     deps = [

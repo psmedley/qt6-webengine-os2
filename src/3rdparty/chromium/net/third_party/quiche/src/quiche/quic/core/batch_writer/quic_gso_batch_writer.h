@@ -11,7 +11,7 @@ namespace quic {
 
 // QuicGsoBatchWriter sends QUIC packets in batches, using UDP socket's generic
 // segmentation offload(GSO) capability.
-class QUIC_EXPORT_PRIVATE QuicGsoBatchWriter : public QuicUdpBatchWriter {
+class QUICHE_EXPORT QuicGsoBatchWriter : public QuicUdpBatchWriter {
  public:
   explicit QuicGsoBatchWriter(int fd);
 
@@ -21,22 +21,28 @@ class QUIC_EXPORT_PRIVATE QuicGsoBatchWriter : public QuicUdpBatchWriter {
 
   bool SupportsReleaseTime() const final { return supports_release_time_; }
 
+  bool SupportsEcn() const override {
+    return GetQuicRestartFlag(quic_support_ect1);
+  }
+
   CanBatchResult CanBatch(const char* buffer, size_t buf_len,
                           const QuicIpAddress& self_address,
                           const QuicSocketAddress& peer_address,
                           const PerPacketOptions* options,
+                          const QuicPacketWriterParams& params,
                           uint64_t release_time) const override;
 
   FlushImplResult FlushImpl() override;
 
  protected:
   // Test only constructor to forcefully enable release time.
-  struct QUIC_EXPORT_PRIVATE ReleaseTimeForceEnabler {};
+  struct QUICHE_EXPORT ReleaseTimeForceEnabler {};
   QuicGsoBatchWriter(std::unique_ptr<QuicBatchWriterBuffer> batch_buffer,
                      int fd, clockid_t clockid_for_release_time,
                      ReleaseTimeForceEnabler enabler);
 
-  ReleaseTime GetReleaseTime(const PerPacketOptions* options) const override;
+  ReleaseTime GetReleaseTime(
+      const QuicPacketWriterParams& params) const override;
 
   // Get the current time in nanos from |clockid_for_release_time_|.
   virtual uint64_t NowInNanosForReleaseTime() const;
@@ -50,10 +56,11 @@ class QUIC_EXPORT_PRIVATE QuicGsoBatchWriter : public QuicUdpBatchWriter {
     return gso_size <= 2 ? 16 : 45;
   }
 
-  static const int kCmsgSpace =
-      kCmsgSpaceForIp + kCmsgSpaceForSegmentSize + kCmsgSpaceForTxTime;
+  static const int kCmsgSpace = kCmsgSpaceForIp + kCmsgSpaceForSegmentSize +
+                                kCmsgSpaceForTxTime + kCmsgSpaceForTOS;
   static void BuildCmsg(QuicMsgHdr* hdr, const QuicIpAddress& self_address,
-                        uint16_t gso_size, uint64_t release_time);
+                        uint16_t gso_size, uint64_t release_time,
+                        QuicEcnCodepoint ecn_codepoint);
 
   template <size_t CmsgSpace, typename CmsgBuilderT>
   FlushImplResult InternalFlushImpl(CmsgBuilderT cmsg_builder) {
@@ -71,7 +78,8 @@ class QUIC_EXPORT_PRIVATE QuicGsoBatchWriter : public QuicUdpBatchWriter {
                    sizeof(cbuf));
 
     uint16_t gso_size = buffered_writes().size() > 1 ? first.buf_len : 0;
-    cmsg_builder(&hdr, first.self_address, gso_size, first.release_time);
+    cmsg_builder(&hdr, first.self_address, gso_size, first.release_time,
+                 first.params.ecn_codepoint);
 
     write_result = QuicLinuxSocketUtils::WritePacket(fd(), hdr);
     QUIC_DVLOG(1) << "Write GSO packet result: " << write_result

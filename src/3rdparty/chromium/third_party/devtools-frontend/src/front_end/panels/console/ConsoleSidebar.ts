@@ -8,43 +8,44 @@ import type * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 import type * as TextUtils from '../../models/text_utils/text_utils.js';
+import * as IconButton from '../../ui/components/icon_button/icon_button.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
 import {ConsoleFilter, FilterType, type LevelsMask} from './ConsoleFilter.js';
-import {type ConsoleViewMessage} from './ConsoleViewMessage.js';
 import consoleSidebarStyles from './consoleSidebar.css.js';
+import {type ConsoleViewMessage} from './ConsoleViewMessage.js';
 
 const UIStrings = {
   /**
-  * @description Filter name in Console Sidebar of the Console panel. This is shown when we fail to
-  * parse a URL when trying to display console messages from each URL separately. This might be
-  * because the console message does not come from any particular URL. This should be translated as
-  * a term that indicates 'not one of the other URLs listed here'.
-  */
+   * @description Filter name in Console Sidebar of the Console panel. This is shown when we fail to
+   * parse a URL when trying to display console messages from each URL separately. This might be
+   * because the console message does not come from any particular URL. This should be translated as
+   * a term that indicates 'not one of the other URLs listed here'.
+   */
   other: '<other>',
   /**
-  *@description Text in Console Sidebar of the Console panel to show how many user messages exist.
-  */
+   *@description Text in Console Sidebar of the Console panel to show how many user messages exist.
+   */
   dUserMessages: '{n, plural, =0 {No user messages} =1 {# user message} other {# user messages}}',
   /**
-  *@description Text in Console Sidebar of the Console panel to show how many messages exist.
-  */
+   *@description Text in Console Sidebar of the Console panel to show how many messages exist.
+   */
   dMessages: '{n, plural, =0 {No messages} =1 {# message} other {# messages}}',
   /**
-  *@description Text in Console Sidebar of the Console panel to show how many errors exist.
-  */
+   *@description Text in Console Sidebar of the Console panel to show how many errors exist.
+   */
   dErrors: '{n, plural, =0 {No errors} =1 {# error} other {# errors}}',
   /**
-  *@description Text in Console Sidebar of the Console panel to show how many warnings exist.
-  */
+   *@description Text in Console Sidebar of the Console panel to show how many warnings exist.
+   */
   dWarnings: '{n, plural, =0 {No warnings} =1 {# warning} other {# warnings}}',
   /**
-  *@description Text in Console Sidebar of the Console panel to show how many info messages exist.
-  */
+   *@description Text in Console Sidebar of the Console panel to show how many info messages exist.
+   */
   dInfo: '{n, plural, =0 {No info} =1 {# info} other {# info}}',
   /**
-  *@description Text in Console Sidebar of the Console panel to show how many verbose messages exist.
-  */
+   *@description Text in Console Sidebar of the Console panel to show how many verbose messages exist.
+   */
   dVerbose: '{n, plural, =0 {No verbose} =1 {# verbose} other {# verbose}}',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/console/ConsoleSidebar.ts', UIStrings);
@@ -77,23 +78,22 @@ export class ConsoleSidebar extends Common.ObjectWrapper.eventMixin<EventTypes, 
       regex: undefined,
     }];
     this.appendGroup(
-        GroupName.All, [], ConsoleFilter.allLevelsFilterValue(), UI.Icon.Icon.create('mediumicon-list'),
-        selectedFilterSetting);
+        GroupName.All, [], ConsoleFilter.allLevelsFilterValue(), IconButton.Icon.create('list'), selectedFilterSetting);
     this.appendGroup(
         GroupName.ConsoleAPI, consoleAPIParsedFilters, ConsoleFilter.allLevelsFilterValue(),
-        UI.Icon.Icon.create('mediumicon-account-circle'), selectedFilterSetting);
+        IconButton.Icon.create('profile'), selectedFilterSetting);
     this.appendGroup(
         GroupName.Error, [], ConsoleFilter.singleLevelMask(Protocol.Log.LogEntryLevel.Error),
-        UI.Icon.Icon.create('mediumicon-error-circle'), selectedFilterSetting);
+        IconButton.Icon.create('cross-circle'), selectedFilterSetting);
     this.appendGroup(
         GroupName.Warning, [], ConsoleFilter.singleLevelMask(Protocol.Log.LogEntryLevel.Warning),
-        UI.Icon.Icon.create('mediumicon-warning-triangle'), selectedFilterSetting);
+        IconButton.Icon.create('warning'), selectedFilterSetting);
     this.appendGroup(
         GroupName.Info, [], ConsoleFilter.singleLevelMask(Protocol.Log.LogEntryLevel.Info),
-        UI.Icon.Icon.create('mediumicon-info-circle'), selectedFilterSetting);
+        IconButton.Icon.create('info'), selectedFilterSetting);
     this.appendGroup(
         GroupName.Verbose, [], ConsoleFilter.singleLevelMask(Protocol.Log.LogEntryLevel.Verbose),
-        UI.Icon.Icon.create('mediumicon-bug'), selectedFilterSetting);
+        IconButton.Icon.create('bug'), selectedFilterSetting);
     const selectedTreeElementName = selectedFilterSetting.get();
     const defaultTreeElement =
         this.treeElements.find(x => x.name() === selectedTreeElementName) || this.treeElements[0];
@@ -101,8 +101,8 @@ export class ConsoleSidebar extends Common.ObjectWrapper.eventMixin<EventTypes, 
   }
 
   private appendGroup(
-      name: string, parsedFilters: TextUtils.TextUtils.ParsedFilter[], levelsMask: LevelsMask, icon: UI.Icon.Icon,
-      selectedFilterSetting: Common.Settings.Setting<string>): void {
+      name: string, parsedFilters: TextUtils.TextUtils.ParsedFilter[], levelsMask: LevelsMask,
+      icon: IconButton.Icon.Icon, selectedFilterSetting: Common.Settings.Setting<string>): void {
     const filter = new ConsoleFilter(name, parsedFilters, null, levelsMask);
     const treeElement = new FilterTreeElement(filter, icon, selectedFilterSetting);
     this.tree.appendChild(treeElement);
@@ -133,7 +133,7 @@ export class ConsoleSidebar extends Common.ObjectWrapper.eventMixin<EventTypes, 
     this.dispatchEventToListeners(Events.FilterSelected);
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.tree.registerCSSFiles([consoleSidebarStyles]);
   }
@@ -167,8 +167,8 @@ export class URLGroupTreeElement extends ConsoleSidebarTreeElement {
   constructor(filter: ConsoleFilter) {
     super(filter.name, filter);
     this.countElement = this.listItemElement.createChild('span', 'count');
-    const leadingIcons = [UI.Icon.Icon.create('largeicon-navigator-file')];
-    this.setLeadingIcons(leadingIcons);
+    const icon = IconButton.Icon.create('document');
+    this.setLeadingIcons([icon]);
     this.messageCount = 0;
   }
 
@@ -207,7 +207,8 @@ export class FilterTreeElement extends ConsoleSidebarTreeElement {
   private messageCount: number;
   private uiStringForFilterCount: string;
 
-  constructor(filter: ConsoleFilter, icon: UI.Icon.Icon, selectedFilterSetting: Common.Settings.Setting<string>) {
+  constructor(
+      filter: ConsoleFilter, icon: IconButton.Icon.Icon, selectedFilterSetting: Common.Settings.Setting<string>) {
     super(filter.name, filter);
     this.uiStringForFilterCount = stringForFilterSidebarItemMap.get(filter.name as GroupName) || '';
     this.selectedFilterSetting = selectedFilterSetting;
@@ -228,7 +229,7 @@ export class FilterTreeElement extends ConsoleSidebarTreeElement {
     return this.filterInternal.name;
   }
 
-  onselect(selectedByUser?: boolean): boolean {
+  override onselect(selectedByUser?: boolean): boolean {
     this.selectedFilterSetting.set(this.filterInternal.name);
     return super.onselect(selectedByUser);
   }

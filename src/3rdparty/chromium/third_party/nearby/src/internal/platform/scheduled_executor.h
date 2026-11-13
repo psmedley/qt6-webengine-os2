@@ -16,24 +16,22 @@
 #define PLATFORM_PUBLIC_SCHEDULED_EXECUTOR_H_
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/time/time.h"
-#include "internal/platform/implementation/platform.h"
-#include "internal/platform/implementation/scheduled_executor.h"
-#include "internal/platform/runnable.h"
 #include "internal/platform/cancelable.h"
 #include "internal/platform/cancellable_task.h"
+#include "internal/platform/implementation/platform.h"
+#include "internal/platform/implementation/scheduled_executor.h"
 #include "internal/platform/lockable.h"
 #include "internal/platform/monitored_runnable.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/mutex_lock.h"
+#include "internal/platform/runnable.h"
 #include "internal/platform/thread_check_callable.h"
 #include "internal/platform/thread_check_runnable.h"
 
-namespace location {
 namespace nearby {
 
 // An Executor that can schedule commands to run after a given delay, or to
@@ -46,10 +44,7 @@ class ABSL_LOCKABLE ScheduledExecutor final : public Lockable {
 
   ScheduledExecutor() : impl_(Platform::CreateScheduledExecutor()) {}
   ScheduledExecutor(ScheduledExecutor&& other) { *this = std::move(other); }
-  ~ScheduledExecutor() {
-    MutexLock lock(&mutex_);
-    DoShutdown();
-  }
+  ~ScheduledExecutor() { DoShutdown(); }
 
   ScheduledExecutor& operator=(ScheduledExecutor&& other)
       ABSL_LOCKS_EXCLUDED(mutex_) {
@@ -73,10 +68,7 @@ class ABSL_LOCKABLE ScheduledExecutor final : public Lockable {
     if (impl_) impl_->Execute(ThreadCheckRunnable(this, std::move(runnable)));
   }
 
-  void Shutdown() ABSL_LOCKS_EXCLUDED(mutex_) {
-    MutexLock lock(&mutex_);
-    DoShutdown();
-  }
+  void Shutdown() ABSL_LOCKS_EXCLUDED(mutex_) { DoShutdown(); }
 
   Cancelable Schedule(Runnable&& runnable, absl::Duration duration)
       ABSL_LOCKS_EXCLUDED(mutex_) {
@@ -92,11 +84,17 @@ class ABSL_LOCKABLE ScheduledExecutor final : public Lockable {
   }
 
  private:
-  void DoShutdown() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    if (impl_) {
-      impl_->Shutdown();
-      impl_.reset();
+  void DoShutdown() ABSL_LOCKS_EXCLUDED(mutex_) {
+    std::unique_ptr<api::ScheduledExecutor> executor = ReleaseExecutor();
+    if (executor) {
+      executor->Shutdown();
     }
+  }
+
+  std::unique_ptr<api::ScheduledExecutor> ReleaseExecutor()
+      ABSL_LOCKS_EXCLUDED(mutex_) {
+    MutexLock lock(&mutex_);
+    return std::move(impl_);
   }
 
   mutable Mutex mutex_;
@@ -104,6 +102,5 @@ class ABSL_LOCKABLE ScheduledExecutor final : public Lockable {
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_PUBLIC_SCHEDULED_EXECUTOR_H_

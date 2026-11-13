@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@
 #include "core/fxcrt/string_view_template.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 namespace fxcrt {
 
@@ -32,6 +32,7 @@ class ByteString;
 // avoids the cost of std::string's iterator stability guarantees.
 class WideString {
  public:
+  // TODO(crbug.com/pdfium/2031): Consider switching to `char16_t` instead.
   using CharType = wchar_t;
   using const_iterator = const CharType*;
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
@@ -70,10 +71,8 @@ class WideString {
   [[nodiscard]] static WideString FromLatin1(ByteStringView str);
   [[nodiscard]] static WideString FromDefANSI(ByteStringView str);
   [[nodiscard]] static WideString FromUTF8(ByteStringView str);
-  [[nodiscard]] static WideString FromUTF16LE(const unsigned short* str,
-                                              size_t len);
-  [[nodiscard]] static WideString FromUTF16BE(const unsigned short* wstr,
-                                              size_t wlen);
+  [[nodiscard]] static WideString FromUTF16LE(pdfium::span<const uint8_t> data);
+  [[nodiscard]] static WideString FromUTF16BE(pdfium::span<const uint8_t> data);
 
   [[nodiscard]] static size_t WStringLength(const unsigned short* str);
 
@@ -185,9 +184,15 @@ class WideString {
 
   void Reserve(size_t len);
 
+  // Increase the backing store of the string so that it is capable of storing
+  // at least `nMinBufLength` wchars. Returns a span to the entire buffer,
+  // which may be larger than `nMinBufLength` due to rounding by allocators.
   // Note: any modification of the string (including ReleaseBuffer()) may
   // invalidate the span, which must not outlive its buffer.
   pdfium::span<wchar_t> GetBuffer(size_t nMinBufLength);
+
+  // Sets the size of the string to `nNewLength` wchars. Call this after a call
+  // to GetBuffer(), to indicate how much of the buffer was actually used.
   void ReleaseBuffer(size_t nNewLength);
 
   int GetInteger() const;
@@ -302,6 +307,13 @@ std::wostream& operator<<(std::wostream& os, const WideString& str);
 std::ostream& operator<<(std::ostream& os, const WideString& str);
 std::wostream& operator<<(std::wostream& os, WideStringView str);
 std::ostream& operator<<(std::ostream& os, WideStringView str);
+
+// This is declared here for use in gtest-based tests but is defined in a test
+// support target. This should not be used in production code. Just use
+// operator<< from above instead.
+// In some cases, gtest will automatically use operator<< as well, but in this
+// case, it needs PrintTo() because WideString looks like a container to gtest.
+void PrintTo(const WideString& str, std::ostream* os);
 
 }  // namespace fxcrt
 

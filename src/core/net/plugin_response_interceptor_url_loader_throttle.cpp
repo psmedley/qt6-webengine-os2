@@ -1,5 +1,6 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:network-protocol
 
 // based on chrome/browser/plugins/plugin_response_interceptor_url_loader_throttle.cc
 // Copyright 2018 The Chromium Authors. All rights reserved.
@@ -8,8 +9,8 @@
 
 #include "plugin_response_interceptor_url_loader_throttle.h"
 
-#include "base/bind.h"
-#include "base/guid.h"
+#include "base/functional/bind.h"
+#include "base/uuid.h"
 #include "chrome/browser/extensions/api/streams_private/streams_private_api.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -30,6 +31,9 @@
 #include <tuple>
 
 namespace {
+
+constexpr uint32_t kFullPageMimeHandlerDataPipeSize = 512U;
+
 void ClearAllButFrameAncestors(network::mojom::URLResponseHead *response_head)
 {
     response_head->headers->RemoveHeader("Content-Security-Policy");
@@ -86,11 +90,14 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(const GURL 
                                                                      bool *defer)
 {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    if (content::download_utils::MustDownload(response_url, response_head->headers.get(), response_head->mime_type))
-        return;
 
     content::WebContents *web_contents = content::WebContents::FromFrameTreeNodeId(m_frame_tree_node_id);
     if (!web_contents)
+        return;
+
+    if (content::download_utils::MustDownload(
+                web_contents->GetBrowserContext(),
+                response_url, response_head->headers.get(), response_head->mime_type))
         return;
 
     std::string extension_id;
@@ -118,11 +125,7 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(const GURL 
     if (extension_id == extension_misc::kPdfExtensionId && response_head->headers)
         ClearAllButFrameAncestors(response_head);
 
-    MimeTypesHandler::ReportUsedHandler(extension_id);
-
-    std::string view_id = base::GenerateGUID();
-    // The string passed down to the original client with the response body.
-    std::string payload = view_id;
+    const std::string stream_id = base::Uuid::GenerateRandomV4().AsLowercaseString();
 
     mojo::PendingRemote<network::mojom::URLLoader> dummy_new_loader;
     std::ignore = dummy_new_loader.InitWithNewPipeAndPassReceiver();
@@ -130,20 +133,20 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(const GURL 
     mojo::PendingReceiver<network::mojom::URLLoaderClient> new_client_receiver =
         new_client.BindNewPipeAndPassReceiver();
 
-
-    uint32_t data_pipe_size = 64U;
+    const std::string internal_id = base::UnguessableToken::Create().ToString();
     // Provide the MimeHandlerView code a chance to override the payload. This is
     // the case where the resource is handled by frame-based MimeHandlerView.
-    *defer = extensions::MimeHandlerViewAttachHelper::OverrideBodyForInterceptedResponse(
-        m_frame_tree_node_id, response_url, response_head->mime_type, view_id,
-        &payload, &data_pipe_size,
-        base::BindOnce(
-            &PluginResponseInterceptorURLLoaderThrottle::ResumeLoad,
-            weak_factory_.GetWeakPtr()));
+    const std::string payload =
+            extensions::MimeHandlerViewAttachHelper::OverrideBodyForInterceptedResponse(
+                    m_frame_tree_node_id, response_url, response_head->mime_type, stream_id,
+                    internal_id,
+                    base::BindOnce(&PluginResponseInterceptorURLLoaderThrottle::ResumeLoad,
+                                   weak_factory_.GetWeakPtr()));
+    *defer = true;
 
     mojo::ScopedDataPipeProducerHandle producer_handle;
     mojo::ScopedDataPipeConsumerHandle consumer_handle;
-    CHECK_EQ(MOJO_RESULT_OK, mojo::CreateDataPipe(data_pipe_size, producer_handle, consumer_handle));
+    CHECK_EQ(MOJO_RESULT_OK, mojo::CreateDataPipe(kFullPageMimeHandlerDataPipeSize, producer_handle, consumer_handle));
 
     uint32_t len = static_cast<uint32_t>(payload.size());
     CHECK_EQ(MOJO_RESULT_OK,
@@ -173,7 +176,7 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(const GURL 
     auto transferrable_loader = blink::mojom::TransferrableURLLoader::New();
     transferrable_loader->url = GURL(
         extensions::Extension::GetBaseURLFromExtensionId(extension_id).spec() +
-        base::GenerateGUID());
+        base::Uuid::GenerateRandomV4().AsLowercaseString());
     transferrable_loader->url_loader = std::move(original_loader);
     transferrable_loader->url_loader_client = std::move(original_client);
     transferrable_loader->head = std::move(deep_copied_response);
@@ -183,11 +186,10 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(const GURL 
     bool embedded = m_request_destination !=
             network::mojom::RequestDestination::kDocument;
     content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-            &extensions::StreamsPrivateAPI::SendExecuteMimeTypeHandlerEvent,
-            extension_id, view_id, embedded, m_frame_tree_node_id,
-            std::move(transferrable_loader), response_url));
+            FROM_HERE,
+            base::BindOnce(&extensions::StreamsPrivateAPI::SendExecuteMimeTypeHandlerEvent,
+                           extension_id, stream_id, embedded, m_frame_tree_node_id,
+                           std::move(transferrable_loader), response_url, internal_id));
 }
 
 void PluginResponseInterceptorURLLoaderThrottle::ResumeLoad()

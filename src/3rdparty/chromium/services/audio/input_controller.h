@@ -10,10 +10,11 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string_piece.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -34,16 +35,20 @@ class AecdumpRecordingManager;
 class AudioBus;
 class AudioInputStream;
 class AudioManager;
-class Snoopable;
 class UserInputMonitor;
+struct AudioGlitchInfo;
 }  // namespace media
 
 namespace audio {
 class AudioProcessorHandler;
 class AudioCallback;
-class OutputTapper;
 class DeviceOutputListener;
+class OutputTapper;
+class Snoopable;
+
+#if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
 class ProcessingAudioFifo;
+#endif
 
 // Only do power monitoring for non-mobile platforms to save resources.
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
@@ -136,7 +141,7 @@ class InputController final : public StreamMonitor {
     // OnMuted callback has had time to be processed.
     virtual void OnCreated(bool initially_muted) = 0;
     virtual void OnError(ErrorCode error_code) = 0;
-    virtual void OnLog(base::StringPiece) = 0;
+    virtual void OnLog(std::string_view) = 0;
     // Called whenever the muted state of the underlying stream changes.
     virtual void OnMuted(bool is_muted) = 0;
 
@@ -154,7 +159,8 @@ class InputController final : public StreamMonitor {
     virtual void Write(const media::AudioBus* data,
                        double volume,
                        bool key_pressed,
-                       base::TimeTicks capture_time) = 0;
+                       base::TimeTicks capture_time,
+                       const media::AudioGlitchInfo& glitch_info) = 0;
 
     // Close this synchronous writer.
     virtual void Close() = 0;
@@ -162,10 +168,9 @@ class InputController final : public StreamMonitor {
 
   // enum used for determining what UMA stats to report.
   enum StreamType {
-    VIRTUAL = 0,
-    HIGH_LATENCY = 1,
-    LOW_LATENCY = 2,
-    FAKE = 3,
+    HIGH_LATENCY = 0,
+    LOW_LATENCY = 1,
+    FAKE = 2,
   };
 
   InputController(const InputController&) = delete;
@@ -251,9 +256,6 @@ class InputController final : public StreamMonitor {
   // Updates the silence state, see enum SilenceState above for state
   // transitions.
   void UpdateSilenceState(bool silence);
-
-  // Logs the silence state as UMA stat.
-  void LogSilenceState(SilenceState value);
 #endif
 
   // Logs the result of creating an InputController.
@@ -288,7 +290,8 @@ class InputController final : public StreamMonitor {
   // Receives new input data on the hw callback thread.
   void OnData(const media::AudioBus* source,
               base::TimeTicks capture_time,
-              double volume);
+              double volume,
+              const media::AudioGlitchInfo& glitch_info);
 
 #if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
   // Called from the constructor. Helper to isolate logic setting up audio
@@ -303,7 +306,8 @@ class InputController final : public StreamMonitor {
   // Used as a callback for |audio_processor_handler_|.
   void DeliverProcessedAudio(const media::AudioBus& audio_bus,
                              base::TimeTicks audio_capture_time,
-                             absl::optional<double> new_volume);
+                             absl::optional<double> new_volume,
+                             const media::AudioGlitchInfo& glitch_info);
 #endif
 
   static StreamType ParamsToStreamType(const media::AudioParameters& params);
@@ -318,7 +322,7 @@ class InputController final : public StreamMonitor {
 
   // Pointer to the audio input stream object.
   // Only used on the audio thread.
-  raw_ptr<media::AudioInputStream> stream_ = nullptr;
+  raw_ptr<media::AudioInputStream, DanglingUntriaged> stream_ = nullptr;
 
   // SyncWriter is used only in low-latency mode for synchronous writing.
   const raw_ptr<SyncWriter> sync_writer_;
@@ -340,7 +344,7 @@ class InputController final : public StreamMonitor {
   std::unique_ptr<OutputTapper> output_tapper_;
 #endif
 
-  const raw_ptr<media::UserInputMonitor> user_input_monitor_;
+  const raw_ptr<media::UserInputMonitor, DanglingUntriaged> user_input_monitor_;
 
 #if defined(AUDIO_POWER_MONITORING)
   // Whether the silence state and microphone levels should be checked and sent

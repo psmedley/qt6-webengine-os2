@@ -8,10 +8,8 @@
 #ifndef SkScalar_DEFINED
 #define SkScalar_DEFINED
 
-#include "include/private/SkFloatingPoint.h"
-
-#undef SK_SCALAR_IS_FLOAT
-#define SK_SCALAR_IS_FLOAT  1
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkFloatingPoint.h"
 
 typedef float SkScalar;
 
@@ -84,7 +82,7 @@ static inline SkScalar SkScalarFraction(SkScalar x) {
 
 static inline SkScalar SkScalarSquare(SkScalar x) { return x * x; }
 
-#define SkScalarInvert(x)           sk_ieee_float_divide_TODO_IS_DIVIDE_BY_ZERO_SAFE_HERE(SK_Scalar1, (x))
+#define SkScalarInvert(x)           (SK_Scalar1 / (x))
 #define SkScalarAve(a, b)           (((a) + (b)) * SK_ScalarHalf)
 #define SkScalarHalf(a)             ((a) * SK_ScalarHalf)
 

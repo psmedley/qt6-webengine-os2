@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -12,73 +13,13 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_display.h"
 #include "ui/gl/gl_display_manager.h"
-#include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/init/gl_factory.h"
 
-#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_WIN)
+#if defined(USE_OZONE)
 
 using ui::GetLastEGLErrorString;
 
 namespace gl {
-
-bool GLDisplayEGL::InitializeExtensionSettings()
-{
-    return GLSurfaceEGLQt::InitializeExtensionSettingsOneOff();
-}
-
-GLDisplayEGL *GLDisplayEGL::GetDisplayForCurrentContext()
-{
-    GLContext *context = GLContext::GetCurrent();
-    return context ? context->GetGLDisplayEGL() : nullptr;
-}
-
-bool GLDisplayEGL::IsEGLSurfacelessContextSupported()
-{
-    return GLSurfaceEGLQt::g_egl_surfaceless_context_supported;
-}
-
-bool GLDisplayEGL::IsEGLContextPrioritySupported()
-{
-    return false;
-}
-
-bool GLDisplayEGL::Initialize(gl::EGLDisplayPlatform native_display)
-{
-    auto glDisplay = GLSurfaceEGLQt::InitializeOneOff(0);
-
-    if (glDisplay) {
-        display_ = glDisplay->GetDisplay();
-        native_display_ = native_display;
-    }
-
-    return glDisplay;
-}
-
-bool GLDisplayEGL::IsAndroidNativeFenceSyncSupported()
-{
-    return false;
-}
-
-// static
-GLDisplayEGL *GLSurfaceEGL::GetGLDisplayEGL()
-{
-    return GLDisplayManagerEGL::GetInstance()->GetDisplay(GpuPreference::kDefault);
-}
-
-DisplayType GLDisplayEGL::GetDisplayType() const
-{
-    return DisplayType::DEFAULT;
-}
-
-EGLDisplayPlatform GLDisplayEGL::GetNativeDisplay() const
-{
-    return native_display_;
-}
-
-GLSurface *GLSurfaceEGL::createSurfaceless(gl::GLDisplayEGL *display, const gfx::Size& size)
-{
-    return new GLSurfacelessQtEGL(display, size);
-}
 
 bool GLSurfaceEGLQt::g_egl_surfaceless_context_supported = false;
 bool GLSurfaceEGLQt::s_initialized = false;
@@ -94,18 +35,35 @@ GLSurfaceEGLQt::~GLSurfaceEGLQt()
     Destroy();
 }
 
-gl::GLDisplay *GLSurfaceEGLQt::InitializeOneOff(uint64_t system_device_id)
+gl::GLDisplay *GLSurfaceEGLQt::InitializeOneOff(gl::GpuPreference preference)
 {
     if (s_initialized)
         return g_display;
 
-    auto *egl_display = GLDisplayManagerEGL::GetInstance()->GetDisplay(system_device_id);
+    auto *egl_display = GLDisplayManagerEGL::GetInstance()->GetDisplay(preference);
     g_display = egl_display;
     egl_display->SetDisplay(GLContextHelper::getEGLDisplay());
     if (!egl_display->GetDisplay()) {
         LOG(ERROR) << "GLContextHelper::getEGLDisplay() failed.";
         return nullptr;
     }
+
+    egl_display->ext->InitializeExtensionSettings(egl_display->GetDisplay());
+    if (egl_display->ext->b_EGL_EXT_create_context_robustness) {
+        egl_display->ext->b_EGL_EXT_create_context_robustness =
+                GLContextHelper::isCreateContextRobustnessSupported();
+    }
+
+#if QT_CONFIG(opengl)
+    if (egl_display->ext->b_EGL_EXT_image_dma_buf_import
+        || egl_display->ext->b_EGL_EXT_image_dma_buf_import_modifiers
+        || egl_display->ext->b_EGL_MESA_image_dma_buf_export) {
+        const bool dmaBufSupported = EGLHelper::instance()->isDmaBufSupported();
+        egl_display->ext->b_EGL_EXT_image_dma_buf_import = dmaBufSupported;
+        egl_display->ext->b_EGL_EXT_image_dma_buf_import_modifiers = dmaBufSupported;
+        egl_display->ext->b_EGL_MESA_image_dma_buf_export = dmaBufSupported;
+    }
+#endif
 
     g_config = GLContextHelper::getEGLConfig();
     if (!g_config) {
@@ -118,7 +76,6 @@ gl::GLDisplay *GLSurfaceEGLQt::InitializeOneOff(uint64_t system_device_id)
         return nullptr;
     }
 
-    g_client_extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
     g_extensions = eglQueryString(egl_display->GetDisplay(), EGL_EXTENSIONS);
     g_egl_surfaceless_context_supported = ExtensionsContain(g_extensions.c_str(), "EGL_KHR_surfaceless_context");
     if (g_egl_surfaceless_context_supported) {
@@ -255,15 +212,5 @@ void* GLSurfacelessQtEGL::GetShareHandle()
     return NULL;
 }
 
-std::string DisplayExtensionsEGL::GetPlatformExtensions(EGLDisplay)
-{
-    EGLDisplay display = GLContextHelper::getEGLDisplay();
-    if (display == EGL_NO_DISPLAY)
-        return "";
-
-    const char* str = eglQueryString(display, EGL_EXTENSIONS);
-    return str ? std::string(str) : "";
-}
-
 } // namespace gl
-#endif // !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_WIN)
+#endif // defined(USE_OZONE)

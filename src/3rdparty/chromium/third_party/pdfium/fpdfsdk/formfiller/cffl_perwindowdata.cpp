@@ -1,4 +1,4 @@
-// Copyright 2020 PDFium Authors. All rights reserved.
+// Copyright 2020 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "fpdfsdk/formfiller/cffl_perwindowdata.h"
 
 #include "fpdfsdk/cpdfsdk_widget.h"
-#include "third_party/base/ptr_util.h"
+#include "third_party/base/memory/ptr_util.h"
 
 CFFL_PerWindowData::CFFL_PerWindowData(CPDFSDK_Widget* pWidget,
                                        const CPDFSDK_PageView* pPageView,

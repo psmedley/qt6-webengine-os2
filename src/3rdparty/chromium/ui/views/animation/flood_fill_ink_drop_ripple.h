@@ -26,6 +26,7 @@ class Layer;
 
 namespace views {
 class CircleLayerDelegate;
+class InkDropHost;
 
 namespace test {
 class FloodFillInkDropRippleTestApi;
@@ -51,12 +52,14 @@ class FloodFillInkDropRippleTestApi;
 //
 class VIEWS_EXPORT FloodFillInkDropRipple : public InkDropRipple {
  public:
-  FloodFillInkDropRipple(const gfx::Size& host_size,
+  FloodFillInkDropRipple(InkDropHost* ink_drop_host,
+                         const gfx::Size& host_size,
                          const gfx::Insets& clip_insets,
                          const gfx::Point& center_point,
                          SkColor color,
                          float visible_opacity);
-  FloodFillInkDropRipple(const gfx::Size& host_size,
+  FloodFillInkDropRipple(InkDropHost* ink_drop_host,
+                         const gfx::Size& host_size,
                          const gfx::Point& center_point,
                          SkColor color,
                          float visible_opacity);
@@ -65,7 +68,6 @@ class VIEWS_EXPORT FloodFillInkDropRipple : public InkDropRipple {
   ~FloodFillInkDropRipple() override;
 
   // InkDropRipple:
-  void SnapToActivated() override;
   ui::Layer* GetRootLayer() override;
 
   void set_use_hide_transform_duration_for_hide_fade_out(bool value) {
@@ -82,6 +84,7 @@ class VIEWS_EXPORT FloodFillInkDropRipple : public InkDropRipple {
   // InkDropRipple:
   void AnimateStateChange(InkDropState old_ink_drop_state,
                           InkDropState new_ink_drop_state) override;
+  void SetStateToActivated() override;
   void SetStateToHidden() override;
   void AbortAllAnimations() override;
 

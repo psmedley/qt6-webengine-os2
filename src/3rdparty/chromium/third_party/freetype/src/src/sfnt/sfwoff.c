@@ -4,7 +4,7 @@
  *
  *   WOFF format management (base).
  *
- * Copyright (C) 1996-2022 by
+ * Copyright (C) 1996-2023 by
  * David Turner, Robert Wilhelm, and Werner Lemberg.
  *
  * This file is part of the FreeType project, and may only be used,
@@ -426,7 +426,7 @@
 #else /* !FT_CONFIG_OPTION_USE_ZLIB */
 
   /* ANSI C doesn't like empty source files */
-  typedef int  _sfwoff_dummy;
+  typedef int  sfwoff_dummy_;
 
 #endif /* !FT_CONFIG_OPTION_USE_ZLIB */
 

@@ -10,13 +10,15 @@
 #include "include/core/SkAlphaType.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorPriv.h"
+#include "include/core/SkColorType.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkSize.h"
 #include "include/core/SkStream.h"
 #include "include/private/SkColorData.h"
 #include "include/private/SkEncodedInfo.h"
-#include "include/private/SkMalloc.h"
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkAlign.h"
+#include "include/private/base/SkMalloc.h"
+#include "include/private/base/SkTemplates.h"
 #include "src/codec/SkCodecPriv.h"
 
 #include <algorithm>
@@ -113,7 +115,7 @@ SkCodec::Result SkBmpRLECodec::onGetPixels(const SkImageInfo& dstInfo,
         }
 
         // Set the color table
-        fColorTable.reset(new SkColorTable(colorTable, maxColors));
+        fColorTable.reset(new SkColorPalette(colorTable, maxColors));
     }
 
     // Check that we have not read past the pixel array offset

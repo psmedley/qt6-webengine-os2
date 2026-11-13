@@ -16,7 +16,7 @@
 #include "libANGLE/Error.h"
 #include "libANGLE/Version.h"
 #include "libANGLE/renderer/gl/renderergl_utils.h"
-#include "platform/FeaturesGL_autogen.h"
+#include "platform/autogen/FeaturesGL_autogen.h"
 
 namespace angle
 {
@@ -47,32 +47,9 @@ class ClearMultiviewGL;
 class ContextImpl;
 class DisplayGL;
 class FunctionsGL;
+class PLSProgramCache;
 class RendererGL;
 class StateManagerGL;
-
-// WorkerContext wraps a native GL context shared from the main context. It is used by the workers
-// for khr_parallel_shader_compile.
-class WorkerContext : angle::NonCopyable
-{
-  public:
-    virtual ~WorkerContext() {}
-
-    virtual bool makeCurrent()   = 0;
-    virtual void unmakeCurrent() = 0;
-};
-
-class [[nodiscard]] ScopedWorkerContextGL
-{
-  public:
-    ScopedWorkerContextGL(RendererGL *renderer, std::string *infoLog);
-    ~ScopedWorkerContextGL();
-
-    bool operator()() const;
-
-  private:
-    RendererGL *mRenderer = nullptr;
-    bool mValid           = false;
-};
 
 class RendererGL : angle::NonCopyable
 {
@@ -105,13 +82,14 @@ class RendererGL : angle::NonCopyable
     const angle::FeaturesGL &getFeatures() const { return mFeatures; }
     BlitGL *getBlitter() const { return mBlitter; }
     ClearMultiviewGL *getMultiviewClearer() const { return mMultiviewClearer; }
+    PLSProgramCache *getPLSProgramCache();
 
     MultiviewImplementationTypeGL getMultiviewImplementationType() const;
     const gl::Caps &getNativeCaps() const;
     const gl::TextureCapsMap &getNativeTextureCaps() const;
     const gl::Extensions &getNativeExtensions() const;
     const gl::Limitations &getNativeLimitations() const;
-    ShPixelLocalStorageType getNativePixelLocalStorageType() const;
+    const ShPixelLocalStorageOptions &getNativePixelLocalStorageOptions() const;
     void initializeFrontendFeatures(angle::FrontendFeatures *features) const;
 
     angle::Result dispatchCompute(const gl::Context *context,
@@ -125,14 +103,10 @@ class RendererGL : angle::NonCopyable
 
     void framebufferFetchBarrier();
 
-    bool bindWorkerContext(std::string *infoLog);
-    void unbindWorkerContext();
     // Checks if the driver has the KHR_parallel_shader_compile or ARB_parallel_shader_compile
     // extension.
     bool hasNativeParallelCompile();
     void setMaxShaderCompilerThreads(GLuint count);
-
-    static unsigned int getMaxWorkerContexts();
 
     void setNeedsFlushBeforeDeleteTextures();
     void flushIfNecessaryBeforeDeleteTextures();
@@ -140,9 +114,6 @@ class RendererGL : angle::NonCopyable
     void markWorkSubmitted();
 
     void handleGPUSwitch();
-
-  protected:
-    virtual WorkerContext *createWorkerContext(std::string *infoLog) = 0;
 
   private:
     void ensureCapsInitialized() const;
@@ -159,6 +130,9 @@ class RendererGL : angle::NonCopyable
     BlitGL *mBlitter;
     ClearMultiviewGL *mMultiviewClearer;
 
+    // Load/store programs for EXT_shader_pixel_local_storage.
+    PLSProgramCache *mPLSProgramCache = nullptr;
+
     bool mUseDebugOutput;
 
     mutable bool mCapsInitialized;
@@ -166,16 +140,10 @@ class RendererGL : angle::NonCopyable
     mutable gl::TextureCapsMap mNativeTextureCaps;
     mutable gl::Extensions mNativeExtensions;
     mutable gl::Limitations mNativeLimitations;
+    mutable ShPixelLocalStorageOptions mNativePLSOptions;
     mutable MultiviewImplementationTypeGL mMultiviewImplementationType;
 
     bool mWorkDoneSinceLastFlush = false;
-
-    // The thread-to-context mapping for the currently active worker threads.
-    angle::HashMap<uint64_t, std::unique_ptr<WorkerContext>> mCurrentWorkerContexts;
-    // The worker contexts available to use.
-    std::list<std::unique_ptr<WorkerContext>> mWorkerContextPool;
-    // Protect the concurrent accesses to worker contexts.
-    std::mutex mWorkerMutex;
 
     bool mNativeParallelCompileEnabled;
 

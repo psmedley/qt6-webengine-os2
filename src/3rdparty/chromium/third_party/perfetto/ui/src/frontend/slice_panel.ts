@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {timeToCode, toNs} from '../common/time';
+import m from 'mithril';
+
+import {duration, time} from '../base/time';
+import {exists} from '../base/utils';
 
 import {globals, SliceDetails} from './globals';
-import {Panel} from './panel';
+import {DurationWidget} from './widgets/duration';
 
 // To display process or thread, we want to concatenate their name with ID, but
 // either can be undefined and all the cases need to be considered carefully to
@@ -33,23 +36,30 @@ function getDisplayName(name: string|undefined, id: number|undefined): string|
   }
 }
 
-export abstract class SlicePanel extends Panel {
-  protected computeDuration(ts: number, dur: number): string {
-    return toNs(dur) === -1 ?
-        `${globals.state.traceTime.endSec - ts} (Did not end)` :
-        timeToCode(dur);
+export abstract class SlicePanel implements m.ClassComponent {
+  protected computeDuration(ts: time, dur: duration): m.Children {
+    if (dur === -1n) {
+      const minDuration = globals.state.traceTime.end - ts;
+      return [m(DurationWidget, {dur: minDuration}), ' (Did not end)'];
+    } else {
+      return m(DurationWidget, {dur});
+    }
   }
 
   protected getProcessThreadDetails(sliceInfo: SliceDetails) {
     return new Map<string, string|undefined>([
       ['Thread', getDisplayName(sliceInfo.threadName, sliceInfo.tid)],
       ['Process', getDisplayName(sliceInfo.processName, sliceInfo.pid)],
-      ['User ID', sliceInfo.uid ? String(sliceInfo.uid) : undefined],
+      ['User ID', exists(sliceInfo.uid) ? String(sliceInfo.uid) : undefined],
       ['Package name', sliceInfo.packageName],
+      /* eslint-disable @typescript-eslint/strict-boolean-expressions */
       [
         'Version code',
         sliceInfo.versionCode ? String(sliceInfo.versionCode) : undefined,
       ],
+      /* eslint-enable */
     ]);
   }
+
+  abstract view(vnode: m.Vnode): void|m.Children;
 }

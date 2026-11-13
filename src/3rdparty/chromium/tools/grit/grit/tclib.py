@@ -9,8 +9,6 @@
 import functools
 import re
 
-import six
-
 from grit import exception
 from grit import lazy_re
 import grit.extern.tclib
@@ -106,7 +104,13 @@ class BaseMessage:
     dup = False
     for other in self.GetPlaceholders():
       if other.presentation == placeholder.presentation:
-        assert other.original == placeholder.original
+        if (other.original != placeholder.original
+            or other.example != placeholder.example):
+          error = ("Conflicting declarations of %s within message. Originals" +
+                   " are [%s], [%s]. Example are [%s], [%s]") % (
+                       placeholder.GetPresentation(), other.original,
+                       placeholder.original, other.example, placeholder.example)
+          raise Exception(error)
         dup = True
 
     if not dup:
@@ -160,7 +164,10 @@ class BaseMessage:
           part.presentation.encode('utf-8'),
           part.original.encode('utf-8'),
           part.example.encode('utf-8'))
-        msg.AppendPlaceholder(ph)
+        try:
+          msg.AppendPlaceholder(ph)
+        except:
+          raise Exception(self.parts)
       else:
         msg.AppendText(part.encode('utf-8'))
 

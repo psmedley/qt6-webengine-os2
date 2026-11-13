@@ -2,9 +2,9 @@
 # Copyright 2016-2021 The Khronos Group Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-GLSLANG_REV=df7fec2cfa966919172ee83bfcae6c9c9b3f91b8
-SPIRV_TOOLS_REV=fb27bbf3077f92cc1a8a55777bce2810a94079cf
-SPIRV_HEADERS_REV=87d5b782bec60822aa878941e6b13c0a9a954c9b
+GLSLANG_REV=a7785ea1ff5b10bfc2d8ca77fdad5929562897b7
+SPIRV_TOOLS_REV=afaf8fda2ad0364655909b56c8b634ce89095bb5
+SPIRV_HEADERS_REV=e867c06631767a2d96424cbec530f9ee5e78180f
 PROTOCOL=https
 
 if [ -d external/glslang ]; then
@@ -38,7 +38,7 @@ fi
 
 if [ -d external/spirv-headers ]; then
 	cd external/spirv-headers
-	git pull origin master
+	git fetch origin
 	git checkout $SPIRV_HEADERS_REV
 	cd ../..
 else

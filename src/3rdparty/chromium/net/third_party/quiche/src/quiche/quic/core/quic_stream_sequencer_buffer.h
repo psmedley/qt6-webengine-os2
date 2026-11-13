@@ -77,7 +77,7 @@ namespace test {
 class QuicStreamSequencerBufferPeer;
 }  // namespace test
 
-class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
+class QUICHE_EXPORT QuicStreamSequencerBuffer {
  public:
   // Size of blocks used by this buffer.
   // Choose 8K to make block large enough to hold multiple frames, each of
@@ -85,7 +85,7 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   static const size_t kBlockSizeBytes = 8 * 1024;  // 8KB
 
   // The basic storage block used by this buffer.
-  struct QUIC_EXPORT_PRIVATE BufferBlock {
+  struct QUICHE_EXPORT BufferBlock {
     char buffer[kBlockSizeBytes];
   };
 
@@ -159,6 +159,15 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   // Returns number of bytes available to be read out.
   size_t ReadableBytes() const;
 
+  // Returns offset of first missing byte.
+  QuicStreamOffset FirstMissingByte() const;
+
+  // Returns offset of highest received byte + 1.
+  QuicStreamOffset NextExpectedByte() const;
+
+  // Return all received frames as a string.
+  std::string ReceivedFramesDebugString() const;
+
  private:
   friend class test::QuicStreamSequencerBufferPeer;
 
@@ -197,15 +206,6 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
 
   // Get the index of the logical 1st block to start next read.
   size_t NextBlockToRead() const;
-
-  // Returns offset of first missing byte.
-  QuicStreamOffset FirstMissingByte() const;
-
-  // Returns offset of highest received byte + 1.
-  QuicStreamOffset NextExpectedByte() const;
-
-  // Return all received frames as a string.
-  std::string ReceivedFramesDebugString() const;
 
   // Resize blocks_ if more blocks are needed to accomodate bytes before
   // next_expected_byte.

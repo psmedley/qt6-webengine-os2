@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,13 @@
 #include <chrono>
 #include <vector>
 
-#include "absl/types/span.h"
 #include "cast/streaming/frame_id.h"
 #include "cast/streaming/rtp_time.h"
 #include "platform/api/time.h"
 #include "platform/base/macros.h"
+#include "platform/base/span.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 // A combination of metadata and data for one encoded frame.  This can contain
 // audio data or video data or other.
@@ -44,7 +43,20 @@ struct EncodedFrame {
                RtpTimeTicks rtp_timestamp,
                Clock::time_point reference_time,
                std::chrono::milliseconds new_playout_delay,
-               absl::Span<uint8_t> data);
+               Clock::time_point capture_begin_time,
+               Clock::time_point capture_end_time,
+               ByteView data);
+
+  // TODO(issuetracker.google.com/285905175): remove remaining optional fields
+  // (new_playout_delay) once Chrome provides the capture begin and end
+  // timestamps, so this constructor only provides the required fields.
+  EncodedFrame(Dependency dependency,
+               FrameId frame_id,
+               FrameId referenced_frame_id,
+               RtpTimeTicks rtp_timestamp,
+               Clock::time_point reference_time,
+               std::chrono::milliseconds new_playout_delay,
+               ByteView data);
   EncodedFrame();
   ~EncodedFrame();
 
@@ -91,16 +103,19 @@ struct EncodedFrame {
   // Playout delay extension. Non-positive values means no change.
   std::chrono::milliseconds new_playout_delay{};
 
-  // Pointer to a buffer containing the encoded signal data for the frame. In
-  // the sender context, this points to the data to be sent, and nothing will be
-  // mutated. In the receiver context, this is set to the region of a
-  // client-provided buffer that was populated.
-  absl::Span<uint8_t> data;
+  // Video capture begin/end timestamps. If set to a value other than
+  // Clock::time_point::min(), used for improved statistics gathering.
+  Clock::time_point capture_begin_time = Clock::time_point::min();
+  Clock::time_point capture_end_time = Clock::time_point::min();
+
+  // A buffer containing the encoded signal data for the frame. In the sender
+  // context, this points to the data to be sent. In the receiver context, this
+  // is set to the region of a client-provided buffer that was populated.
+  ByteView data;
 
   OSP_DISALLOW_COPY_AND_ASSIGN(EncodedFrame);
 };
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast
 
 #endif  // CAST_STREAMING_ENCODED_FRAME_H_

@@ -17,7 +17,7 @@
 #include "include/core/SkSize.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
-#include "include/utils/SkRandom.h"
+#include "src/base/SkRandom.h"
 
 namespace skiagm {
 
@@ -122,7 +122,7 @@ protected:
         return "";
     }
 
-    SkString onShortName() override {
+    SkString getName() const override {
         if (kRect_Clip == fClip && !fAntiAlias) {
             return SkString("complexclip2");
         }
@@ -134,7 +134,7 @@ protected:
         return str;
     }
 
-    SkISize onISize() override {
+    SkISize getISize() override {
         return SkISize::Make(SkScalarRoundToInt(fTotalWidth),
                              SkScalarRoundToInt(fTotalHeight));
     }

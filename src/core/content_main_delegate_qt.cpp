@@ -39,8 +39,8 @@
 #endif
 
 #if BUILDFLAG(IS_WIN)
-#include "media/gpu/windows/dxva_video_decode_accelerator_win.h"
-#include "media/gpu/windows/media_foundation_video_encode_accelerator_win.h"
+#include "media/base/win/mf_initializer.h"
+#include "sandbox/policy/win/sandbox_warmup.h"
 #endif
 
 #if BUILDFLAG(IS_MAC)
@@ -83,7 +83,7 @@ struct LazyDirectoryListerCacher
                 webui::GetI18nTemplateHtml(
                     ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(IDR_DIR_HEADER_HTML),
                     std::move(dict));
-        html_data = base::RefCountedString::TakeString(&html);
+        html_data = base::MakeRefCounted<base::RefCountedString>(std::move(html));
     }
 
     scoped_refptr<base::RefCountedMemory> html_data;
@@ -169,8 +169,7 @@ void ContentMainDelegateQt::PreSandboxStartup()
     if (isBrowserProcess) {
         // from gpu_main.cc:
 #if BUILDFLAG(IS_WIN)
-        media::DXVAVideoDecodeAccelerator::PreSandboxInitialization();
-        media::MediaFoundationVideoEncodeAccelerator::PreSandboxInitialization();
+        media::PreSandboxMediaFoundationInitialization();
 #endif
 
 #if BUILDFLAG(IS_MAC)
@@ -202,11 +201,13 @@ content::ContentBrowserClient *ContentMainDelegateQt::CreateContentBrowserClient
     return m_browserClient.get();
 }
 
+#if defined(USE_OZONE) || BUILDFLAG(IS_WIN)
 content::ContentGpuClient *ContentMainDelegateQt::CreateContentGpuClient()
 {
     m_gpuClient.reset(new ContentGpuClientQt);
     return m_gpuClient.get();
 }
+#endif
 
 content::ContentRendererClient *ContentMainDelegateQt::CreateContentRendererClient()
 {
@@ -256,6 +257,8 @@ absl::optional<int> ContentMainDelegateQt::BasicStartupComplete()
 {
     SafeOverridePath(base::FILE_EXE, WebEngineLibraryInfo::getPath(base::FILE_EXE));
     SafeOverridePath(base::DIR_QT_LIBRARY_DATA, WebEngineLibraryInfo::getPath(base::DIR_QT_LIBRARY_DATA));
+    SafeOverridePath(base::DIR_ASSETS, WebEngineLibraryInfo::getPath(base::DIR_ASSETS));
+    SafeOverridePath(base::DIR_EXE, WebEngineLibraryInfo::getPath(base::DIR_ASSETS));
     SafeOverridePath(ui::DIR_LOCALES, WebEngineLibraryInfo::getPath(ui::DIR_LOCALES));
 #if QT_CONFIG(webengine_spellchecker)
     SafeOverridePath(base::DIR_APP_DICTIONARIES, WebEngineLibraryInfo::getPath(base::DIR_APP_DICTIONARIES));

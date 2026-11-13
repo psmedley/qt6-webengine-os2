@@ -1,16 +1,29 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/wire/client/Device.h"
 
@@ -23,8 +36,15 @@
 
 namespace dawn::wire::client {
 
-Device::Device(const ObjectBaseParams& params)
-    : ObjectBase(params), mIsAlive(std::make_shared<bool>()) {
+Device::Device(const ObjectBaseParams& params,
+               const ObjectHandle& eventManagerHandle,
+               const WGPUDeviceDescriptor* descriptor)
+    : ObjectWithEventsBase(params, eventManagerHandle), mIsAlive(std::make_shared<bool>()) {
+    if (descriptor && descriptor->deviceLostCallback) {
+        mDeviceLostCallback = descriptor->deviceLostCallback;
+        mDeviceLostUserdata = descriptor->deviceLostUserdata;
+    }
+
 #if defined(DAWN_ENABLE_ASSERTS)
     mErrorCallback = [](WGPUErrorType, char const*, void*) {
         static bool calledOnce = false;
@@ -36,15 +56,17 @@ Device::Device(const ObjectBaseParams& params)
         }
     };
 
-    mDeviceLostCallback = [](WGPUDeviceLostReason, char const*, void*) {
-        static bool calledOnce = false;
-        if (!calledOnce) {
-            calledOnce = true;
-            dawn::WarningLog() << "No Dawn device lost callback was set. This is probably not "
-                                  "intended. If you really want to ignore device lost "
-                                  "and suppress this message, set the callback to null.";
-        }
-    };
+    if (!mDeviceLostCallback) {
+        mDeviceLostCallback = [](WGPUDeviceLostReason, char const*, void*) {
+            static bool calledOnce = false;
+            if (!calledOnce) {
+                calledOnce = true;
+                dawn::WarningLog() << "No Dawn device lost callback was set. This is probably not "
+                                      "intended. If you really want to ignore device lost "
+                                      "and suppress this message, set the callback to null.";
+            }
+        };
+    }
 #endif  // DAWN_ENABLE_ASSERTS
 }
 
@@ -54,16 +76,18 @@ Device::~Device() {
                           request->userdata);
     });
 
-    mCreatePipelineAsyncRequests.CloseAll([](CreatePipelineAsyncRequest* request) {
+    mCreatePipelineAsyncRequests.CloseAll([this](CreatePipelineAsyncRequest* request) {
         if (request->createComputePipelineAsyncCallback != nullptr) {
             request->createComputePipelineAsyncCallback(
-                WGPUCreatePipelineAsyncStatus_DeviceDestroyed, nullptr,
-                "Device destroyed before callback", request->userdata);
+                WGPUCreatePipelineAsyncStatus_Success,
+                ToAPI(GetClient()->Get<ComputePipeline>(request->pipelineObjectID)), "",
+                request->userdata);
         } else {
-            ASSERT(request->createRenderPipelineAsyncCallback != nullptr);
+            DAWN_ASSERT(request->createRenderPipelineAsyncCallback != nullptr);
             request->createRenderPipelineAsyncCallback(
-                WGPUCreatePipelineAsyncStatus_DeviceDestroyed, nullptr,
-                "Device destroyed before callback", request->userdata);
+                WGPUCreatePipelineAsyncStatus_Success,
+                ToAPI(GetClient()->Get<RenderPipeline>(request->pipelineObjectID)), "",
+                request->userdata);
         }
     });
 
@@ -117,14 +141,18 @@ void Device::CancelCallbacksForDisconnect() {
         request->callback(WGPUErrorType_DeviceLost, "Device lost", request->userdata);
     });
 
-    mCreatePipelineAsyncRequests.CloseAll([](CreatePipelineAsyncRequest* request) {
+    mCreatePipelineAsyncRequests.CloseAll([this](CreatePipelineAsyncRequest* request) {
         if (request->createComputePipelineAsyncCallback != nullptr) {
-            request->createComputePipelineAsyncCallback(WGPUCreatePipelineAsyncStatus_DeviceLost,
-                                                        nullptr, "Device lost", request->userdata);
+            request->createComputePipelineAsyncCallback(
+                WGPUCreatePipelineAsyncStatus_Success,
+                ToAPI(GetClient()->Get<ComputePipeline>(request->pipelineObjectID)), "",
+                request->userdata);
         } else {
-            ASSERT(request->createRenderPipelineAsyncCallback != nullptr);
-            request->createRenderPipelineAsyncCallback(WGPUCreatePipelineAsyncStatus_DeviceLost,
-                                                       nullptr, "Device lost", request->userdata);
+            DAWN_ASSERT(request->createRenderPipelineAsyncCallback != nullptr);
+            request->createRenderPipelineAsyncCallback(
+                WGPUCreatePipelineAsyncStatus_Success,
+                ToAPI(GetClient()->Get<RenderPipeline>(request->pipelineObjectID)), "",
+                request->userdata);
         }
     });
 }
@@ -148,12 +176,11 @@ void Device::SetDeviceLostCallback(WGPUDeviceLostCallback callback, void* userda
     mDeviceLostUserdata = userdata;
 }
 
-bool Device::PopErrorScope(WGPUErrorCallback callback, void* userdata) {
-    // TODO(crbug.com/dawn/1324) Replace bool return with void when users are updated.
+void Device::PopErrorScope(WGPUErrorCallback callback, void* userdata) {
     Client* client = GetClient();
     if (client->IsDisconnected()) {
         callback(WGPUErrorType_DeviceLost, "GPU device disconnected", userdata);
-        return true;
+        return;
     }
 
     uint64_t serial = mErrorScopes.Add({callback, userdata});
@@ -161,7 +188,6 @@ bool Device::PopErrorScope(WGPUErrorCallback callback, void* userdata) {
     cmd.deviceId = GetWireId();
     cmd.requestSerial = serial;
     client->SerializeCommand(cmd);
-    return true;
 }
 
 bool Device::OnPopErrorScopeCallback(uint64_t requestSerial,
@@ -171,6 +197,7 @@ bool Device::OnPopErrorScopeCallback(uint64_t requestSerial,
         case WGPUErrorType_NoError:
         case WGPUErrorType_Validation:
         case WGPUErrorType_OutOfMemory:
+        case WGPUErrorType_Internal:
         case WGPUErrorType_Unknown:
         case WGPUErrorType_DeviceLost:
             break;
@@ -199,29 +226,6 @@ WGPUBuffer Device::CreateBuffer(const WGPUBufferDescriptor* descriptor) {
     return Buffer::Create(this, descriptor);
 }
 
-WGPUBuffer Device::CreateErrorBuffer() {
-    WGPUBufferDescriptor fakeDescriptor = {};
-    return Buffer::CreateError(this, &fakeDescriptor);
-}
-
-WGPUQuerySet Device::CreateQuerySet(const WGPUQuerySetDescriptor* descriptor) {
-    return QuerySet::Create(this, descriptor);
-}
-
-WGPUTexture Device::CreateTexture(const WGPUTextureDescriptor* descriptor) {
-    return Texture::Create(this, descriptor);
-}
-
-WGPUTexture Device::CreateErrorTexture(const WGPUTextureDescriptor* descriptor) {
-    return Texture::CreateError(this, descriptor);
-}
-
-WGPUAdapter Device::GetAdapter() {
-    // Not implemented in the wire.
-    UNREACHABLE();
-    return nullptr;
-}
-
 WGPUQueue Device::GetQueue() {
     // The queue is lazily created because if a Device is created by
     // Reserve/Inject, we cannot send the GetQueue message until
@@ -230,7 +234,7 @@ WGPUQueue Device::GetQueue() {
     if (mQueue == nullptr) {
         // Get the primary queue for this device.
         Client* client = GetClient();
-        mQueue = client->Make<Queue>();
+        mQueue = client->Make<Queue>(GetEventManagerHandle());
 
         DeviceGetQueueCmd cmd;
         cmd.self = ToAPI(this);
@@ -247,12 +251,11 @@ void Device::CreateComputePipelineAsync(WGPUComputePipelineDescriptor const* des
                                         WGPUCreateComputePipelineAsyncCallback callback,
                                         void* userdata) {
     Client* client = GetClient();
-    if (client->IsDisconnected()) {
-        return callback(WGPUCreatePipelineAsyncStatus_DeviceLost, nullptr,
-                        "GPU device disconnected", userdata);
-    }
-
     ComputePipeline* pipeline = client->Make<ComputePipeline>();
+
+    if (client->IsDisconnected()) {
+        return callback(WGPUCreatePipelineAsyncStatus_Success, ToAPI(pipeline), "", userdata);
+    }
 
     CreatePipelineAsyncRequest request = {};
     request.createComputePipelineAsyncCallback = callback;
@@ -297,12 +300,11 @@ void Device::CreateRenderPipelineAsync(WGPURenderPipelineDescriptor const* descr
                                        WGPUCreateRenderPipelineAsyncCallback callback,
                                        void* userdata) {
     Client* client = GetClient();
-    if (client->IsDisconnected()) {
-        return callback(WGPUCreatePipelineAsyncStatus_DeviceLost, nullptr,
-                        "GPU device disconnected", userdata);
-    }
-
     RenderPipeline* pipeline = client->Make<RenderPipeline>();
+
+    if (client->IsDisconnected()) {
+        return callback(WGPUCreatePipelineAsyncStatus_Success, ToAPI(pipeline), "", userdata);
+    }
 
     CreatePipelineAsyncRequest request = {};
     request.createRenderPipelineAsyncCallback = callback;

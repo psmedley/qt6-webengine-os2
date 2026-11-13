@@ -17,7 +17,7 @@
 #include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkSize.h"
-#include "include/private/SkMalloc.h"
+#include "include/private/base/SkMalloc.h"
 #include "src/core/SkDevice.h"
 #include "src/core/SkWriter32.h"
 #include "src/utils/SkCanvasStack.h"
@@ -190,7 +190,7 @@ SkCanvasState* SkCanvasStateUtils::CaptureCanvasState(SkCanvas* canvas) {
     // Historically, the canvas state could report multiple top-level layers because SkCanvas
     // supported unclipped layers. With that feature removed, all required information is contained
     // by the canvas' top-most device.
-    SkBaseDevice* device = canvas->topDevice();
+    SkDevice* device = canvas->topDevice();
     SkASSERT(device);
 
     SkSWriter32<sizeof(SkCanvasLayerState)> layerWriter;
@@ -324,7 +324,7 @@ std::unique_ptr<SkCanvas> SkCanvasStateUtils::MakeFromCanvasState(const SkCanvas
                                                                   state_v1->layers[i].y));
     }
 
-    return std::move(canvas);
+    return canvas;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

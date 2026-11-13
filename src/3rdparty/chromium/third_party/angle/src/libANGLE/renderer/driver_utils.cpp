@@ -10,19 +10,12 @@
 
 #include "libANGLE/renderer/driver_utils.h"
 
+#include "common/android_util.h"
 #include "common/platform.h"
 #include "common/system_utils.h"
 
-#if defined(ANGLE_PLATFORM_ANDROID)
-#    include <sys/system_properties.h>
-#endif
-
 #if defined(ANGLE_PLATFORM_LINUX)
 #    include <sys/utsname.h>
-#endif
-
-#if defined(ANGLE_PLATFORM_WINDOWS)
-#    include <versionhelpers.h>
 #endif
 
 namespace rx
@@ -240,7 +233,7 @@ bool Is12thGenIntel(uint32_t DeviceId)
            std::end(IntelGen12);
 }
 
-const char *GetVendorString(uint32_t vendorId)
+std::string GetVendorString(uint32_t vendorId)
 {
     switch (vendorId)
     {
@@ -272,41 +265,17 @@ const char *GetVendorString(uint32_t vendorId)
             return "Vivante";
         case VENDOR_ID_VMWARE:
             return "VMware";
+        case VENDOR_ID_VIRTIO:
+            return "VirtIO";
         case 0xba5eba11:  // Mock vendor ID used for tests.
             return "Test";
         case 0:
             return "NULL";
-        default:
-            // TODO(jmadill): More vendor IDs.
-            UNIMPLEMENTED();
-            return "Unknown";
     }
-}
 
-MajorMinorPatchVersion::MajorMinorPatchVersion() {}
-MajorMinorPatchVersion::MajorMinorPatchVersion(int major, int minor, int patch)
-    : majorVersion(major), minorVersion(minor), patchVersion(patch)
-{}
-
-bool operator==(const MajorMinorPatchVersion &a, const MajorMinorPatchVersion &b)
-{
-    return std::tie(a.majorVersion, a.minorVersion, a.patchVersion) ==
-           std::tie(b.majorVersion, b.minorVersion, b.patchVersion);
-}
-bool operator!=(const MajorMinorPatchVersion &a, const MajorMinorPatchVersion &b)
-{
-    return std::tie(a.majorVersion, a.minorVersion, a.patchVersion) !=
-           std::tie(b.majorVersion, b.minorVersion, b.patchVersion);
-}
-bool operator<(const MajorMinorPatchVersion &a, const MajorMinorPatchVersion &b)
-{
-    return std::tie(a.majorVersion, a.minorVersion, a.patchVersion) <
-           std::tie(b.majorVersion, b.minorVersion, b.patchVersion);
-}
-bool operator>=(const MajorMinorPatchVersion &a, const MajorMinorPatchVersion &b)
-{
-    return std::tie(a.majorVersion, a.minorVersion, a.patchVersion) >=
-           std::tie(b.majorVersion, b.minorVersion, b.patchVersion);
+    std::stringstream s;
+    s << gl::FmtHex(vendorId);
+    return s.str();
 }
 
 ARMDriverVersion ParseARMDriverVersion(uint32_t driverVersion)
@@ -321,17 +290,14 @@ ARMDriverVersion ParseARMDriverVersion(uint32_t driverVersion)
 
 int GetAndroidSDKVersion()
 {
-#if defined(ANGLE_PLATFORM_ANDROID)
-    char apiVersion[PROP_VALUE_MAX];
-    int length = __system_property_get("ro.build.version.sdk", apiVersion);
-    if (length == 0)
+    std::string androidSdkLevel;
+    if (!angle::android::GetSystemProperty(angle::android::kSDKSystemPropertyName,
+                                           &androidSdkLevel))
     {
         return 0;
     }
-    return atoi(apiVersion);
-#else
-    return 0;
-#endif
+
+    return std::atoi(androidSdkLevel.c_str());
 }
 #if !defined(ANGLE_PLATFORM_MACOS)
 OSVersion GetMacOSVersion()
@@ -341,7 +307,7 @@ OSVersion GetMacOSVersion()
 }
 #endif
 
-#if !defined(ANGLE_PLATFORM_IOS)
+#if !ANGLE_PLATFORM_IOS_FAMILY
 OSVersion GetiOSVersion()
 {
     // Return a default version
@@ -422,17 +388,6 @@ bool IsWayland()
         checked = true;
     }
     return isWayland;
-}
-
-bool IsWin10OrGreater()
-{
-#if defined(ANGLE_ENABLE_WINDOWS_UWP)
-    return true;
-#elif defined(ANGLE_PLATFORM_WINDOWS)
-    return IsWindows10OrGreater();
-#else
-    return false;
-#endif
 }
 
 }  // namespace rx

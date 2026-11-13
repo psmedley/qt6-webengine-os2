@@ -8,7 +8,8 @@
 #ifndef skgpu_graphite_geom_IntersectionTree_DEFINED
 #define skgpu_graphite_geom_IntersectionTree_DEFINED
 
-#include "src/core/SkArenaAlloc.h"
+#include "include/private/base/SkAlign.h"
+#include "src/base/SkArenaAlloc.h"
 #include "src/gpu/graphite/geom/Rect.h"
 
 namespace skgpu::graphite {
@@ -21,6 +22,11 @@ namespace skgpu::graphite {
  */
 class IntersectionTree {
 public:
+    enum class SplitType : bool {
+        kX,
+        kY
+    };
+
     IntersectionTree();
 
     bool add(Rect rect) {
@@ -42,11 +48,6 @@ private:
 
         virtual bool intersects(Rect) = 0;
         virtual Node* addNonIntersecting(Rect, SkArenaAlloc*) = 0;
-    };
-
-    enum class SplitType : bool {
-        kX,
-        kY
     };
 
     template<SplitType kSplitType> class TreeNode;

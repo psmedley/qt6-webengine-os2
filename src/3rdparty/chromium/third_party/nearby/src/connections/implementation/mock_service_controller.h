@@ -15,10 +15,15 @@
 #ifndef CORE_INTERNAL_MOCK_SERVICE_CONTROLLER_H_
 #define CORE_INTERNAL_MOCK_SERVICE_CONTROLLER_H_
 
+#include <utility>
+#include <vector>
+
 #include "gmock/gmock.h"
 #include "connections/implementation/service_controller.h"
+#include "connections/listeners.h"
+#include "connections/v3/connection_listening_options.h"
+#include "internal/interop/device.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -43,7 +48,7 @@ class MockServiceController : public ServiceController {
   MOCK_METHOD(Status, StartDiscovery,
               (ClientProxy * client, const std::string& service_id,
                const DiscoveryOptions& discovery_options,
-               const DiscoveryListener& listener),
+               DiscoveryListener listener),
               (override));
 
   MOCK_METHOD(void, StopDiscovery, (ClientProxy * client), (override));
@@ -53,15 +58,31 @@ class MockServiceController : public ServiceController {
                const OutOfBandConnectionMetadata& metadata),
               (override));
 
+  MOCK_METHOD((std::pair<Status, std::vector<ConnectionInfoVariant>>),
+              StartListeningForIncomingConnections,
+              (ClientProxy * client, absl::string_view service_id,
+               v3::ConnectionListener listener,
+               const v3::ConnectionListeningOptions& options),
+              (override));
+
+  MOCK_METHOD(void, StopListeningForIncomingConnections, (ClientProxy * client),
+              (override));
+
   MOCK_METHOD(Status, RequestConnection,
               (ClientProxy * client, const std::string& endpoint_id,
                const ConnectionRequestInfo& info,
                const ConnectionOptions& connection_options),
               (override));
 
+  MOCK_METHOD(Status, RequestConnectionV3,
+              (ClientProxy * client, const NearbyDevice& remote_device,
+               const ConnectionRequestInfo& info,
+               const ConnectionOptions& connection_options),
+              (override));
+
   MOCK_METHOD(Status, AcceptConnection,
               (ClientProxy * client, const std::string& endpoint_id,
-               const PayloadListener& listener),
+               PayloadListener listener),
               (override));
 
   MOCK_METHOD(Status, RejectConnection,
@@ -84,11 +105,23 @@ class MockServiceController : public ServiceController {
               (ClientProxy * client, const std::string& endpoint_id),
               (override));
 
+  MOCK_METHOD(Status, UpdateAdvertisingOptions,
+              (ClientProxy * client, absl::string_view service_id,
+               const AdvertisingOptions& advertising_options),
+              (override));
+
+  MOCK_METHOD(Status, UpdateDiscoveryOptions,
+              (ClientProxy * client, absl::string_view service_id,
+               const DiscoveryOptions& advertising_options),
+              (override));
+
   MOCK_METHOD(void, ShutdownBwuManagerExecutors, (), (override));
+
+  MOCK_METHOD(void, SetCustomSavePath,
+              (ClientProxy * client, const std::string& path), (override));
 };
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_MOCK_SERVICE_CONTROLLER_H_

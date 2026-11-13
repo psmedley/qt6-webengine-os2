@@ -6,28 +6,29 @@ import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import type * as SDK from '../../core/sdk/sdk.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import {AccessibilitySubPane} from './AccessibilitySubPane.js';
 
 const UIStrings = {
   /**
-  * @description Name of a tool which allows the developer to view the contents of the page in the
-  * 'source order' (the order in which the HTML elements show up in the source code). In the
-  * Accessibility panel.
-  */
+   * @description Name of a tool which allows the developer to view the contents of the page in the
+   * 'source order' (the order in which the HTML elements show up in the source code). In the
+   * Accessibility panel.
+   */
   sourceOrderViewer: 'Source Order Viewer',
   /**
-  *@description Text in Source Order Viewer of the Accessibility panel shown when the selected node has no child elements
-  */
+   *@description Text in Source Order Viewer of the Accessibility panel shown when the selected node has no child elements
+   */
   noSourceOrderInformation: 'No source order information available',
   /**
-  *@description Text in Source Order Viewer of the Accessibility panel shown when the selected node has many child elements
-  */
+   *@description Text in Source Order Viewer of the Accessibility panel shown when the selected node has many child elements
+   */
   thereMayBeADelayInDisplaying: 'There may be a delay in displaying source order for elements with many children',
   /**
-  * @description Checkbox label in Source Order Viewer of the Accessibility panel. Source order
-  * means the order in which the HTML elements show up in the source code.
-  */
+   * @description Checkbox label in Source Order Viewer of the Accessibility panel. Source order
+   * means the order in which the HTML elements show up in the source code.
+   */
   showSourceOrder: 'Show source order',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/accessibility/SourceOrderView.ts', UIStrings);
@@ -44,6 +45,7 @@ export class SourceOrderPane extends AccessibilitySubPane {
   constructor() {
     super(i18nString(UIStrings.sourceOrderViewer));
 
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('source-order')}`);
     this.noNodeInfo = this.createInfo(i18nString(UIStrings.noSourceOrderInformation));
     this.warning = this.createInfo(i18nString(UIStrings.thereMayBeADelayInDisplaying));
     this.warning.id = 'source-order-warning';
@@ -53,6 +55,7 @@ export class SourceOrderPane extends AccessibilitySubPane {
     this.checkboxElement = this.checkboxLabel.checkboxElement;
 
     this.checkboxLabel.classList.add('source-order-checkbox');
+    this.checkboxLabel.setAttribute('jslog', `${VisualLogging.toggle().track({click: true})}`);
     this.checkboxElement.addEventListener('click', this.checkboxClicked.bind(this), false);
     this.element.appendChild(this.checkboxLabel);
 

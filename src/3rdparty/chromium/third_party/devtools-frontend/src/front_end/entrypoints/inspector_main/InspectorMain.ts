@@ -7,30 +7,36 @@ import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import type * as Protocol from '../../generated/protocol.js';
 import * as MobileThrottling from '../../panels/mobile_throttling/mobile_throttling.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
 import nodeIconStyles from './nodeIcon.css.js';
 
-import type * as Protocol from '../../generated/protocol.js';
-
 const UIStrings = {
   /**
-  * @description Text that refers to the main target. The main target is the primary webpage that
-  * DevTools is connected to. This text is used in various places in the UI as a label/name to inform
-  * the user which target/webpage they are currently connected to, as DevTools may connect to multiple
-  * targets at the same time in some scenarios.
-  */
+   * @description Text that refers to the main target. The main target is the primary webpage that
+   * DevTools is connected to. This text is used in various places in the UI as a label/name to inform
+   * the user which target/webpage they are currently connected to, as DevTools may connect to multiple
+   * targets at the same time in some scenarios.
+   */
   main: 'Main',
   /**
-  * @description A warning shown to the user when JavaScript is disabled on the webpage that
-  * DevTools is connected to.
-  */
+   * @description Text that refers to the tab target. The tab target is the Chrome tab that
+   * DevTools is connected to. This text is used in various places in the UI as a label/name to inform
+   * the user which target they are currently connected to, as DevTools may connect to multiple
+   * targets at the same time in some scenarios.
+   */
+  tab: 'Tab',
+  /**
+   * @description A warning shown to the user when JavaScript is disabled on the webpage that
+   * DevTools is connected to.
+   */
   javascriptIsDisabled: 'JavaScript is disabled',
   /**
-  * @description A message that prompts the user to open devtools for a specific environment (Node.js)
-  */
+   * @description A message that prompts the user to open devtools for a specific environment (Node.js)
+   */
   openDedicatedTools: 'Open dedicated DevTools for `Node.js`',
 };
 const str_ = i18n.i18n.registerUIStrings('entrypoints/inspector_main/InspectorMain.ts', UIStrings);
@@ -58,8 +64,25 @@ export class InspectorMainImpl implements Common.Runnable.Runnable {
       // TODO(crbug.com/1348385): support waiting for debugger with tab target.
       const waitForDebuggerInPage =
           type === SDK.Target.Type.Frame && Root.Runtime.Runtime.queryParam('panel') === 'sources';
+      const name = type === SDK.Target.Type.Frame ? i18nString(UIStrings.main) : i18nString(UIStrings.tab);
       const target = SDK.TargetManager.TargetManager.instance().createTarget(
-          'main', i18nString(UIStrings.main), type, null, undefined, waitForDebuggerInPage);
+          'main', name, type, null, undefined, waitForDebuggerInPage);
+
+      const waitForPrimaryPageTarget = (): Promise<SDK.Target.Target> => {
+        return new Promise(resolve => {
+          const targetManager = SDK.TargetManager.TargetManager.instance();
+          targetManager.observeTargets({
+            targetAdded: (target: SDK.Target.Target): void => {
+              if (target === targetManager.primaryPageTarget()) {
+                target.setName(i18nString(UIStrings.main));
+                resolve(target);
+              }
+            },
+            targetRemoved: (_: unknown): void => {},
+          });
+        });
+      };
+      await waitForPrimaryPageTarget();
 
       // Only resume target during the first connection,
       // subsequent connections are due to connection hand-over,
@@ -79,7 +102,9 @@ export class InspectorMainImpl implements Common.Runnable.Runnable {
         }
       }
 
-      void target.runtimeAgent().invoke_runIfWaitingForDebugger();
+      if (type !== SDK.Target.Type.Tab) {
+        void target.runtimeAgent().invoke_runIfWaitingForDebugger();
+      }
     }, Components.TargetDetachedDialog.TargetDetachedDialog.webSocketConnectionLost);
 
     new SourcesPanelIndicator();
@@ -95,26 +120,13 @@ export class InspectorMainImpl implements Common.Runnable.Runnable {
 
 Common.Runnable.registerEarlyInitializationRunnable(InspectorMainImpl.instance);
 
-let reloadActionDelegateInstance: ReloadActionDelegate;
-
 export class ReloadActionDelegate implements UI.ActionRegistration.ActionDelegate {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): ReloadActionDelegate {
-    const {forceNew} = opts;
-    if (!reloadActionDelegateInstance || forceNew) {
-      reloadActionDelegateInstance = new ReloadActionDelegate();
-    }
-
-    return reloadActionDelegateInstance;
-  }
-
-  handleAction(context: UI.Context.Context, actionId: string): boolean {
+  handleAction(_context: UI.Context.Context, actionId: string): boolean {
     switch (actionId) {
-      case 'inspector_main.reload':
+      case 'inspector-main.reload':
         SDK.ResourceTreeModel.ResourceTreeModel.reloadAllPages(false);
         return true;
-      case 'inspector_main.hard-reload':
+      case 'inspector-main.hard-reload':
         SDK.ResourceTreeModel.ResourceTreeModel.reloadAllPages(true);
         return true;
     }
@@ -122,21 +134,9 @@ export class ReloadActionDelegate implements UI.ActionRegistration.ActionDelegat
   }
 }
 
-let focusDebuggeeActionDelegateInstance: FocusDebuggeeActionDelegate;
-
 export class FocusDebuggeeActionDelegate implements UI.ActionRegistration.ActionDelegate {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): FocusDebuggeeActionDelegate {
-    const {forceNew} = opts;
-    if (!focusDebuggeeActionDelegateInstance || forceNew) {
-      focusDebuggeeActionDelegateInstance = new FocusDebuggeeActionDelegate();
-    }
-
-    return focusDebuggeeActionDelegateInstance;
-  }
   handleAction(_context: UI.Context.Context, _actionId: string): boolean {
-    const mainTarget = SDK.TargetManager.TargetManager.instance().mainTarget();
+    const mainTarget = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (!mainTarget) {
       return false;
     }
@@ -196,13 +196,11 @@ export class SourcesPanelIndicator {
     javaScriptDisabledChanged();
 
     function javaScriptDisabledChanged(): void {
-      let icon: UI.Icon.Icon|null = null;
-      const javaScriptDisabled = Common.Settings.Settings.instance().moduleSetting('javaScriptDisabled').get();
-      if (javaScriptDisabled) {
-        icon = UI.Icon.Icon.create('smallicon-warning');
-        UI.Tooltip.Tooltip.install(icon, i18nString(UIStrings.javascriptIsDisabled));
+      const warnings = [];
+      if (Common.Settings.Settings.instance().moduleSetting('javaScriptDisabled').get()) {
+        warnings.push(i18nString(UIStrings.javascriptIsDisabled));
       }
-      UI.InspectorView.InspectorView.instance().setPanelIcon('sources', icon);
+      UI.InspectorView.InspectorView.instance().setPanelWarnings('sources', warnings);
     }
   }
 }

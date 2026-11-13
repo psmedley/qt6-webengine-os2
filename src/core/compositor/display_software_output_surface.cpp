@@ -1,13 +1,13 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "display_software_output_surface.h"
 
 #include "compositor.h"
-#include "render_widget_host_view_qt_delegate.h"
 #include "type_conversion.h"
 
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/viz/service/display/display.h"
 #include "components/viz/service/display/output_surface_frame.h"
 
@@ -22,10 +22,11 @@ class DisplaySoftwareOutputSurface::Device final : public viz::SoftwareOutputDev
 {
 public:
     Device(bool requiresAlpha);
+    ~Device() override;
 
     // Overridden from viz::SoftwareOutputDevice.
     void Resize(const gfx::Size &sizeInPixels, float devicePixelRatio) override;
-    void OnSwapBuffers(SwapBuffersCallback swap_ack_callback) override;
+    void OnSwapBuffers(SwapBuffersCallback swap_ack_callback, gfx::FrameData data) override;
 
     // Overridden from Compositor.
     void swapFrame() override;
@@ -51,20 +52,25 @@ DisplaySoftwareOutputSurface::Device::Device(bool requiresAlpha)
 {
 }
 
+DisplaySoftwareOutputSurface::Device::~Device()
+{
+    unbind();
+}
+
 void DisplaySoftwareOutputSurface::Device::Resize(const gfx::Size &sizeInPixels, float devicePixelRatio)
 {
     if (viewport_pixel_size_ == sizeInPixels && m_devicePixelRatio == devicePixelRatio)
         return;
     m_devicePixelRatio = devicePixelRatio;
     viewport_pixel_size_ = sizeInPixels;
-    surface_ = SkSurface::MakeRaster(SkImageInfo::MakeN32Premul(sizeInPixels.width(), sizeInPixels.height()));
+    surface_ = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(sizeInPixels.width(), sizeInPixels.height()));
 }
 
-void DisplaySoftwareOutputSurface::Device::OnSwapBuffers(SwapBuffersCallback swap_ack_callback)
+void DisplaySoftwareOutputSurface::Device::OnSwapBuffers(SwapBuffersCallback swap_ack_callback, gfx::FrameData data)
 {
     { // MEMO don't hold a lock together with an 'observer', as the call from Qt's scene graph may come at the same time
         QMutexLocker locker(&m_mutex);
-        m_taskRunner = base::ThreadTaskRunnerHandle::Get();
+        m_taskRunner = base::SingleThreadTaskRunner::GetCurrentDefault();
         m_swapCompletionCallback = std::move(swap_ack_callback);
     }
 

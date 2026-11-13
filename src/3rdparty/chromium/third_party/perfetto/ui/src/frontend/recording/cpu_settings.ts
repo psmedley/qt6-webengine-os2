@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {Probe, ProbeAttrs, Slider, SliderAttrs} from '../record_widgets';
 import {POLL_INTERVAL_MS, RecordingSectionAttrs} from './recording_sections';
@@ -45,13 +45,23 @@ export class CpuSettings implements m.ClassComponent<RecordingSectionAttrs> {
           setEnabled: (cfg, val) => cfg.cpuSched = val,
           isEnabled: (cfg) => cfg.cpuSched,
         } as ProbeAttrs),
-        m(Probe, {
-          title: 'CPU frequency and idle states',
-          img: 'rec_cpu_freq.png',
-          descr: 'Records cpu frequency and idle state changes via ftrace',
-          setEnabled: (cfg, val) => cfg.cpuFreq = val,
-          isEnabled: (cfg) => cfg.cpuFreq,
-        } as ProbeAttrs),
+        m(Probe,
+          {
+            title: 'CPU frequency and idle states',
+            img: 'rec_cpu_freq.png',
+            descr:
+                'Records cpu frequency and idle state changes via ftrace and sysfs',
+            setEnabled: (cfg, val) => cfg.cpuFreq = val,
+            isEnabled: (cfg) => cfg.cpuFreq,
+          } as ProbeAttrs,
+          m(Slider, {
+            title: 'Sysfs poll interval',
+            cssClass: '.thin',
+            values: POLL_INTERVAL_MS,
+            unit: 'ms',
+            set: (cfg, val) => cfg.cpuFreqPollMs = val,
+            get: (cfg) => cfg.cpuFreqPollMs,
+          } as SliderAttrs)),
         m(Probe, {
           title: 'Syscalls',
           img: 'rec_syscalls.png',

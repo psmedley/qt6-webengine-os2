@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/modules/mediarecorder/audio_track_encoder.h"
 #include "third_party/blink/renderer/modules/mediarecorder/audio_track_recorder.h"
+#include "third_party/blink/renderer/modules/modules_export.h"
 
 namespace base {
 class TimeTicks;
@@ -38,11 +39,13 @@ namespace blink {
 // Some encoders may buffer input frames, and MediaRecorder's abrupt stop design
 // does not allow us to Flush. So, we may never receive the output for them,
 // losing some audio at the end of the recording.
-class AudioTrackMojoEncoder : public AudioTrackEncoder {
+class MODULES_EXPORT AudioTrackMojoEncoder : public AudioTrackEncoder {
  public:
-  AudioTrackMojoEncoder(AudioTrackRecorder::CodecId codec,
-                        OnEncodedAudioCB on_encoded_audio_cb,
-                        uint32_t bits_per_second = 0);
+  AudioTrackMojoEncoder(
+      scoped_refptr<base::SequencedTaskRunner> encoder_task_runner,
+      AudioTrackRecorder::CodecId codec,
+      OnEncodedAudioCB on_encoded_audio_cb,
+      uint32_t bits_per_second = 0);
 
   AudioTrackMojoEncoder(const AudioTrackMojoEncoder&) = delete;
   AudioTrackMojoEncoder& operator=(const AudioTrackMojoEncoder&) = delete;
@@ -58,15 +61,13 @@ class AudioTrackMojoEncoder : public AudioTrackEncoder {
   void EncodeAudio(std::unique_ptr<media::AudioBus> input_bus,
                    base::TimeTicks capture_time) override;
 
-  // Must be called on `encoder_thread_` before destructing this class.
-  void Shutdown() override;
-
  private:
-  ~AudioTrackMojoEncoder() override;
-
   // Run when the platform encoder finishes initializing, will flush
   // `input_queue_`.
   void OnInitializeDone(media::EncoderStatus status);
+
+  void DoEncodeAudio(std::unique_ptr<media::AudioBus> input_bus,
+                     base::TimeTicks capture_time);
 
   // Run when input is delivered to the platform encoder, or when an error is
   // encountered.
@@ -83,6 +84,8 @@ class AudioTrackMojoEncoder : public AudioTrackEncoder {
     std::unique_ptr<media::AudioBus> audio_bus;
     const base::TimeTicks capture_time;
   };
+
+  const scoped_refptr<base::SequencedTaskRunner> encoder_task_runner_;
 
   AudioTrackRecorder::CodecId codec_;
 

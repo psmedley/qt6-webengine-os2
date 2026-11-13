@@ -8,15 +8,13 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_PROXY_PROXY_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_PROXY_PROXY_API_H_
 
+#include <optional>
 #include <string>
 
 #include "base/memory/singleton.h"
-#include "chrome/browser/extensions/api/preference/preference_api.h"
+#include "base/values.h"
+#include "chrome/browser/extensions/pref_transformer_interface.h"
 #include "components/proxy_config/proxy_prefs.h"
-
-namespace base {
-class Value;
-}
 
 namespace extensions {
 class EventRouterForwarder;
@@ -34,12 +32,12 @@ class ProxyPrefTransformer : public PrefTransformerInterface {
   ~ProxyPrefTransformer() override;
 
   // Implementation of PrefTransformerInterface.
-  std::unique_ptr<base::Value> ExtensionToBrowserPref(
-      const base::Value* extension_pref,
-      std::string* error,
-      bool* bad_message) override;
-  std::unique_ptr<base::Value> BrowserToExtensionPref(
-      const base::Value* browser_pref,
+  std::optional<base::Value> ExtensionToBrowserPref(
+      const base::Value& extension_pref,
+      std::string& error,
+      bool& bad_message) override;
+  std::optional<base::Value> BrowserToExtensionPref(
+      const base::Value& browser_pref,
       bool is_incognito_profile) override;
 };
 

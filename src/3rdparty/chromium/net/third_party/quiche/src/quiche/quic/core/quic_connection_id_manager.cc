@@ -125,10 +125,12 @@ void QuicPeerIssuedConnectionIdManager::PrepareToRetireConnectionIdPriorTo(
 }
 
 QuicErrorCode QuicPeerIssuedConnectionIdManager::OnNewConnectionIdFrame(
-    const QuicNewConnectionIdFrame& frame, std::string* error_detail) {
+    const QuicNewConnectionIdFrame& frame, std::string* error_detail,
+    bool* is_duplicate_frame) {
   if (recent_new_connection_id_sequence_numbers_.Contains(
           frame.sequence_number)) {
     // This frame has a recently seen sequence number. Ignore.
+    *is_duplicate_frame = true;
     return QUIC_NO_ERROR;
   }
   if (!IsConnectionIdNew(frame)) {
@@ -296,48 +298,21 @@ QuicSelfIssuedConnectionIdManager::~QuicSelfIssuedConnectionIdManager() {
   retire_connection_id_alarm_->Cancel();
 }
 
-QuicConnectionId QuicSelfIssuedConnectionIdManager::GenerateNewConnectionId(
-    const QuicConnectionId& old_connection_id) const {
-  return QuicUtils::CreateReplacementConnectionId(old_connection_id);
-}
-
-absl::optional<QuicNewConnectionIdFrame>
+std::optional<QuicNewConnectionIdFrame>
 QuicSelfIssuedConnectionIdManager::MaybeIssueNewConnectionId() {
-  const bool check_cid_collision_when_issue_new_cid =
-      GetQuicReloadableFlag(quic_check_cid_collision_when_issue_new_cid);
-  absl::optional<QuicConnectionId> new_cid;
-  if (GetQuicReloadableFlag(
-          quic_connection_uses_abstract_connection_id_generator)) {
-    QUIC_RELOADABLE_FLAG_COUNT(
-        quic_connection_uses_abstract_connection_id_generator);
-    new_cid =
-        connection_id_generator_.GenerateNextConnectionId(last_connection_id_);
-  } else {
-    new_cid = GenerateNewConnectionId(last_connection_id_);
-  }
+  std::optional<QuicConnectionId> new_cid =
+      connection_id_generator_.GenerateNextConnectionId(last_connection_id_);
   if (!new_cid.has_value()) {
-    QUIC_BUG_IF(quic_bug_469887433_1,
-                !GetQuicReloadableFlag(
-                    quic_connection_uses_abstract_connection_id_generator));
     return {};
   }
-  if (check_cid_collision_when_issue_new_cid) {
-    QUIC_RELOADABLE_FLAG_COUNT_N(quic_check_cid_collision_when_issue_new_cid, 1,
-                                 2);
-    if (!visitor_->MaybeReserveConnectionId(*new_cid)) {
-      QUIC_RELOADABLE_FLAG_COUNT_N(quic_check_cid_collision_when_issue_new_cid,
-                                   2, 2);
-      return {};
-    }
+  if (!visitor_->MaybeReserveConnectionId(*new_cid)) {
+    return {};
   }
   QuicNewConnectionIdFrame frame;
   frame.connection_id = *new_cid;
   frame.sequence_number = next_connection_id_sequence_number_++;
   frame.stateless_reset_token =
       QuicUtils::GenerateStatelessResetToken(frame.connection_id);
-  if (!check_cid_collision_when_issue_new_cid) {
-    visitor_->MaybeReserveConnectionId(frame.connection_id);
-  }
   active_connection_ids_.emplace_back(frame.connection_id,
                                       frame.sequence_number);
   frame.retire_prior_to = active_connection_ids_.front().second;
@@ -345,9 +320,9 @@ QuicSelfIssuedConnectionIdManager::MaybeIssueNewConnectionId() {
   return frame;
 }
 
-absl::optional<QuicNewConnectionIdFrame> QuicSelfIssuedConnectionIdManager::
+std::optional<QuicNewConnectionIdFrame> QuicSelfIssuedConnectionIdManager::
     MaybeIssueNewConnectionIdForPreferredAddress() {
-  absl::optional<QuicNewConnectionIdFrame> frame = MaybeIssueNewConnectionId();
+  std::optional<QuicNewConnectionIdFrame> frame = MaybeIssueNewConnectionId();
   QUICHE_DCHECK(!frame.has_value() || (frame->sequence_number == 1u));
   return frame;
 }
@@ -356,7 +331,7 @@ QuicErrorCode QuicSelfIssuedConnectionIdManager::OnRetireConnectionIdFrame(
     const QuicRetireConnectionIdFrame& frame, QuicTime::Delta pto_delay,
     std::string* error_detail) {
   QUICHE_DCHECK(!active_connection_ids_.empty());
-  if (frame.sequence_number > active_connection_ids_.back().second) {
+  if (frame.sequence_number >= next_connection_id_sequence_number_) {
     *error_detail = "To be retired connecton ID is never issued.";
     return IETF_QUIC_PROTOCOL_VIOLATION;
   }
@@ -438,8 +413,7 @@ void QuicSelfIssuedConnectionIdManager::RetireConnectionId() {
 
 void QuicSelfIssuedConnectionIdManager::MaybeSendNewConnectionIds() {
   while (active_connection_ids_.size() < active_connection_id_limit_) {
-    absl::optional<QuicNewConnectionIdFrame> frame =
-        MaybeIssueNewConnectionId();
+    std::optional<QuicNewConnectionIdFrame> frame = MaybeIssueNewConnectionId();
     if (!frame.has_value()) {
       break;
     }
@@ -459,7 +433,7 @@ bool QuicSelfIssuedConnectionIdManager::HasConnectionIdToConsume() const {
   return false;
 }
 
-absl::optional<QuicConnectionId>
+std::optional<QuicConnectionId>
 QuicSelfIssuedConnectionIdManager::ConsumeOneConnectionId() {
   for (const auto& active_cid_data : active_connection_ids_) {
     if (active_cid_data.second >
@@ -472,7 +446,7 @@ QuicSelfIssuedConnectionIdManager::ConsumeOneConnectionId() {
       return active_cid_data.first;
     }
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 bool QuicSelfIssuedConnectionIdManager::IsConnectionIdInUse(

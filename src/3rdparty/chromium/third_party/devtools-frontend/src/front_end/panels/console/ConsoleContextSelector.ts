@@ -12,30 +12,30 @@ import consoleContextSelectorStyles from './consoleContextSelector.css.js';
 
 const UIStrings = {
   /**
-  *@description Title of toolbar item in console context selector of the console panel
-  */
+   *@description Title of toolbar item in console context selector of the console panel
+   */
   javascriptContextNotSelected: 'JavaScript context: Not selected',
   /**
-  *@description Text in Console Context Selector of the Console panel
-  */
+   *@description Text in Console Context Selector of the Console panel
+   */
   extension: 'Extension',
   /**
-  *@description Text in Console Context Selector of the Console panel
-  *@example {top} PH1
-  */
+   *@description Text in Console Context Selector of the Console panel
+   *@example {top} PH1
+   */
   javascriptContextS: 'JavaScript context: {PH1}',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/console/ConsoleContextSelector.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 export class ConsoleContextSelector implements SDK.TargetManager.SDKModelObserver<SDK.RuntimeModel.RuntimeModel>,
                                                UI.SoftDropDown.Delegate<SDK.RuntimeModel.ExecutionContext> {
-  private readonly items: UI.ListModel.ListModel<SDK.RuntimeModel.ExecutionContext>;
+  readonly items: UI.ListModel.ListModel<SDK.RuntimeModel.ExecutionContext>;
   private readonly dropDown: UI.SoftDropDown.SoftDropDown<SDK.RuntimeModel.ExecutionContext>;
   private readonly toolbarItemInternal: UI.Toolbar.ToolbarItem;
 
   constructor() {
     this.items = new UI.ListModel.ListModel();
-    this.dropDown = new UI.SoftDropDown.SoftDropDown(this.items, this);
+    this.dropDown = new UI.SoftDropDown.SoftDropDown(this.items, this, 'javascript-context');
     this.dropDown.setRowHeight(36);
     this.toolbarItemInternal = new UI.Toolbar.ToolbarItem(this.dropDown.element);
     this.toolbarItemInternal.setEnabled(false);
@@ -47,22 +47,22 @@ export class ConsoleContextSelector implements SDK.TargetManager.SDKModelObserve
 
     SDK.TargetManager.TargetManager.instance().addModelListener(
         SDK.RuntimeModel.RuntimeModel, SDK.RuntimeModel.Events.ExecutionContextCreated, this.onExecutionContextCreated,
-        this);
+        this, {scoped: true});
     SDK.TargetManager.TargetManager.instance().addModelListener(
         SDK.RuntimeModel.RuntimeModel, SDK.RuntimeModel.Events.ExecutionContextChanged, this.onExecutionContextChanged,
-        this);
+        this, {scoped: true});
     SDK.TargetManager.TargetManager.instance().addModelListener(
         SDK.RuntimeModel.RuntimeModel, SDK.RuntimeModel.Events.ExecutionContextDestroyed,
-        this.onExecutionContextDestroyed, this);
+        this.onExecutionContextDestroyed, this, {scoped: true});
     SDK.TargetManager.TargetManager.instance().addModelListener(
-        SDK.ResourceTreeModel.ResourceTreeModel, SDK.ResourceTreeModel.Events.FrameNavigated, this.frameNavigated,
-        this);
+        SDK.ResourceTreeModel.ResourceTreeModel, SDK.ResourceTreeModel.Events.FrameNavigated, this.frameNavigated, this,
+        {scoped: true});
 
     UI.Context.Context.instance().addFlavorChangeListener(
         SDK.RuntimeModel.ExecutionContext, this.executionContextChangedExternally, this);
     UI.Context.Context.instance().addFlavorChangeListener(
         SDK.DebuggerModel.CallFrame, this.callFrameSelectedInUI, this);
-    SDK.TargetManager.TargetManager.instance().observeModels(SDK.RuntimeModel.RuntimeModel, this);
+    SDK.TargetManager.TargetManager.instance().observeModels(SDK.RuntimeModel.RuntimeModel, this, {scoped: true});
     SDK.TargetManager.TargetManager.instance().addModelListener(
         SDK.DebuggerModel.DebuggerModel, SDK.DebuggerModel.Events.CallFrameSelected, this.callFrameSelectedInModel,
         this);
@@ -78,7 +78,7 @@ export class ConsoleContextSelector implements SDK.TargetManager.SDKModelObserve
     SDK.OverlayModel.OverlayModel.hideDOMNodeHighlight();
     if (to && to.frameId) {
       const frame = SDK.FrameManager.FrameManager.instance().getFrame(to.frameId);
-      if (frame && !frame.isTopFrame()) {
+      if (frame && !frame.isOutermostFrame()) {
         void frame.highlight();
       }
     }
@@ -175,6 +175,9 @@ export class ConsoleContextSelector implements SDK.TargetManager.SDKModelObserve
   private executionContextChangedExternally({
     data: executionContext,
   }: Common.EventTarget.EventTargetEvent<SDK.RuntimeModel.ExecutionContext|null>): void {
+    if (executionContext && !SDK.TargetManager.TargetManager.instance().isInScope(executionContext.target())) {
+      return;
+    }
     this.dropDown.selectItem(executionContext);
   }
 
@@ -188,7 +191,7 @@ export class ConsoleContextSelector implements SDK.TargetManager.SDKModelObserve
     if (!frame) {
       return false;
     }
-    return frame.isTopFrame();
+    return frame.isOutermostFrame();
   }
 
   private hasTopContext(): boolean {
@@ -226,7 +229,7 @@ export class ConsoleContextSelector implements SDK.TargetManager.SDKModelObserve
       const resourceTreeModel = target.model(SDK.ResourceTreeModel.ResourceTreeModel);
       frame = resourceTreeModel && resourceTreeModel.frameForId(executionContext.frameId);
     }
-    if (executionContext.origin.startsWith('chrome-extension://')) {
+    if (Common.ParsedURL.schemeIs(executionContext.origin, 'chrome-extension:')) {
       return i18nString(UIStrings.extension);
     }
     const sameTargetParentFrame = frame && frame.sameTargetParentFrame();

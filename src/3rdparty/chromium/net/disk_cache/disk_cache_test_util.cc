@@ -8,7 +8,7 @@
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/run_loop.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/blockfile/backend_impl.h"
 #include "net/disk_cache/blockfile/file.h"
@@ -41,6 +41,14 @@ void CacheTestFillBuffer(char* buffer, size_t len, bool no_nulls) {
     buffer[0] = 'g';
 }
 
+scoped_refptr<net::IOBufferWithSize> CacheTestCreateAndFillBuffer(
+    size_t len,
+    bool no_nulls) {
+  auto buffer = base::MakeRefCounted<net::IOBufferWithSize>(len);
+  CacheTestFillBuffer(buffer->data(), len, no_nulls);
+  return buffer;
+}
+
 bool CreateCacheTestFile(const base::FilePath& name) {
   int flags = base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_READ |
               base::File::FLAG_WRITE;
@@ -63,8 +71,8 @@ bool CheckCacheIntegrity(const base::FilePath& path,
                          int max_size,
                          uint32_t mask) {
   auto cache = std::make_unique<disk_cache::BackendImpl>(
-      path, mask, base::ThreadTaskRunnerHandle::Get(), net::DISK_CACHE,
-      nullptr);
+      path, mask, base::SingleThreadTaskRunner::GetCurrentDefault(),
+      net::DISK_CACHE, nullptr);
   if (max_size)
     cache->SetMaxSize(max_size);
   if (!cache.get())

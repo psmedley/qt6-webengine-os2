@@ -6,12 +6,13 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/base_switches.h"
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
@@ -29,6 +30,7 @@
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "mojo/core/embedder/embedder.h"
+#include "ui/accessibility/platform/ax_platform_for_test.h"
 #include "ui/base/ime/init/input_method_initializer.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -39,7 +41,7 @@
 #include "ui/display/screen.h"
 #include "ui/gfx/font_util.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gl/gl_switches.h"
+#include "ui/gl/gl_utils.h"
 #include "ui/gl/init/gl_factory.h"
 #include "ui/views/buildflags.h"
 #include "ui/views/examples/example_base.h"
@@ -67,7 +69,7 @@
 #include "ui/views/examples/examples_skia_gold_pixel_diff.h"
 #endif
 
-#if defined(USE_OZONE)
+#if BUILDFLAG(IS_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
@@ -76,7 +78,7 @@ namespace views::examples {
 base::LazyInstance<base::TestDiscardableMemoryAllocator>::DestructorAtExit
     g_discardable_memory_allocator = LAZY_INSTANCE_INITIALIZER;
 
-ExamplesExitCode ExamplesMainProc(bool under_test) {
+ExamplesExitCode ExamplesMainProc(bool under_test, ExampleVector examples) {
 #if BUILDFLAG(IS_WIN)
   ui::ScopedOleInitializer ole_initializer;
 #endif
@@ -86,12 +88,14 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
   if (CheckCommandLineUsage())
     return ExamplesExitCode::kSucceeded;
 
+  ui::AXPlatformForTest ax_platform;
+
   // Disabling Direct Composition works around the limitation that
   // InProcessContextFactory doesn't work with Direct Composition, causing the
   // window to not render. See http://crbug.com/936249.
-  command_line->AppendSwitch(switches::kDisableDirectComposition);
+  gl::SetGlWorkarounds(gl::GlWorkarounds{.disable_direct_composition = true});
 
-  base::FeatureList::InitializeInstance(
+  base::FeatureList::InitInstance(
       command_line->GetSwitchValueASCII(switches::kEnableFeatures),
       command_line->GetSwitchValueASCII(switches::kDisableFeatures));
 
@@ -100,13 +104,13 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
 
   mojo::core::Init();
 
-#if defined(USE_OZONE)
+#if BUILDFLAG(IS_OZONE)
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
 #endif
 
-  gl::init::InitializeGLOneOff(/*system_device_id=*/0);
+  gl::init::InitializeGLOneOff(/*gpu_preference=*/gl::GpuPreference::kDefault);
 
   // Viz depends on the task environment to correctly tear down.
   base::test::TaskEnvironment task_environment(
@@ -153,13 +157,18 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
   {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     ExamplesViewsDelegateChromeOS views_delegate;
-#else
+#else  // BUILDFLAG(IS_CHROMEOS_ASH)
     views::DesktopTestViewsDelegate views_delegate;
+#if BUILDFLAG(IS_MAC)
+    views_delegate.set_context_factory(context_factories->GetContextFactory());
+#endif
 #if defined(USE_AURA)
     wm::WMState wm_state;
 #endif
-#endif
-#if BUILDFLAG(ENABLE_DESKTOP_AURA)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_MAC)
+    display::ScopedNativeScreen desktop_screen;
+#elif BUILDFLAG(ENABLE_DESKTOP_AURA)
     std::unique_ptr<display::Screen> desktop_screen =
         views::CreateDesktopScreen();
 #endif
@@ -187,7 +196,12 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
     base::test::ScopedDisableRunLoopTimeout disable_timeout;
 #endif
 
-    views::examples::ShowExamplesWindow(run_loop.QuitClosure());
+    if (examples.empty()) {
+      views::examples::ShowExamplesWindow(run_loop.QuitClosure());
+    } else {
+      views::examples::ShowExamplesWindow(run_loop.QuitClosure(),
+                                          std::move(examples));
+    }
 
     run_loop.Run();
 

@@ -10,9 +10,9 @@
 
 #include "libANGLE/capture/capture_gl_1_autogen.h"
 
+#include "common/gl_enum_utils.h"
 #include "libANGLE/Context.h"
 #include "libANGLE/capture/FrameCapture.h"
-#include "libANGLE/capture/gl_enum_utils.h"
 #include "libANGLE/validationGL1_autogen.h"
 
 using namespace angle;
@@ -21,7 +21,6 @@ namespace gl
 {
 
 // GL 1.0
-
 CallCapture CaptureAccum(const State &glState, bool isCallValid, GLenum op, GLfloat value)
 {
     ParamBuffer paramBuffer;
@@ -2506,12 +2505,15 @@ CallCapture CapturePixelZoom(const State &glState,
     return CallCapture(angle::EntryPoint::GLPixelZoom, std::move(paramBuffer));
 }
 
-CallCapture CapturePolygonMode(const State &glState, bool isCallValid, GLenum face, GLenum mode)
+CallCapture CapturePolygonMode(const State &glState,
+                               bool isCallValid,
+                               GLenum face,
+                               PolygonMode modePacked)
 {
     ParamBuffer paramBuffer;
 
     paramBuffer.addEnumParam("face", BigGLEnum::TriangleFace, ParamType::TGLenum, face);
-    paramBuffer.addEnumParam("mode", BigGLEnum::PolygonMode, ParamType::TGLenum, mode);
+    paramBuffer.addValueParam("modePacked", ParamType::TPolygonMode, modePacked);
 
     return CallCapture(angle::EntryPoint::GLPolygonMode, std::move(paramBuffer));
 }
@@ -4458,7 +4460,6 @@ CallCapture CaptureVertex4sv(const State &glState, bool isCallValid, const GLsho
 }
 
 // GL 1.1
-
 CallCapture CaptureAreTexturesResident(const State &glState,
                                        bool isCallValid,
                                        GLsizei n,
@@ -4783,7 +4784,6 @@ CallCapture CaptureTexSubImage1D(const State &glState,
 // GL 1.2
 
 // GL 1.3
-
 CallCapture CaptureCompressedTexImage1D(const State &glState,
                                         bool isCallValid,
                                         GLenum target,
@@ -5638,7 +5638,6 @@ CallCapture CaptureMultiTexCoord4sv(const State &glState,
 }
 
 // GL 1.4
-
 CallCapture CaptureFogCoordPointer(const State &glState,
                                    bool isCallValid,
                                    GLenum type,
@@ -6470,7 +6469,6 @@ CallCapture CaptureWindowPos3sv(const State &glState, bool isCallValid, const GL
 }
 
 // GL 1.5
-
 CallCapture CaptureGetBufferSubData(const State &glState,
                                     bool isCallValid,
                                     GLenum target,

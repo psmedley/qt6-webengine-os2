@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef QWEBENGINECOOKIESTORE_P_H
 #define QWEBENGINECOOKIESTORE_P_H
@@ -29,7 +30,7 @@ class CookieMonsterDelegateQt;
 
 QT_BEGIN_NAMESPACE
 
-class Q_WEBENGINECORE_PRIVATE_EXPORT QWebEngineCookieStorePrivate
+class Q_WEBENGINECORE_EXPORT QWebEngineCookieStorePrivate
 {
     Q_DECLARE_PUBLIC(QWebEngineCookieStore)
     struct CookieData {

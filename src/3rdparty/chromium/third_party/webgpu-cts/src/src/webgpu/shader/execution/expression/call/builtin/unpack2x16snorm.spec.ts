@@ -7,6 +7,11 @@ of bits 16×i through 16×i+15 of e as a twos-complement signed integer.
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
+import { TypeF32, TypeU32, TypeVec } from '../../../../../util/conversion.js';
+import { allInputSources, run } from '../../expression.js';
+
+import { builtin } from './builtin.js';
+import { d } from './unpack2x16snorm.cache.js';
 
 export const g = makeTestGroup(GPUTest);
 
@@ -17,4 +22,8 @@ g.test('unpack')
 @const fn unpack2x16snorm(e: u32) -> vec2<f32>
 `
   )
-  .unimplemented();
+  .params(u => u.combine('inputSource', allInputSources))
+  .fn(async t => {
+    const cases = await d.get(t.params.inputSource === 'const' ? 'u32_const' : 'u32_non_const');
+    await run(t, builtin('unpack2x16snorm'), [TypeU32], TypeVec(2, TypeF32), t.params, cases);
+  });

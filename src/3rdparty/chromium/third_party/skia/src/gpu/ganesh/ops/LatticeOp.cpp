@@ -9,6 +9,7 @@
 
 #include "include/core/SkBitmap.h"
 #include "include/core/SkRect.h"
+#include "src/base/SkSafeMath.h"
 #include "src/core/SkLatticeIter.h"
 #include "src/core/SkMatrixPriv.h"
 #include "src/gpu/BufferWriter.h"
@@ -26,7 +27,9 @@
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelper.h"
 
-namespace skgpu::v1::LatticeOp {
+using namespace skia_private;
+
+namespace skgpu::ganesh::LatticeOp {
 
 namespace {
 
@@ -175,7 +178,7 @@ public:
     const char* name() const override { return "NonAALatticeOp"; }
 
     void visitProxies(const GrVisitProxyFunc& func) const override {
-        func(fView.proxy(), GrMipmapped::kNo);
+        func(fView.proxy(), skgpu::Mipmapped::kNo);
         if (fProgramInfo) {
             fProgramInfo->visitFPProxies(func);
         } else {
@@ -236,13 +239,15 @@ private:
             }
         }
 
-        int patchCnt = fPatches.count();
+        int patchCnt = fPatches.size();
         int numRects = 0;
+
+        SkSafeMath safeMath;
         for (int i = 0; i < patchCnt; i++) {
-            numRects += fPatches[i].fIter->numRectsToDraw();
+            numRects = safeMath.addInt(numRects, fPatches[i].fIter->numRectsToDraw());
         }
 
-        if (!numRects) {
+        if (!numRects || !safeMath) {
             return;
         }
 
@@ -353,16 +358,16 @@ private:
             return CombineResult::kCannotCombine;
         }
 
-        fPatches.move_back_n(that->fPatches.count(), that->fPatches.begin());
+        fPatches.move_back_n(that->fPatches.size(), that->fPatches.begin());
         fWideColor |= that->fWideColor;
         return CombineResult::kMerged;
     }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     SkString onDumpInfo() const override {
         SkString str;
 
-        for (int i = 0; i < fPatches.count(); ++i) {
+        for (int i = 0; i < fPatches.size(); ++i) {
             str.appendf("%d: Color: 0x%08x Dst [L: %.2f, T: %.2f, R: %.2f, B: %.2f]\n", i,
                         fPatches[i].fColor.toBytes_RGBA(), fPatches[i].fDst.fLeft,
                         fPatches[i].fDst.fTop, fPatches[i].fDst.fRight, fPatches[i].fDst.fBottom);
@@ -381,7 +386,7 @@ private:
     };
 
     Helper fHelper;
-    SkSTArray<1, Patch, true> fPatches;
+    STArray<1, Patch, true> fPatches;
     GrSurfaceProxyView fView;
     SkAlphaType fAlphaType;
     sk_sp<GrColorSpaceXform> fColorSpaceXform;
@@ -409,9 +414,9 @@ GrOp::Owner MakeNonAA(GrRecordingContext* context,
                                 std::move(colorSpaceXform), filter, std::move(iter), dst);
 }
 
-}  // namespace skgpu::v1::LatticeOp
+}  // namespace skgpu::ganesh::LatticeOp
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 #include "src/gpu/ganesh/GrDrawOpTest.h"
 #include "src/gpu/ganesh/GrProxyProvider.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
@@ -474,9 +479,9 @@ GR_DRAW_OP_TEST_DEFINE(NonAALatticeOp) {
                                                               dims,
                                                               GrRenderable::kNo,
                                                               1,
-                                                              GrMipmapped::kNo,
+                                                              skgpu::Mipmapped::kNo,
                                                               SkBackingFit::kExact,
-                                                              SkBudgeted::kYes,
+                                                              skgpu::Budgeted::kYes,
                                                               GrProtected::kNo,
                                                               /*label=*/"LatticeOp");
 
@@ -531,10 +536,15 @@ GR_DRAW_OP_TEST_DEFINE(NonAALatticeOp) {
             std::move(proxy), origin,
             context->priv().caps()->getReadSwizzle(format, GrColorType::kRGBA_8888));
 
-    return skgpu::v1::LatticeOp::NonAALatticeOp::Make(context, std::move(paint), viewMatrix,
-                                                      std::move(view), kPremul_SkAlphaType,
-                                                      std::move(csxf), filter, std::move(iter),
-                                                      dst);
+    return skgpu::ganesh::LatticeOp::NonAALatticeOp::Make(context,
+                                                          std::move(paint),
+                                                          viewMatrix,
+                                                          std::move(view),
+                                                          kPremul_SkAlphaType,
+                                                          std::move(csxf),
+                                                          filter,
+                                                          std::move(iter),
+                                                          dst);
 }
 
 #endif

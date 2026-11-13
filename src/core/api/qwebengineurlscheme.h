@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:network-protocol
 
 #ifndef QWEBENGINEURLSCHEME_H
 #define QWEBENGINEURLSCHEME_H
@@ -42,6 +43,7 @@ public:
         ViewSourceAllowed = 0x20,
         ContentSecurityPolicyIgnored = 0x40,
         CorsEnabled = 0x80,
+        FetchApiAllowed = 0x100,
     };
     Q_DECLARE_FLAGS(Flags, Flag)
     Q_FLAG(Flags)

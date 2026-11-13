@@ -11,9 +11,17 @@
 #include "device/bluetooth/bluetooth_advertisement.h"
 #include "device/bluetooth/floss/exported_callback_manager.h"
 #include "device/bluetooth/floss/floss_dbus_client.h"
-#include "device/bluetooth/floss/floss_gatt_client.h"
+#include "device/bluetooth/floss/floss_gatt_manager_client.h"
+#include "device/bluetooth/public/cpp/bluetooth_uuid.h"
 
 namespace floss {
+
+constexpr char kAdvertisingSetCallbackPath[] =
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+    "/org/chromium/bluetooth/advertising_set/callback/lacros";
+#else
+    "/org/chromium/bluetooth/advertising_set/callback";
+#endif
 
 // Represents type of address to advertise.
 enum class OwnAddressType {
@@ -37,11 +45,11 @@ struct AdvertisingSetParameters {
 };
 
 // Represents the data to be advertised.
-struct AdvertiseData {
-  std::vector<std::string> service_uuids;
-  std::vector<std::string> solicit_uuids;
+struct DEVICE_BLUETOOTH_EXPORT AdvertiseData {
+  std::vector<device::BluetoothUUID> service_uuids;
+  std::vector<device::BluetoothUUID> solicit_uuids;
   std::vector<std::vector<uint8_t>> transport_discovery_data;
-  std::map<int32_t, std::vector<uint8_t>> manufacturer_data;
+  std::map<uint16_t, std::vector<uint8_t>> manufacturer_data;
   std::map<std::string, std::vector<uint8_t>> service_data;
   bool include_tx_power_level;
   bool include_device_name;
@@ -156,7 +164,9 @@ class DEVICE_BLUETOOTH_EXPORT FlossAdvertiserClient
   // Initializes the advertising manager with given adapter.
   void Init(dbus::Bus* bus,
             const std::string& service_name,
-            const int adapter_index) override;
+            const int adapter_index,
+            base::Version version,
+            base::OnceClosure on_ready) override;
 
   // Manages observers.
   void AddObserver(FlossAdvertiserClientObserver* observer);
@@ -192,9 +202,15 @@ class DEVICE_BLUETOOTH_EXPORT FlossAdvertiserClient
       ErrorCallback error_callback);
 
  protected:
+  // Registers callback to daemon after all callback methods are exported.
+  void OnMethodsExported();
+
   // Completes the method call for RegisterAdvertiserCallback.
   void CompleteRegisterCallback(dbus::Response* response,
                                 dbus::ErrorResponse* error_response);
+
+  // Completes the method call for UnregisterAdvertiserCallback.
+  void CompleteUnregisterCallback(DBusResult<bool> ret);
 
   // Completes the method call for |StartAdvertisingSet|.
   void CompleteStartAdvertisingSetCallback(
@@ -248,7 +264,7 @@ class DEVICE_BLUETOOTH_EXPORT FlossAdvertiserClient
       AdvertisingStatus status);
 
   // Managed by FlossDBusManager - we keep local pointer to access object proxy.
-  base::raw_ptr<dbus::Bus> bus_ = nullptr;
+  raw_ptr<dbus::Bus> bus_ = nullptr;
 
   // Path used for gatt api calls by this class.
   dbus::ObjectPath gatt_adapter_path_;
@@ -267,10 +283,6 @@ class DEVICE_BLUETOOTH_EXPORT FlossAdvertiserClient
     CallMethod(std::move(callback), bus_, service_name_, kGattInterface,
                gatt_adapter_path_, member, args...);
   }
-
-  // Object path for exported callbacks registered against the advertising set
-  // callback interface.
-  static const char kExportedCallbacksPath[];
 
   // Exported callbacks for interacting with daemon.
   ExportedCallbackManager<FlossAdvertiserClientObserver>
@@ -293,6 +305,9 @@ class DEVICE_BLUETOOTH_EXPORT FlossAdvertiserClient
   std::unordered_map<AdvertiserId,
                      std::pair<SetAdvParamsSuccessCallback, ErrorCallback>>
       set_advertising_params_callbacks_;
+
+  // Signal when client is ready to be used.
+  base::OnceClosure on_ready_;
 
   base::WeakPtrFactory<FlossAdvertiserClient> weak_ptr_factory_{this};
 };

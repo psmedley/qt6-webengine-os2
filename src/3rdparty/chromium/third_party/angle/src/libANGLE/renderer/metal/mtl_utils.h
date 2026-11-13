@@ -33,12 +33,23 @@ void StopFrameCapture();
 namespace mtl
 {
 
+enum class StagingPurpose
+{
+    Initialization,
+    Upload
+};
+
+bool PreferStagedTextureUploads(const gl::Context *context,
+                                const TextureRef &texture,
+                                const Format &textureObjFormat,
+                                const StagingPurpose purpose);
+
 // Initialize texture content to black.
 angle::Result InitializeTextureContents(const gl::Context *context,
                                         const TextureRef &texture,
                                         const Format &textureObjFormat,
                                         const ImageNativeIndex &index);
-// Same as above but using GPU clear operation instead of CPU.
+// Same as above but using GPU clear operation instead of CPU.forma
 // - channelsToInit parameter controls which channels will get their content initialized.
 angle::Result InitializeTextureContentsGPU(const gl::Context *context,
                                            const TextureRef &texture,
@@ -89,8 +100,9 @@ uint32_t GetDeviceVendorId(id<MTLDevice> metalDevice);
 AutoObjCPtr<id<MTLLibrary>> CreateShaderLibrary(
     const mtl::ContextDevice &metalDevice,
     const std::string &source,
-    NSDictionary<NSString *, NSObject *> *substitutionDictionary,
-    bool enableFastMath,
+    const std::map<std::string, std::string> &substitutionDictionary,
+    bool disableFastMath,
+    bool usesInvariance,
     AutoObjCPtr<NSError *> *error);
 
 AutoObjCPtr<id<MTLLibrary>> CreateShaderLibrary(const mtl::ContextDevice &metalDevice,
@@ -101,16 +113,26 @@ AutoObjCPtr<id<MTLLibrary>> CreateShaderLibrary(
     const mtl::ContextDevice &metalDevice,
     const char *source,
     size_t sourceLen,
-    NSDictionary<NSString *, NSObject *> *substitutionDictionary,
-    bool enableFastMath,
+    const std::map<std::string, std::string> &substitutionDictionary,
+    bool disableFastMath,
+    bool usesInvariance,
     AutoObjCPtr<NSError *> *error);
 
-AutoObjCPtr<id<MTLLibrary>> CreateShaderLibraryFromBinary(
-    id<MTLDevice> metalDevice,
-    const uint8_t *binarySource,
-    size_t binarySourceLen,
-    NSDictionary<NSString *, NSObject *> *substitutionDictionary,
-    AutoObjCPtr<NSError *> *error);
+AutoObjCPtr<id<MTLLibrary>> CreateShaderLibrary(id<MTLDevice> metalDevice,
+                                                const char *source,
+                                                size_t sourceLen,
+                                                AutoObjCPtr<NSError *> *error);
+
+AutoObjCPtr<id<MTLLibrary>> CreateShaderLibraryFromBinary(id<MTLDevice> metalDevice,
+                                                          const uint8_t *binarySource,
+                                                          size_t binarySourceLen,
+                                                          AutoObjCPtr<NSError *> *error);
+
+// Compiles a shader library into a metallib file, returning the path to it.
+std::string CompileShaderLibraryToFile(const std::string &source,
+                                       const std::map<std::string, std::string> &macros,
+                                       bool disableFastMath,
+                                       bool usesInvariance);
 
 bool SupportsAppleGPUFamily(id<MTLDevice> device, uint8_t appleFamily);
 
@@ -135,13 +157,13 @@ MTLSamplerMinMagFilter GetFilter(GLenum filter);
 MTLSamplerMipFilter GetMipmapFilter(GLenum filter);
 MTLSamplerAddressMode GetSamplerAddressMode(GLenum wrap);
 
-MTLBlendFactor GetBlendFactor(GLenum factor);
-MTLBlendOperation GetBlendOp(GLenum op);
+MTLBlendFactor GetBlendFactor(gl::BlendFactorType factor);
+MTLBlendOperation GetBlendOp(gl::BlendEquationType op);
 
 MTLCompareFunction GetCompareFunc(GLenum func);
 MTLStencilOperation GetStencilOp(GLenum op);
 
-MTLWinding GetFontfaceWinding(GLenum frontFaceMode, bool invert);
+MTLWinding GetFrontfaceWinding(GLenum frontFaceMode, bool invert);
 
 PrimitiveTopologyClass GetPrimitiveTopologyClass(gl::PrimitiveMode mode);
 MTLPrimitiveType GetPrimitiveType(gl::PrimitiveMode mode);
@@ -173,7 +195,7 @@ bool DeviceHasMaximumRenderTargetSize(id<MTLDevice> device);
 // has alpha channel.
 MTLClearColor EmulatedAlphaClearColor(MTLClearColor color, MTLColorWriteMask colorMask);
 
-NSUInteger ComputeTotalSizeUsedForMTLRenderPassDescriptor(const MTLRenderPassDescriptor *descriptor,
+NSUInteger ComputeTotalSizeUsedForMTLRenderPassDescriptor(const mtl::RenderPassDesc &descriptor,
                                                           const Context *context,
                                                           const mtl::ContextDevice &device);
 

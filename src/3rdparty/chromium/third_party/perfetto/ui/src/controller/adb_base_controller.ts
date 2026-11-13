@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {extractDurationFromTraceConfig} from '../base/trace_config_utils';
-import {extractTraceConfig} from '../base/trace_config_utils';
+import {exists} from '../base/utils';
 import {isAdbTarget} from '../common/state';
+import {
+  extractDurationFromTraceConfig,
+  extractTraceConfig,
+} from '../core/trace_config_utils';
+import {globals} from '../frontend/globals';
 
 import {Adb} from './adb_interfaces';
 import {ReadBuffersResponse} from './consumer_port_types';
-import {globals} from './globals';
 import {Consumer, RpcConsumerPort} from './record_controller_interfaces';
 
 export enum AdbConnectionState {
@@ -115,7 +118,7 @@ export abstract class AdbBaseConsumerPort extends RpcConsumerPort {
     if (!traceConfigProto) return;
     const duration = extractDurationFromTraceConfig(traceConfigProto);
     this.sendStatus(`Recording in progress${
-        duration ? ' for ' + duration.toString() + ' ms' : ''}...`);
+        exists(duration) ? ' for ' + duration.toString() + ' ms' : ''}...`);
   }
 
   abstract invoke(method: string, argsProto: Uint8Array): void;

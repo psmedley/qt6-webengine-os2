@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,7 +78,7 @@ void UpdateWidgetSize(CXFA_ContentLayoutItem* pLayoutItem,
       break;
     }
     default:
-      NOTREACHED();
+      NOTREACHED_NORETURN();
   }
 }
 
@@ -646,12 +646,13 @@ void CXFA_ContentLayoutProcessor::Trace(cppgc::Visitor* visitor) const {
   visitor->Trace(m_pCurChildNode);
   visitor->Trace(m_pKeepHeadNode);
   visitor->Trace(m_pKeepTailNode);
-  visitor->Trace(m_pCurChildPreprocessor);
   visitor->Trace(m_pLayoutItem);
   visitor->Trace(m_pOldLayoutItem);
   visitor->Trace(m_pViewLayoutProcessor);
+  visitor->Trace(m_pCurChildPreprocessor);
   ContainerTrace(visitor, m_ArrayKeepItems);
   ContainerTrace(visitor, m_PendingNodes);
+  ContainerTrace(visitor, m_PendingNodesCount);
 }
 
 CXFA_ContentLayoutItem* CXFA_ContentLayoutProcessor::CreateContentLayoutItem(
@@ -1848,7 +1849,6 @@ CXFA_ContentLayoutProcessor::DoLayoutFlowedContainer(
             case Result::kRowFullBreak:
               goto SuspendAndCreateNewRow;
             case Result::kDone:
-            default:
               fContentCurRowY +=
                   pProcessor->InsertPendingItems(m_pCurChildNode);
               pProcessor = nullptr;
@@ -1857,8 +1857,6 @@ CXFA_ContentLayoutProcessor::DoLayoutFlowedContainer(
           break;
         }
         case Stage::kDone:
-          break;
-        default:
           break;
       }
       GotoNextContainerNodeSimple();
@@ -2430,7 +2428,7 @@ CXFA_ContentLayoutProcessor::InsertFlowedItem(
     pFormNode =
         m_pViewLayoutProcessor->QueryOverflow(pProcessor->GetFormNode());
     if (!pFormNode && pLayoutContext && pLayoutContext->m_pOverflowProcessor) {
-      pFormNode = pLayoutContext->m_pOverflowNode.Get();
+      pFormNode = pLayoutContext->m_pOverflowNode;
       bUseInherited = true;
     }
     absl::optional<CXFA_ViewLayoutProcessor::OverflowData> overflow_data =

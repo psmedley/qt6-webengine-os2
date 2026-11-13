@@ -100,6 +100,10 @@ DEFINE_QUICHE_COMMAND_LINE_FLAG(bool, quiet, false,
                                 "Set to true for a quieter output experience.");
 
 DEFINE_QUICHE_COMMAND_LINE_FLAG(
+    bool, output_resolved_server_address, false,
+    "Set to true to print the resolved IP of the server.");
+
+DEFINE_QUICHE_COMMAND_LINE_FLAG(
     std::string, quic_version, "",
     "QUIC version to speak, e.g. 21. If not set, then all available "
     "versions are offered in the handshake. Also supports wire versions "
@@ -114,10 +118,6 @@ DEFINE_QUICHE_COMMAND_LINE_FLAG(
     std::string, client_connection_options, "",
     "Client connection options as ASCII tags separated by commas, "
     "e.g. \"ABCD,EFGH\"");
-
-DEFINE_QUICHE_COMMAND_LINE_FLAG(bool, quic_ietf_draft, false,
-                                "Use the IETF draft version. This also enables "
-                                "required internal QUIC flags.");
 
 DEFINE_QUICHE_COMMAND_LINE_FLAG(
     bool, version_mismatch_ok, false,
@@ -147,6 +147,10 @@ DEFINE_QUICHE_COMMAND_LINE_FLAG(
     int32_t, num_requests, 1,
     "How many sequential requests to make on a single connection.");
 
+DEFINE_QUICHE_COMMAND_LINE_FLAG(bool, ignore_errors, false,
+                                "If true, ignore connection/response errors "
+                                "and send all num_requests anyway.");
+
 DEFINE_QUICHE_COMMAND_LINE_FLAG(
     bool, disable_certificate_verification, false,
     "If true, don't verify the server certificate.");
@@ -173,8 +177,16 @@ DEFINE_QUICHE_COMMAND_LINE_FLAG(bool, one_connection_per_request, false,
                                 "If true, close the connection after each "
                                 "request. This allows testing 0-RTT.");
 
-DEFINE_QUICHE_COMMAND_LINE_FLAG(int32_t, server_connection_id_length, -1,
-                                "Length of the server connection ID used.");
+DEFINE_QUICHE_COMMAND_LINE_FLAG(
+    std::string, server_connection_id, "",
+    "If non-empty, the client will use the given server connection id for all "
+    "connections. The flag value is the hex-string of the on-wire connection id"
+    " bytes, e.g. '--server_connection_id=0123456789abcdef'.");
+
+DEFINE_QUICHE_COMMAND_LINE_FLAG(
+    int32_t, server_connection_id_length, -1,
+    "Length of the server connection ID used. This flag has no effects if "
+    "--server_connection_id is non-empty.");
 
 DEFINE_QUICHE_COMMAND_LINE_FLAG(int32_t, client_connection_id_length, -1,
                                 "Length of the client connection ID used.");
@@ -189,6 +201,11 @@ DEFINE_QUICHE_COMMAND_LINE_FLAG(
 
 DEFINE_QUICHE_COMMAND_LINE_FLAG(std::string, interface_name, "",
                                 "Interface name to bind QUIC UDP sockets to.");
+
+DEFINE_QUICHE_COMMAND_LINE_FLAG(
+    std::string, signing_algorithms_pref, "",
+    "A textual specification of a set of signature algorithms that can be "
+    "accepted by boring SSL SSL_set1_sigalgs_list()");
 
 namespace quic {
 namespace {
@@ -244,17 +261,6 @@ int QuicToyClient::SendRequestsAndPrintResponses(
   }
 
   quic::ParsedQuicVersionVector versions = quic::CurrentSupportedVersions();
-
-  if (quiche::GetQuicheCommandLineFlag(FLAGS_quic_ietf_draft)) {
-    quic::QuicVersionInitializeSupportForIetfDraft();
-    versions = {};
-    for (const ParsedQuicVersion& version : AllSupportedVersions()) {
-      if (version.HasIetfQuicFrames() &&
-          version.handshake_protocol == quic::PROTOCOL_TLS1_3) {
-        versions.push_back(version);
-      }
-    }
-  }
 
   std::string quic_version_string =
       quiche::GetQuicheCommandLineFlag(FLAGS_quic_version);
@@ -355,6 +361,17 @@ int QuicToyClient::SendRequestsAndPrintResponses(
       initial_mtu != 0 ? initial_mtu : quic::kDefaultMaxPacketSize);
   client->set_drop_response_body(
       quiche::GetQuicheCommandLineFlag(FLAGS_drop_response_body));
+  const std::string server_connection_id_hex_string =
+      quiche::GetQuicheCommandLineFlag(FLAGS_server_connection_id);
+  QUICHE_CHECK(server_connection_id_hex_string.size() % 2 == 0)
+      << "The length of --server_connection_id must be even. It is "
+      << server_connection_id_hex_string.size() << "-byte long.";
+  if (!server_connection_id_hex_string.empty()) {
+    const std::string server_connection_id_bytes =
+        absl::HexStringToBytes(server_connection_id_hex_string);
+    client->set_server_connection_id_override(QuicConnectionId(
+        server_connection_id_bytes.data(), server_connection_id_bytes.size()));
+  }
   const int32_t server_connection_id_length =
       quiche::GetQuicheCommandLineFlag(FLAGS_server_connection_id_length);
   if (server_connection_id_length >= 0) {
@@ -375,6 +392,11 @@ int QuicToyClient::SendRequestsAndPrintResponses(
   if (!interface_name.empty()) {
     client->set_interface_name(interface_name);
   }
+  const std::string signing_algorithms_pref =
+      quiche::GetQuicheCommandLineFlag(FLAGS_signing_algorithms_pref);
+  if (!signing_algorithms_pref.empty()) {
+    client->SetTlsSignatureAlgorithms(signing_algorithms_pref);
+  }
   if (!client->Initialize()) {
     std::cerr << "Failed to initialize client." << std::endl;
     return 1;
@@ -394,7 +416,12 @@ int QuicToyClient::SendRequestsAndPrintResponses(
               << client->session()->error_details() << std::endl;
     return 1;
   }
-  std::cerr << "Connected to " << host << ":" << port << std::endl;
+
+  std::cout << "Connected to " << host << ":" << port;
+  if (quiche::GetQuicheCommandLineFlag(FLAGS_output_resolved_server_address)) {
+    std::cout << ", resolved IP " << client->server_address().host().ToString();
+  }
+  std::cout << std::endl;
 
   // Construct the string body from flags, if provided.
   std::string body = quiche::GetQuicheCommandLineFlag(FLAGS_body);
@@ -469,13 +496,18 @@ int QuicToyClient::SendRequestsAndPrintResponses(
                 << std::endl;
       std::cout << "early data accepted: " << client->EarlyDataAccepted()
                 << std::endl;
+      QUIC_LOG(INFO) << "Request completed with TTFB(us): "
+                     << client->latest_ttfb().ToMicroseconds() << ", TTLB(us): "
+                     << client->latest_ttlb().ToMicroseconds();
     }
 
     if (!client->connected()) {
       std::cerr << "Request caused connection failure. Error: "
                 << quic::QuicErrorCodeToString(client->session()->error())
                 << std::endl;
-      return 1;
+      if (!quiche::GetQuicheCommandLineFlag(FLAGS_ignore_errors)) {
+        return 1;
+      }
     }
 
     int response_code = client->latest_response_code();
@@ -488,11 +520,15 @@ int QuicToyClient::SendRequestsAndPrintResponses(
       } else {
         std::cout << "Request failed (redirect " << response_code << ")."
                   << std::endl;
-        return 1;
+        if (!quiche::GetQuicheCommandLineFlag(FLAGS_ignore_errors)) {
+          return 1;
+        }
       }
     } else {
       std::cout << "Request failed (" << response_code << ")." << std::endl;
-      return 1;
+      if (!quiche::GetQuicheCommandLineFlag(FLAGS_ignore_errors)) {
+        return 1;
+      }
     }
 
     if (i + 1 < num_requests) {  // There are more requests to perform.
@@ -507,7 +543,9 @@ int QuicToyClient::SendRequestsAndPrintResponses(
         if (!client->Connect()) {
           std::cerr << "Failed to reconnect client between requests."
                     << std::endl;
-          return 1;
+          if (!quiche::GetQuicheCommandLineFlag(FLAGS_ignore_errors)) {
+            return 1;
+          }
         }
       } else if (!quiche::GetQuicheCommandLineFlag(
                      FLAGS_disable_port_changes)) {

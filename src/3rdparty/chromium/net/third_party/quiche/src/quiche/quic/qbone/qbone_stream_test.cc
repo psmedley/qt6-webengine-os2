@@ -9,6 +9,7 @@
 #include "absl/strings/string_view.h"
 #include "quiche/quic/core/crypto/quic_random.h"
 #include "quiche/quic/core/quic_session.h"
+#include "quiche/quic/core/quic_stream_priority.h"
 #include "quiche/quic/core/quic_utils.h"
 #include "quiche/quic/platform/api/quic_test.h"
 #include "quiche/quic/platform/api/quic_test_loopback.h"
@@ -18,7 +19,6 @@
 #include "quiche/quic/test_tools/mock_connection_id_generator.h"
 #include "quiche/quic/test_tools/quic_test_utils.h"
 #include "quiche/common/simple_buffer_allocator.h"
-#include "quiche/spdy/core/spdy_protocol.h"
 
 namespace quic {
 
@@ -70,8 +70,8 @@ class MockQuicSession : public QboneSessionBase {
     // priority.
     write_blocked_streams()->RegisterStream(
         stream_id,
-        /*is_static_stream=*/false,
-        /* precedence= */ spdy::SpdyStreamPrecedence(3));
+        /* is_static_stream = */ false,
+        QuicStreamPriority::Default(priority_type()));
   }
 
   // The session take ownership of the stream.
@@ -101,7 +101,8 @@ class DummyPacketWriter : public QuicPacketWriter {
   WriteResult WritePacket(const char* buffer, size_t buf_len,
                           const QuicIpAddress& self_address,
                           const QuicSocketAddress& peer_address,
-                          PerPacketOptions* options) override {
+                          PerPacketOptions* options,
+                          const QuicPacketWriterParams& params) override {
     return WriteResult(WRITE_STATUS_ERROR, 0);
   }
 
@@ -109,8 +110,8 @@ class DummyPacketWriter : public QuicPacketWriter {
 
   void SetWritable() override {}
 
-  absl::optional<int> MessageTooBigErrorCode() const override {
-    return absl::nullopt;
+  std::optional<int> MessageTooBigErrorCode() const override {
+    return std::nullopt;
   }
 
   QuicByteCount GetMaxPacketSize(
@@ -121,6 +122,8 @@ class DummyPacketWriter : public QuicPacketWriter {
   bool SupportsReleaseTime() const override { return false; }
 
   bool IsBatchMode() const override { return false; }
+
+  bool SupportsEcn() const override { return false; }
 
   QuicPacketBuffer GetNextWriteLocation(
       const QuicIpAddress& self_address,

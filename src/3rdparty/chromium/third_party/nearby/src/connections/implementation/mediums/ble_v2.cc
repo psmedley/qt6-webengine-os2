@@ -18,9 +18,13 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/escaping.h"
+#include "absl/time/time.h"
 #include "absl/types/optional.h"
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
+#include "connections/implementation/mediums/ble_v2/advertisement_read_result.h"
 #include "connections/implementation/mediums/ble_v2/ble_advertisement.h"
 #include "connections/implementation/mediums/ble_v2/ble_advertisement_header.h"
 #include "connections/implementation/mediums/ble_v2/ble_utils.h"
@@ -28,20 +32,20 @@
 #include "connections/implementation/mediums/bluetooth_radio.h"
 #include "connections/implementation/mediums/utils.h"
 #include "connections/power_level.h"
+#include "internal/flags/nearby_flags.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mutex_lock.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
 namespace {
 
-using ::location::nearby::api::ble_v2::BleAdvertisementData;
-using ::location::nearby::api::ble_v2::GattCharacteristic;
-using ::location::nearby::api::ble_v2::TxPowerLevel;
+using ::nearby::api::ble_v2::BleAdvertisementData;
+using ::nearby::api::ble_v2::GattCharacteristic;
+using ::nearby::api::ble_v2::TxPowerLevel;
 
 constexpr int kMaxAdvertisementLength = 512;
 constexpr int kDummyServiceIdLength = 128;
@@ -51,9 +55,6 @@ constexpr int kDummyServiceIdLength = 128;
 void AssumeHeld(Mutex& m) ABSL_ASSERT_EXCLUSIVE_LOCK(m) {}
 
 }  // namespace
-
-// These definitions are necessary before C++17.
-constexpr absl::Duration BleV2::kPeripheralLostTimeout;
 
 BleV2::BleV2(BluetoothRadio& radio)
     : radio_(radio), adapter_(radio_.GetBluetoothAdapter()) {}
@@ -273,25 +274,22 @@ bool BleV2::StartScanning(const std::string& service_id, PowerLevel power_level,
                       discovered_peripheral_tracker_
                           .ProcessFoundBleAdvertisement(
                               std::move(peripheral), advertisement_data,
-                              {
-                                  .fetch_advertisements =
-                                      [&](BleV2Peripheral peripheral,
-                                          int num_slots, int psm,
-                                          const std::vector<std::string>&
-                                              interesting_service_ids,
-                                          mediums::AdvertisementReadResult&
-                                              advertisement_read_result) {
-                                        // Th`mutex_` is already held here. Use
-                                        // `AssumeHeld` tell the thread
-                                        // annotation static analysis that
-                                        // `mutex_` is already exclusively
-                                        // locked.
-                                        AssumeHeld(mutex_);
-                                        ProcessFetchGattAdvertisementsRequest(
-                                            std::move(peripheral), num_slots,
-                                            psm, interesting_service_ids,
-                                            advertisement_read_result);
-                                      },
+                              [this](BleV2Peripheral peripheral, int num_slots,
+                                     int psm,
+                                     const std::vector<std::string>&
+                                         interesting_service_ids,
+                                     mediums::AdvertisementReadResult&
+                                         advertisement_read_result) {
+                                // Th`mutex_` is already held here. Use
+                                // `AssumeHeld` tell the thread
+                                // annotation static analysis that
+                                // `mutex_` is already exclusively
+                                // locked.
+                                AssumeHeld(mutex_);
+                                ProcessFetchGattAdvertisementsRequest(
+                                    std::move(peripheral), num_slots, psm,
+                                    interesting_service_ids,
+                                    advertisement_read_result);
                               });
                     });
                   },
@@ -303,6 +301,10 @@ bool BleV2::StartScanning(const std::string& service_id, PowerLevel power_level,
     return false;
   }
 
+  absl::Duration peripheral_lost_timeout =
+      absl::Milliseconds(NearbyFlags::GetInstance().GetInt64Flag(
+          config_package_nearby::nearby_connections_feature::
+              kBlePeripheralLostTimeoutMillis));
   // Set up lost alarm.
   lost_alarm_ = std::make_unique<CancelableAlarm>(
       "BLE.StartScanning() onLost",
@@ -310,7 +312,7 @@ bool BleV2::StartScanning(const std::string& service_id, PowerLevel power_level,
         MutexLock lock(&mutex_);
         discovered_peripheral_tracker_.ProcessLostGattAdvertisements();
       },
-      kPeripheralLostTimeout, &alarm_executor_, /*is_recurring=*/true);
+      peripheral_lost_timeout, &alarm_executor_, /*is_recurring=*/true);
 
   NEARBY_LOGS(INFO) << "Turned on BLE scanning with service id=" << service_id;
   return true;
@@ -413,7 +415,9 @@ bool BleV2::StartAcceptingConnections(const std::string& service_id,
             });
             incoming_sockets_.insert({service_id, client_socket});
           }
-          callback.accepted_cb(std::move(client_socket), service_id);
+          if (callback) {
+            callback(std::move(client_socket), service_id);
+          }
         }
       });
 
@@ -544,10 +548,9 @@ bool BleV2::StartAdvertisementGattServerLocked(
 
 bool BleV2::GenerateAdvertisementCharacteristic(
     int slot, const ByteArray& gatt_advertisement, GattServer& gatt_server) {
-  std::vector<GattCharacteristic::Permission> permissions{
-      GattCharacteristic::Permission::kRead};
-  std::vector<GattCharacteristic::Property> properties{
-      GattCharacteristic::Property::kRead};
+  GattCharacteristic::Permission permission =
+      GattCharacteristic::Permission::kRead;
+  GattCharacteristic::Property property = GattCharacteristic::Property::kRead;
 
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
   absl::optional<Uuid> advertiement_uuid =
@@ -560,7 +563,7 @@ bool BleV2::GenerateAdvertisementCharacteristic(
   absl::optional<GattCharacteristic> gatt_characteristic =
       gatt_server.CreateCharacteristic(
           mediums::bleutils::kCopresenceServiceUuid, *advertiement_uuid,
-          permissions, properties);
+          permission, property);
   if (!gatt_characteristic.has_value()) {
     NEARBY_LOGS(INFO) << "Unable to create and add a characterstic to the gatt "
                          "server for the advertisement.";
@@ -631,7 +634,7 @@ void BleV2::ProcessFetchGattAdvertisementsRequest(
   }
   if (slot_characteristic_uuids.empty()) {
     // TODO(b/222392304): More test coverage.
-    NEARBY_LOGS(WARNING) << "Edwin GATT client doesn't have characteristics.";
+    NEARBY_LOGS(WARNING) << "GATT client doesn't have characteristics.";
     advertisement_read_result.RecordLastReadStatus(false);
     return;
   }
@@ -645,7 +648,7 @@ void BleV2::ProcessFetchGattAdvertisementsRequest(
   if (!gatt_client->DiscoverServiceAndCharacteristics(
           mediums::bleutils::kCopresenceServiceUuid, characteristic_uuids)) {
     // TODO(b/222392304): More test coverage.
-    NEARBY_LOGS(WARNING) << "Edwin GATT client doesn't have characteristics.";
+    NEARBY_LOGS(WARNING) << "GATT client doesn't have characteristics.";
     advertisement_read_result.RecordLastReadStatus(false);
     return;
   }
@@ -666,7 +669,8 @@ void BleV2::ProcessFetchGattAdvertisementsRequest(
     auto characteristic_byte =
         gatt_client->ReadCharacteristic(gatt_characteristic.value());
     if (characteristic_byte.has_value()) {
-      advertisement_read_result.AddAdvertisement(slot, *characteristic_byte);
+      advertisement_read_result.AddAdvertisement(
+          slot, ByteArray(characteristic_byte.value()));
       NEARBY_LOGS(VERBOSE) << "Successfully read advertisement at slot="
                            << slot;
     } else {
@@ -903,4 +907,3 @@ void BleV2::RunOnBleThread(Runnable runnable) {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

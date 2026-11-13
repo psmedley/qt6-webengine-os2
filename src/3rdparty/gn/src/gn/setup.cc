@@ -23,6 +23,7 @@
 #include "gn/exec_process.h"
 #include "gn/filesystem_utils.h"
 #include "gn/input_file.h"
+#include "gn/label_pattern.h"
 #include "gn/parse_tree.h"
 #include "gn/parser.h"
 #include "gn/source_dir.h"
@@ -116,6 +117,28 @@ Variables
           "//build/my_config.gni",
         ]
 
+  export_compile_commands [optional]
+      A list of label patterns for which to generate a Clang compilation
+      database (see "gn help label_pattern" for the string format).
+
+      When specified, GN will generate a compile_commands.json file in the root
+      of the build directory containing information on how to compile each
+      source file reachable from any label matching any pattern in the list.
+      This is used for Clang-based tooling and some editor integration. See
+      https://clang.llvm.org/docs/JSONCompilationDatabase.html
+
+      The switch --add-export-compile-commands to "gn gen" (see "gn help gen")
+      appends to this value which provides a per-user way to customize it.
+
+      The deprecated switch --export-compile-commands to "gn gen" (see "gn help
+      gen") adds to the export target list using a different format.
+
+      Example:
+        export_compile_commands = [
+          "//base/*",
+          "//tools:doom_melon",
+        ]
+
   root [optional]
       Label of the root build target. The GN build will start by loading the
       build file containing this target name. This defaults to "//:" which will
@@ -125,13 +148,27 @@ Variables
       The command-line switch --root-target will override this value (see "gn
       help --root-target").
 
-  script_executable [optional]
-      Path to specific Python executable or other interpreter to use in
-      action targets and exec_script calls. By default GN searches the
-      PATH for Python to execute these scripts.
+  root_patterns [optional]
+      A list of label pattern strings. When not defined or empty, the GN build
+      graph will contain all targets from any BUILD.gn evaluated in the default
+      toolchain context, and their transitive dependencies.
 
-      If set to the empty string, the path specified in action targets
-      and exec_script calls will be executed directly.
+      When set to a non empty list, only the targets in the default toolchain
+      matching these patterns, and their transitive dependencies, will be defined
+      instead.
+
+      The command-line switch --root-pattern will override this value (see
+      "gn help --root-pattern")
+
+  script_executable [optional]
+      By default, GN runs the scripts used in action targets and exec_script
+      calls using the Python interpreter found in PATH. This value specifies the
+      Python executable or other interpreter to use instead.
+
+      If set to the empty string, the scripts will be executed directly.
+
+      The command-line switch --script-executable will override this value (see
+      "gn help --script-executable")
 
   secondary_source [optional]
       Label of an alternate directory tree to find input files. When searching
@@ -165,6 +202,7 @@ Variables
       When set specifies the minimum required version of Ninja. The default
       required version is 1.7.2. Specifying a higher version might enable the
       use of some of newer features that can make the build more efficient.
+
 
 Example .gn file contents
 
@@ -507,7 +545,7 @@ bool Setup::FillArguments(const base::CommandLine& cmdline, Err* err) {
 
   base::FilePath build_arg_file =
       build_settings_.GetFullPath(GetBuildArgFile());
-  auto switch_value = cmdline.GetSwitchValueASCII(switches::kArgs);
+  auto switch_value = cmdline.GetSwitchValueString(switches::kArgs);
   if (cmdline.HasSwitch(switches::kArgs) ||
       (gen_empty_args_ && !PathExists(build_arg_file))) {
     if (!FillArgsFromCommandLine(
@@ -781,8 +819,19 @@ bool Setup::FillPythonPath(const base::CommandLine& cmdline, Err* err) {
     if (!value->VerifyTypeIs(Value::STRING, err)) {
       return false;
     }
-    build_settings_.set_python_path(
-        ProcessFileExtensions(UTF8ToFilePath(value->string_value())));
+    // Note that an empty string value is valid, and means that the scripts
+    // invoked by actions will be run directly.
+    base::FilePath python_path;
+    if (!value->string_value().empty()) {
+      python_path =
+          ProcessFileExtensions(UTF8ToFilePath(value->string_value()));
+      if (python_path.empty()) {
+        *err = Err(Location(), "Could not find \"" + value->string_value() +
+                                   "\" from dotfile in PATH.");
+        return false;
+      }
+    }
+    build_settings_.set_python_path(python_path);
   } else {
 #if defined(OS_WIN)
     base::FilePath python_path =
@@ -841,6 +890,7 @@ bool Setup::RunConfigFile(Err* err) {
 bool Setup::FillOtherConfig(const base::CommandLine& cmdline, Err* err) {
   SourceDir current_dir("//");
   Label root_target_label(current_dir, "");
+  std::vector<LabelPattern> root_patterns;
 
   // Secondary source path, read from the config file if present.
   // Read from the config file if present.
@@ -893,7 +943,7 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline, Err* err) {
 
   // Root build file.
   if (cmdline.HasSwitch(switches::kRootTarget)) {
-    auto switch_value = cmdline.GetSwitchValueASCII(switches::kRootTarget);
+    auto switch_value = cmdline.GetSwitchValueString(switches::kRootTarget);
     Value root_value(nullptr, switch_value);
     root_target_label = Label::Resolve(current_dir, std::string_view(), Label(),
                                        root_value, err);
@@ -918,10 +968,63 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline, Err* err) {
       }
     }
   }
+
+  if (cmdline.HasSwitch(switches::kRootPattern)) {
+    auto& switches = cmdline.GetSwitches();
+    for (auto it = switches.find(switches::kRootPattern);
+         it != switches.end() && it->first == switches::kRootPattern; ++it) {
+      std::string pattern = base::CommandLine::StringTypeToUTF8(it->second);
+      LabelPattern pat = LabelPattern::GetPattern(
+          SourceDir("//"), build_settings_.root_path_utf8(),
+          Value(nullptr, pattern), err);
+      if (err->has_error()) {
+        err->AppendSubErr(
+            Err(Location(),
+                "for the command-line switch --root-pattern=" + pattern));
+        return false;
+      }
+      if (!pat.toolchain().is_null()) {
+        *err = Err(Location(),
+                   "Root pattern cannot have toolchain suffix: " + pattern);
+        return false;
+      }
+      root_patterns.push_back(std::move(pat));
+    }
+    // Ensure GN does not complain about the .gn root_patterns value being
+    // ignored if it is set.
+    (void)dotfile_scope_.GetValue("root_patterns", true);
+  } else {
+    const Value* root_patterns_value =
+        dotfile_scope_.GetValue("root_patterns", true);
+    if (root_patterns_value) {
+      if (!root_patterns_value->VerifyTypeIs(Value::LIST, err)) {
+        return false;
+      }
+      for (const auto& pattern_value : root_patterns_value->list_value()) {
+        if (!pattern_value.VerifyTypeIs(Value::STRING, err))
+          return false;
+
+        LabelPattern pat = LabelPattern::GetPattern(
+            SourceDir("//"), build_settings_.root_path_utf8(), pattern_value,
+            err);
+        if (err->has_error())
+          return false;
+        if (!pat.toolchain().is_null()) {
+          *err =
+              Err(pattern_value, "Root pattern cannot have toolchain suffix: " +
+                                     pattern_value.string_value());
+          return false;
+        }
+        root_patterns.push_back(std::move(pat));
+      }
+    }
+  }
+
   // Set the root build file here in order to take into account the values of
   // "build_file_extension" and "root".
   root_build_file_ = loader_->BuildFileForLabel(root_target_label);
   build_settings_.SetRootTargetLabel(root_target_label);
+  build_settings_.SetRootPatterns(std::move(root_patterns));
 
   // Build config file.
   const Value* build_config_value =
@@ -1022,6 +1125,44 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline, Err* err) {
     }
     SourceFile path(arg_file_template_value->string_value());
     build_settings_.set_arg_file_template_path(path);
+  }
+
+  // No stamp files.
+  const Value* no_stamp_files_value =
+      dotfile_scope_.GetValue("no_stamp_files", true);
+  if (no_stamp_files_value) {
+    if (!no_stamp_files_value->VerifyTypeIs(Value::BOOLEAN, err)) {
+      return false;
+    }
+    build_settings_.set_no_stamp_files(no_stamp_files_value->boolean_value());
+    CHECK(!build_settings_.no_stamp_files())
+        << "no_stamp_files does not work yet!";
+  }
+
+  // Export compile commands.
+  const Value* export_cc_value =
+      dotfile_scope_.GetValue("export_compile_commands", true);
+  if (export_cc_value) {
+    if (!ExtractListOfLabelPatterns(&build_settings_, *export_cc_value,
+                                    SourceDir("//"), &export_compile_commands_,
+                                    err)) {
+      return false;
+    }
+  }
+
+  // Append any additional export compile command patterns from the cmdline.
+  for (const std::string& cur :
+       cmdline.GetSwitchValueStrings(switches::kAddExportCompileCommands)) {
+    LabelPattern pat = LabelPattern::GetPattern(
+        SourceDir("//"), build_settings_.root_path_utf8(), Value(nullptr, cur),
+        err);
+    if (err->has_error()) {
+      err->AppendSubErr(Err(
+          Location(),
+          "for the command-line switch --add-export-compile-commands=" + cur));
+      return false;
+    }
+    export_compile_commands_.push_back(std::move(pat));
   }
 
   return true;

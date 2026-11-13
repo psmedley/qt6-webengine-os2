@@ -1,5 +1,6 @@
 // Copyright (C) 2017 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -21,7 +22,7 @@
 
 namespace QtWebEngineCore {
 
-class Q_WEBENGINECORE_PRIVATE_EXPORT PdfiumDocumentWrapperQt
+class Q_WEBENGINECORE_EXPORT PdfiumDocumentWrapperQt
 {
 public:
     PdfiumDocumentWrapperQt(const void *pdfData, size_t size, const char *password = nullptr);

@@ -6,11 +6,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+ - `Typeface.MakeFreeTypeFaceFromData` is now `Typeface.MakeTypefaceFromData` to be consistent
+   with the rest of the Skia library in the capitalization of the f in Typeface.
+   (CK still uses Freetype under the hood).
+ - Passing a `null` `Typeface` to the `Font` constructor no longer uses the default typeface. See
+   `CanvasKit.Typeface.GetDefault()` as a way to get the compiled-in typeface to replace this
+   behavior.
+ - `MakeManagedAnimation` no longer falls back to the built-in typeface if the provided
+   FreeType data is not in the assets map.
+
+### Added
+ - `CanvasKit.Typeface.GetDefault()` as a way to explicitly get the compiled-in typeface (if any).
+
+## [0.39.1] - 2023-10-12
+
+### Fixed
+ - `@webgpu/types` is actually a dependency, not just a devDependency.
+
+## [0.39.0] - 2023-10-11
+
+### Added
+- `ImageFilter.getOutputBounds` returns the adjusted bounds of a rect after
+   applying the `ImageFilter`.
+- `Picture.cullRect` which gives approximate bounds of the draw commands in the
+  picture.
+- `Picture.approximateBytesUsed` which returns an approximation of the bytes
+  used to store this picture. This size does not include large objects like
+  images.
+ - `FontMgr.matchFamilyStyle` finds the closest matching typeface to the specified familyName and style.
+- `Paint.setBlender` Sets the current blender.
+- `Blender.Mode` Create a blender that implements the specified BlendMode.
+- `RuntimeEffect.MakeForBlender` Compiles a RuntimeEffect from the given blender code.
+- `ManagedAnimation` getters and setters for lottie slots exported by Essential Graphics in AE.
+   Color, scalar, vec2, text, and image slot types are supported.
+- `ManagedAnimation` WYSIWYG editor API: `attachEditor`, `enableEditor`, `dispatchEditorKey`,
+  `dispatchEditorPointer`.
+- `InputState` and `ModifierKey` enums.
+- `Paragraph.getClosestGlyphInfoAtCoordinate` and `Paragraph.getGlyphInfoAt` return the information associated with the glyph or grapheme cluster in the paragraph at the specified location/index.
+- `Paragraph.getLineMetricsAt`, returns the line metrics of a line.
+- `Paragraph.getNumberOfLines`, returns the number of visible lines in the paragraph.
+- `Paragraph.getLineNumberAt`, finds the line that contains the given UTF-16 index.
+- `ManagedAnimation.setEditorCursorWeight` -- adjust the WYSIWYG editor cursor weight.
+
+
+### Fixed
+ - `EmbindObject` has been updated to allow TypeScript to differentiate between opaque
+   types such as Shader, ColorFilter, et cetera.
+
+### Changed
+- `MakeSWCanvasSurface` now allows passing an `OffscreenCanvas` element.
+- `Picture.beginRecording` takes an optional `computeBounds` boolean argument
+   which, when true, will cause the resulting recorded picture to compute a
+   more accurate `cullRect` when it is created.
+
+## [0.38.2] - 2023-06-09
+
+### Added
+ - `Paragraph.unresolvedCodepoints` which allows clients to identify gaps in font coverage
+    more easily.
+
+### Fixed
+ - `.wasm` files are now exported in the npm package.json
+
+## [0.38.1] - 2023-05-02
+
+### Removed
+ - Particles have been removed.
+
+### Added
+ - Skottie TransformValue accessors for dynamic layer transforms.
+ - Added `CanvasKit.FontCollection`, which wraps SkParagraph's FontCollection.
+   A FontCollection instance contains a cache of fonts used by SkParagraph and
+   a cache of paragraph layouts.
+ - Added `CanvasKit.ParagraphBuilder.MakeFromFontCollection` to make a
+   `ParagraphBuilder` that uses a given `FontCollection`.
+ - `Paint.setDither` is exposed.
+ - Documentation has been improved.
+
+### Changed
+ - `Image.encodeToData` now makes use of the GPU context more consistently.
+
+## [0.38.0] - 2023-01-12
+
+### Changed
+ - `Paragraph.getRectsForRange` and `Paragraph.getRectsForPlaceholders` had been returning a list
+   of Float32Arrays upon which a property 'direction' had been monkey-patched (this was
+   undocumented). They now return an object `RectWithDirection`.
+- `CanvasKit.MakeOnScreenGLSurface` allows providing a cached sample count and stencil
+  value to avoid repeated lookups on Surface creation.
+
+## [0.37.2] - 2022-11-15
+
+### Fixed
+ - Images made from textures correctly invalidate internal state, reducing flicker (skbug.com/13903)
+
+## [0.37.1] - 2022-11-08
+
 ### Fixed
  - Font resolution algorithm for ellipsis in SkParagraph (skbug.com/11797)
  - GrContexts will properly target the correct WebGL context
  - CanvasKit built with no_embedded_font will properly link and be able to load fonts from passed-in
    bytes.
+ - Text styled with fontSize or heightMultiplier 0 will be invisible.
 
 ## [0.37.0] - 2022-09-07
 
@@ -244,7 +342,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
  - `Font.getGlyphIntercepts()`
- 
+
 ### Fixed
  - Bug with images using certain exif metadata. (skbug.com/11968)
 
@@ -410,7 +508,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    `CanvasKit.Shader`.
  - `MakeRasterDirectSurface` for giving the user direct access to drawn pixels.
  - `getLineMetrics` to Paragraph.
- - `Canvas.saveLayerPaint` as an experimental, undocumented "fast path" if one only needs to pass 
+ - `Canvas.saveLayerPaint` as an experimental, undocumented "fast path" if one only needs to pass
    the paint.
  - Support for .woff and .woff2 fonts. Disable .woff2 for reduced code size by supplying
    no_woff2 to compile.sh. (This removes the code to do brotli decompression).

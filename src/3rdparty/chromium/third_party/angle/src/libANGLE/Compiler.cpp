@@ -123,11 +123,20 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     // GL_EXT_clip_cull_distance
     mResources.EXT_clip_cull_distance = extensions.clipCullDistanceEXT;
 
+    // GL_ANGLE_clip_cull_distance
+    mResources.ANGLE_clip_cull_distance = extensions.clipCullDistanceANGLE;
+
     // GL_EXT_primitive_bounding_box
     mResources.EXT_primitive_bounding_box = extensions.primitiveBoundingBoxEXT;
 
     // GL_OES_primitive_bounding_box
     mResources.OES_primitive_bounding_box = extensions.primitiveBoundingBoxOES;
+
+    // GL_EXT_separate_shader_objects
+    mResources.EXT_separate_shader_objects = extensions.separateShaderObjectsEXT;
+
+    // GL_ARM_shader_framebuffer_fetch
+    mResources.ARM_shader_framebuffer_fetch = extensions.shaderFramebufferFetchARM;
 
     // GLSL ES 3.0 constants
     mResources.MaxVertexOutputVectors  = caps.maxVertexOutputComponents / 4;
@@ -139,7 +148,10 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     mResources.EXT_blend_func_extended  = extensions.blendFuncExtendedEXT;
     mResources.MaxDualSourceDrawBuffers = caps.maxDualSourceDrawBuffers;
 
-    // APPLE_clip_distance/EXT_clip_cull_distance
+    // EXT_conservative_depth
+    mResources.EXT_conservative_depth = extensions.conservativeDepthEXT;
+
+    // APPLE_clip_distance / EXT_clip_cull_distance / ANGLE_clip_cull_distance
     mResources.MaxClipDistances                = caps.maxClipDistances;
     mResources.MaxCullDistances                = caps.maxCullDistances;
     mResources.MaxCombinedClipAndCullDistances = caps.maxCombinedClipAndCullDistances;
@@ -200,6 +212,7 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     mResources.MaxShaderStorageBufferBindings = caps.maxShaderStorageBufferBindings;
 
     // Needed by point size clamping workaround
+    mResources.MinPointSize = caps.minAliasedPointSize;
     mResources.MaxPointSize = caps.maxAliasedPointSize;
 
     if (state.getClientMajorVersion() == 2 && !extensions.drawBuffersEXT)
@@ -407,11 +420,6 @@ ShaderType ShCompilerInstance::getShaderType() const
 ShBuiltInResources ShCompilerInstance::getBuiltInResources() const
 {
     return sh::GetBuiltInResources(mHandle);
-}
-
-const std::string &ShCompilerInstance::getBuiltinResourcesString() const
-{
-    return sh::GetBuiltInResourcesString(mHandle);
 }
 
 ShShaderOutput ShCompilerInstance::getShaderOutputType() const

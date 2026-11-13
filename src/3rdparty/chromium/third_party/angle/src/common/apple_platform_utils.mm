@@ -18,9 +18,9 @@ bool IsMetalRendererAvailable()
 
     // We only support macos 10.13+ and 11 for now. Since they are requirements for Metal 2.0.
 #if TARGET_OS_SIMULATOR
-    if (ANGLE_APPLE_AVAILABLE_XCI(10.13, 13.0, 13))
+    if (ANGLE_APPLE_AVAILABLE_XCI(10.13, 13.1, 13))
 #else
-    if (ANGLE_APPLE_AVAILABLE_XCI(10.13, 13.0, 11))
+    if (ANGLE_APPLE_AVAILABLE_XCI(10.13, 13.1, 11))
 #endif
     {
         if (!queriedSystemDevice)
@@ -48,26 +48,18 @@ bool IsMetalRendererAvailable()
                     // Hardcode constant to sidestep compiler errors. Call will
                     // return false on older macOS versions.
                     const NSUInteger macFamily2v1 = 10005;
+                    ANGLE_APPLE_ALLOW_DEPRECATED_BEGIN
                     if ([device supportsFeatureSet:static_cast<MTLFeatureSet>(macFamily2v1)])
                         gpuFamilySufficient = true;
+                    ANGLE_APPLE_ALLOW_DEPRECATED_END
                 }
-#elif defined(ANGLE_PLATFORM_IOS) && !TARGET_OS_SIMULATOR
-                // A8 devices (iPad Mini 4, iPad Air 2) cannot use ANGLE's Metal backend.
-                // This check can be removed once they are no longer supported.
-                if (ANGLE_APPLE_AVAILABLE_XCI(10.15, 13.1, 13))
-                {
-                    if ([device supportsFamily:MTLGPUFamilyApple3])
-                        gpuFamilySufficient = true;
-                }
-                else
-                {
-                    // Hardcode constant to sidestep compiler errors. Call will
-                    // return false on older macOS versions.
-                    const NSUInteger iosFamily3v1 = 4;
-                    if ([device supportsFeatureSet:static_cast<MTLFeatureSet>(iosFamily3v1)])
-                        gpuFamilySufficient = true;
-                }
-#elif defined(ANGLE_PLATFORM_IOS) && TARGET_OS_SIMULATOR
+#elif ANGLE_PLATFORM_IOS_FAMILY && !ANGLE_PLATFORM_IOS_FAMILY_SIMULATOR
+                // Hardcode constant to sidestep compiler errors. Call will
+                // return false on older macOS versions.
+                const NSUInteger iosFamily3v1 = 4;
+                if ([device supportsFeatureSet:static_cast<MTLFeatureSet>(iosFamily3v1)])
+                    gpuFamilySufficient = true;
+#elif ANGLE_PLATFORM_IOS_FAMILY && ANGLE_PLATFORM_IOS_FAMILY_SIMULATOR
                 // FIXME: Currently we do not have good simulator query, as it does not support
                 // the whole feature set needed for iOS.
                 gpuFamilySufficient = true;

@@ -6,13 +6,14 @@
 #define QUICHE_SPDY_CORE_ARRAY_OUTPUT_BUFFER_H_
 
 #include <cstddef>
+#include <cstdint>
 
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/spdy/core/zero_copy_output_buffer.h"
 
 namespace spdy {
 
-class QUICHE_EXPORT_PRIVATE ArrayOutputBuffer : public ZeroCopyOutputBuffer {
+class QUICHE_EXPORT ArrayOutputBuffer : public ZeroCopyOutputBuffer {
  public:
   // |buffer| is pointed to the output to write to, and |size| is the capacity
   // of the output.

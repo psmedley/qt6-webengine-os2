@@ -21,9 +21,11 @@
 
 #include <stdint.h>
 
+#include "libavutil/attributes_internal.h"
+
 #include "avcodec.h"
 
-extern const uint32_t ff_square_tab[512];
+extern const uint32_t attribute_visibility_hidden ff_square_tab[512];
 
 
 /* minimum alignment rules ;)
@@ -87,7 +89,7 @@ void ff_me_cmp_init_ppc(MECmpContext *c, AVCodecContext *avctx);
 void ff_me_cmp_init_x86(MECmpContext *c, AVCodecContext *avctx);
 void ff_me_cmp_init_mips(MECmpContext *c, AVCodecContext *avctx);
 
-void ff_set_cmp(MECmpContext *c, me_cmp_func *cmp, int type);
+int ff_set_cmp(MECmpContext *c, me_cmp_func *cmp, int type);
 
 void ff_dsputil_init_dwt(MECmpContext *c);
 

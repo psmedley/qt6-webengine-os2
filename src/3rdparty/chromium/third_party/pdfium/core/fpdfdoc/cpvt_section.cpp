@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "core/fpdfdoc/cpvt_wordinfo.h"
 #include "core/fxcrt/stl_util.h"
 #include "third_party/base/check.h"
-#include "third_party/base/cxx17_backports.h"
 
 namespace {
 
@@ -223,8 +222,8 @@ void CPVT_Section::ResetLinePlace() {
 
 CPVT_WordPlace CPVT_Section::AddWord(const CPVT_WordPlace& place,
                                      const CPVT_WordInfo& wordinfo) {
-  int32_t nWordIndex = pdfium::clamp(
-      place.nWordIndex, 0, fxcrt::CollectionSize<int32_t>(m_WordArray));
+  int32_t nWordIndex = std::clamp(place.nWordIndex, 0,
+                                  fxcrt::CollectionSize<int32_t>(m_WordArray));
   m_WordArray.insert(m_WordArray.begin() + nWordIndex,
                      std::make_unique<CPVT_WordInfo>(wordinfo));
   return place;

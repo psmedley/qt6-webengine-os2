@@ -44,7 +44,12 @@ class LinuxPerfJitLogger : public CodeEventLogger {
   explicit LinuxPerfJitLogger(Isolate* isolate);
   ~LinuxPerfJitLogger() override;
 
-  void CodeMoveEvent(AbstractCode from, AbstractCode to) override;
+  void CodeMoveEvent(Tagged<InstructionStream> from,
+                     Tagged<InstructionStream> to) override {
+    UNREACHABLE();  // Unsupported.
+  }
+  void BytecodeMoveEvent(Tagged<BytecodeArray> from,
+                         Tagged<BytecodeArray> to) override {}
   void CodeDisableOptEvent(Handle<AbstractCode> code,
                            Handle<SharedFunctionInfo> shared) override {}
 
@@ -55,7 +60,7 @@ class LinuxPerfJitLogger : public CodeEventLogger {
   void CloseMarkerFile(void* marker_address);
 
   uint64_t GetTimestamp();
-  void LogRecordedBuffer(Handle<AbstractCode> code,
+  void LogRecordedBuffer(Tagged<AbstractCode> code,
                          MaybeHandle<SharedFunctionInfo> maybe_shared,
                          const char* name, int length) override;
 #if V8_ENABLE_WEBASSEMBLY
@@ -76,11 +81,11 @@ class LinuxPerfJitLogger : public CodeEventLogger {
 
   void LogWriteBytes(const char* bytes, int size);
   void LogWriteHeader();
-  void LogWriteDebugInfo(Handle<Code> code, Handle<SharedFunctionInfo> shared);
+  void LogWriteDebugInfo(Tagged<Code> code, Handle<SharedFunctionInfo> shared);
 #if V8_ENABLE_WEBASSEMBLY
   void LogWriteDebugInfo(const wasm::WasmCode* code);
 #endif  // V8_ENABLE_WEBASSEMBLY
-  void LogWriteUnwindingInfo(Code code);
+  void LogWriteUnwindingInfo(Tagged<Code> code);
 
   static const uint32_t kElfMachIA32 = 3;
   static const uint32_t kElfMachX64 = 62;
@@ -127,7 +132,6 @@ class LinuxPerfJitLogger : public CodeEventLogger {
 
   // Per-process singleton file. We assume that there is one main isolate;
   // to determine when it goes away, we keep reference count.
-  static base::LazyRecursiveMutex file_mutex_;
   static FILE* perf_output_handle_;
   static uint64_t reference_count_;
   static void* marker_address_;

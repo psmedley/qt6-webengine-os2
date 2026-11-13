@@ -25,8 +25,8 @@ static_assert(File::FROM_BEGIN == SEEK_SET && File::FROM_CURRENT == SEEK_CUR &&
 namespace {
 
 #if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL) || \
-    defined(OS_HAIKU) || defined(OS_MSYS) || defined(OS_ZOS) || \
-    defined(OS_ANDROID) && __ANDROID_API__ < 21
+    defined(OS_HAIKU) || defined(OS_MSYS) || defined(OS_ZOS) ||  \
+    defined(OS_ANDROID) && __ANDROID_API__ < 21 || defined(OS_SERENITY)
 int CallFstat(int fd, stat_wrapper_t* sb) {
   return fstat(fd, sb);
 }
@@ -330,6 +330,8 @@ void File::DoInitialize(const FilePath& path, uint32_t flags) {
   DCHECK(!IsValid());
 
   int open_flags = 0;
+  if (flags & FLAG_CREATE)
+    open_flags = O_CREAT | O_EXCL;
 
   if (flags & FLAG_CREATE_ALWAYS) {
     DCHECK(!open_flags);

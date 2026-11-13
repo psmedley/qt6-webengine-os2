@@ -277,6 +277,12 @@ void ExternalPopupMenu::GetPopupMenuInfo(
       continue;
 
     Element& item_element = *list_items[i];
+#if BUILDFLAG(IS_ANDROID)
+    // Separators get rendered as selectable options on android
+    if (IsA<HTMLHRElement>(item_element)) {
+      continue;
+    }
+#endif
     auto popup_item = mojom::blink::MenuItem::New();
     popup_item->label = owner_element.ItemText(item_element);
     popup_item->tool_tip = item_element.title();
@@ -300,13 +306,13 @@ void ExternalPopupMenu::GetPopupMenuInfo(
   const ComputedStyle& menu_style = owner_element.GetComputedStyle()
                                         ? *owner_element.GetComputedStyle()
                                         : *owner_element.EnsureComputedStyle();
-  const SimpleFontData* font_data = menu_style.GetFont().PrimaryFont();
+  const SimpleFontData* font_data = menu_style.GetFont()->PrimaryFont();
   DCHECK(font_data);
   // These coordinates need to be in CSS pixels.
   float dpr = GetDprForSizeAdjustment(owner_element);
   *item_height = font_data ? font_data->GetFontMetrics().Height() / dpr : 0;
   *font_size = static_cast<int>(
-      menu_style.GetFont().GetFontDescription().ComputedSize() / dpr);
+      menu_style.GetFont()->GetFontDescription().ComputedSize() / dpr);
   *selected_item = ToExternalPopupMenuItemIndex(
       owner_element.SelectedListIndex(), owner_element);
 
@@ -325,6 +331,12 @@ int ExternalPopupMenu::ToPopupMenuItemIndex(int external_popup_menu_item_index,
   for (wtf_size_t i = 0; i < items.size(); ++i) {
     if (owner_element.ItemIsDisplayNone(*items[i]))
       continue;
+#if BUILDFLAG(IS_ANDROID)
+    // <hr> elements are not sent to the browser on android
+    if (IsA<HTMLHRElement>(*items[i])) {
+      continue;
+    }
+#endif
     if (index_tracker++ == external_popup_menu_item_index)
       return i;
   }
@@ -342,6 +354,12 @@ int ExternalPopupMenu::ToExternalPopupMenuItemIndex(
   for (wtf_size_t i = 0; i < items.size(); ++i) {
     if (owner_element.ItemIsDisplayNone(*items[i]))
       continue;
+#if BUILDFLAG(IS_ANDROID)
+    // <hr> elements are not sent to the browser on android
+    if (IsA<HTMLHRElement>(*items[i])) {
+      continue;
+    }
+#endif
     if (popup_menu_item_index == static_cast<int>(i))
       return index_tracker;
     ++index_tracker;

@@ -10,9 +10,9 @@
 
 #include <vector>
 
-#include "include/private/SkNoncopyable.h"
+#include "include/private/base/SkNoncopyable.h"
 #include "modules/svg/include/SkSVGTypes.h"
-#include "src/core/SkTLazy.h"
+#include "src/base/SkTLazy.h"
 
 class SkSVGAttributeParser : public SkNoncopyable {
 public:
@@ -116,9 +116,13 @@ private:
     bool parseLengthUnitToken(SkSVGLength::Unit*);
     bool parseNamedColorToken(SkColor*);
     bool parseHexColorToken(SkColor*);
+    bool parseColorComponentScalarToken(int32_t*);
+    bool parseColorComponentIntegralToken(int32_t*);
+    bool parseColorComponentFractionalToken(int32_t*);
     bool parseColorComponentToken(int32_t*);
     bool parseColorToken(SkColor*);
     bool parseRGBColorToken(SkColor*);
+    bool parseRGBAColorToken(SkColor*);
     bool parseSVGColor(SkSVGColor*, SkSVGColor::Vars&&);
     bool parseSVGColorType(SkSVGColorType*);
     bool parseFuncIRI(SkSVGFuncIRI*);

@@ -22,7 +22,8 @@ static enum xnn_status create_global_average_pooling_operator(
   const struct xnn_value* values,
   size_t num_values,
   struct xnn_operator_data* opdata,
-  const struct xnn_caches* caches)
+  struct xnn_code_cache* code_cache,
+  struct xnn_weights_cache* weights_cache)
 {
   assert(node->num_inputs == 1);
   const uint32_t input_id = node->inputs[0];
@@ -40,13 +41,27 @@ static enum xnn_status create_global_average_pooling_operator(
 
   enum xnn_status status;
   if (values[node->inputs[0]].layout == xnn_layout_type_nchw) {
-    assert(node->compute_type == xnn_compute_type_fp32);
-    status = xnn_create_global_average_pooling_ncw_f32(
-      channel_dim /* channels */,
-      node->activation.output_min,
-      node->activation.output_max,
-      node->flags,
-      &opdata->operator_objects[0]);
+    assert(node->compute_type == xnn_compute_type_fp32 || node->compute_type == xnn_compute_type_fp16);
+    switch (node->compute_type) {
+      case xnn_compute_type_fp32:
+        status = xnn_create_global_average_pooling_ncw_f32(
+          channel_dim /* channels */,
+          node->activation.output_min,
+          node->activation.output_max,
+          node->flags,
+          &opdata->operator_objects[0]);
+        break;
+      case xnn_compute_type_fp16:
+        status = xnn_create_global_average_pooling_ncw_f16(
+          channel_dim /* channels */,
+          node->activation.output_min,
+          node->activation.output_max,
+          node->flags,
+          &opdata->operator_objects[0]);
+        break;
+      default:
+        XNN_UNREACHABLE;
+    }
   } else {
     assert(values[node->inputs[0]].layout == xnn_layout_type_nhwc);
     assert(values[node->outputs[0]].layout == xnn_layout_type_nhwc);
@@ -59,7 +74,6 @@ static enum xnn_status create_global_average_pooling_operator(
           node->flags,
           &opdata->operator_objects[0]);
         break;
-#ifndef XNN_NO_F16_OPERATORS
       case xnn_compute_type_fp16:
         status = xnn_create_global_average_pooling_nwc_f16(
           channel_dim /* channels */, channel_dim /* input stride */, channel_dim /* output stride */,
@@ -68,8 +82,6 @@ static enum xnn_status create_global_average_pooling_operator(
           node->flags,
           &opdata->operator_objects[0]);
         break;
-#endif  // !defined(XNN_NO_F16_OPERATORS)
-#ifndef XNN_NO_QS8_OPERATORS
       case xnn_compute_type_qs8:
       {
         const float output_scale = values[output_id].quantization.scale;
@@ -86,8 +98,6 @@ static enum xnn_status create_global_average_pooling_operator(
           &opdata->operator_objects[0]);
         break;
       }
-#endif  // !defined(XNN_NO_QS8_OPERATORS)
-#ifndef XNN_NO_QU8_OPERATORS
       case xnn_compute_type_qu8:
       {
         const float output_scale = values[output_id].quantization.scale;
@@ -104,104 +114,150 @@ static enum xnn_status create_global_average_pooling_operator(
           &opdata->operator_objects[0]);
         break;
       }
-#endif  // !defined(XNN_NO_QU8_OPERATORS)
       default:
         XNN_UNREACHABLE;
     }
-  }
-  if (status == xnn_status_success) {
-    switch (node->type) {
-      case xnn_node_type_global_average_pooling_1d:
-        opdata->batch_size = xnn_shape_multiply_batch_dims(&values[input_id].shape, 2);
-        opdata->input_width = values[input_id].shape.dim[num_input_dims - 2];
-        break;
-      case xnn_node_type_global_average_pooling_2d:
-        opdata->batch_size = xnn_shape_multiply_batch_dims(&values[input_id].shape, 3);
-        opdata->input_width = values[input_id].shape.dim[num_input_dims - 3] * values[input_id].shape.dim[num_input_dims - 2];
-        break;
-      default:
-        XNN_UNREACHABLE;
-    }
-    opdata->inputs[0] = input_id;
-    opdata->outputs[0] = output_id;
   }
   return status;
 }
 
+static enum xnn_status reshape_global_average_pooling_operator(
+  struct xnn_operator_data* opdata,
+  struct xnn_value* values,
+  size_t num_values,
+  pthreadpool_t threadpool)
+{
+  const uint32_t input_id = opdata->inputs[0];
+  assert(input_id < num_values);
+  const size_t num_input_dims = values[input_id].shape.num_dims;
+  size_t batch_size, input_width;
+  switch (opdata->type) {
+    case xnn_node_type_global_average_pooling_1d:
+      batch_size = xnn_shape_multiply_batch_dims(&values[input_id].shape, 2);
+      input_width = values[input_id].shape.dim[num_input_dims - 2];
+      break;
+    case xnn_node_type_global_average_pooling_2d:
+      batch_size = xnn_shape_multiply_batch_dims(&values[input_id].shape, 3);
+      input_width = values[input_id].shape.dim[num_input_dims - 3] * values[input_id].shape.dim[num_input_dims - 2];
+      break;
+    default:
+      XNN_UNREACHABLE;
+  }
+  switch (opdata->operator_objects[0]->type) {
+    case xnn_operator_type_global_average_pooling_ncw_f32:
+      return xnn_reshape_global_average_pooling_ncw_f32(
+        opdata->operator_objects[0],
+        batch_size,
+        input_width,
+        threadpool);
+      break;
+    case xnn_operator_type_global_average_pooling_ncw_f16:
+      return xnn_reshape_global_average_pooling_ncw_f16(
+        opdata->operator_objects[0],
+        batch_size,
+        input_width,
+        threadpool);
+      break;
+    case xnn_operator_type_global_average_pooling_nwc_f32:
+      return xnn_reshape_global_average_pooling_nwc_f32(
+        opdata->operator_objects[0],
+        batch_size,
+        input_width,
+        &opdata->workspace_size, &opdata->workspace_alignment,
+        threadpool);
+      break;
+    case xnn_operator_type_global_average_pooling_nwc_f16:
+      return xnn_reshape_global_average_pooling_nwc_f16(
+        opdata->operator_objects[0],
+        batch_size,
+        input_width,
+        &opdata->workspace_size, &opdata->workspace_alignment,
+        threadpool);
+      break;
+    case xnn_operator_type_global_average_pooling_nwc_qs8:
+      return xnn_reshape_global_average_pooling_nwc_qs8(
+        opdata->operator_objects[0],
+        batch_size,
+        input_width,
+        &opdata->workspace_size, &opdata->workspace_alignment,
+        threadpool);
+      break;
+    case xnn_operator_type_global_average_pooling_nwc_qu8:
+      return xnn_reshape_global_average_pooling_nwc_qu8(
+        opdata->operator_objects[0],
+        batch_size,
+        input_width,
+        &opdata->workspace_size, &opdata->workspace_alignment,
+        threadpool);
+      break;
+    default:
+      XNN_UNREACHABLE;
+  }
+}
+
 static enum xnn_status setup_global_average_pooling_operator(
   const struct xnn_operator_data* opdata,
-  const struct xnn_blob* blobs,
-  size_t num_blobs,
+  const struct xnn_value* values,
+  size_t num_values,
   pthreadpool_t threadpool)
 {
   const uint32_t input_id = opdata->inputs[0];
   assert(input_id != XNN_INVALID_VALUE_ID);
-  assert(input_id < num_blobs);
+  assert(input_id < num_values);
 
   const uint32_t output_id = opdata->outputs[0];
   assert(output_id != XNN_INVALID_VALUE_ID);
-  assert(output_id < num_blobs);
+  assert(output_id < num_values);
 
-  const struct xnn_blob* input_blob = blobs + input_id;
-  const void* input_data = input_blob->data;
+  const struct xnn_value* input_value = values + input_id;
+  const void* input_data = input_value->data;
   assert(input_data != NULL);
 
-  const struct xnn_blob* output_blob = blobs + output_id;
-  void* output_data = output_blob->data;
+  const struct xnn_value* output_value = values + output_id;
+  void* output_data = output_value->data;
   assert(output_data != NULL);
 
   switch (opdata->operator_objects[0]->type) {
     case xnn_operator_type_global_average_pooling_ncw_f32:
       return xnn_setup_global_average_pooling_ncw_f32(
         opdata->operator_objects[0],
-        opdata->batch_size,
-        opdata->input_width,
         input_data,
-        output_data,
-        threadpool);
+        output_data);
+      break;
+    case xnn_operator_type_global_average_pooling_ncw_f16:
+      return xnn_setup_global_average_pooling_ncw_f16(
+        opdata->operator_objects[0],
+        input_data,
+        output_data);
       break;
     case xnn_operator_type_global_average_pooling_nwc_f32:
       return xnn_setup_global_average_pooling_nwc_f32(
         opdata->operator_objects[0],
-        opdata->batch_size,
-        opdata->input_width,
+        opdata->workspace,
         input_data,
-        output_data,
-        threadpool);
+        output_data);
       break;
-#ifndef XNN_NO_F16_OPERATORS
     case xnn_operator_type_global_average_pooling_nwc_f16:
       return xnn_setup_global_average_pooling_nwc_f16(
         opdata->operator_objects[0],
-        opdata->batch_size,
-        opdata->input_width,
+        opdata->workspace,
         input_data,
-        output_data,
-        threadpool);
+        output_data);
       break;
-#endif  // !defined(XNN_NO_F16_OPERATORS)
-#ifndef XNN_NO_QS8_OPERATORS
     case xnn_operator_type_global_average_pooling_nwc_qs8:
       return xnn_setup_global_average_pooling_nwc_qs8(
         opdata->operator_objects[0],
-        opdata->batch_size,
-        opdata->input_width,
+        opdata->workspace,
         input_data,
-        output_data,
-        threadpool);
+        output_data);
       break;
-#endif  // !defined(XNN_NO_QS8_OPERATORS)
-#ifndef XNN_NO_QU8_OPERATORS
     case xnn_operator_type_global_average_pooling_nwc_qu8:
       return xnn_setup_global_average_pooling_nwc_qu8(
         opdata->operator_objects[0],
-        opdata->batch_size,
-        opdata->input_width,
+        opdata->workspace,
         input_data,
-        output_data,
-        threadpool);
+        output_data);
       break;
-#endif  // !defined(XNN_NO_QU8_OPERATORS)
     default:
       XNN_UNREACHABLE;
   }
@@ -239,12 +295,8 @@ static enum xnn_status define_global_average_pooling_nd(
 
   switch (input_value->datatype) {
     case xnn_datatype_fp32:
-#ifndef XNN_NO_QS8_OPERATORS
     case xnn_datatype_qint8:
-#endif  // !defined(XNN_NO_QS8_OPERATORS)
-#ifndef XNN_NO_QU8_OPERATORS
     case xnn_datatype_quint8:
-#endif  // !defined(XNN_NO_QU8_OPERATORS)
       break;
     default:
       xnn_log_error(
@@ -270,16 +322,12 @@ static enum xnn_status define_global_average_pooling_nd(
     case xnn_datatype_fp32:
       compute_type = xnn_compute_type_fp32;
       break;
-#ifndef XNN_NO_QS8_OPERATORS
     case xnn_datatype_qint8:
       compute_type = xnn_compute_type_qs8;
       break;
-#endif  // !defined(XNN_NO_QS8_OPERATORS)
-#ifndef XNN_NO_QU8_OPERATORS
     case xnn_datatype_quint8:
       compute_type = xnn_compute_type_qu8;
       break;
-#endif  // !defined(XNN_NO_QU8_OPERATORS)
     default:
       xnn_log_error(
         "failed to define %s operator with output ID #%" PRIu32 ": unsupported Value datatype %s (%d)",
@@ -310,6 +358,7 @@ static enum xnn_status define_global_average_pooling_nd(
   node->flags = flags;
 
   node->create = create_global_average_pooling_operator;
+  node->reshape = reshape_global_average_pooling_operator;
   node->setup = setup_global_average_pooling_operator;
 
   return xnn_status_success;

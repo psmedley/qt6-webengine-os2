@@ -14,26 +14,34 @@
 
 import {searchSegment} from '../base/binary_search';
 import {Actions} from '../common/actions';
-import {toNs} from '../common/time';
-
 import {globals} from './globals';
 
 function setToPrevious(current: number) {
-  const index = Math.max(current - 1, 0);
+  let index = current - 1;
+  if (index < 0) {
+    index = globals.currentSearchResults.totalResults - 1;
+  }
   globals.dispatch(Actions.setSearchIndex({index}));
 }
 
 function setToNext(current: number) {
   const index =
-      Math.min(current + 1, globals.currentSearchResults.totalResults - 1);
+      (current + 1) % globals.currentSearchResults.totalResults;
   globals.dispatch(Actions.setSearchIndex({index}));
 }
 
 export function executeSearch(reverse = false) {
   const index = globals.state.searchIndex;
-  const startNs = toNs(globals.frontendLocalState.visibleWindowTime.start);
-  const endNs = toNs(globals.frontendLocalState.visibleWindowTime.end);
+  const vizWindow = globals.stateVisibleTime();
+  const startNs = vizWindow.start;
+  const endNs = vizWindow.end;
   const currentTs = globals.currentSearchResults.tsStarts[index];
+
+  // If the value of |globals.currentSearchResults.totalResults| is 0,
+  // it means that the query is in progress or no results are found.
+  if (globals.currentSearchResults.totalResults === 0) {
+    return;
+  }
 
   // If this is a new search or the currentTs is not in the viewport,
   // select the first/last item in the viewport.
@@ -72,19 +80,27 @@ function selectCurrentSearchResult() {
   const searchIndex = globals.state.searchIndex;
   const source = globals.currentSearchResults.sources[searchIndex];
   const currentId = globals.currentSearchResults.sliceIds[searchIndex];
-  const trackId = globals.currentSearchResults.trackIds[searchIndex];
+  const trackKey = globals.currentSearchResults.trackKeys[searchIndex];
 
   if (currentId === undefined) return;
 
   if (source === 'cpu') {
-    globals.dispatch(
-        Actions.selectSlice({id: currentId, trackId, scroll: true}));
+    globals.makeSelection(
+        Actions.selectSlice({id: currentId, trackKey, scroll: true}),
+        {clearSearch: false},
+    );
   } else if (source === 'log') {
-    globals.dispatch(Actions.selectLog({id: currentId, trackId, scroll: true}));
+    globals.makeSelection(
+        Actions.selectLog({id: currentId, trackKey, scroll: true}),
+        {clearSearch: false},
+    );
   } else {
     // Search results only include slices from the slice table for now.
     // When we include annotations we need to pass the correct table.
-    globals.dispatch(Actions.selectChromeSlice(
-        {id: currentId, trackId, table: 'slice', scroll: true}));
+    globals.makeSelection(
+        Actions.selectChromeSlice(
+            {id: currentId, trackKey, table: 'slice', scroll: true}),
+        {clearSearch: false},
+    );
   }
 }

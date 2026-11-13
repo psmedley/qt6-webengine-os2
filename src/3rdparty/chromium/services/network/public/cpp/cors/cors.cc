@@ -4,22 +4,24 @@
 
 #include "services/network/public/cpp/cors/cors.h"
 
-#include <cctype>
 #include <set>
+#include <string_view>
 #include <vector>
 
 #include "base/containers/contains.h"
 #include "base/containers/fixed_flat_set.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/ranges/algorithm.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "net/base/mime_util.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_util.h"
+#include "services/network/public/cpp/client_hints.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "services/network/public/cpp/request_mode.h"
+#include "third_party/abseil-cpp/absl/strings/ascii.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 #include "url/url_constants.h"
@@ -34,37 +36,26 @@ namespace network {
 
 namespace {
 
+BASE_FEATURE(kCorsSafelistedHeaderValueSizeRelaxed,
+             "CorsSafelistedHeaderValueSizeRelaxed",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 const char kAsterisk[] = "*";
 const char kLowerCaseTrue[] = "true";
-
-// TODO(toyoshim): Consider to move the following method to
-// //net/base/mime_util, and expose to Blink platform/network in order to
-// replace the existing equivalent method in HTTPParser.
-// We may prefer to implement a strict RFC2616 media-type
-// (https://tools.ietf.org/html/rfc2616#section-3.7) parser.
-std::string ExtractMIMETypeFromMediaType(const std::string& media_type) {
-  std::string::size_type semicolon = media_type.find(';');
-  std::string top_level_type;
-  std::string subtype;
-  if (net::ParseMimeTypeWithoutParameter(media_type.substr(0, semicolon),
-                                         &top_level_type, &subtype)) {
-    return top_level_type + "/" + subtype;
-  }
-  return std::string();
-}
 
 // Returns true only if |header_value| satisfies ABNF: 1*DIGIT [ "." 1*DIGIT ]
 bool IsSimilarToDoubleABNF(const std::string& header_value) {
   if (header_value.empty())
     return false;
   char first_char = header_value.at(0);
-  if (!isdigit(first_char))
+  if (!absl::ascii_isdigit(static_cast<unsigned char>(first_char))) {
     return false;
+  }
 
   bool period_found = false;
   bool digit_found_after_period = false;
   for (char ch : header_value) {
-    if (isdigit(ch)) {
+    if (absl::ascii_isdigit(static_cast<unsigned char>(ch))) {
       if (period_found) {
         digit_found_after_period = true;
       }
@@ -89,8 +80,9 @@ bool IsSimilarToIntABNF(const std::string& header_value) {
     return false;
 
   for (char ch : header_value) {
-    if (!isdigit(ch))
+    if (!absl::ascii_isdigit(static_cast<unsigned char>(ch))) {
       return false;
+    }
   }
   return true;
 }
@@ -110,9 +102,15 @@ bool IsCorsSafelistedLowerCaseContentType(const std::string& value) {
   if (base::ranges::any_of(value, IsCorsUnsafeRequestHeaderByte))
     return false;
 
-  std::string mime_type = ExtractMIMETypeFromMediaType(value);
-  return mime_type == "application/x-www-form-urlencoded" ||
-         mime_type == "multipart/form-data" || mime_type == "text/plain";
+  absl::optional<std::string> mime_type =
+      net::ExtractMimeTypeFromMediaType(value,
+                                        /*accept_comma_separated=*/false);
+  if (!mime_type.has_value()) {
+    return false;
+  }
+
+  return *mime_type == "application/x-www-form-urlencoded" ||
+         *mime_type == "multipart/form-data" || *mime_type == "text/plain";
 }
 
 bool IsNoCorsSafelistedHeaderNameLowerCase(const std::string& lower_name) {
@@ -141,6 +139,8 @@ const char kAccessControlRequestHeaders[] = "Access-Control-Request-Headers";
 const char kAccessControlRequestMethod[] = "Access-Control-Request-Method";
 const char kAccessControlRequestPrivateNetwork[] =
     "Access-Control-Request-Private-Network";
+const char kPrivateNetworkDeviceId[] = "Private-Network-Access-ID";
+const char kPrivateNetworkDeviceName[] = "Private-Network-Access-Name";
 
 }  // namespace header_names
 
@@ -156,7 +156,7 @@ base::expected<void, CorsErrorStatus> CheckAccess(
     // to be sent, even with Access-Control-Allow-Credentials set to true.
     // See https://fetch.spec.whatwg.org/#cors-protocol-and-credentials.
     if (credentials_mode != mojom::CredentialsMode::kInclude)
-      return base::expected<void, CorsErrorStatus>();
+      return base::ok();
 
     // Since the credential is a concept for network schemes, we perform the
     // wildcard check only for HTTP and HTTPS. This is a quick hack to allow
@@ -165,11 +165,11 @@ base::expected<void, CorsErrorStatus> CheckAccess(
     // browser process or network service, this check won't be needed any more
     // because it is always for network requests there.
     if (response_url.SchemeIsHTTPOrHTTPS()) {
-      return base::unexpected<CorsErrorStatus>(
+      return base::unexpected(
           CorsErrorStatus(mojom::CorsError::kWildcardOriginNotAllowed));
     }
   } else if (!allow_origin_header) {
-    return base::unexpected<CorsErrorStatus>(
+    return base::unexpected(
         CorsErrorStatus(mojom::CorsError::kMissingAllowOriginHeader));
   } else if (*allow_origin_header != origin.Serialize()) {
     // We do not use url::Origin::IsSameOriginWith() here for two reasons below.
@@ -189,13 +189,13 @@ base::expected<void, CorsErrorStatus> CheckAccess(
     // Does not allow to have multiple origins in the allow origin header.
     // See https://fetch.spec.whatwg.org/#http-access-control-allow-origin.
     if (allow_origin_header->find_first_of(" ,") != std::string::npos) {
-      return base::unexpected<CorsErrorStatus>(CorsErrorStatus(
+      return base::unexpected(CorsErrorStatus(
           mojom::CorsError::kMultipleAllowOriginValues, *allow_origin_header));
     }
 
     // Check valid "null" first since GURL assumes it as invalid.
     if (*allow_origin_header == "null") {
-      return base::unexpected<CorsErrorStatus>(CorsErrorStatus(
+      return base::unexpected(CorsErrorStatus(
           mojom::CorsError::kAllowOriginMismatch, *allow_origin_header));
     }
 
@@ -203,11 +203,11 @@ base::expected<void, CorsErrorStatus> CheckAccess(
     // validation, but should be ok for providing error details to developers.
     GURL header_origin(*allow_origin_header);
     if (!header_origin.is_valid()) {
-      return base::unexpected<CorsErrorStatus>(CorsErrorStatus(
+      return base::unexpected(CorsErrorStatus(
           mojom::CorsError::kInvalidAllowOriginValue, *allow_origin_header));
     }
 
-    return base::unexpected<CorsErrorStatus>(CorsErrorStatus(
+    return base::unexpected(CorsErrorStatus(
         mojom::CorsError::kAllowOriginMismatch, *allow_origin_header));
   }
 
@@ -216,12 +216,12 @@ base::expected<void, CorsErrorStatus> CheckAccess(
     // This check should be case sensitive.
     // See also https://fetch.spec.whatwg.org/#http-new-header-syntax.
     if (allow_credentials_header != kLowerCaseTrue) {
-      return base::unexpected<CorsErrorStatus>(
+      return base::unexpected(
           CorsErrorStatus(mojom::CorsError::kInvalidAllowCredentials,
                           allow_credentials_header.value_or(std::string())));
     }
   }
-  return base::expected<void, CorsErrorStatus>();
+  return base::ok();
 }
 
 base::expected<void, CorsErrorStatus> CheckAccessAndReportMetrics(
@@ -257,10 +257,6 @@ bool ShouldCheckCors(const GURL& request_url,
   // request doesn't have one, CORS should not work.
   DCHECK(request_initiator);
 
-  // |request_url| should not contain the url::kDataScheme here, but have a
-  // DCHECK for a while, just in case.
-  DCHECK(!request_url.SchemeIs(url::kDataScheme));
-
   if (request_initiator->IsSameOriginWith(request_url))
     return false;
   return true;
@@ -286,34 +282,37 @@ bool IsCorsSafelistedContentType(const std::string& media_type) {
 
 bool IsCorsSafelistedHeader(const std::string& name, const std::string& value) {
   const std::string lower_name = base::ToLowerASCII(name);
+  const size_t kValueLimit =
+      base::FeatureList::IsEnabled(kCorsSafelistedHeaderValueSizeRelaxed) ? 256
+                                                                          : 128;
 
   // If |value|’s length is greater than 128, then return false.
-  if (value.size() > 128)
+  if (value.size() > kValueLimit) {
     return false;
+  }
 
-  // https://fetch.spec.whatwg.org/#cors-safelisted-request-header
-  // "A CORS-safelisted header is a header whose name is either one of `Accept`,
-  // `Accept-Language`, and `Content-Language`, or whose name is
-  // `Content-Type` and value, once parsed, is one of
-  //     `application/x-www-form-urlencoded`, `multipart/form-data`, and
-  //     `text/plain`
-  // or whose name is a byte-case-insensitive match for one of
-  //      `DPR`, `Save-Data`, `device-memory`, `Viewport-Width`, and `Width`,
-  // and whose value, once extracted, is not failure."
-  //
-  // Treat inspector headers as a CORS-safelisted headers, since they are added
-  // by blink when the inspector is open.
-  //
-  // Treat 'Intervention' as a CORS-safelisted header, since it is added by
-  // Chrome when an intervention is (or may be) applied.
-  static constexpr auto safe_names = base::MakeFixedFlatSet<base::StringPiece>({
+  // CORS-Safelisted headers are the only headers permitted in a CORS request.
+  static constexpr auto safe_names = base::MakeFixedFlatSet<std::string_view>({
+
+      // [Block 1 - Specification]
+      // Headers in this section are included in the order listed by:
+      // https://fetch.spec.whatwg.org/#cors-safelisted-request-header
       "accept",
       "accept-language",
       "content-language",
-      "intervention",
       "content-type",
-      "save-data",
+      // Simple range values are safelisted.
+      // https://fetch.spec.whatwg.org/#simple-range-header-value
+      "range",
 
+      // [Block 2 - Intervention]
+      // Treat 'Intervention' as a CORS-safelisted header, since it is added by
+      // Chrome when an intervention is (or may be) applied.
+      "intervention",
+
+      // [Block 3 - Client Hints]
+      // Headers in this section are included in the order listed by:
+      // services/network/public/mojom/web_client_hints_types.mojom
       // These four were deprecated and replaced by variants with a `sec-ch-`
       // prefix to conform with the proposal:
       // https://wicg.github.io/client-hints-infrastructure/
@@ -321,111 +320,85 @@ bool IsCorsSafelistedHeader(const std::string& name, const std::string& value) {
       "dpr",
       "width",
       "viewport-width",
-
-      // The Sec-CH-Viewport-height header field gives a server information
-      // about the user-agent's current viewport height.
-      //
-      // https://wicg.github.io/responsive-image-client-hints/#sec-ch-viewport-height
-      "sec-ch-viewport-height",
-
+      // These three don't have `sec-ch-` prefix replacements as of yet.
+      "rtt",
+      "downlink",
+      "ect",
+      // "lang", Removed in M96
       // The `Sec-CH-UA-*` header fields are proposed replacements for
       // `User-Agent`, using the Client Hints infrastructure.
-      //
       // https://tools.ietf.org/html/draft-west-ua-client-hints
       "sec-ch-ua",
-      "sec-ch-ua-platform",
       "sec-ch-ua-arch",
+      "sec-ch-ua-platform",
       "sec-ch-ua-model",
       "sec-ch-ua-mobile",
       "sec-ch-ua-full-version",
       "sec-ch-ua-platform-version",
-      "sec-ch-ua-bitness",
-      // The `Sec-CH-UA-Reduced` header field is a temporary client hint, which
-      // will only be sent in the presence of a valid Origin Trial token.  It
-      // was introduced to enable safely experimenting with sending a reduced
-      // user agent string in the `User-Agent` header.
-      "sec-ch-ua-reduced",
-
       // The `Sec-CH-Prefers-Color-Scheme` header field is modeled after the
       // prefers-color-scheme user preference media feature. It reflects the
       // user’s desire that the page use a light or dark color theme. This is
       // currently pulled from operating system preferences, although there may
       // be internal UI in the future.
-      //
       // https://wicg.github.io/user-preference-media-features-headers/#sec-ch-prefers-color-scheme
       "sec-ch-prefers-color-scheme",
-
+      "sec-ch-ua-bitness",
+      // The Sec-CH-Viewport-height header field gives a server information
+      // about the user-agent's current viewport height.
+      // https://wicg.github.io/responsive-image-client-hints/#sec-ch-viewport-height
+      "sec-ch-viewport-height",
+      // The Device Memory header field is a number that indicates the client’s
+      // device memory i.e. approximate amount of ram in GiB. The header value
+      // must satisfy ABNF  1*DIGIT [ "." 1*DIGIT ]
+      // For more details see:
+      // https://w3c.github.io/device-memory/#sec-device-memory-client-hint-header
+      "sec-ch-device-memory",
+      "sec-ch-dpr",
+      "sec-ch-width",
+      "sec-ch-viewport-width",
+      // The `Sec-CH-UA-Full-Version-List` provide server information about the
+      // full version for each brand in its brands list.
+      // https://wicg.github.io/ua-client-hints/#sec-ch-ua-full-version-list
+      "sec-ch-ua-full-version-list",
+      "sec-ch-ua-wow64",
+      "save-data",
       // The `Sec-CH-Prefers-Reduced-Motion` header field is modeled after the
       // prefers-reduced-motion user preference media feature. It reflects the
       // user’s desire that the page minimizes the amount of animation or motion
       // it uses. This is currently pulled from operating system preferences,
       // although there may be internal UI in the future.
-      //
       // https://wicg.github.io/user-preference-media-features-headers/#sec-ch-prefers-reduced-motion
       "sec-ch-prefers-reduced-motion",
-
-      // The Device Memory header field is a number that indicates the client’s
-      // device memory i.e. approximate amount of ram in GiB. The header value
-      // must satisfy ABNF  1*DIGIT [ "." 1*DIGIT ]
-      // See
-      // https://w3c.github.io/device-memory/#sec-device-memory-client-hint-header
-      // for more details.
-      "sec-ch-device-memory",
-      "sec-ch-dpr",
-      "sec-ch-width",
-      "sec-ch-viewport-width",
-
-      // Simple range values are safelisted.
-      // https://fetch.spec.whatwg.org/#simple-range-header-value
-      "range",
-
-      // The `Sec-CH-UA-Full-Version-List` provide server information about the
-      // full version for each brand in its brands list.
-      // https://wicg.github.io/ua-client-hints/#sec-ch-ua-full-version-list
-      "sec-ch-ua-full-version-list",
-
-      // The `Sec-CH-UA-Full` header field is a temporary client hint, which
-      // will only be sent in the presence of a valid Origin Trial token.  It
-      // was introduced to enable sites to register for the deprecation UA
-      // reduction origin trial and continue to receive the full UA string for
-      // some period, once UA reduction rolls out.
-      "sec-ch-ua-full",
-
-      "sec-ch-ua-wow64",
+      // The `Sec-CH-UA-Form-Factor` header field provides information on the
+      // form factor of the user agent device.
+      "sec-ch-ua-form-factor",
+      // The `Sec-CH-Prefers-Reduced-Transparency` header field is modeled after
+      // the prefers-reduced-transparency user preference media feature. It
+      // reflects the user’s desire that the page minimizes the amount of
+      // transparency it uses. This is currently pulled from operating system
+      // preferences, although there may be internal UI in the future.
+      // https://wicg.github.io/user-preference-media-features-headers/#sec-ch-prefers-reduced-transparency
+      "sec-ch-prefers-reduced-transparency",
   });
 
+  // Check if the name of the header to send is safe.
   if (!base::Contains(safe_names, lower_name))
     return false;
 
-  // Client hints are device specific, and not origin specific. As such all
-  // client hint headers are considered as safe.
-  // See
-  // third_party/blink/public/mojom/web_client_hints/web_client_hints_types.mojom.
-  // Client hint headers can be added by Chrome automatically or via JavaScript.
-  if (lower_name == "device-memory" || lower_name == "dpr")
-    return IsSimilarToDoubleABNF(value);
-  if (lower_name == "width" || lower_name == "viewport-width")
-    return IsSimilarToIntABNF(value);
+  // Verify the values of all non-secure headers (except `intervention`).
   const std::string lower_value = base::ToLowerASCII(value);
-  if (lower_name == "save-data")
-    return lower_value == "on";
-
   if (lower_name == "accept") {
     return !base::ranges::any_of(value, IsCorsUnsafeRequestHeaderByte);
-  }
-
-  if (lower_name == "accept-language" || lower_name == "content-language") {
+  } else if (lower_name == "accept-language" ||
+             lower_name == "content-language") {
     return base::ranges::all_of(value, [](char c) {
       return (0x30 <= c && c <= 0x39) || (0x41 <= c && c <= 0x5a) ||
              (0x61 <= c && c <= 0x7a) || c == 0x20 || c == 0x2a || c == 0x2c ||
              c == 0x2d || c == 0x2e || c == 0x3b || c == 0x3d;
     });
-  }
-
-  if (lower_name == "content-type")
+  } else if (lower_name == "content-type") {
     return IsCorsSafelistedLowerCaseContentType(lower_value);
-
-  if (lower_name == "range") {
+  } else if (lower_name == "range") {
     // A 'simple' range value is of the following form: 'bytes=\d+-(\d+)?'.
     // We can use the regular range header parser with the following caveats:
     // - No space characters or trailing commas
@@ -437,15 +410,26 @@ bool IsCorsSafelistedHeader(const std::string& name, const std::string& value) {
         })) {
       return false;
     }
-
     std::vector<net::HttpByteRange> ranges;
     if (!net::HttpUtil::ParseRangeHeader(lower_value, &ranges))
       return false;
     if (ranges.size() != 1 || ranges[0].IsSuffixByteRange())
       return false;
     return true;
+  } else if (lower_name == "device-memory" || lower_name == "dpr" ||
+             lower_name == "downlink") {
+    return IsSimilarToDoubleABNF(value);
+  } else if (lower_name == "width" || lower_name == "viewport-width" ||
+             lower_name == "rtt") {
+    return IsSimilarToIntABNF(value);
+  } else if (lower_name == "ect") {
+    auto* const* begin = network::kWebEffectiveConnectionTypeMapping;
+    auto* const* end = network::kWebEffectiveConnectionTypeMapping +
+                       network::kWebEffectiveConnectionTypeMappingCount;
+    return std::find(begin, end, value) != end;
+  } else if (lower_name == "save-data") {
+    return lower_value == "on";
   }
-
   return true;
 }
 

@@ -562,13 +562,6 @@ bool FramebufferMtl::totalBitsUsedIsLessThanOrEqualToMaxBitsSupported(
 
 gl::FramebufferStatus FramebufferMtl::checkStatus(const gl::Context *context) const
 {
-    if (!mState.attachmentsHaveSameDimensions())
-    {
-        return gl::FramebufferStatus::Incomplete(
-            GL_FRAMEBUFFER_UNSUPPORTED,
-            gl::err::kFramebufferIncompleteUnsupportedMissmatchedDimensions);
-    }
-
     ContextMtl *contextMtl = mtl::GetImpl(context);
     if (!contextMtl->getDisplay()->getFeatures().allowSeparateDepthStencilBuffers.enabled &&
         mState.hasSeparateDepthAndStencilAttachments())
@@ -603,7 +596,7 @@ gl::FramebufferStatus FramebufferMtl::checkStatus(const gl::Context *context) co
 
 gl::FramebufferStatus FramebufferMtl::checkPackedDepthStencilAttachment() const
 {
-    if (ANGLE_APPLE_AVAILABLE_XCI(10.14, 13.0, 12.0))
+    if (ANGLE_APPLE_AVAILABLE_XCI(10.14, 13.1, 12.0))
     {
         // If depth/stencil attachment has depth & stencil bits, then depth & stencil must not have
         // separate attachment. i.e. They must be the same texture or one of them has no
@@ -654,8 +647,14 @@ angle::Result FramebufferMtl::syncState(const gl::Context *context,
                 ANGLE_TRY(updateStencilRenderTarget(context));
                 break;
             case gl::Framebuffer::DIRTY_BIT_DEPTH_BUFFER_CONTENTS:
+                // Restore depth attachment load action as its content may have been updated
+                // after framebuffer invalidation.
+                mRenderPassDesc.depthAttachment.loadAction = MTLLoadActionLoad;
+                break;
             case gl::Framebuffer::DIRTY_BIT_STENCIL_BUFFER_CONTENTS:
-                // NOTE(hqle): What are we supposed to do?
+                // Restore stencil attachment load action as its content may have been updated
+                // after framebuffer invalidation.
+                mRenderPassDesc.stencilAttachment.loadAction = MTLLoadActionLoad;
                 break;
             case gl::Framebuffer::DIRTY_BIT_DRAW_BUFFERS:
                 mustNotifyContext = true;
@@ -680,6 +679,12 @@ angle::Result FramebufferMtl::syncState(const gl::Context *context,
                     ASSERT(dirtyBit >= gl::Framebuffer::DIRTY_BIT_COLOR_BUFFER_CONTENTS_0 &&
                            dirtyBit < gl::Framebuffer::DIRTY_BIT_COLOR_BUFFER_CONTENTS_MAX);
                     // NOTE: might need to notify context.
+
+                    // Restore color attachment load action as its content may have been updated
+                    // after framebuffer invalidation.
+                    size_t colorIndexGL = static_cast<size_t>(
+                        dirtyBit - gl::Framebuffer::DIRTY_BIT_COLOR_BUFFER_CONTENTS_0);
+                    mRenderPassDesc.colorAttachments[colorIndexGL].loadAction = MTLLoadActionLoad;
                 }
                 break;
             }
@@ -947,95 +952,11 @@ angle::Result FramebufferMtl::updateCachedRenderTarget(const gl::Context *contex
     return angle::Result::Continue;
 }
 
-angle::Result FramebufferMtl::getReadableViewForRenderTarget(
-    const gl::Context *context,
-    const RenderTargetMtl &rtt,
-    const gl::Rectangle &readArea,
-    mtl::TextureRef *readableDepthViewOut,
-    mtl::TextureRef *readableStencilViewOut,
-    uint32_t *readableViewLevel,
-    uint32_t *readableViewLayer,
-    gl::Rectangle *readableViewArea)
-{
-    ContextMtl *contextMtl     = mtl::GetImpl(context);
-    mtl::TextureRef srcTexture = rtt.getTexture();
-    uint32_t level             = rtt.getLevelIndex().get();
-    uint32_t slice             = rtt.getLayerIndex();
-
-    // NOTE(hqle): slice is not used atm.
-    ASSERT(slice == 0);
-
-    bool readStencil = readableStencilViewOut;
-
-    if (!srcTexture)
-    {
-        if (readableDepthViewOut)
-        {
-            *readableDepthViewOut = nullptr;
-        }
-        if (readableStencilViewOut)
-        {
-            *readableStencilViewOut = nullptr;
-        }
-        *readableViewArea = readArea;
-        return angle::Result::Continue;
-    }
-
-    bool skipCopy = srcTexture->isShaderReadable();
-    if (rtt.getFormat()->hasDepthAndStencilBits() && readStencil)
-    {
-        // If the texture is packed depth stencil, and we need stencil view,
-        // then it must support creating different format view.
-        skipCopy = skipCopy && srcTexture->supportFormatView();
-    }
-
-    if (skipCopy)
-    {
-        // Texture supports stencil view, just use it directly
-        if (readableDepthViewOut)
-        {
-            *readableDepthViewOut = srcTexture;
-        }
-        if (readableStencilViewOut)
-        {
-            *readableStencilViewOut = srcTexture;
-        }
-        *readableViewLevel = level;
-        *readableViewLayer = slice;
-        *readableViewArea  = readArea;
-    }
-    else
-    {
-        ASSERT(srcTexture->textureType() != MTLTextureType3D);
-
-        // Texture doesn't support stencil view or not shader readable, copy to an interminate
-        // texture that supports stencil view and shader read.
-        mtl::TextureRef formatableView = srcTexture->getReadableCopy(
-            contextMtl, contextMtl->getBlitCommandEncoder(), level, slice,
-            MTLRegionMake2D(readArea.x, readArea.y, readArea.width, readArea.height));
-
-        ANGLE_CHECK_GL_ALLOC(contextMtl, formatableView);
-
-        if (readableDepthViewOut)
-        {
-            *readableDepthViewOut = formatableView;
-        }
-        if (readableStencilViewOut)
-        {
-            *readableStencilViewOut = formatableView->getStencilView();
-        }
-
-        *readableViewLevel = 0;
-        *readableViewLayer = 0;
-        *readableViewArea  = gl::Rectangle(0, 0, readArea.width, readArea.height);
-    }
-
-    return angle::Result::Continue;
-}
-
 angle::Result FramebufferMtl::prepareRenderPass(const gl::Context *context,
                                                 mtl::RenderPassDesc *pDescOut)
 {
+    const gl::DrawBufferMask enabledDrawBuffers = getState().getEnabledDrawBuffers();
+
     mtl::RenderPassDesc &desc = *pDescOut;
 
     mRenderPassFirstColorAttachmentFormat = nullptr;
@@ -1050,7 +971,10 @@ angle::Result FramebufferMtl::prepareRenderPass(const gl::Context *context,
         mtl::RenderPassColorAttachmentDesc &colorAttachment = desc.colorAttachments[colorIndexGL];
         const RenderTargetMtl *colorRenderTarget            = mColorRenderTargets[colorIndexGL];
 
-        if (colorRenderTarget)
+        // GL allows data types of fragment shader color outputs to be incompatible with disabled
+        // color attachments. To prevent various Metal validation issues, assign textures only to
+        // enabled attachments.
+        if (colorRenderTarget && enabledDrawBuffers.test(colorIndexGL))
         {
             colorRenderTarget->toRenderPassAttachmentDesc(&colorAttachment);
 
@@ -1096,6 +1020,13 @@ angle::Result FramebufferMtl::prepareRenderPass(const gl::Context *context,
     else
     {
         desc.stencilAttachment.reset();
+    }
+
+    if (desc.numColorAttachments == 0 && mDepthRenderTarget == nullptr &&
+        mStencilRenderTarget == nullptr)
+    {
+        desc.defaultWidth  = mState.getDefaultWidth();
+        desc.defaultHeight = mState.getDefaultHeight();
     }
 
     return angle::Result::Continue;
@@ -1611,6 +1542,7 @@ angle::Result FramebufferMtl::readPixelsImpl(const gl::Context *context,
 
         return result;
     }
+
     if (texture->isBeingUsedByGPU(contextMtl))
     {
         contextMtl->flushCommandBuffer(mtl::WaitUntilFinished);

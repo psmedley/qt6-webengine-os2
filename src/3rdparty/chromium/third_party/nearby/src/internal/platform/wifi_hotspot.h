@@ -15,13 +15,16 @@
 #ifndef PLATFORM_PUBLIC_WIFI_HOTSPOT_H_
 #define PLATFORM_PUBLIC_WIFI_HOTSPOT_H_
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
-#include "absl/container/flat_hash_map.h"
-#include "internal/platform/byte_array.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
 #include "internal/platform/cancellation_flag.h"
+#include "internal/platform/exception.h"
 #include "internal/platform/implementation/platform.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
 #include "internal/platform/input_stream.h"
@@ -29,9 +32,8 @@
 #include "internal/platform/mutex.h"
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/output_stream.h"
-#include "internal/platform/wifi_hotspot_credential.h"
+#include "internal/platform/wifi_credential.h"
 
-namespace location {
 namespace nearby {
 
 // Socket class for both SoftAP ( created through accept connection from STA)
@@ -171,7 +173,7 @@ class WifiHotspotMedium {
   }
 
   // Returns the port range as a pair of min and max port.
-  absl::optional<std::pair<std::int32_t, std::int32_t>> GetDynamicPortRange() {
+  std::optional<std::pair<std::int32_t, std::int32_t>> GetDynamicPortRange() {
     return impl_->GetDynamicPortRange();
   }
 
@@ -182,10 +184,11 @@ class WifiHotspotMedium {
   bool StopWifiHotspot() { return impl_->StopWifiHotspot(); }
 
   bool ConnectWifiHotspot(const std::string& ssid,
-                          const std::string& password) {
+                          const std::string& password, int frequency) {
     MutexLock lock(&mutex_);
     hotspot_credentials_.SetSSID(ssid);
     hotspot_credentials_.SetPassword(password);
+    hotspot_credentials_.SetFrequency(frequency);
     return impl_->ConnectWifiHotspot(&hotspot_credentials_);
   }
   bool DisconnectWifiHotspot() { return impl_->DisconnectWifiHotspot(); }
@@ -215,6 +218,5 @@ class WifiHotspotMedium {
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_PUBLIC_WIFI_HOTSPOT_H_

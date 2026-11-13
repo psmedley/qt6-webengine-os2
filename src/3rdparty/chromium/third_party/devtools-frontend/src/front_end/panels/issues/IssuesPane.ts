@@ -4,23 +4,22 @@
 
 import * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
-import * as Root from '../../core/root/root.js';
 import * as IssuesManager from '../../models/issues_manager/issues_manager.js';
 import * as IssueCounter from '../../ui/components/issue_counter/issue_counter.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import {HiddenIssuesRow} from './HiddenIssuesRow.js';
-import issuesPaneStyles from './issuesPane.css.js';
-import issuesTreeStyles from './issuesTree.css.js';
-
 import {
-  Events as IssueAggregatorEvents,
-  IssueAggregator,
   type AggregatedIssue,
   type AggregationKey,
+  Events as IssueAggregatorEvents,
+  IssueAggregator,
 } from './IssueAggregator.js';
+import {getGroupIssuesByKindSetting, IssueKindView, issueKindViewSortPriority} from './IssueKindView.js';
+import issuesPaneStyles from './issuesPane.css.js';
+import issuesTreeStyles from './issuesTree.css.js';
 import {IssueView} from './IssueView.js';
-import {IssueKindView, getGroupIssuesByKindSetting, issueKindViewSortPriority} from './IssueKindView.js';
 
 const UIStrings = {
   /**
@@ -43,10 +42,6 @@ const UIStrings = {
    * @description Category title for a group of content security policy (CSP) issues
    */
   contentSecurityPolicy: 'Content Security Policy',
-  /**
-   * @description Category title for a group of trusted web activity issues
-   */
-  trustedWebActivity: 'Trusted Web Activity',
   /**
    * @description Text for other types of items
    */
@@ -71,12 +66,12 @@ const UIStrings = {
    */
   groupByCategory: 'Group by category',
   /**
-  * @description Title for a checkbox which toggles grouping by kind in the issues tab
-    */
+   * @description Title for a checkbox which toggles grouping by kind in the issues tab
+   */
   groupDisplayedIssuesUnderKind: 'Group displayed issues as Page errors, Breaking changes and Improvements',
   /**
-  * @description Label for a checkbox which toggles grouping by kind in the issues tab
-    */
+   * @description Label for a checkbox which toggles grouping by kind in the issues tab
+   */
   groupByKind: 'Group by kind',
   /**
    * @description Title for a checkbox. Whether the issues tab should include third-party issues or not.
@@ -137,8 +132,6 @@ class IssueCategoryView extends UI.TreeOutline.TreeElement {
         return i18nString(UIStrings.heavyAds);
       case IssuesManager.Issue.IssueCategory.ContentSecurityPolicy:
         return i18nString(UIStrings.contentSecurityPolicy);
-      case IssuesManager.Issue.IssueCategory.TrustedWebActivity:
-        return i18nString(UIStrings.trustedWebActivity);
       case IssuesManager.Issue.IssueCategory.LowTextContrast:
         return i18nString(UIStrings.lowTextContrast);
       case IssuesManager.Issue.IssueCategory.Cors:
@@ -154,7 +147,7 @@ class IssueCategoryView extends UI.TreeOutline.TreeElement {
     }
   }
 
-  onattach(): void {
+  override onattach(): void {
     this.#appendHeader();
   }
 
@@ -175,8 +168,6 @@ export function getGroupIssuesByCategorySetting(): Common.Settings.Setting<boole
   return Common.Settings.Settings.instance().createSetting('groupIssuesByCategory', false);
 }
 
-let issuesPaneInstance: IssuesPane;
-
 export class IssuesPane extends UI.Widget.VBox {
   #categoryViews: Map<IssuesManager.Issue.IssueCategory, IssueCategoryView>;
   #issueViews: Map<AggregationKey, IssueView>;
@@ -189,8 +180,10 @@ export class IssuesPane extends UI.Widget.VBox {
   #aggregator: IssueAggregator;
   #issueViewUpdatePromise: Promise<void> = Promise.resolve();
 
-  private constructor() {
+  constructor() {
     super(true);
+
+    this.element.setAttribute('jslog', `${VisualLogging.panel().context('issues')}`);
 
     this.contentElement.classList.add('issues-pane');
 
@@ -224,16 +217,7 @@ export class IssuesPane extends UI.Widget.VBox {
         IssuesManager.IssuesManager.Events.IssuesCountUpdated, this.#updateCounts, this);
   }
 
-  static instance(opts: {forceNew: boolean|null} = {forceNew: null}): IssuesPane {
-    const {forceNew} = opts;
-    if (!issuesPaneInstance || forceNew) {
-      issuesPaneInstance = new IssuesPane();
-    }
-
-    return issuesPaneInstance;
-  }
-
-  elementsToRestoreScrollPositionsFor(): Element[] {
+  override elementsToRestoreScrollPositionsFor(): Element[] {
     return [this.#issuesTree.element];
   }
 
@@ -259,7 +243,7 @@ export class IssuesPane extends UI.Widget.VBox {
     groupByKindSetting.addChangeListener(() => {
       this.#fullUpdate(true);
     });
-    groupByKindSettingCheckbox.setVisible(Root.Runtime.experiments.isEnabled('groupAndHideIssuesByKind'));
+    groupByKindSettingCheckbox.setVisible(true);
 
     const thirdPartySetting = IssuesManager.Issue.getShowThirdPartyIssuesSetting();
     this.#showThirdPartyCheckbox = new UI.Toolbar.ToolbarSettingCheckbox(
@@ -336,14 +320,30 @@ export class IssuesPane extends UI.Widget.VBox {
       console.error('The issues tree should only contain IssueView objects as direct children');
       return 0;
     });
+    if (parent instanceof UI.TreeOutline.TreeElement) {
+      // This is an aggregated view, so we need to update the label for position and size of the treeItem.
+      this.#updateItemPositionAndSize(parent);
+    }
+  }
+
+  #updateItemPositionAndSize(parent: UI.TreeOutline.TreeElement): void {
+    const childNodes = parent.childrenListNode.children;
+    let treeItemCount = 0;
+
+    for (let i = 0; i < childNodes.length; i++) {
+      const node = childNodes[i];
+      if (node.classList.contains('issue')) {
+        UI.ARIAUtils.setPositionInSet(node, ++treeItemCount);
+        UI.ARIAUtils.setSetSize(node, childNodes.length / 2);  // Each issue has 2 nodes (issue + description).
+      }
+    }
   }
 
   #getIssueViewParent(issue: AggregatedIssue): UI.TreeOutline.TreeOutline|UI.TreeOutline.TreeElement {
-    const groupByKind = Root.Runtime.experiments.isEnabled('groupAndHideIssuesByKind');
     if (issue.isHidden()) {
       return this.#hiddenIssuesRow;
     }
-    if (groupByKind && getGroupIssuesByKindSetting().get()) {
+    if (getGroupIssuesByKindSetting().get()) {
       const kind = issue.getKind();
       const view = this.#kindViews.get(kind);
       if (view) {
@@ -414,10 +414,9 @@ export class IssuesPane extends UI.Widget.VBox {
   }
 
   #updateCounts(): void {
-    const groupByKind = Root.Runtime.experiments.isEnabled('groupAndHideIssuesByKind');
     this.#showIssuesTreeOrNoIssuesDetectedMessage(
         this.#issuesManager.numberOfIssues(), this.#issuesManager.numberOfHiddenIssues());
-    if (groupByKind && getGroupIssuesByKindSetting().get()) {
+    if (getGroupIssuesByKindSetting().get()) {
       this.#updateIssueKindViewsCount();
     }
   }
@@ -451,13 +450,12 @@ export class IssuesPane extends UI.Widget.VBox {
     await this.#issueViewUpdatePromise;
     const key = this.#aggregator.keyForIssue(issue);
     const issueView = this.#issueViews.get(key);
-    const groupByKind = Root.Runtime.experiments.isEnabled('groupAndHideIssuesByKind');
     if (issueView) {
       if (issueView.isForHiddenIssue()) {
         this.#hiddenIssuesRow.expand();
         this.#hiddenIssuesRow.reveal();
       }
-      if (groupByKind && getGroupIssuesByKindSetting().get() && !issueView.isForHiddenIssue()) {
+      if (getGroupIssuesByKindSetting().get() && !issueView.isForHiddenIssue()) {
         const kindView = this.#kindViews.get(issueView.getIssueKind());
         kindView?.expand();
         kindView?.reveal();
@@ -468,7 +466,7 @@ export class IssuesPane extends UI.Widget.VBox {
     }
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.#issuesTree.registerCSSFiles([issuesTreeStyles]);
     this.registerCSSFiles([issuesPaneStyles]);

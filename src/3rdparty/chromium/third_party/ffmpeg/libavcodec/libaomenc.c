@@ -23,6 +23,8 @@
  * AV1 encoder support via libaom
  */
 
+#include <limits.h>
+
 #define AOM_DISABLE_CTRL_TYPECHECKS 1
 #include <aom/aom_encoder.h>
 #include <aom/aomcx.h>
@@ -449,16 +451,16 @@ static int set_pix_fmt(AVCodecContext *avctx, aom_codec_caps_t codec_caps,
         enccfg->monochrome = 1;
         /* Fall-through */
     case AV_PIX_FMT_YUV420P:
-        enccfg->g_profile = FF_PROFILE_AV1_MAIN;
+        enccfg->g_profile = AV_PROFILE_AV1_MAIN;
         *img_fmt = AOM_IMG_FMT_I420;
         return 0;
     case AV_PIX_FMT_YUV422P:
-        enccfg->g_profile = FF_PROFILE_AV1_PROFESSIONAL;
+        enccfg->g_profile = AV_PROFILE_AV1_PROFESSIONAL;
         *img_fmt = AOM_IMG_FMT_I422;
         return 0;
     case AV_PIX_FMT_YUV444P:
     case AV_PIX_FMT_GBRP:
-        enccfg->g_profile = FF_PROFILE_AV1_HIGH;
+        enccfg->g_profile = AV_PROFILE_AV1_HIGH;
         *img_fmt = AOM_IMG_FMT_I444;
         return 0;
     case AV_PIX_FMT_GRAY10:
@@ -469,7 +471,7 @@ static int set_pix_fmt(AVCodecContext *avctx, aom_codec_caps_t codec_caps,
     case AV_PIX_FMT_YUV420P12:
         if (codec_caps & AOM_CODEC_CAP_HIGHBITDEPTH) {
             enccfg->g_profile =
-                enccfg->g_bit_depth == 10 ? FF_PROFILE_AV1_MAIN : FF_PROFILE_AV1_PROFESSIONAL;
+                enccfg->g_bit_depth == 10 ? AV_PROFILE_AV1_MAIN : AV_PROFILE_AV1_PROFESSIONAL;
             *img_fmt = AOM_IMG_FMT_I42016;
             *flags |= AOM_CODEC_USE_HIGHBITDEPTH;
             return 0;
@@ -478,7 +480,7 @@ static int set_pix_fmt(AVCodecContext *avctx, aom_codec_caps_t codec_caps,
     case AV_PIX_FMT_YUV422P10:
     case AV_PIX_FMT_YUV422P12:
         if (codec_caps & AOM_CODEC_CAP_HIGHBITDEPTH) {
-            enccfg->g_profile = FF_PROFILE_AV1_PROFESSIONAL;
+            enccfg->g_profile = AV_PROFILE_AV1_PROFESSIONAL;
             *img_fmt = AOM_IMG_FMT_I42216;
             *flags |= AOM_CODEC_USE_HIGHBITDEPTH;
             return 0;
@@ -490,7 +492,7 @@ static int set_pix_fmt(AVCodecContext *avctx, aom_codec_caps_t codec_caps,
     case AV_PIX_FMT_GBRP12:
         if (codec_caps & AOM_CODEC_CAP_HIGHBITDEPTH) {
             enccfg->g_profile =
-                enccfg->g_bit_depth == 10 ? FF_PROFILE_AV1_HIGH : FF_PROFILE_AV1_PROFESSIONAL;
+                enccfg->g_bit_depth == 10 ? AV_PROFILE_AV1_HIGH : AV_PROFILE_AV1_PROFESSIONAL;
             *img_fmt = AOM_IMG_FMT_I44416;
             *flags |= AOM_CODEC_USE_HIGHBITDEPTH;
             return 0;
@@ -840,7 +842,7 @@ static av_cold int aom_init(AVCodecContext *avctx,
     /* 0-3: For non-zero values the encoder increasingly optimizes for reduced
      * complexity playback on low powered devices at the expense of encode
      * quality. */
-    if (avctx->profile != FF_PROFILE_UNKNOWN)
+    if (avctx->profile != AV_PROFILE_UNKNOWN)
         enccfg.g_profile = avctx->profile;
 
     enccfg.g_error_resilient = ctx->error_resilient;
@@ -1016,7 +1018,7 @@ static av_cold int aom_init(AVCodecContext *avctx,
     if (codec_caps & AOM_CODEC_CAP_HIGHBITDEPTH)
         ctx->rawimg.bit_depth = enccfg.g_bit_depth;
 
-    cpb_props = ff_add_cpb_side_data(avctx);
+    cpb_props = ff_encode_add_cpb_side_data(avctx);
     if (!cpb_props)
         return AVERROR(ENOMEM);
 
@@ -1094,6 +1096,7 @@ static int storeframe(AVCodecContext *avctx, struct FrameListData *cx_frame,
     }
     memcpy(pkt->data, cx_frame->buf, pkt->size);
     pkt->pts = pkt->dts = cx_frame->pts;
+    pkt->duration = cx_frame->duration;
 
     if (!!(cx_frame->flags & AOM_FRAME_IS_KEY)) {
         pkt->flags |= AV_PKT_FLAG_KEY;
@@ -1275,6 +1278,7 @@ static int aom_encode(AVCodecContext *avctx, AVPacket *pkt,
     AOMContext *ctx = avctx->priv_data;
     struct aom_image *rawimg = NULL;
     int64_t timestamp = 0;
+    unsigned long duration = 0;
     int res, coded_size;
     aom_enc_frame_flags_t flags = 0;
 
@@ -1287,6 +1291,24 @@ static int aom_encode(AVCodecContext *avctx, AVPacket *pkt,
         rawimg->stride[AOM_PLANE_U] = frame->linesize[1];
         rawimg->stride[AOM_PLANE_V] = frame->linesize[2];
         timestamp                   = frame->pts;
+
+        if (frame->duration > ULONG_MAX) {
+            av_log(avctx, AV_LOG_WARNING,
+                   "Frame duration too large: %"PRId64"\n", frame->duration);
+        } else if (frame->duration)
+            duration = frame->duration;
+        else if (avctx->framerate.num > 0 && avctx->framerate.den > 0)
+            duration = av_rescale_q(1, av_inv_q(avctx->framerate), avctx->time_base);
+        else {
+FF_DISABLE_DEPRECATION_WARNINGS
+            duration =
+#if FF_API_TICKS_PER_FRAME
+                avctx->ticks_per_frame ? avctx->ticks_per_frame :
+#endif
+                1;
+FF_ENABLE_DEPRECATION_WARNINGS
+        }
+
         switch (frame->color_range) {
         case AVCOL_RANGE_MPEG:
             rawimg->range = AOM_CR_STUDIO_RANGE;
@@ -1300,8 +1322,7 @@ static int aom_encode(AVCodecContext *avctx, AVPacket *pkt,
             flags |= AOM_EFLAG_FORCE_KF;
     }
 
-    res = aom_codec_encode(&ctx->encoder, rawimg, timestamp,
-                           avctx->ticks_per_frame, flags);
+    res = aom_codec_encode(&ctx->encoder, rawimg, timestamp, duration, flags);
     if (res != AOM_CODEC_OK) {
         log_encoder_error(avctx, "Error encoding frame");
         return AVERROR_INVALIDDATA;

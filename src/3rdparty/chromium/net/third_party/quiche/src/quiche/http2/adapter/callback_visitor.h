@@ -11,16 +11,18 @@
 #include "quiche/http2/adapter/nghttp2.h"
 #include "quiche/http2/adapter/nghttp2_util.h"
 #include "quiche/common/platform/api/quiche_export.h"
+#include "quiche/common/quiche_callbacks.h"
 
 namespace http2 {
 namespace adapter {
 
 // This visitor implementation accepts a set of nghttp2 callbacks and a "user
 // data" pointer, and invokes the callbacks according to HTTP/2 events received.
-class QUICHE_EXPORT_PRIVATE CallbackVisitor : public Http2VisitorInterface {
+class QUICHE_EXPORT CallbackVisitor : public Http2VisitorInterface {
  public:
   // Called when the visitor receives a close event for `stream_id`.
-  using StreamCloseListener = std::function<void(Http2StreamId stream_id)>;
+  using StreamCloseListener =
+      quiche::MultiUseCallback<void(Http2StreamId stream_id)>;
 
   explicit CallbackVisitor(Perspective perspective,
                            const nghttp2_session_callbacks& callbacks,
@@ -45,7 +47,7 @@ class QUICHE_EXPORT_PRIVATE CallbackVisitor : public Http2VisitorInterface {
                             size_t payload_length) override;
   bool OnDataForStream(Http2StreamId stream_id,
                        absl::string_view data) override;
-  void OnEndStream(Http2StreamId stream_id) override;
+  bool OnEndStream(Http2StreamId stream_id) override;
   void OnRstStream(Http2StreamId stream_id, Http2ErrorCode error_code) override;
   bool OnCloseStream(Http2StreamId stream_id,
                      Http2ErrorCode error_code) override;
@@ -79,7 +81,7 @@ class QUICHE_EXPORT_PRIVATE CallbackVisitor : public Http2VisitorInterface {
   }
 
  private:
-  struct QUICHE_EXPORT_PRIVATE StreamInfo {
+  struct QUICHE_EXPORT StreamInfo {
     bool before_sent_headers = false;
     bool sent_headers = false;
     bool received_headers = false;
@@ -105,6 +107,8 @@ class QUICHE_EXPORT_PRIVATE CallbackVisitor : public Http2VisitorInterface {
   nghttp2_frame current_frame_;
   std::vector<nghttp2_settings_entry> settings_;
   size_t remaining_data_ = 0;
+  // Any new stream must have an ID greater than the watermark.
+  Http2StreamId stream_id_watermark_ = 0;
 };
 
 }  // namespace adapter

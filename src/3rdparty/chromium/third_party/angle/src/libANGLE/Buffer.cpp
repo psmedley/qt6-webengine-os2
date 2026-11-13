@@ -37,7 +37,8 @@ BufferState::BufferState()
       mTransformFeedbackGenericBindingCount(0),
       mImmutable(GL_FALSE),
       mStorageExtUsageFlags(0),
-      mExternal(GL_FALSE)
+      mExternal(GL_FALSE),
+      mWebGLType(WebGLBufferType::Undefined)
 {}
 
 BufferState::~BufferState() {}
@@ -57,9 +58,26 @@ Buffer::~Buffer()
 
 void Buffer::onDestroy(const Context *context)
 {
+    mContentsObservers.clear();
+
     // In tests, mImpl might be null.
     if (mImpl)
         mImpl->destroy(context);
+}
+
+void Buffer::onBind(const Context *context, BufferBinding target)
+{
+    if (mState.mWebGLType == WebGLBufferType::Undefined)
+    {
+        if (target == BufferBinding::ElementArray)
+        {
+            mState.mWebGLType = WebGLBufferType::ElementArray;
+        }
+        else
+        {
+            mState.mWebGLType = WebGLBufferType::OtherData;
+        }
+    }
 }
 
 angle::Result Buffer::setLabel(const Context *context, const std::string &label)
@@ -403,12 +421,12 @@ void Buffer::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMessa
     onStateChange(message);
 }
 
-size_t Buffer::getContentsObserverIndex(VertexArray *vertexArray, uint32_t bufferIndex) const
+size_t Buffer::getContentsObserverIndex(void *observer, uint32_t bufferIndex) const
 {
+    ContentsObserver contentsObserver{bufferIndex, observer};
     for (size_t observerIndex = 0; observerIndex < mContentsObservers.size(); ++observerIndex)
     {
-        const ContentsObserver &observer = mContentsObservers[observerIndex];
-        if (observer.vertexArray == vertexArray && observer.bufferIndex == bufferIndex)
+        if (mContentsObservers[observerIndex] == contentsObserver)
         {
             return observerIndex;
         }
@@ -419,15 +437,16 @@ size_t Buffer::getContentsObserverIndex(VertexArray *vertexArray, uint32_t buffe
 
 void Buffer::addContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex)
 {
+    ASSERT(bufferIndex != ContentsObserver::kBufferTextureIndex);
     if (getContentsObserverIndex(vertexArray, bufferIndex) == kInvalidContentsObserverIndex)
     {
-        mContentsObservers.push_back({vertexArray, bufferIndex});
+        mContentsObservers.push_back({bufferIndex, vertexArray});
     }
 }
 
-void Buffer::removeContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex)
+void Buffer::removeContentsObserverImpl(void *observer, uint32_t bufferIndex)
 {
-    size_t foundObserver = getContentsObserverIndex(vertexArray, bufferIndex);
+    size_t foundObserver = getContentsObserverIndex(observer, bufferIndex);
     if (foundObserver != kInvalidContentsObserverIndex)
     {
         size_t lastObserverIndex = mContentsObservers.size() - 1;
@@ -439,11 +458,43 @@ void Buffer::removeContentsObserver(VertexArray *vertexArray, uint32_t bufferInd
     }
 }
 
+void Buffer::removeContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex)
+{
+    removeContentsObserverImpl(vertexArray, bufferIndex);
+}
+
+void Buffer::addContentsObserver(Texture *texture)
+{
+    if (!hasContentsObserver(texture))
+    {
+        mContentsObservers.push_back({ContentsObserver::kBufferTextureIndex, texture});
+    }
+}
+
+void Buffer::removeContentsObserver(Texture *texture)
+{
+    removeContentsObserverImpl(texture, ContentsObserver::kBufferTextureIndex);
+}
+
+bool Buffer::hasContentsObserver(Texture *texture) const
+{
+    return getContentsObserverIndex(texture, ContentsObserver::kBufferTextureIndex) !=
+           kInvalidContentsObserverIndex;
+}
+
 void Buffer::onContentsChange()
 {
-    for (const ContentsObserver &observer : mContentsObservers)
+    for (const ContentsObserver &contentsObserver : mContentsObservers)
     {
-        observer.vertexArray->onBufferContentsChange(observer.bufferIndex);
+        if (contentsObserver.bufferIndex != ContentsObserver::kBufferTextureIndex)
+        {
+            static_cast<VertexArray *>(contentsObserver.observer)
+                ->onBufferContentsChange(contentsObserver.bufferIndex);
+        }
+        else
+        {
+            static_cast<Texture *>(contentsObserver.observer)->onBufferContentsChange();
+        }
     }
 }
 }  // namespace gl

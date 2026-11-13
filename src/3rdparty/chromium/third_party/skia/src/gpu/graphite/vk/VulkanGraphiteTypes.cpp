@@ -11,17 +11,16 @@ namespace skgpu::graphite {
 
 VulkanTextureInfo VulkanTextureSpecToTextureInfo(const VulkanTextureSpec& vkSpec,
                                                  uint32_t sampleCount,
-                                                 uint32_t levelCount) {
+                                                 Mipmapped mipmapped) {
     return VulkanTextureInfo(sampleCount,
-                             levelCount,
+                             mipmapped,
                              vkSpec.fFlags,
                              vkSpec.fFormat,
                              vkSpec.fImageTiling,
                              vkSpec.fImageUsageFlags,
                              vkSpec.fSharingMode,
-                             vkSpec.fCurrentQueueFamily,
-                             vkSpec.fImageLayout,
-                             vkSpec.fAspectMask);
+                             vkSpec.fAspectMask,
+                             vkSpec.fYcbcrConversionInfo);
 }
 
 } // namespace skgpu::graphite

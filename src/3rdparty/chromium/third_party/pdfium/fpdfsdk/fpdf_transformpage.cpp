@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,8 @@
 #include "core/fxge/cfx_fillrenderoptions.h"
 #include "core/fxge/cfx_path.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
+#include "third_party/base/containers/span.h"
 #include "third_party/base/numerics/safe_conversions.h"
-#include "third_party/base/span.h"
 
 namespace {
 
@@ -228,12 +228,11 @@ FPDFPage_TransFormWithClip(FPDF_PAGE page,
   if (matrix)
     WriteMatrix(text_buf, CFXMatrixFromFSMatrix(*matrix)) << " cm ";
 
-  auto pStream =
-      pDoc->NewIndirect<CPDF_Stream>(nullptr, 0, pDoc->New<CPDF_Dictionary>());
+  auto pStream = pDoc->NewIndirect<CPDF_Stream>(pDoc->New<CPDF_Dictionary>());
   pStream->SetDataFromStringstream(&text_buf);
 
   auto pEndStream =
-      pDoc->NewIndirect<CPDF_Stream>(nullptr, 0, pDoc->New<CPDF_Dictionary>());
+      pDoc->NewIndirect<CPDF_Stream>(pDoc->New<CPDF_Dictionary>());
   pEndStream->SetData(ByteStringView(" Q").raw_span());
 
   RetainPtr<CPDF_Array> pContentArray = ToArray(pContentObj);
@@ -309,7 +308,7 @@ FPDFPageObj_GetClipPath(FPDF_PAGEOBJECT page_object) {
   if (!pPageObj)
     return nullptr;
 
-  return FPDFClipPathFromCPDFClipPath(&pPageObj->m_ClipPath);
+  return FPDFClipPathFromCPDFClipPath(&pPageObj->mutable_clip_path());
 }
 
 FPDF_EXPORT int FPDF_CALLCONV FPDFClipPath_CountPaths(FPDF_CLIPPATH clip_path) {
@@ -406,8 +405,7 @@ FPDF_EXPORT void FPDF_CALLCONV FPDFPage_InsertClipPath(FPDF_PAGE page,
   if (!pDoc)
     return;
 
-  auto pStream =
-      pDoc->NewIndirect<CPDF_Stream>(nullptr, 0, pDoc->New<CPDF_Dictionary>());
+  auto pStream = pDoc->NewIndirect<CPDF_Stream>(pDoc->New<CPDF_Dictionary>());
   pStream->SetDataFromStringstream(&strClip);
 
   RetainPtr<CPDF_Array> pArray = ToArray(pContentObj);

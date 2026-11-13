@@ -19,7 +19,6 @@
 #include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "quiche/quic/core/http/capsule.h"
 #include "quiche/quic/core/http/http_decoder.h"
 #include "quiche/quic/core/http/http_encoder.h"
 #include "quiche/quic/core/http/quic_header_list.h"
@@ -28,13 +27,16 @@
 #include "quiche/quic/core/qpack/qpack_decoded_headers_accumulator.h"
 #include "quiche/quic/core/quic_error_codes.h"
 #include "quiche/quic/core/quic_packets.h"
+#include "quiche/quic/core/quic_session.h"
 #include "quiche/quic/core/quic_stream.h"
+#include "quiche/quic/core/quic_stream_priority.h"
 #include "quiche/quic/core/quic_stream_sequencer.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/core/web_transport_interface.h"
 #include "quiche/quic/platform/api/quic_export.h"
 #include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/quic/platform/api/quic_socket_address.h"
+#include "quiche/common/capsule.h"
 #include "quiche/common/platform/api/quiche_mem_slice.h"
 #include "quiche/spdy/core/http2_header_block.h"
 #include "quiche/spdy/core/spdy_framer.h"
@@ -50,13 +52,13 @@ class QuicSpdySession;
 class WebTransportHttp3;
 
 // A QUIC stream that can send and receive HTTP2 (SPDY) headers.
-class QUIC_EXPORT_PRIVATE QuicSpdyStream
+class QUICHE_EXPORT QuicSpdyStream
     : public QuicStream,
-      public CapsuleParser::Visitor,
+      public quiche::CapsuleParser::Visitor,
       public QpackDecodedHeadersAccumulator::Visitor {
  public:
   // Visitor receives callbacks from the stream.
-  class QUIC_EXPORT_PRIVATE Visitor {
+  class QUICHE_EXPORT Visitor {
    public:
     Visitor() {}
     Visitor(const Visitor&) = delete;
@@ -64,10 +66,6 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
 
     // Called when the stream is closed.
     virtual void OnClose(QuicSpdyStream* stream) = 0;
-
-    // Allows subclasses to override and do work.
-    virtual void OnPromiseHeadersComplete(QuicStreamId /*promised_id*/,
-                                          size_t /*frame_len*/) {}
 
    protected:
     virtual ~Visitor() {}
@@ -96,11 +94,6 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   // should be closed; no more data will be sent by the peer.
   virtual void OnStreamHeaderList(bool fin, size_t frame_len,
                                   const QuicHeaderList& header_list);
-
-  // Called by the session when decompressed push promise headers have
-  // been completely delivered to this stream.
-  virtual void OnPromiseHeaderList(QuicStreamId promised_id, size_t frame_len,
-                                   const QuicHeaderList& header_list);
 
   // Called by the session when a PRIORITY frame has been been received for this
   // stream. This method will only be called for server streams.
@@ -180,11 +173,17 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   // code to |status_code|.
   static bool ParseHeaderStatusCode(const spdy::Http2HeaderBlock& header,
                                     int* status_code);
+  // Returns true if status_value (associated with :status) contains a valid
+  // 3-digit status and parse the status code to |status_code|.
+  static bool ParseHeaderStatusCode(absl::string_view status_value,
+                                    int* status_code);
 
-  // Returns true when all data from the peer has been read and consumed,
-  // including the fin.
+  // Returns true when headers, data and trailers all are read.
   bool IsDoneReading() const;
+  // For IETF QUIC, bytes-to-read/readable-bytes only concern body (not headers
+  // or trailers). For gQUIC, they refer to all the bytes in the sequencer.
   bool HasBytesToRead() const;
+  QuicByteCount ReadableBytes() const;
 
   void set_visitor(Visitor* visitor) { visitor_ = visitor; }
 
@@ -221,8 +220,8 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
 
   QuicSpdySession* spdy_session() const { return spdy_session_; }
 
-  // Send PRIORITY_UPDATE frame and update |last_sent_urgency_| if
-  // |last_sent_urgency_| is different from current priority.
+  // Send PRIORITY_UPDATE frame and update |last_sent_priority_| if
+  // |last_sent_priority_| is different from current priority.
   void MaybeSendPriorityUpdateFrame() override;
 
   // Returns the WebTransport session owned by this stream, if one exists.
@@ -251,14 +250,14 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   bool CanWriteNewBodyData(QuicByteCount write_size) const;
 
   // From CapsuleParser::Visitor.
-  bool OnCapsule(const Capsule& capsule) override;
-  void OnCapsuleParseFailure(const std::string& error_message) override;
+  bool OnCapsule(const quiche::Capsule& capsule) override;
+  void OnCapsuleParseFailure(absl::string_view error_message) override;
 
   // Sends an HTTP/3 datagram. The stream ID is not part of |payload|. Virtual
   // to allow mocking in tests.
   virtual MessageStatus SendHttp3Datagram(absl::string_view payload);
 
-  class QUIC_EXPORT_PRIVATE Http3DatagramVisitor {
+  class QUICHE_EXPORT Http3DatagramVisitor {
    public:
     virtual ~Http3DatagramVisitor() {}
 
@@ -266,10 +265,15 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
     // the stream ID.
     virtual void OnHttp3Datagram(QuicStreamId stream_id,
                                  absl::string_view payload) = 0;
+
+    // Called when a Capsule with an unknown type is received.
+    virtual void OnUnknownCapsule(QuicStreamId stream_id,
+                                  const quiche::UnknownCapsule& capsule) = 0;
   };
 
-  // Registers |visitor| to receive HTTP/3 datagrams. |visitor| must be
-  // valid until a corresponding call to UnregisterHttp3DatagramVisitor.
+  // Registers |visitor| to receive HTTP/3 datagrams and enables Capsule
+  // Protocol by registering a CapsuleParser. |visitor| must be valid until a
+  // corresponding call to UnregisterHttp3DatagramVisitor.
   void RegisterHttp3DatagramVisitor(Http3DatagramVisitor* visitor);
 
   // Unregisters an HTTP/3 datagram visitor. Must only be called after a call to
@@ -280,16 +284,16 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   // Mainly meant to be used by the visitors' move operators.
   void ReplaceHttp3DatagramVisitor(Http3DatagramVisitor* visitor);
 
-  class QUIC_EXPORT_PRIVATE ConnectIpVisitor {
+  class QUICHE_EXPORT ConnectIpVisitor {
    public:
     virtual ~ConnectIpVisitor() {}
 
     virtual bool OnAddressAssignCapsule(
-        const AddressAssignCapsule& capsule) = 0;
+        const quiche::AddressAssignCapsule& capsule) = 0;
     virtual bool OnAddressRequestCapsule(
-        const AddressRequestCapsule& capsule) = 0;
+        const quiche::AddressRequestCapsule& capsule) = 0;
     virtual bool OnRouteAdvertisementCapsule(
-        const RouteAdvertisementCapsule& capsule) = 0;
+        const quiche::RouteAdvertisementCapsule& capsule) = 0;
     virtual void OnHeadersWritten() = 0;
   };
 
@@ -313,9 +317,13 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   QuicByteCount GetMaxDatagramSize() const;
 
   // Writes |capsule| onto the DATA stream.
-  void WriteCapsule(const Capsule& capsule, bool fin = false);
+  void WriteCapsule(const quiche::Capsule& capsule, bool fin = false);
 
   void WriteGreaseCapsule();
+
+  const std::string& invalid_request_details() const {
+    return invalid_request_details_;
+  }
 
  protected:
   // Called when the received headers are too large. By default this will
@@ -331,6 +339,11 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
       quiche::QuicheReferenceCountedPointer<QuicAckListenerInterface>
           ack_listener);
 
+  virtual bool CopyAndValidateTrailers(const QuicHeaderList& header_list,
+                                       bool expect_final_byte_offset,
+                                       size_t* final_byte_offset,
+                                       spdy::Http2HeaderBlock* trailers);
+
   Visitor* visitor() { return visitor_; }
 
   void set_headers_decompressed(bool val) { headers_decompressed_ = val; }
@@ -343,14 +356,23 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
 
   void OnWriteSideInDataRecvdState() override;
 
-  virtual bool AreHeadersValid(const QuicHeaderList& header_list) const;
-  // TODO(b/202433856) Merge AreHeaderFieldValueValid into AreHeadersValid once
-  // all flags guarding the behavior of AreHeadersValid has been rolled out.
+  virtual bool ValidateReceivedHeaders(const QuicHeaderList& header_list);
+  // TODO(b/202433856) Merge AreHeaderFieldValueValid into
+  // ValidateReceivedHeaders once all flags guarding the behavior of
+  // ValidateReceivedHeaders has been rolled out.
   virtual bool AreHeaderFieldValuesValid(
       const QuicHeaderList& header_list) const;
 
   // Reset stream upon invalid request headers.
   virtual void OnInvalidHeaders();
+
+  void set_invalid_request_details(std::string invalid_request_details);
+
+  // Called by HttpDecoderVisitor.
+  virtual bool OnDataFrameStart(QuicByteCount header_length,
+                                QuicByteCount payload_length);
+
+  void CloseReadSide() override;
 
  private:
   friend class test::QuicSpdyStreamPeer;
@@ -358,7 +380,7 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   friend class QuicStreamUtils;
   class HttpDecoderVisitor;
 
-  struct QUIC_EXPORT_PRIVATE WebTransportDataStream {
+  struct QUICHE_EXPORT WebTransportDataStream {
     WebTransportDataStream(QuicSpdyStream* stream,
                            WebTransportSessionId session_id);
 
@@ -367,8 +389,6 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   };
 
   // Called by HttpDecoderVisitor.
-  bool OnDataFrameStart(QuicByteCount header_length,
-                        QuicByteCount payload_length);
   bool OnDataFramePayload(absl::string_view payload);
   bool OnDataFrameEnd();
   bool OnHeadersFrameStart(QuicByteCount header_length,
@@ -401,6 +421,9 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
 
   // Called when a datagram frame or capsule is received.
   void HandleReceivedDatagram(absl::string_view payload);
+
+  // Whether the next received header is trailer or not.
+  virtual bool NextHeaderIsTrailer() const { return headers_decompressed_; }
 
   QuicSpdySession* spdy_session_;
 
@@ -442,7 +465,7 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   // the sequencer each time new stream data is processed.
   QuicSpdyStreamBodyManager body_manager_;
 
-  std::unique_ptr<CapsuleParser> capsule_parser_;
+  std::unique_ptr<quiche::CapsuleParser> capsule_parser_;
 
   // Sequencer offset keeping track of how much data HttpDecoder has processed.
   // Initial value is zero for fresh streams, or sequencer()->NumBytesConsumed()
@@ -461,9 +484,9 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   // Offset of unacked frame headers.
   QuicIntervalSet<QuicStreamOffset> unacked_frame_headers_offsets_;
 
-  // Urgency value sent in the last PRIORITY_UPDATE frame, or default urgency
-  // defined by the spec if no PRIORITY_UPDATE frame has been sent.
-  int last_sent_urgency_;
+  // Priority parameters sent in the last PRIORITY_UPDATE frame, or default
+  // values defined by RFC9218 if no PRIORITY_UPDATE frame has been sent.
+  QuicStreamPriority last_sent_priority_;
 
   // If this stream is a WebTransport extended CONNECT stream, contains the
   // WebTransport session associated with this stream.
@@ -477,6 +500,9 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream
   Http3DatagramVisitor* datagram_visitor_ = nullptr;
   // CONNECT-IP support.
   ConnectIpVisitor* connect_ip_visitor_ = nullptr;
+
+  // Empty if the headers are valid.
+  std::string invalid_request_details_;
 };
 
 }  // namespace quic

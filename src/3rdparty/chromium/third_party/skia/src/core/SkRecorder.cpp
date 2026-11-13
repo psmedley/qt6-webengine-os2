@@ -7,21 +7,56 @@
 
 #include "src/core/SkRecorder.h"
 
+#include "include/core/SkCanvas.h"
+#include "include/core/SkData.h"
+#include "include/core/SkDrawable.h"
 #include "include/core/SkImage.h"
+#include "include/core/SkImageFilter.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
 #include "include/core/SkPicture.h"
+#include "include/core/SkPoint.h"
+#include "include/core/SkRSXform.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkShader.h"
+#include "include/core/SkString.h"
 #include "include/core/SkSurface.h"
-#include "include/private/SkTo.h"
+#include "include/core/SkTextBlob.h"
+#include "include/core/SkVertices.h"
+#include "include/private/base/SkFloatingPoint.h"
+#include "include/private/base/SkTemplates.h"
+#include "include/private/base/SkTo.h"
 #include "include/private/chromium/Slug.h"
 #include "src/core/SkBigPicture.h"
 #include "src/core/SkCanvasPriv.h"
+#include "src/core/SkRecord.h"
+#include "src/core/SkRecords.h"
 #include "src/text/GlyphRun.h"
 #include "src/utils/SkPatchUtils.h"
 
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <new>
 
+class SkBlender;
+class SkMesh;
+class SkPath;
+class SkRRect;
+class SkRegion;
+class SkSurfaceProps;
+enum class SkBlendMode;
+enum class SkClipOp;
+struct SkDrawShadowRec;
+
+using namespace skia_private;
+
 SkDrawableList::~SkDrawableList() {
-    fArray.unrefAll();
+    for(SkDrawable* p : fArray) {
+        p->unref();
+    }
+    fArray.reset();
 }
 
 SkBigPicture::SnapshotArray* SkDrawableList::newDrawableSnapshot() {
@@ -29,9 +64,9 @@ SkBigPicture::SnapshotArray* SkDrawableList::newDrawableSnapshot() {
     if (0 == count) {
         return nullptr;
     }
-    SkAutoTMalloc<const SkPicture*> pics(count);
+    AutoTMalloc<const SkPicture*> pics(count);
     for (int i = 0; i < count; ++i) {
-        pics[i] = fArray[i]->newPictureSnapshot();
+        pics[i] = fArray[i]->makePictureSnapshot().release();
     }
     return new SkBigPicture::SnapshotArray(pics.release(), count);
 }
@@ -215,11 +250,9 @@ void SkRecorder::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
     this->append<SkRecords::DrawTextBlob>(paint, sk_ref_sp(blob), x, y);
 }
 
-#if SK_SUPPORT_GPU
 void SkRecorder::onDrawSlug(const sktext::gpu::Slug* slug) {
     this->append<SkRecords::DrawSlug>(sk_ref_sp(slug));
 }
-#endif
 
 void SkRecorder::onDrawGlyphRunList(
         const sktext::GlyphRunList& glyphRunList, const SkPaint& paint) {
@@ -241,6 +274,10 @@ void SkRecorder::onDrawVerticesObject(const SkVertices* vertices, SkBlendMode bm
     this->append<SkRecords::DrawVertices>(paint,
                                           sk_ref_sp(const_cast<SkVertices*>(vertices)),
                                           bmode);
+}
+
+void SkRecorder::onDrawMesh(const SkMesh& mesh, sk_sp<SkBlender> blender, const SkPaint& paint) {
+    this->append<SkRecords::DrawMesh>(paint, mesh, std::move(blender));
 }
 
 void SkRecorder::onDrawPatch(const SkPoint cubics[12], const SkColor colors[4],
@@ -289,7 +326,7 @@ void SkRecorder::onDrawEdgeAAImageSet2(const ImageSetEntry set[], int count,
     int totalDstClipCount, totalMatrixCount;
     SkCanvasPriv::GetDstClipAndMatrixCounts(set, count, &totalDstClipCount, &totalMatrixCount);
 
-    SkAutoTArray<ImageSetEntry> setCopy(count);
+    AutoTArray<ImageSetEntry> setCopy(count);
     for (int i = 0; i < count; ++i) {
         setCopy[i] = set[i];
     }
@@ -299,20 +336,22 @@ void SkRecorder::onDrawEdgeAAImageSet2(const ImageSetEntry set[], int count,
             this->copy(preViewMatrices, totalMatrixCount), sampling, constraint);
 }
 
-void SkRecorder::onFlush() {
-    this->append<SkRecords::Flush>();
-}
-
 void SkRecorder::willSave() {
     this->append<SkRecords::Save>();
 }
 
 SkCanvas::SaveLayerStrategy SkRecorder::getSaveLayerStrategy(const SaveLayerRec& rec) {
-    this->append<SkRecords::SaveLayer>(this->copy(rec.fBounds)
-                    , this->copy(rec.fPaint)
-                    , sk_ref_sp(rec.fBackdrop)
-                    , rec.fSaveLayerFlags
-                    , SkCanvasPriv::GetBackdropScaleFactor(rec));
+    AutoTArray<sk_sp<SkImageFilter>> filters(rec.fFilters.size());
+    for (size_t i = 0; i < rec.fFilters.size(); ++i) {
+        filters[i] = rec.fFilters[i];
+    }
+
+    this->append<SkRecords::SaveLayer>(this->copy(rec.fBounds),
+                                       this->copy(rec.fPaint),
+                                       sk_ref_sp(rec.fBackdrop),
+                                       rec.fSaveLayerFlags,
+                                       SkCanvasPriv::GetBackdropScaleFactor(rec),
+                                       std::move(filters));
     return SkCanvas::kNoLayer_SaveLayerStrategy;
 }
 

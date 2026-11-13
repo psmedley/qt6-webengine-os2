@@ -11,9 +11,11 @@
 #include "include/core/SkRefCnt.h"
 #include "include/gpu/GpuTypes.h"
 
+#include <functional>
+
 class GrDirectContext;
 
-#ifdef SK_GRAPHITE_ENABLED
+#if defined(SK_GRAPHITE)
 namespace skgpu::graphite { class Context; }
 #endif
 
@@ -32,17 +34,17 @@ public:
     }
 
     FlushFinishTracker(GrDirectContext* context) : fContext(context) {}
-#ifdef SK_GRAPHITE_ENABLED
+#if defined(SK_GRAPHITE)
     FlushFinishTracker(skgpu::graphite::Context* context) : fGraphiteContext(context) {}
 #endif
 
     void setFinished() { fIsFinished = true; }
 
-    void waitTillFinished();
+    void waitTillFinished(std::function<void()> tick = {});
 
 private:
     GrDirectContext* fContext = nullptr;
-#ifdef SK_GRAPHITE_ENABLED
+#if defined(SK_GRAPHITE)
     skgpu::graphite::Context*  fGraphiteContext = nullptr;
 #endif
 

@@ -1,29 +1,49 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/common/RefCounted.h"
 
 #include <cstddef>
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#include <sanitizer/tsan_interface.h>
+#endif
+#endif
 
 #include "dawn/common/Assert.h"
+
+namespace dawn {
 
 static constexpr size_t kPayloadBits = 1;
 static constexpr uint64_t kPayloadMask = (uint64_t(1) << kPayloadBits) - 1;
 static constexpr uint64_t kRefCountIncrement = (uint64_t(1) << kPayloadBits);
 
 RefCount::RefCount(uint64_t payload) : mRefCount(kRefCountIncrement + payload) {
-    ASSERT((payload & kPayloadMask) == payload);
+    DAWN_ASSERT((payload & kPayloadMask) == payload);
 }
 
 uint64_t RefCount::GetValueForTesting() const {
@@ -39,7 +59,7 @@ uint64_t RefCount::GetPayload() const {
 }
 
 void RefCount::Increment() {
-    ASSERT((mRefCount & ~kPayloadMask) != 0);
+    DAWN_ASSERT((mRefCount & ~kPayloadMask) != 0);
 
     // The relaxed ordering guarantees only the atomicity of the update, which is enough here
     // because the reference we are copying from still exists and makes sure other threads
@@ -49,8 +69,28 @@ void RefCount::Increment() {
     mRefCount.fetch_add(kRefCountIncrement, std::memory_order_relaxed);
 }
 
+bool RefCount::TryIncrement() {
+    uint64_t current = mRefCount.load(std::memory_order_relaxed);
+    bool success = false;
+    do {
+        if ((current & ~kPayloadMask) == 0u) {
+            return false;
+        }
+        // The relaxed ordering guarantees only the atomicity of the update. This is fine because:
+        //   - If another thread's decrement happens before this increment, the increment should
+        //     fail.
+        //   - If another thread's decrement happens after this increment, the decrement shouldn't
+        //     delete the object, because the ref count > 0.
+        // See Boost library for reference:
+        //   https://github.com/boostorg/smart_ptr/blob/develop/include/boost/smart_ptr/detail/sp_counted_base_std_atomic.hpp#L62
+        success = mRefCount.compare_exchange_weak(current, current + kRefCountIncrement,
+                                                  std::memory_order_relaxed);
+    } while (!success);
+    return true;
+}
+
 bool RefCount::Decrement() {
-    ASSERT((mRefCount & ~kPayloadMask) != 0);
+    DAWN_ASSERT((mRefCount & ~kPayloadMask) != 0);
 
     // The release fence here is to make sure all accesses to the object on a thread A
     // happen-before the object is deleted on a thread B. The release memory order ensures that
@@ -68,6 +108,14 @@ bool RefCount::Decrement() {
         // Note that on ARM64 this will generate a `dmb ish` instruction which is a global
         // memory barrier, when an acquire load on mRefCount (using the `ldar` instruction)
         // should be enough and could end up being faster.
+
+        // https://github.com/google/sanitizers/issues/1415 There is false positive bug in TSAN
+        // when using standalone fence.
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+        __tsan_acquire(&mRefCount);
+#endif
+#endif
         std::atomic_thread_fence(std::memory_order_acquire);
         return true;
     }
@@ -95,6 +143,18 @@ void RefCounted::Release() {
     }
 }
 
+void RefCounted::ReleaseAndLockBeforeDestroy() {
+    if (mRefCount.Decrement()) {
+        LockAndDeleteThis();
+    }
+}
+
 void RefCounted::DeleteThis() {
     delete this;
 }
+
+void RefCounted::LockAndDeleteThis() {
+    DeleteThis();
+}
+
+}  // namespace dawn

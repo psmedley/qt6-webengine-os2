@@ -1,5 +1,4 @@
-// Copyright (c) 2013 Google Inc.
-// All rights reserved.
+// Copyright 2013 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -32,6 +31,10 @@
 // See stackwalker_arm64.h for documentation.
 //
 // Author: Mark Mentovai, Ted Mielczarek, Jim Blandy, Colin Blundell
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
+#endif
 
 #include <vector>
 
@@ -264,15 +267,25 @@ void StackwalkerARM64::CorrectRegLRByFramePointer(
           last_frame->context.iregs[MD_CONTEXT_ARM64_REG_SP])
     return;
 
-  StackFrameARM64* last_last_frame =
-      static_cast<StackFrameARM64*>(*(frames.end() - 2));
-  uint64_t last_last_fp =
-      last_last_frame->context.iregs[MD_CONTEXT_ARM64_REG_FP];
+  // Searching for a real callee frame. Skipping inline frames since they
+  // don't contain context (and cannot be downcasted to StackFrameARM64).
+  size_t last_frame_callee_id = frames.size() - 2;
+  while (last_frame_callee_id >= 0 && frames[last_frame_callee_id]->trust ==
+                                          StackFrame::FRAME_TRUST_INLINE) {
+    last_frame_callee_id--;
+  }
+  if (last_frame_callee_id < 0) return;
+  StackFrameARM64* last_frame_callee =
+      static_cast<StackFrameARM64*>(frames[last_frame_callee_id]);
+
+  uint64_t last_frame_callee_fp =
+      last_frame_callee->context.iregs[MD_CONTEXT_ARM64_REG_FP];
 
   uint64_t last_fp = 0;
-  if (last_last_fp && !memory_->GetMemoryAtAddress(last_last_fp, &last_fp)) {
-    BPLOG(ERROR) << "Unable to read last_fp from last_last_fp: 0x"
-                 << std::hex << last_last_fp;
+  if (last_frame_callee_fp &&
+      !memory_->GetMemoryAtAddress(last_frame_callee_fp, &last_fp)) {
+    BPLOG(ERROR) << "Unable to read last_fp from last_last_fp: 0x" << std::hex
+                 << last_frame_callee_fp;
     return;
   }
   // Give up if STACK CFI doesn't agree with frame pointer.
@@ -280,9 +293,10 @@ void StackwalkerARM64::CorrectRegLRByFramePointer(
     return;
 
   uint64_t last_lr = 0;
-  if (last_last_fp && !memory_->GetMemoryAtAddress(last_last_fp + 8, &last_lr)) {
+  if (last_frame_callee_fp &&
+      !memory_->GetMemoryAtAddress(last_frame_callee_fp + 8, &last_lr)) {
     BPLOG(ERROR) << "Unable to read last_lr from (last_last_fp + 8): 0x"
-                 << std::hex << (last_last_fp + 8);
+                 << std::hex << (last_frame_callee_fp + 8);
     return;
   }
   last_lr = PtrauthStrip(last_lr);

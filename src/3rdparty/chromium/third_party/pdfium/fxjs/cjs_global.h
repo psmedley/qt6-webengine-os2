@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "fxjs/cfx_keyvalue.h"
 #include "fxjs/cjs_object.h"
 #include "fxjs/cjs_result.h"
+#include "third_party/base/containers/span.h"
 
 class CFX_GlobalData;
 
@@ -82,7 +83,7 @@ class CJS_Global final : public CJS_Object {
       v8::Local<v8::Object> pObj);
   void PutObjectProperty(v8::Local<v8::Object> obj, CFX_KeyValue* pData);
   CJS_Result setPersistent(CJS_Runtime* pRuntime,
-                           const std::vector<v8::Local<v8::Value>>& params);
+                           pdfium::span<v8::Local<v8::Value>> params);
   bool HasProperty(const ByteString& propname);
   bool DelProperty(const ByteString& propname);
   CJS_Result GetProperty(CJS_Runtime* pRuntime, const ByteString& propname);

@@ -18,6 +18,23 @@ constexpr auto CallInterfaceDescriptor::DefaultRegisterArray() {
   return registers;
 }
 
+constexpr auto CallInterfaceDescriptor::DefaultDoubleRegisterArray() {
+  auto registers = DoubleRegisterArray(ft1, ft2, ft3, ft4, ft5, ft6, ft7);
+  return registers;
+}
+
+constexpr auto CallInterfaceDescriptor::DefaultReturnRegisterArray() {
+  auto registers =
+      RegisterArray(kReturnRegister0, kReturnRegister1, kReturnRegister2);
+  return registers;
+}
+
+constexpr auto CallInterfaceDescriptor::DefaultReturnDoubleRegisterArray() {
+  // Padding to have as many double return registers as GP return registers.
+  auto registers = DoubleRegisterArray(kFPReturnRegister0, no_dreg, no_dreg);
+  return registers;
+}
+
 #if DEBUG
 template <typename DerivedDescriptor>
 void StaticCallInterfaceDescriptor<DerivedDescriptor>::
@@ -100,6 +117,9 @@ constexpr Register StoreDescriptor::SlotRegister() { return a4; }
 constexpr Register StoreWithVectorDescriptor::VectorRegister() { return a3; }
 
 // static
+constexpr Register DefineKeyedOwnDescriptor::FlagsRegister() { return a5; }
+
+// static
 constexpr Register StoreTransitionDescriptor::MapRegister() { return a5; }
 
 // static
@@ -171,6 +191,13 @@ constexpr auto CallFunctionTemplateDescriptor::registers() {
   // a1 : function template info
   // a0 : number of arguments (on the stack)
   return RegisterArray(a1, a0);
+}
+
+constexpr auto CallFunctionTemplateGenericDescriptor::registers() {
+  // a1 : function template info
+  // a2 : number of arguments (on the stack)
+  // a3 : topmost script-having context
+  return RegisterArray(a1, a2, a3);
 }
 
 // static
@@ -274,11 +301,41 @@ constexpr auto BinarySmiOp_BaselineDescriptor::registers() {
 }
 
 // static
-constexpr auto ApiCallbackDescriptor::registers() {
-  return RegisterArray(a1,   // kApiFunctionAddress
-                       a2,   // kArgc
-                       a3,   // kCallData
-                       a0);  // kHolder
+constexpr Register
+CallApiCallbackGenericDescriptor::TopmostScriptHavingContextRegister() {
+  return a1;
+}
+// static
+constexpr Register
+CallApiCallbackOptimizedDescriptor::ApiFunctionAddressRegister() {
+  return a1;
+}
+// static
+constexpr Register
+CallApiCallbackOptimizedDescriptor::ActualArgumentsCountRegister() {
+  return a2;
+}
+// static
+constexpr Register CallApiCallbackOptimizedDescriptor::CallDataRegister() {
+  return a3;
+}
+// static
+constexpr Register CallApiCallbackOptimizedDescriptor::HolderRegister() {
+  return a0;
+}
+
+// static
+constexpr Register
+CallApiCallbackGenericDescriptor::ActualArgumentsCountRegister() {
+  return a2;
+}
+// static
+constexpr Register CallApiCallbackGenericDescriptor::CallHandlerInfoRegister() {
+  return a3;
+}
+// static
+constexpr Register CallApiCallbackGenericDescriptor::HolderRegister() {
+  return a0;
 }
 
 // static
@@ -306,6 +363,12 @@ constexpr auto InterpreterPushArgsThenConstructDescriptor::registers() {
 }
 
 // static
+constexpr auto ConstructForwardAllArgsDescriptor::registers() {
+  return RegisterArray(a1,   // constructor to call
+                       a3);  // new target
+}
+
+// static
 constexpr auto ResumeGeneratorDescriptor::registers() {
   return RegisterArray(a0,   // the value to pass to the generator
                        a1);  // the JSGeneratorObject to resume
@@ -314,6 +377,11 @@ constexpr auto ResumeGeneratorDescriptor::registers() {
 // static
 constexpr auto RunMicrotasksEntryDescriptor::registers() {
   return RegisterArray(a0, a1);
+}
+
+constexpr auto WasmJSToWasmWrapperDescriptor::registers() {
+  // Arbitrarily picked register.
+  return RegisterArray(t0);
 }
 
 }  // namespace internal

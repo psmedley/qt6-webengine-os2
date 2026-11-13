@@ -7,15 +7,15 @@
 
 #include "src/gpu/AtlasTypes.h"
 
-#include "include/private/SkMalloc.h"
-#include "src/core/SkOpts.h"
+#include "include/private/base/SkMalloc.h"
+#include "src/core/SkSwizzlePriv.h"
 
 namespace skgpu {
 
 Plot::Plot(int pageIndex, int plotIndex, AtlasGenerationCounter* generationCounter,
            int offX, int offY, int width, int height, SkColorType colorType, size_t bpp)
-        : fLastUpload(DrawToken::AlreadyFlushedToken())
-        , fLastUse(DrawToken::AlreadyFlushedToken())
+        : fLastUpload(AtlasToken::InvalidToken())
+        , fLastUse(AtlasToken::InvalidToken())
         , fFlushesSinceLastUse(0)
         , fPageIndex(pageIndex)
         , fPlotIndex(plotIndex)
@@ -92,10 +92,14 @@ bool Plot::addSubImage(int width, int height, const void* image, AtlasLocator* a
 }
 
 std::pair<const void*, SkIRect> Plot::prepareForUpload() {
-    // We should only be issuing uploads if we are in fact dirty
-    SkASSERT(fDirty && fData);
+    // We should only be issuing uploads if we are dirty
+    SkASSERT(fDirty);
+    if (!fData) {
+        return {nullptr, {}};
+    }
     size_t rowBytes = fBytesPerPixel * fWidth;
-    const unsigned char* dataPtr = fData;
+    const unsigned char* dataPtr;
+    SkIRect offsetRect;
     // Clamp to 4-byte aligned boundaries
     unsigned int clearBits = 0x3 / fBytesPerPixel;
     fDirtyRect.fLeft &= ~clearBits;
@@ -103,12 +107,13 @@ std::pair<const void*, SkIRect> Plot::prepareForUpload() {
     fDirtyRect.fRight &= ~clearBits;
     SkASSERT(fDirtyRect.fRight <= fWidth);
     // Set up dataPtr
+    dataPtr = fData;
     dataPtr += rowBytes * fDirtyRect.fTop;
     dataPtr += fBytesPerPixel * fDirtyRect.fLeft;
+    offsetRect = fDirtyRect.makeOffset(fOffset.fX, fOffset.fY);
 
-    SkIRect offsetRect = fDirtyRect.makeOffset(fOffset.fX, fOffset.fY);
     fDirtyRect.setEmpty();
-    SkDEBUGCODE(fDirty = false;)
+    SkDEBUGCODE(fDirty = false);
 
     return { dataPtr, offsetRect };
 }
@@ -117,8 +122,8 @@ void Plot::resetRects() {
     fRectanizer.reset();
     fGenID = fGenerationCounter->next();
     fPlotLocator = PlotLocator(fPageIndex, fPlotIndex, fGenID);
-    fLastUpload = DrawToken::AlreadyFlushedToken();
-    fLastUse = DrawToken::AlreadyFlushedToken();
+    fLastUpload = AtlasToken::InvalidToken();
+    fLastUse = AtlasToken::InvalidToken();
 
     // zero out the plot
     if (fData) {

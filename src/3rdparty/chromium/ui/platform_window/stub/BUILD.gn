@@ -11,6 +11,7 @@ jumbo_component("stub") {
     "//base",
     "//ui/base",
     "//ui/base/cursor",
+    "//ui/display",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/platform_window",

@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,7 @@
 #include "core/fpdfapi/parser/cpdf_number.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "core/fpdfapi/render/cpdf_renderoptions.h"
 #include "core/fpdfdoc/cpdf_annot.h"
 #include "core/fpdfdoc/cpdf_formfield.h"
@@ -64,7 +65,6 @@ bool PopupAppearsForAnnotType(CPDF_Annot::Subtype subtype) {
     case CPDF_Annot::Subtype::THREED:
     case CPDF_Annot::Subtype::RICHMEDIA:
     case CPDF_Annot::Subtype::XFAWIDGET:
-    default:
       return false;
   }
 }
@@ -79,12 +79,13 @@ std::unique_ptr<CPDF_Annot> CreatePopupAnnot(CPDF_Document* pDocument,
   if (!pParentDict)
     return nullptr;
 
-  // TODO(jaepark): We shouldn't strip BOM for some strings and not for others.
-  // See pdfium:593.
-  WideString sContents =
-      pParentDict->GetUnicodeTextFor(pdfium::annotation::kContents);
-  if (sContents.IsEmpty())
+  // TODO(crbug.com/pdfium/1098): Determine if we really need to check if
+  // /Contents is empty or not. If so, optimize decoding for empty check.
+  ByteString contents =
+      pParentDict->GetByteStringFor(pdfium::annotation::kContents);
+  if (PDF_DecodeText(contents.raw_span()).IsEmpty()) {
     return nullptr;
+  }
 
   auto pAnnotDict = pDocument->New<CPDF_Dictionary>();
   pAnnotDict->SetNewFor<CPDF_Name>(pdfium::annotation::kType, "Annot");
@@ -92,8 +93,8 @@ std::unique_ptr<CPDF_Annot> CreatePopupAnnot(CPDF_Document* pDocument,
   pAnnotDict->SetNewFor<CPDF_String>(
       pdfium::form_fields::kT,
       pParentDict->GetByteStringFor(pdfium::form_fields::kT), false);
-  pAnnotDict->SetNewFor<CPDF_String>(pdfium::annotation::kContents,
-                                     sContents.ToUTF8(), false);
+  pAnnotDict->SetNewFor<CPDF_String>(pdfium::annotation::kContents, contents,
+                                     /*bHex=*/false);
 
   CFX_FloatRect rect = pParentDict->GetRectFor(pdfium::annotation::kRect);
   rect.Normalize();
@@ -128,7 +129,7 @@ void GenerateAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
     return;
   }
 
-  CPDF_Object* pFieldTypeObj =
+  RetainPtr<const CPDF_Object> pFieldTypeObj =
       CPDF_FormField::GetFieldAttrForDict(pAnnotDict, pdfium::form_fields::kFT);
   if (!pFieldTypeObj)
     return;
@@ -140,7 +141,7 @@ void GenerateAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
     return;
   }
 
-  CPDF_Object* pFieldFlagsObj =
+  RetainPtr<const CPDF_Object> pFieldFlagsObj =
       CPDF_FormField::GetFieldAttrForDict(pAnnotDict, pdfium::form_fields::kFf);
   uint32_t flags = pFieldFlagsObj ? pFieldFlagsObj->GetInteger() : 0;
   if (field_type == pdfium::form_fields::kCh) {
@@ -192,20 +193,19 @@ CPDF_AnnotList::CPDF_AnnotList(CPDF_Page* pPage)
       // provides its own Popup annotations.
       continue;
     }
-    pAnnots->ConvertToIndirectObjectAt(i, m_pDocument.Get());
-    m_AnnotList.push_back(
-        std::make_unique<CPDF_Annot>(pDict, m_pDocument.Get()));
+    pAnnots->ConvertToIndirectObjectAt(i, m_pDocument);
+    m_AnnotList.push_back(std::make_unique<CPDF_Annot>(pDict, m_pDocument));
     if (bRegenerateAP && subtype == "Widget" &&
         CPDF_InteractiveForm::IsUpdateAPEnabled() &&
         !pDict->GetDictFor(pdfium::annotation::kAP)) {
-      GenerateAP(m_pDocument.Get(), pDict.Get());
+      GenerateAP(m_pDocument, pDict.Get());
     }
   }
 
   m_nAnnotCount = m_AnnotList.size();
   for (size_t i = 0; i < m_nAnnotCount; ++i) {
     std::unique_ptr<CPDF_Annot> pPopupAnnot =
-        CreatePopupAnnot(m_pDocument.Get(), pPage, m_AnnotList[i].get());
+        CreatePopupAnnot(m_pDocument, pPage, m_AnnotList[i].get());
     if (pPopupAnnot)
       m_AnnotList.push_back(std::move(pPopupAnnot));
   }

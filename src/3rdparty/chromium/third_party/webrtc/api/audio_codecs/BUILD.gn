@@ -32,8 +32,10 @@ rtc_library("audio_codecs_api") {
     "..:array_view",
     "..:bitrate_allocation",
     "..:make_ref_counted",
+    "..:ref_count",
     "..:scoped_refptr",
     "../../api:field_trials_view",
+    "../../api:rtp_parameters",
     "../../rtc_base:buffer",
     "../../rtc_base:checks",
     "../../rtc_base:event_tracer",
@@ -62,7 +64,6 @@ rtc_library("builtin_audio_decoder_factory") {
     "L16:audio_decoder_L16",
     "g711:audio_decoder_g711",
     "g722:audio_decoder_g722",
-    "isac:audio_decoder_isac",
   ]
   defines = []
   if (rtc_include_ilbc) {
@@ -95,7 +96,6 @@ rtc_library("builtin_audio_encoder_factory") {
     "L16:audio_encoder_L16",
     "g711:audio_encoder_g711",
     "g722:audio_encoder_g722",
-    "isac:audio_encoder_isac",
   ]
   defines = []
   if (rtc_include_ilbc) {

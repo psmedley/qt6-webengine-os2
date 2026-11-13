@@ -120,6 +120,12 @@ bool AndroidWindow::resize(int width, int height)
     }
     pthread_mutex_unlock(&sInitWindowMutex);
 
+    if (sApp->window == nullptr)
+    {
+        // Note: logging isn't initalized yet but this message shows up in logcat.
+        FATAL() << "Window is NULL (is screen locked? e.g. SplashScreen in logcat)";
+    }
+
     // TODO: figure out a way to set the format as well,
     // which is available only after EGLWindow initialization
     int32_t err = ANativeWindow_setBuffersGeometry(sApp->window, mWidth, mHeight, 0);
@@ -165,6 +171,11 @@ static int32_t onInputEvent(struct android_app *app, AInputEvent *event)
     return 0;  // 0 == not handled
 }
 
+static bool validPollResult(int result)
+{
+    return result >= 0 || result == ALOOPER_POLL_CALLBACK;
+}
+
 void android_main(struct android_app *app)
 {
     int events;
@@ -181,7 +192,8 @@ void android_main(struct android_app *app)
     // Message loop, polling for events indefinitely (due to -1 timeout)
     // Must be here in order to handle APP_CMD_INIT_WINDOW event,
     // which occurs after AndroidWindow::initializeImpl(), but before AndroidWindow::messageLoop
-    while (ALooper_pollAll(-1, nullptr, &events, reinterpret_cast<void **>(&source)) >= 0)
+    while (
+        validPollResult(ALooper_pollOnce(-1, nullptr, &events, reinterpret_cast<void **>(&source))))
     {
         if (source != nullptr)
         {

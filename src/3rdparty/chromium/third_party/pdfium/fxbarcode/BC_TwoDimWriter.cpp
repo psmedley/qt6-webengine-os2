@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "fxbarcode/BC_Writer.h"
 #include "fxbarcode/common/BC_CommonBitMatrix.h"
 #include "third_party/base/check.h"
-#include "third_party/base/numerics/safe_math.h"
 
 CBC_TwoDimWriter::CBC_TwoDimWriter(bool bFixedSize)
     : m_bFixedSize(bFixedSize) {}

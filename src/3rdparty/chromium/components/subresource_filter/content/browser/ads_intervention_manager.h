@@ -105,7 +105,7 @@ class AdsInterventionManager {
   // AdsInterventionManager. Both are bound to the profile.
   raw_ptr<SubresourceFilterContentSettingsManager> settings_manager_ = nullptr;
 
-  raw_ptr<base::Clock> clock_;
+  raw_ptr<base::Clock, DanglingUntriaged> clock_;
 };
 
 }  // namespace subresource_filter

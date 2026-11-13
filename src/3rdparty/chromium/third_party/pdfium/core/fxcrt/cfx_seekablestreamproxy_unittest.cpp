@@ -1,4 +1,4 @@
-// Copyright 2019 PDFium Authors. All rights reserved.
+// Copyright 2019 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,12 @@
 #include "core/fxcrt/cfx_read_only_span_stream.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 TEST(SeekableStreamProxyTest, NullStream) {
   auto proxy_stream = pdfium::MakeRetain<CFX_SeekableStreamProxy>(
       pdfium::MakeRetain<CFX_ReadOnlySpanStream>(
-          pdfium::make_span<const uint8_t>(nullptr, 0)));
+          pdfium::span<const uint8_t>()));
 
   wchar_t buffer[16];
   EXPECT_EQ(0u, proxy_stream->ReadBlock(buffer, std::size(buffer)));

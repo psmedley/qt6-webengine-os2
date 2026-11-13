@@ -58,9 +58,7 @@ bool SwitchableGPUsSupported(const GPUInfo& gpu_info,
       (command_line.GetSwitchValueASCII(switches::kUseGL) !=
            gl::kGLImplementationDesktopName &&
        command_line.GetSwitchValueASCII(switches::kUseGL) !=
-           gl::kGLImplementationANGLEName &&
-       command_line.GetSwitchValueASCII(switches::kUseGL) !=
-           gl::kGLImplementationCoreProfileName)) {
+           gl::kGLImplementationANGLEName)) {
     return false;
   }
   // Always allow offline renderers on ARM-based macs.

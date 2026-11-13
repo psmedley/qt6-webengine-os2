@@ -15,11 +15,9 @@
 #include "internal/platform/implementation/windows/log_message.h"
 
 #include <algorithm>
-// TODO(b/217211016): may need get rid of this dependency since there is
-// no "base" in OSS.
-#include "base/stringprintf.h"
 
-namespace location {
+#include "strings/strappendv.h"
+
 namespace nearby {
 namespace windows {
 
@@ -51,7 +49,7 @@ void LogMessage::Print(const char* format, ...) {
   va_list ap;
   va_start(ap, format);
   std::string result;
-  StringAppendV(&result, format, ap);
+  strings::StrAppendV(&result, format, ap);
   log_streamer_.stream() << result;
   va_end(ap);
 }
@@ -71,4 +69,3 @@ bool LogMessage::ShouldCreateLogMessage(Severity severity) {
 }
 }  // namespace api
 }  // namespace nearby
-}  // namespace location

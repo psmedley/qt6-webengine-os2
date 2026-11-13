@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/try.star", "DEFAULT_EXCLUDE_LOCATION_FILTERS")
+load("//lib/try.star", "location_filters_without_defaults", "try_")
 load("//outages/config.star", outages_config = "config")
 
 _MD_HEADER = """\
@@ -44,7 +44,12 @@ These builders are currently disabled due to the cq_disable_experiments outages
 setting. See //infra/config/outages/README.md for more information.
 """ if outages_config.disable_cq_experiments else "")
 
-_TRY_BUILDER_VIEW_URL = "https://ci.chromium.org/p/chromium/builders/try"
+_MEGA_MODE_HEADER = """\
+These builders run when the "Mega" CQ mode is triggered. This mode runs all the
+builders required in the standard CQ, plus a large amount of optional builders.
+"""
+
+_TRY_BUILDER_VIEW_URL = "https://ci.chromium.org/p/{project}/builders/{bucket}/{builder}"
 
 def _get_main_config_group_builders(ctx):
     cq_cfg = ctx.output["luci/commit-queue.cfg"]
@@ -69,34 +74,22 @@ def _get_main_config_group_builders(ctx):
 
     fail("Could not find the main CQ group")
 
-def _normalize_regexp(regexp):
-    if regexp == ".*":
-        return None
-    return regexp
-
-def _normalize_location_filter(f):
-    return cq.location_filter(
-        gerrit_host_regexp = _normalize_regexp(f.gerrit_host_regexp),
-        gerrit_project_regexp = _normalize_regexp(f.gerrit_project_regexp),
-        path_regexp = _normalize_regexp(f.path_regexp),
-        exclude = f.exclude,
-    )
-
 def _normalize_builder(builder):
-    location_filters = [_normalize_location_filter(f) for f in builder.location_filters]
-    location_filters = [f for f in location_filters if f not in DEFAULT_EXCLUDE_LOCATION_FILTERS]
+    location_filters = location_filters_without_defaults(builder)
 
     return struct(
         name = builder.name,
         experiment_percentage = builder.experiment_percentage,
         includable_only = builder.includable_only,
         location_filters = location_filters,
+        mode_allowlist = builder.mode_allowlist,
     )
 
 def _group_builders_by_section(builders):
     required = []
     experimental = []
     optional = []
+    mega = []
 
     for builder in builders:
         builder = _normalize_builder(builder)
@@ -106,6 +99,8 @@ def _group_builders_by_section(builders):
             optional.append(builder)
         elif builder.includable_only:
             continue
+        elif try_.MEGA_CQ_FULL_RUN_NAME in builder.mode_allowlist:
+            mega.append(builder)
         else:
             required.append(builder)
 
@@ -113,17 +108,24 @@ def _group_builders_by_section(builders):
         required = required,
         experimental = experimental,
         optional = optional,
+        mega = mega,
     )
 
-def _codesearch_query(*atoms):
-    query = ["https://cs.chromium.org/search?q="]
+def _codesearch_query(url, *atoms):
+    query = ["{}/search?q=".format(url)]
     for atom in atoms:
         query.append("+")
         query.append(atom)
     return "".join(query)
 
+def _public_codesearch_query(*atoms):
+    return _codesearch_query("https://cs.chromium.org", *atoms)
+
+def _internal_codesearch_query(*atoms):
+    return _codesearch_query("https://source.corp.google.com", *atoms)
+
 def _get_location_filter_details(f):
-    if f.gerrit_host_regexp or f.gerrit_project_regexp:
+    if f.gerrit_host_regexp != ".*" or f.gerrit_project_regexp != ".*":
         fail("cq-builders.md generator needs updating to support gerrit host/project regexp")
 
     regex = f.path_regexp
@@ -131,7 +133,7 @@ def _get_location_filter_details(f):
     if regex.endswith(".+"):
         regex = regex[:-len(".+")]
 
-    url = _codesearch_query("file:" + regex)
+    url = _public_codesearch_query("file:" + regex)
 
     # If the regex doesn't have any interesting characters that might be part of a
     # regex, assume the regex is targeting a single path and direct link to it
@@ -156,6 +158,7 @@ def _generate_cq_builders_md(ctx):
         ("Required builders", _REQUIRED_HEADER, "required"),
         ("Optional builders", _OPTIONAL_HEADER, "optional"),
         ("Experimental builders", _EXPERIMENTAL_HEADER, "experimental"),
+        ("Mega CQ builders", _MEGA_MODE_HEADER, "mega"),
     ):
         builders = getattr(builders_by_section, section)
         if not builders:
@@ -164,8 +167,19 @@ def _generate_cq_builders_md(ctx):
         lines.append("## %s" % title)
         lines.append(header)
 
+        printed_projects = set()
         for b in builders:
-            name = b.name.rsplit("/", 1)[-1]
+            project, bucket, name = b.name.split("/")
+            if project not in ("chrome", "chromium"):
+                fail("unexpected project added to the CQ: {}".format(project))
+            if project not in printed_projects:
+                lines.append("### %s" % project)
+                printed_projects = printed_projects.union([project])
+            builder_url = _TRY_BUILDER_VIEW_URL.format(
+                project = project,
+                bucket = bucket,
+                builder = name,
+            )
 
             # Some builders share a common prefix (android-marshmallow-x86-rel
             # and android-marshmallow-x86-rel-non-cq for example). The quotes
@@ -173,18 +187,18 @@ def _generate_cq_builders_md(ctx):
             # than everything with a common prefix. Two sets of quotes are
             # needed because the first set is interpreted by codesearch.
             quoted_name = "\"\"{name}\"\"".format(name = name)
+            if project == "chrome":
+                codesearch_query = _internal_codesearch_query("file:/try/.*\\.star$")
+            else:
+                codesearch_query = _public_codesearch_query("file:/try/.*\\.star$")
             lines.append((
-                "* [{name}]({try_builder_view}/{name}) " +
-                "([definition]({definition_query}+{quoted_name})) " +
-                "([matching builders]({trybot_query}+{quoted_name}))"
+                "* [{name}]({try_builder_view}) " +
+                "([definition]({definition_query}+{quoted_name}))"
             ).format(
                 name = name,
                 quoted_name = quoted_name,
-                try_builder_view = _TRY_BUILDER_VIEW_URL,
-                definition_query = _codesearch_query(
-                    "file:/try/.*\\.star$",
-                ),
-                trybot_query = _codesearch_query("file:trybots.py"),
+                try_builder_view = builder_url,
+                definition_query = codesearch_query,
             ))
 
             if b.experiment_percentage:

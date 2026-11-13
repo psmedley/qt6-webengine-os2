@@ -5,10 +5,13 @@
 import * as Common from '../../../../core/common/common.js';
 import * as i18n from '../../../../core/i18n/i18n.js';
 import * as Platform from '../../../../core/platform/platform.js';
+import * as Coordinator from '../../../components/render_coordinator/render_coordinator.js';
 import * as UI from '../../legacy.js';
 
 import chartViewPortStyles from './chartViewport.css.legacy.js';
 import {MinimalTimeWindowMs} from './FlameChart.js';
+
+const coordinator = Coordinator.RenderCoordinator.RenderCoordinator.instance();
 
 export interface ChartViewportDelegate {
   windowChanged(startTime: number, endTime: number, animate: boolean): void;
@@ -42,12 +45,11 @@ export class ChartViewport extends UI.Widget.VBox {
   private targetLeftTime!: number;
   private targetRightTime!: number;
   private selectionOffsetShiftX!: number;
-  private selectionOffsetShiftY!: number;
   private selectionStartX!: number|null;
-  private lastMouseOffsetX!: number;
+  private lastMouseOffsetX?: number;
   private minimumBoundary!: number;
   private totalTime!: number;
-  private updateTimerId?: number;
+  private isUpdateScheduled?: boolean;
   private cancelWindowTimesAnimation?: (() => void)|null;
 
   constructor(delegate: ChartViewportDelegate) {
@@ -104,7 +106,7 @@ export class ChartViewport extends UI.Widget.VBox {
     return this.isDraggingInternal;
   }
 
-  elementsToRestoreScrollPositionsFor(): Element[] {
+  override elementsToRestoreScrollPositionsFor(): Element[] {
     return [this.vScrollElement];
   }
 
@@ -117,7 +119,7 @@ export class ChartViewport extends UI.Widget.VBox {
     this.updateContentElementSize();
   }
 
-  onResize(): void {
+  override onResize(): void {
     this.updateScrollBar();
     this.updateContentElementSize();
     this.scheduleUpdate();
@@ -139,6 +141,7 @@ export class ChartViewport extends UI.Widget.VBox {
     this.totalHeight = 0;
     this.targetLeftTime = 0;
     this.targetRightTime = 0;
+    this.isUpdateScheduled = false;
     this.updateContentElementSize();
   }
 
@@ -235,7 +238,6 @@ export class ChartViewport extends UI.Widget.VBox {
     }
     this.isDraggingInternal = true;
     this.selectionOffsetShiftX = event.offsetX - event.pageX;
-    this.selectionOffsetShiftY = event.offsetY - event.pageY;
     this.selectionStartX = event.offsetX;
     const style = this.selectionOverlay.style;
     style.left = this.selectionStartX + 'px';
@@ -310,9 +312,12 @@ export class ChartViewport extends UI.Widget.VBox {
 
   private updateCursorPosition(e: Event): void {
     const mouseEvent = (e as MouseEvent);
-    this.showCursor(mouseEvent.shiftKey);
-    this.cursorElement.style.left = mouseEvent.offsetX + 'px';
     this.lastMouseOffsetX = mouseEvent.offsetX;
+    const shouldShowCursor = mouseEvent.shiftKey && !mouseEvent.metaKey;
+    this.showCursor(shouldShowCursor);
+    if (shouldShowCursor) {
+      this.cursorElement.style.left = mouseEvent.offsetX + 'px';
+    }
   }
 
   pixelToTime(x: number): number {
@@ -375,7 +380,10 @@ export class ChartViewport extends UI.Widget.VBox {
 
   private handleZoomGesture(zoom: number): void {
     const bounds = {left: this.targetLeftTime, right: this.targetRightTime};
-    const cursorTime = this.pixelToTime(this.lastMouseOffsetX);
+    // If the user has not moved their mouse over the panel (unlikely but
+    // possible!), the offsetX will be undefined. In that case, let's just use
+    // the minimum time / pixel 0 as their mouse point.
+    const cursorTime = this.pixelToTime(this.lastMouseOffsetX || 0);
     bounds.left += (bounds.left - cursorTime) * zoom;
     bounds.right += (bounds.right - cursorTime) * zoom;
     this.requestWindowTimes(bounds, /* animate */ true);
@@ -412,11 +420,12 @@ export class ChartViewport extends UI.Widget.VBox {
   }
 
   scheduleUpdate(): void {
-    if (this.updateTimerId || this.cancelWindowTimesAnimation) {
+    if (this.cancelWindowTimesAnimation || this.isUpdateScheduled) {
       return;
     }
-    this.updateTimerId = this.element.window().requestAnimationFrame(() => {
-      this.updateTimerId = 0;
+    this.isUpdateScheduled = true;
+    void coordinator.write(() => {
+      this.isUpdateScheduled = false;
       this.update();
     });
   }

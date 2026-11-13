@@ -16,27 +16,30 @@
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
 #include "api/field_trials.h"
-#include "api/rtc_event_log/rtc_event_log.h"
-#include "api/task_queue/default_task_queue_factory.h"
+#include "api/media_types.h"
+#include "api/task_queue/task_queue_base.h"
 #include "api/test/video/function_video_decoder_factory.h"
 #include "api/transport/field_trial_based_config.h"
+#include "api/units/timestamp.h"
 #include "api/video/video_codec_type.h"
 #include "api/video_codecs/video_decoder.h"
 #include "call/call.h"
 #include "common_video/libyuv/include/webrtc_libyuv.h"
 #include "media/engine/internal_decoder_factory.h"
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "modules/rtp_rtcp/source/rtp_util.h"
 #include "modules/video_coding/utility/ivf_file_writer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/string_to_number.h"
 #include "rtc_base/strings/json.h"
-#include "rtc_base/time_utils.h"
 #include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/sleep.h"
 #include "test/call_config_utils.h"
-#include "test/call_test.h"
 #include "test/encoder_settings.h"
 #include "test/fake_decoder.h"
 #include "test/gtest.h"
@@ -48,54 +51,55 @@
 #include "test/testsupport/frame_writer.h"
 #include "test/time_controller/simulated_time_controller.h"
 #include "test/video_renderer.h"
+#include "test/video_test_constants.h"
 
 // Flag for payload type.
 ABSL_FLAG(int,
           media_payload_type,
-          webrtc::test::CallTest::kPayloadTypeVP8,
+          webrtc::test::VideoTestConstants::kPayloadTypeVP8,
           "Media payload type");
 
 // Flag for RED payload type.
 ABSL_FLAG(int,
           red_payload_type,
-          webrtc::test::CallTest::kRedPayloadType,
+          webrtc::test::VideoTestConstants::kRedPayloadType,
           "RED payload type");
 
 // Flag for ULPFEC payload type.
 ABSL_FLAG(int,
           ulpfec_payload_type,
-          webrtc::test::CallTest::kUlpfecPayloadType,
+          webrtc::test::VideoTestConstants::kUlpfecPayloadType,
           "ULPFEC payload type");
 
 // Flag for FLEXFEC payload type.
 ABSL_FLAG(int,
           flexfec_payload_type,
-          webrtc::test::CallTest::kFlexfecPayloadType,
+          webrtc::test::VideoTestConstants::kFlexfecPayloadType,
           "FLEXFEC payload type");
 
 ABSL_FLAG(int,
           media_payload_type_rtx,
-          webrtc::test::CallTest::kSendRtxPayloadType,
+          webrtc::test::VideoTestConstants::kSendRtxPayloadType,
           "Media over RTX payload type");
 
 ABSL_FLAG(int,
           red_payload_type_rtx,
-          webrtc::test::CallTest::kRtxRedPayloadType,
+          webrtc::test::VideoTestConstants::kRtxRedPayloadType,
           "RED over RTX payload type");
 
 // Flag for SSRC and RTX SSRC.
 ABSL_FLAG(uint32_t,
           ssrc,
-          webrtc::test::CallTest::kVideoSendSsrcs[0],
+          webrtc::test::VideoTestConstants::kVideoSendSsrcs[0],
           "Incoming SSRC");
 ABSL_FLAG(uint32_t,
           ssrc_rtx,
-          webrtc::test::CallTest::kSendRtxSsrcs[0],
+          webrtc::test::VideoTestConstants::kSendRtxSsrcs[0],
           "Incoming RTX SSRC");
 
 ABSL_FLAG(uint32_t,
           ssrc_flexfec,
-          webrtc::test::CallTest::kFlexfecSendSsrc,
+          webrtc::test::VideoTestConstants::kFlexfecSendSsrc,
           "Incoming FLEXFEC SSRC");
 
 // Flag for abs-send-time id.
@@ -158,6 +162,13 @@ ABSL_FLAG(bool, simulated_time, false, "Run in simulated time");
 ABSL_FLAG(bool, disable_preview, false, "Disable decoded video preview.");
 
 ABSL_FLAG(bool, disable_decoding, false, "Disable video decoding.");
+
+ABSL_FLAG(int,
+          extend_run_time_duration,
+          0,
+          "Extends the run time of the receiving client after the last RTP "
+          "packet has been delivered. Typically useful to let the last few "
+          "frames be decoded and rendered. Duration given in seconds.");
 
 namespace {
 bool ValidatePayloadType(int32_t payload_type) {
@@ -229,7 +240,6 @@ class DecoderBitstreamFileWriter : public test::FakeDecoder {
   ~DecoderBitstreamFileWriter() override { fclose(file_); }
 
   int32_t Decode(const EncodedImage& encoded_frame,
-                 bool /* missing_frames */,
                  int64_t /* render_time_ms */) override {
     if (fwrite(encoded_frame.data(), 1, encoded_frame.size(), file_) <
         encoded_frame.size()) {
@@ -257,6 +267,8 @@ class DecoderIvfFileWriter : public test::FakeDecoder {
       video_codec_type_ = VideoCodecType::kVideoCodecH264;
     } else if (codec == "AV1") {
       video_codec_type_ = VideoCodecType::kVideoCodecAV1;
+    } else if (codec == "H265") {
+      video_codec_type_ = VideoCodecType::kVideoCodecH265;
     } else {
       RTC_LOG(LS_ERROR) << "Unsupported video codec " << codec;
       RTC_DCHECK_NOTREACHED();
@@ -265,7 +277,6 @@ class DecoderIvfFileWriter : public test::FakeDecoder {
   ~DecoderIvfFileWriter() override { file_writer_->Close(); }
 
   int32_t Decode(const EncodedImage& encoded_frame,
-                 bool /* missing_frames */,
                  int64_t render_time_ms) override {
     if (!file_writer_->WriteFrame(encoded_frame, video_codec_type_)) {
       return WEBRTC_VIDEO_CODEC_ERROR;
@@ -394,15 +405,6 @@ std::unique_ptr<StreamState> ConfigureFromFlags(
     stream_state->flexfec_streams.push_back(flexfec_stream);
   }
 
-  if (absl::GetFlag(FLAGS_transmission_offset_id) != -1) {
-    receive_config.rtp.extensions.push_back(
-        RtpExtension(RtpExtension::kTimestampOffsetUri,
-                     absl::GetFlag(FLAGS_transmission_offset_id)));
-  }
-  if (absl::GetFlag(FLAGS_abs_send_time_id) != -1) {
-    receive_config.rtp.extensions.push_back(RtpExtension(
-        RtpExtension::kAbsSendTimeUri, absl::GetFlag(FLAGS_abs_send_time_id)));
-  }
   receive_config.renderer = stream_state->sinks.back().get();
 
   // Setup the receiving stream
@@ -476,26 +478,20 @@ class RtpReplayer final {
               bool simulated_time)
       : replay_config_path_(replay_config_path),
         rtp_dump_path_(rtp_dump_path),
-        field_trials_(std::move(field_trials)),
+        time_sim_(simulated_time
+                      ? std::make_unique<GlobalSimulatedTimeController>(
+                            Timestamp::Millis(1 << 30))
+                      : nullptr),
+        env_(CreateEnvironment(
+            std::move(field_trials),
+            time_sim_ ? time_sim_->GetTaskQueueFactory() : nullptr,
+            time_sim_ ? time_sim_->GetClock() : nullptr)),
         rtp_reader_(CreateRtpReader(rtp_dump_path_)) {
-    TaskQueueFactory* task_queue_factory;
-    if (simulated_time) {
-      time_sim_ = std::make_unique<GlobalSimulatedTimeController>(
-          Timestamp::Millis(1 << 30));
-      task_queue_factory = time_sim_->GetTaskQueueFactory();
-    } else {
-      task_queue_factory_ = CreateDefaultTaskQueueFactory(field_trials_.get()),
-      task_queue_factory = task_queue_factory_.get();
-    }
-    worker_thread_ =
-        std::make_unique<rtc::TaskQueue>(task_queue_factory->CreateTaskQueue(
-            "worker_thread", TaskQueueFactory::Priority::NORMAL));
+    worker_thread_ = env_.task_queue_factory().CreateTaskQueue(
+        "worker_thread", TaskQueueFactory::Priority::NORMAL);
     rtc::Event event;
     worker_thread_->PostTask([&]() {
-      Call::Config call_config(&event_log_);
-      call_config.trials = field_trials_.get();
-      call_config.task_queue_factory = task_queue_factory;
-      call_.reset(Call::Create(call_config));
+      call_ = Call::Create(CallConfig(env_));
 
       // Creation of the streams must happen inside a task queue because it is
       // resued as a worker thread.
@@ -547,12 +543,24 @@ class RtpReplayer final {
 
  private:
   void ReplayPackets() {
+    enum class Result { kOk, kUnknownSsrc, kParsingFailed };
     int64_t replay_start_ms = -1;
     int num_packets = 0;
     std::map<uint32_t, int> unknown_packets;
     rtc::Event event(/*manual_reset=*/false, /*initially_signalled=*/false);
     uint32_t start_timestamp = absl::GetFlag(FLAGS_start_timestamp);
     uint32_t stop_timestamp = absl::GetFlag(FLAGS_stop_timestamp);
+
+    RtpHeaderExtensionMap extensions;
+    if (absl::GetFlag(FLAGS_transmission_offset_id) != -1) {
+      extensions.RegisterByUri(absl::GetFlag(FLAGS_transmission_offset_id),
+                               RtpExtension::kTimestampOffsetUri);
+    }
+    if (absl::GetFlag(FLAGS_abs_send_time_id) != -1) {
+      extensions.RegisterByUri(absl::GetFlag(FLAGS_abs_send_time_id),
+                               RtpExtension::kAbsSendTimeUri);
+    }
+
     while (true) {
       int64_t now_ms = CurrentTimeMs();
       if (replay_start_ms == -1) {
@@ -563,7 +571,17 @@ class RtpReplayer final {
       if (!rtp_reader_->NextPacket(&packet)) {
         break;
       }
-      rtc::CopyOnWriteBuffer packet_buffer(packet.data, packet.length);
+      rtc::CopyOnWriteBuffer packet_buffer(
+          packet.original_length > 0 ? packet.original_length : packet.length);
+      memcpy(packet_buffer.MutableData(), packet.data, packet.length);
+      if (packet.length < packet.original_length) {
+        // Only the RTP header was recorded in the RTP dump, payload is not
+        // known and and padding length is not known, zero the payload and
+        // clear the padding bit.
+        memset(packet_buffer.MutableData() + packet.length, 0,
+               packet.original_length - packet.length);
+        packet_buffer.MutableData()[0] &= ~0x20;
+      }
       RtpPacket header;
       header.Parse(packet_buffer);
       if (header.Timestamp() < start_timestamp ||
@@ -575,27 +593,39 @@ class RtpReplayer final {
       SleepOrAdvanceTime(deliver_in_ms);
 
       ++num_packets;
-      PacketReceiver::DeliveryStatus result = PacketReceiver::DELIVERY_OK;
+
+      Result result = Result::kOk;
       worker_thread_->PostTask([&]() {
-        MediaType media_type =
-            IsRtcpPacket(packet_buffer) ? MediaType::ANY : MediaType::VIDEO;
-        result = call_->Receiver()->DeliverPacket(media_type,
-                                                  std::move(packet_buffer),
-                                                  /* packet_time_us */ -1);
+        if (IsRtcpPacket(packet_buffer)) {
+          call_->Receiver()->DeliverRtcpPacket(std::move(packet_buffer));
+        }
+        RtpPacketReceived received_packet(&extensions,
+                                          Timestamp::Millis(CurrentTimeMs()));
+        if (!received_packet.Parse(std::move(packet_buffer))) {
+          result = Result::kParsingFailed;
+          return;
+        }
+        call_->Receiver()->DeliverRtpPacket(
+            MediaType::VIDEO, received_packet,
+            [&result](const RtpPacketReceived& parsed_packet) -> bool {
+              result = Result::kUnknownSsrc;
+              // No point in trying to demux again.
+              return false;
+            });
         event.Set();
       });
       event.Wait(/*give_up_after=*/TimeDelta::Seconds(10));
 
       switch (result) {
-        case PacketReceiver::DELIVERY_OK:
+        case Result::kOk:
           break;
-        case PacketReceiver::DELIVERY_UNKNOWN_SSRC: {
+        case Result::kUnknownSsrc: {
           if (unknown_packets[header.Ssrc()] == 0)
             fprintf(stderr, "Unknown SSRC: %u!\n", header.Ssrc());
           ++unknown_packets[header.Ssrc()];
           break;
         }
-        case PacketReceiver::DELIVERY_PACKET_ERROR: {
+        case Result::kParsingFailed: {
           fprintf(stderr,
                   "Packet error, corrupt packets or incorrect setup?\n");
           fprintf(stderr, "Packet len=%zu pt=%u seq=%u ts=%u ssrc=0x%8x\n",
@@ -605,9 +635,10 @@ class RtpReplayer final {
         }
       }
     }
-    // One more call to SleepOrAdvanceTime is required to process the last
+    // Note that even when `extend_run_time_duration` is zero
+    // `SleepOrAdvanceTime` should still be called in order to process the last
     // delivered packet when running in simulated time.
-    SleepOrAdvanceTime(0);
+    SleepOrAdvanceTime(absl::GetFlag(FLAGS_extend_run_time_duration) * 1000);
 
     fprintf(stderr, "num_packets: %d\n", num_packets);
 
@@ -618,10 +649,7 @@ class RtpReplayer final {
     }
   }
 
-  int64_t CurrentTimeMs() {
-    return time_sim_ ? time_sim_->GetClock()->TimeInMilliseconds()
-                     : rtc::TimeMillis();
-  }
+  int64_t CurrentTimeMs() { return env_.clock().CurrentTime().ms(); }
 
   void SleepOrAdvanceTime(int64_t duration_ms) {
     if (time_sim_) {
@@ -633,11 +661,9 @@ class RtpReplayer final {
 
   const std::string replay_config_path_;
   const std::string rtp_dump_path_;
-  RtcEventLogNull event_log_;
-  std::unique_ptr<FieldTrialsView> field_trials_;
   std::unique_ptr<GlobalSimulatedTimeController> time_sim_;
-  std::unique_ptr<TaskQueueFactory> task_queue_factory_;
-  std::unique_ptr<rtc::TaskQueue> worker_thread_;
+  Environment env_;
+  std::unique_ptr<TaskQueueBase, TaskQueueDeleter> worker_thread_;
   std::unique_ptr<Call> call_;
   std::unique_ptr<test::RtpFileReader> rtp_reader_;
   std::unique_ptr<StreamState> stream_state_;
@@ -672,6 +698,7 @@ int main(int argc, char* argv[]) {
   RTC_CHECK(ValidateRtpHeaderExtensionId(
       absl::GetFlag(FLAGS_transmission_offset_id)));
   RTC_CHECK(ValidateInputFilenameNotEmpty(absl::GetFlag(FLAGS_input_file)));
+  RTC_CHECK_GE(absl::GetFlag(FLAGS_extend_run_time_duration), 0);
 
   rtc::ThreadManager::Instance()->WrapCurrentThread();
   webrtc::test::RunTest(webrtc::RtpReplay);

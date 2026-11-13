@@ -21,9 +21,9 @@ const path = require('path');
 const ROOT_DIR = path.dirname(path.dirname(__dirname));  // The repo root.
 const OUT_SYMLINK = path.join(ROOT_DIR, 'ui/out');
 
-function defBundle(bundle, distDir) {
+function defBundle(tsRoot, bundle, distDir) {
   return {
-    input: `${OUT_SYMLINK}/tsc/${bundle}/index.js`,
+    input: `${OUT_SYMLINK}/${tsRoot}/${bundle}/index.js`,
     output: {
       name: bundle,
       format: 'iife',
@@ -37,16 +37,9 @@ function defBundle(bundle, distDir) {
         browser: true,
         preferBuiltins: false,
       }),
-      // emscripten conditionally executes require('fs') (likewise for
-      // others), when running under node. Rollup can't find those libraries
-      // so expects these to be present in the global scope, which then fails
-      // at runtime. To avoid this we ignore require('fs') and the like.
+
       commonjs({
-        ignore: [
-          'fs',
-          'path',
-          'crypto',
-        ]
+        strictRequires: true,
       }),
 
       replace({
@@ -59,7 +52,7 @@ function defBundle(bundle, distDir) {
           // but |process| is not defined in the browser. Bypass.
           // https://github.com/immerjs/immer/issues/557
           {test: /process\.env\.NODE_ENV/g, replace: '\'production\''},
-        ]
+        ],
       }),
 
       // Translate source maps to point back to the .ts sources.
@@ -74,7 +67,7 @@ function defBundle(bundle, distDir) {
 
       // Call the default warning handler for all remaining warnings.
       warn(warning);
-    }
+    },
   };
 }
 
@@ -100,11 +93,14 @@ function defServiceWorkerBundle() {
   };
 }
 
+const maybeBigtrace = process.env['ENABLE_BIGTRACE'] ?
+    [defBundle('tsc/bigtrace', 'bigtrace', 'dist_version/bigtrace')] :
+    [];
+
 export default [
-  defBundle('frontend', 'dist_version'),
-  defBundle('controller', 'dist_version'),
-  defBundle('engine', 'dist_version'),
-  defBundle('traceconv', 'dist_version'),
-  defBundle('chrome_extension', 'chrome_extension'),
+  defBundle('tsc', 'frontend', 'dist_version'),
+  defBundle('tsc', 'engine', 'dist_version'),
+  defBundle('tsc', 'traceconv', 'dist_version'),
+  defBundle('tsc', 'chrome_extension', 'chrome_extension'),
   defServiceWorkerBundle(),
-]
+].concat(maybeBigtrace);

@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CPDF_Dictionary;
 class CPDF_Encryptor;
@@ -32,7 +32,9 @@ class CPDF_FlateEncoder {
   pdfium::span<const uint8_t> GetSpan() const;
 
  private:
-  bool is_owned() const { return m_Data.index() == 1; }
+  bool is_owned() const {
+    return absl::holds_alternative<DataVector<uint8_t>>(m_Data);
+  }
 
   // Returns |m_pClonedDict| if it is valid. Otherwise returns |m_pDict|.
   const CPDF_Dictionary* GetDict() const;

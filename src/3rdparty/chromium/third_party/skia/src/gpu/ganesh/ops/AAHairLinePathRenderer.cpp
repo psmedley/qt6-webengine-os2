@@ -8,7 +8,9 @@
 #include "src/gpu/ganesh/ops/AAHairLinePathRenderer.h"
 
 #include "include/core/SkPoint3.h"
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkFloatingPoint.h"
+#include "include/private/base/SkTemplates.h"
+#include "src/base/SkSafeMath.h"
 #include "src/core/SkGeometry.h"
 #include "src/core/SkMatrixPriv.h"
 #include "src/core/SkPointPriv.h"
@@ -32,11 +34,13 @@
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
 
-#define PREALLOC_PTARRAY(N) SkSTArray<(N),SkPoint, true>
+using namespace skia_private;
 
-using PtArray = SkTArray<SkPoint, true>;
-using IntArray = SkTArray<int, true>;
-using FloatArray = SkTArray<float, true>;
+#define PREALLOC_PTARRAY(N) STArray<(N),SkPoint, true>
+
+using PtArray = TArray<SkPoint, true>;
+using IntArray = TArray<int, true>;
+using FloatArray = TArray<float, true>;
 
 namespace {
 
@@ -323,8 +327,8 @@ int gather_lines_and_quads(const SkPath& path,
         addChoppedQuad(srcSpaceQuadPts, devPts, isContourStart);
     };
 
+    SkPoint pathPts[4] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
     for (;;) {
-        SkPoint pathPts[4];
         SkPath::Verb verb = iter.next(pathPts);
         switch (verb) {
             case SkPath::kConic_Verb:
@@ -434,7 +438,7 @@ int gather_lines_and_quads(const SkPath& path,
                     } else {
                         GrPathUtils::convertCubicToQuads(devPts, SK_Scalar1, &q);
                     }
-                    for (int i = 0; i < q.count(); i += 3) {
+                    for (int i = 0; i < q.size(); i += 3) {
                         if (persp) {
                             addSrcChoppedQuad(&q[i], !verbsInContour && 0 == i);
                         } else {
@@ -510,7 +514,7 @@ void intersect_lines(const SkPoint& ptA, const SkVector& normA,
     SkScalar lineBW = -normB.dot(ptB);
 
     SkScalar wInv = normA.fX * normB.fY - normA.fY * normB.fX;
-    wInv = SkScalarInvert(wInv);
+    wInv = sk_ieee_float_divide(1.0f, wInv);
     if (!SkScalarIsFinite(wInv)) {
         // lines are parallel, pick the point in between
         *result = (ptA + ptB)*SK_ScalarHalf;
@@ -925,14 +929,14 @@ private:
             return CombineResult::kCannotCombine;
         }
 
-        fPaths.push_back_n(that->fPaths.count(), that->fPaths.begin());
+        fPaths.push_back_n(that->fPaths.size(), that->fPaths.begin());
         return CombineResult::kMerged;
     }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     SkString onDumpInfo() const override {
         return SkStringPrintf("Color: 0x%08x Coverage: 0x%02x, Count: %d\n%s",
-                              fColor.toBytes_RGBA(), fCoverage, fPaths.count(),
+                              fColor.toBytes_RGBA(), fCoverage, fPaths.size(),
                               fHelper.dumpInfo().c_str());
     }
 #endif
@@ -948,7 +952,7 @@ private:
         SkScalar fCapLength;
     };
 
-    SkSTArray<1, PathData, true> fPaths;
+    STArray<1, PathData, true> fPaths;
     Helper fHelper;
     SkPMColor4f fColor;
     uint8_t fCoverage;
@@ -1057,7 +1061,7 @@ AAHairlineOp::Program AAHairlineOp::predictPrograms(const GrCaps* caps) const {
     // given path.
     Program neededPrograms = Program::kLine;
 
-    for (int i = 0; i < fPaths.count(); i++) {
+    for (int i = 0; i < fPaths.size(); i++) {
         uint32_t mask = fPaths[i].fPath.getSegmentMasks();
 
         if (mask & (SkPath::kQuad_SegmentMask | SkPath::kCubic_SegmentMask)) {
@@ -1171,18 +1175,30 @@ void AAHairlineOp::onPrepareDraws(GrMeshDrawTarget* target) {
     FloatArray cWeights;
     int quadCount = 0;
 
-    int instanceCount = fPaths.count();
+    int instanceCount = fPaths.size();
     bool convertConicsToQuads = !target->caps().shaderCaps()->fFloatIs32Bits;
-    for (int i = 0; i < instanceCount; i++) {
+    SkSafeMath safeMath;
+    for (int i = 0; i < instanceCount && safeMath.ok(); i++) {
         const PathData& args = fPaths[i];
-        quadCount += gather_lines_and_quads(args.fPath, args.fViewMatrix, args.fDevClipBounds,
-                                            args.fCapLength, convertConicsToQuads, &lines, &quads,
-                                            &conics, &qSubdivs, &cWeights);
+        quadCount = safeMath.addInt(quadCount,
+                                    gather_lines_and_quads(args.fPath,
+                                                           args.fViewMatrix,
+                                                           args.fDevClipBounds,
+                                                           args.fCapLength,
+                                                           convertConicsToQuads,
+                                                           &lines,
+                                                           &quads,
+                                                           &conics,
+                                                           &qSubdivs,
+                                                           &cWeights));
     }
 
-    int lineCount = lines.count() / 2;
-    int conicCount = conics.count() / 3;
-    int quadAndConicCount = conicCount + quadCount;
+    int lineCount = lines.size() / 2;
+    int conicCount = conics.size() / 3;
+    int quadAndConicCount = safeMath.addInt(conicCount, quadCount);
+    if (!safeMath.ok()) {
+        return;
+    }
 
     static constexpr int kMaxLines = SK_MaxS32 / kLineSegNumVertices;
     static constexpr int kMaxQuadsAndConics = SK_MaxS32 / kQuadNumVertices;
@@ -1232,7 +1248,7 @@ void AAHairlineOp::onPrepareDraws(GrMeshDrawTarget* target) {
         // Setup vertices
         BezierVertex* bezVerts = reinterpret_cast<BezierVertex*>(vertices);
 
-        int unsubdivQuadCnt = quads.count() / 3;
+        int unsubdivQuadCnt = quads.size() / 3;
         for (int i = 0; i < unsubdivQuadCnt; ++i) {
             SkASSERT(qSubdivs[i] >= 0);
             if (!quads[3*i].isFinite() || !quads[3*i+1].isFinite() || !quads[3*i+2].isFinite()) {
@@ -1290,7 +1306,7 @@ void AAHairlineOp::onExecute(GrOpFlushState* flushState, const SkRect& chainBoun
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 
 GR_DRAW_OP_TEST_DEFINE(AAHairlineOp) {
     SkMatrix viewMatrix = GrTest::TestMatrix(random);
@@ -1306,7 +1322,7 @@ GR_DRAW_OP_TEST_DEFINE(AAHairlineOp) {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 PathRenderer::CanDrawPath AAHairLinePathRenderer::onCanDrawPath(const CanDrawPathArgs& args) const {
     if (GrAAType::kCoverage != args.fAAType) {
@@ -1346,4 +1362,4 @@ bool AAHairLinePathRenderer::onDrawPath(const DrawPathArgs& args) {
     return true;
 }
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh

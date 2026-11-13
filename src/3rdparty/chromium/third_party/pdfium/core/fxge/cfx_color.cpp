@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,8 +87,7 @@ CFX_Color CFX_Color::ConvertColorType(Type nConvertColorType) const {
         case CFX_Color::Type::kTransparent:
           break;
         case CFX_Color::Type::kGray:
-          NOTREACHED();
-          break;
+          NOTREACHED_NORETURN();
         case CFX_Color::Type::kRGB:
           ret = ConvertGRAY2RGB(fColor1);
           break;
@@ -105,8 +104,7 @@ CFX_Color CFX_Color::ConvertColorType(Type nConvertColorType) const {
           ret = ConvertRGB2GRAY(fColor1, fColor2, fColor3);
           break;
         case CFX_Color::Type::kRGB:
-          NOTREACHED();
-          break;
+          NOTREACHED_NORETURN();
         case CFX_Color::Type::kCMYK:
           ret = ConvertRGB2CMYK(fColor1, fColor2, fColor3);
           break;
@@ -123,8 +121,7 @@ CFX_Color CFX_Color::ConvertColorType(Type nConvertColorType) const {
           ret = ConvertCMYK2RGB(fColor1, fColor2, fColor3, fColor4);
           break;
         case CFX_Color::Type::kCMYK:
-          NOTREACHED();
-          break;
+          NOTREACHED_NORETURN();
       }
       break;
   }

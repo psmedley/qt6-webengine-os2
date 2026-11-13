@@ -5,9 +5,9 @@
 #ifndef NET_FIRST_PARTY_SETS_FIRST_PARTY_SET_METADATA_H_
 #define NET_FIRST_PARTY_SETS_FIRST_PARTY_SET_METADATA_H_
 
+#include "build/build_config.h"
 #include "net/base/net_export.h"
 #include "net/first_party_sets/first_party_set_entry.h"
-#include "net/first_party_sets/same_party_context.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
@@ -21,8 +21,7 @@ class NET_EXPORT FirstPartySetMetadata {
   // `frame_entry` and `top_frame_entry` must live for the duration of the ctor;
   // nullptr indicates that there's no First-Party Set that's associated with
   // the current frame or the top frame, respectively, in the given context.
-  FirstPartySetMetadata(const SamePartyContext& context,
-                        const FirstPartySetEntry* frame_entry,
+  FirstPartySetMetadata(const FirstPartySetEntry* frame_entry,
                         const FirstPartySetEntry* top_frame_entry);
 
   FirstPartySetMetadata(FirstPartySetMetadata&&);
@@ -30,13 +29,15 @@ class NET_EXPORT FirstPartySetMetadata {
 
   ~FirstPartySetMetadata();
 
+#if BUILDFLAG(IS_MAC_13)
+  bool operator==(const FirstPartySetMetadata& other) const = default;
+  bool operator!=(const FirstPartySetMetadata& other) const = default;
+#else
   bool operator==(const FirstPartySetMetadata& other) const;
   bool operator!=(const FirstPartySetMetadata& other) const;
+#endif
 
-  const SamePartyContext& context() const { return context_; }
 
-  // Returns a optional<T>& instead of a T* so that operator== can be defined
-  // more easily.
   const absl::optional<FirstPartySetEntry>& frame_entry() const {
     return frame_entry_;
   }
@@ -45,13 +46,10 @@ class NET_EXPORT FirstPartySetMetadata {
   }
 
   // Returns true if `frame_entry` and `top_frame_entry` are both non-null and
-  // have the same primary. This is different from `context_.context_type()`
-  // because it only checks if the the frames' sites are in the same set
-  // regardless of their ancestor chain.
+  // have the same primary.
   bool AreSitesInSameFirstPartySet() const;
 
  private:
-  SamePartyContext context_ = SamePartyContext();
   absl::optional<FirstPartySetEntry> frame_entry_ = absl::nullopt;
   absl::optional<FirstPartySetEntry> top_frame_entry_ = absl::nullopt;
 };

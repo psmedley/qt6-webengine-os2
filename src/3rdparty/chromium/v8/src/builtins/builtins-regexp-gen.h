@@ -8,6 +8,7 @@
 #include "src/base/optional.h"
 #include "src/codegen/code-stub-assembler.h"
 #include "src/common/message-template.h"
+#include "src/objects/string.h"
 #include "src/regexp/regexp.h"
 
 namespace v8 {
@@ -20,8 +21,6 @@ class RegExpBuiltinsAssembler : public CodeStubAssembler {
 
   TNode<Smi> SmiZero();
   TNode<IntPtrT> IntPtrZero();
-
-  TNode<RawPtrT> LoadCodeObjectEntry(TNode<CodeT> code);
 
   // Allocate either a JSRegExpResult or a JSRegExpResultWithIndices (depending
   // on has_indices) with the given length (the number of captures, including

@@ -53,23 +53,6 @@ struct ConfigDesc;
 class DeviceImpl;
 class StreamProducerImpl;
 
-class ShareGroupImpl : angle::NonCopyable
-{
-  public:
-    ShareGroupImpl() : mAnyContextWithRobustness(false) {}
-    virtual ~ShareGroupImpl() {}
-    virtual void onDestroy(const egl::Display *display) {}
-
-    void onRobustContextAdd() { mAnyContextWithRobustness = true; }
-    bool hasAnyContextWithRobustness() const { return mAnyContextWithRobustness; }
-
-  private:
-    // Whether any context in the share group has robustness enabled.  If any context in the share
-    // group is robust, any program created in any context of the share group must have robustness
-    // enabled.  This is because programs are shared between the share group contexts.
-    bool mAnyContextWithRobustness;
-};
-
 class DisplayImpl : public EGLImplFactory, public angle::Subject
 {
   public:
@@ -134,6 +117,8 @@ class DisplayImpl : public EGLImplFactory, public angle::Subject
     virtual egl::Error handleGPUSwitch();
     virtual egl::Error forceGPUSwitch(EGLint gpuIDHigh, EGLint gpuIDLow);
 
+    virtual egl::Error waitUntilWorkScheduled();
+
     virtual bool isX11() const;
     virtual bool isWayland() const;
     virtual bool isGBM() const;
@@ -145,7 +130,6 @@ class DisplayImpl : public EGLImplFactory, public angle::Subject
                                             EGLuint64KHR *modifiers,
                                             EGLBoolean *external_only,
                                             EGLint *num_modifiers);
-    GLuint getNextSurfaceID() override;
 
   protected:
     const egl::DisplayState &mState;
@@ -161,7 +145,6 @@ class DisplayImpl : public EGLImplFactory, public angle::Subject
     mutable egl::Caps mCaps;
 
     egl::BlobCache *mBlobCache;
-    rx::AtomicSerialFactory mNextSurfaceID;
 };
 
 }  // namespace rx

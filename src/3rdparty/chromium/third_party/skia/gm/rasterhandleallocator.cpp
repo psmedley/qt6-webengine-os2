@@ -11,6 +11,7 @@
 #include "include/core/SkPixmap.h"
 #include "include/core/SkRasterHandleAllocator.h"
 #include "include/core/SkSurface.h"
+#include "include/private/base/SkMalloc.h"
 
 class GraphicsPort {
 protected:
@@ -60,7 +61,7 @@ public:
     SkiaAllocator() {}
 
     bool allocHandle(const SkImageInfo& info, Rec* rec) override {
-        sk_sp<SkSurface> surface = SkSurface::MakeRaster(info);
+        sk_sp<SkSurface> surface = SkSurfaces::Raster(info);
         if (!surface) {
             return false;
         }
@@ -154,7 +155,7 @@ using MyAllocator = CGAllocator;
 
 #elif defined(SK_BUILD_FOR_WIN)
 
-#include "src/core/SkLeanWindows.h"
+#include "src/base/SkLeanWindows.h"
 
 static RECT toRECT(const SkIRect& r) {
     return { r.left(), r.top(), r.right(), r.bottom() };
@@ -303,5 +304,5 @@ DEF_SIMPLE_GM(rasterallocator, canvas, 600, 300) {
 
     SkPixmap pm;
     nativeCanvas->peekPixels(&pm);
-    canvas->drawImage(SkImage::MakeRasterCopy(pm), 280, 0);
+    canvas->drawImage(SkImages::RasterFromPixmapCopy(pm), 280, 0);
 }

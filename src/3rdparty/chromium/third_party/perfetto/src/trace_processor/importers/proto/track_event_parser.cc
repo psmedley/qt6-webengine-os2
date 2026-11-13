@@ -17,10 +17,11 @@
 #include "src/trace_processor/importers/proto/track_event_parser.h"
 
 #include <iostream>
+#include <optional>
 #include <string>
 
 #include "perfetto/base/logging.h"
-#include "perfetto/ext/base/optional.h"
+#include "perfetto/ext/base/base64.h"
 #include "perfetto/ext/base/string_writer.h"
 #include "perfetto/trace_processor/status.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
@@ -30,6 +31,7 @@
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/json/json_utils.h"
+#include "src/trace_processor/importers/proto/packet_analyzer.h"
 #include "src/trace_processor/importers/proto/packet_sequence_state.h"
 #include "src/trace_processor/importers/proto/profile_packet_utils.h"
 #include "src/trace_processor/importers/proto/track_event_tracker.h"
@@ -37,8 +39,10 @@
 #include "src/trace_processor/util/proto_to_args_parser.h"
 #include "src/trace_processor/util/status_macros.h"
 
+#include "protos/perfetto/common/android_log_constants.pbzero.h"
 #include "protos/perfetto/trace/extension_descriptor.pbzero.h"
 #include "protos/perfetto/trace/interned_data/interned_data.pbzero.h"
+#include "protos/perfetto/trace/track_event/chrome_active_processes.pbzero.h"
 #include "protos/perfetto/trace/track_event/chrome_compositor_scheduler_state.pbzero.h"
 #include "protos/perfetto/trace/track_event/chrome_histogram_sample.pbzero.h"
 #include "protos/perfetto/trace/track_event/chrome_legacy_ipc.pbzero.h"
@@ -119,6 +123,10 @@ class TrackEventArgsParser : public util::ProtoToArgsParser::Delegate {
                      storage_.InternString(base::StringView(key.key)),
                      Variadic::Boolean(value));
   }
+  void AddBytes(const Key& key, const protozero::ConstBytes& value) final {
+    std::string b64_data = base::Base64Encode(value.data, value.size);
+    AddString(key, b64_data);
+  }
   bool AddJson(const Key& key, const protozero::ConstChars& value) final {
     auto json_value = json::ParseJsonString(value);
     if (!json_value)
@@ -173,7 +181,7 @@ std::string NormalizePathSeparators(const protozero::ConstChars& path) {
   return result;
 }
 
-base::Optional<base::Status> MaybeParseUnsymbolizedSourceLocation(
+std::optional<base::Status> MaybeParseUnsymbolizedSourceLocation(
     std::string prefix,
     const protozero::Field& field,
     util::ProtoToArgsParser::Delegate& delegate) {
@@ -183,7 +191,7 @@ base::Optional<base::Status> MaybeParseUnsymbolizedSourceLocation(
   if (!decoder) {
     // Lookup failed fall back on default behaviour which will just put
     // the iid into the args table.
-    return base::nullopt;
+    return std::nullopt;
   }
   // Interned mapping_id loses it's meaning when the sequence ends. So we need
   // to get an id from stack_profile_mapping table.
@@ -194,7 +202,7 @@ base::Optional<base::Status> MaybeParseUnsymbolizedSourceLocation(
           ->sequence_stack_profile_tracker()
           .FindOrInsertMapping(decoder->mapping_id(), &intern_lookup);
   if (!mapping_id) {
-    return base::nullopt;
+    return std::nullopt;
   }
   delegate.AddUnsignedInteger(
       util::ProtoToArgsParser::Key(prefix + ".mapping_id"), mapping_id->value);
@@ -203,7 +211,7 @@ base::Optional<base::Status> MaybeParseUnsymbolizedSourceLocation(
   return base::OkStatus();
 }
 
-base::Optional<base::Status> MaybeParseSourceLocation(
+std::optional<base::Status> MaybeParseSourceLocation(
     std::string prefix,
     const protozero::Field& field,
     util::ProtoToArgsParser::Delegate& delegate) {
@@ -212,7 +220,7 @@ base::Optional<base::Status> MaybeParseSourceLocation(
   if (!decoder) {
     // Lookup failed fall back on default behaviour which will just put
     // the source_location_iid into the args table.
-    return base::nullopt;
+    return std::nullopt;
   }
 
   delegate.AddString(util::ProtoToArgsParser::Key(prefix + ".file_name"),
@@ -225,6 +233,29 @@ base::Optional<base::Status> MaybeParseSourceLocation(
   }
 
   return base::OkStatus();
+}
+
+protos::pbzero::AndroidLogPriority ToAndroidLogPriority(
+    protos::pbzero::LogMessage::Priority prio) {
+  switch (prio) {
+    case protos::pbzero::LogMessage::Priority::PRIO_UNSPECIFIED:
+      return protos::pbzero::AndroidLogPriority::PRIO_UNSPECIFIED;
+    case protos::pbzero::LogMessage::Priority::PRIO_UNUSED:
+      return protos::pbzero::AndroidLogPriority::PRIO_UNUSED;
+    case protos::pbzero::LogMessage::Priority::PRIO_VERBOSE:
+      return protos::pbzero::AndroidLogPriority::PRIO_VERBOSE;
+    case protos::pbzero::LogMessage::Priority::PRIO_DEBUG:
+      return protos::pbzero::AndroidLogPriority::PRIO_DEBUG;
+    case protos::pbzero::LogMessage::Priority::PRIO_INFO:
+      return protos::pbzero::AndroidLogPriority::PRIO_INFO;
+    case protos::pbzero::LogMessage::Priority::PRIO_WARN:
+      return protos::pbzero::AndroidLogPriority::PRIO_WARN;
+    case protos::pbzero::LogMessage::Priority::PRIO_ERROR:
+      return protos::pbzero::AndroidLogPriority::PRIO_ERROR;
+    case protos::pbzero::LogMessage::Priority::PRIO_FATAL:
+      return protos::pbzero::AndroidLogPriority::PRIO_FATAL;
+  }
+  return protos::pbzero::AndroidLogPriority::PRIO_UNSPECIFIED;
 }
 
 }  // namespace
@@ -243,11 +274,12 @@ class TrackEventParser::EventImporter {
         args_translation_table_(context_->args_translation_table.get()),
         ts_(ts),
         event_data_(event_data),
-        sequence_state_(event_data->sequence_state.get()),
+        sequence_state_(event_data->trace_packet_data.sequence_state.get()),
         blob_(std::move(blob)),
         event_(blob_),
         legacy_event_(event_.legacy_event()),
-        defaults_(event_data->sequence_state->GetTrackEventDefaults()),
+        defaults_(event_data->trace_packet_data.sequence_state
+                      ->GetTrackEventDefaults()),
         thread_timestamp_(event_data->thread_timestamp),
         thread_instruction_count_(event_data->thread_instruction_count),
         packet_sequence_id_(packet_sequence_id) {}
@@ -260,6 +292,14 @@ class TrackEventParser::EventImporter {
 
     category_id_ = ParseTrackEventCategory();
     name_id_ = ParseTrackEventName();
+
+    if (context_->content_analyzer) {
+      PacketAnalyzer::SampleAnnotation annotation;
+      annotation.push_back({parser_->event_category_key_id_, category_id_});
+      annotation.push_back({parser_->event_name_key_id_, name_id_});
+      PacketAnalyzer::Get(context_)->ProcessPacket(
+          event_data_->trace_packet_data.packet, annotation);
+    }
 
     RETURN_IF_ERROR(ParseTrackAssociation());
 
@@ -415,7 +455,7 @@ class TrackEventParser::EventImporter {
     //      TrackEvent types), or
     //   b) a default track.
     if (track_uuid_) {
-      base::Optional<TrackId> opt_track_id =
+      std::optional<TrackId> opt_track_id =
           track_event_tracker_->GetDescriptorTrack(track_uuid_, name_id_,
                                                    packet_sequence_id_);
       if (!opt_track_id) {
@@ -570,7 +610,7 @@ class TrackEventParser::EventImporter {
             track_id_ = context_->track_tracker
                             ->GetOrCreateLegacyChromeGlobalInstantTrack();
             legacy_passthrough_utid_ = utid_;
-            utid_ = base::nullopt;
+            utid_ = std::nullopt;
             break;
           case LegacyEvent::SCOPE_PROCESS:
             if (!upid_) {
@@ -582,7 +622,7 @@ class TrackEventParser::EventImporter {
                 context_->track_tracker->InternLegacyChromeProcessInstantTrack(
                     *upid_);
             legacy_passthrough_utid_ = utid_;
-            utid_ = base::nullopt;
+            utid_ = std::nullopt;
             break;
         }
         break;
@@ -686,9 +726,9 @@ class TrackEventParser::EventImporter {
     PERFETTO_DCHECK(track_uuid_it);
     PERFETTO_DCHECK(index < TrackEventData::kMaxNumExtraCounters);
 
-    base::Optional<TrackId> track_id = track_event_tracker_->GetDescriptorTrack(
+    std::optional<TrackId> track_id = track_event_tracker_->GetDescriptorTrack(
         *track_uuid_it, kNullStringId, packet_sequence_id_);
-    base::Optional<uint32_t> counter_row =
+    std::optional<uint32_t> counter_row =
         storage_->counter_track_table().id().IndexOf(*track_id);
 
     double value = event_data_->extra_counter_values[index];
@@ -746,12 +786,12 @@ class TrackEventParser::EventImporter {
     }
 
     tables::SliceTable::RowReference slice_ref = *opt_thread_slice_ref;
-    base::Optional<int64_t> tts = slice_ref.thread_ts();
+    std::optional<int64_t> tts = slice_ref.thread_ts();
     if (tts) {
       PERFETTO_DCHECK(thread_timestamp_);
       slice_ref.set_thread_dur(*thread_timestamp_ - *tts);
     }
-    base::Optional<int64_t> tic = slice_ref.thread_instruction_count();
+    std::optional<int64_t> tic = slice_ref.thread_instruction_count();
     if (tic) {
       PERFETTO_DCHECK(event_data_->thread_instruction_count);
       slice_ref.set_thread_instruction_delta(
@@ -789,7 +829,7 @@ class TrackEventParser::EventImporter {
     return util::OkStatus();
   }
 
-  base::Optional<uint64_t> GetLegacyEventId() {
+  std::optional<uint64_t> GetLegacyEventId() {
     if (legacy_event_.has_unscoped_id())
       return legacy_event_.unscoped_id();
     // TODO(andrewbb): Catapult doesn't support global_id and local_id on flow
@@ -797,7 +837,7 @@ class TrackEventParser::EventImporter {
     // to be some callsites supplying local_id in chromium), but we would have
     // to consider the process ID for local IDs and use a separate ID scope for
     // global_id and unscoped_id.
-    return base::nullopt;
+    return std::nullopt;
   }
 
   util::Status ParseFlowEventV1(char phase) {
@@ -891,7 +931,7 @@ class TrackEventParser::EventImporter {
     // up nested underneath their parent slices.
     int64_t duration_ns = 0;
     int64_t tidelta = 0;
-    base::Optional<tables::SliceTable::Id> opt_slice_id;
+    std::optional<tables::SliceTable::Id> opt_slice_id;
     auto args_inserter = [this, phase](BoundInserter* inserter) {
       ParseTrackEventArgs(inserter);
       // For legacy MARK event, add phase for JSON exporter.
@@ -1181,6 +1221,13 @@ class TrackEventParser::EventImporter {
       log_errors(
           ParseHistogramName(event_.chrome_histogram_sample(), inserter));
     }
+    if (event_.has_chrome_active_processes()) {
+      protos::pbzero::ChromeActiveProcesses::Decoder message(
+          event_.chrome_active_processes());
+      for (auto it = message.pid(); it; ++it) {
+        parser_->AddActiveProcess(ts_, *it);
+      }
+    }
 
     TrackEventArgsParser args_writer(ts_, *inserter, *storage_,
                                      *sequence_state_);
@@ -1309,9 +1356,20 @@ class TrackEventParser::EventImporter {
           Variadic::Integer(source_location_decoder->line_number()));
     }
 
+    // The track event log message doesn't specify any priority. UI never
+    // displays priorities < 2 (VERBOSE in android). Let's make all the track
+    // event logs show up as INFO.
+    int32_t priority = protos::pbzero::AndroidLogPriority::PRIO_INFO;
+    if (message.has_prio()) {
+      priority = ToAndroidLogPriority(
+          static_cast<protos::pbzero::LogMessage::Priority>(message.prio()));
+      inserter->AddArg(parser_->log_message_priority_id_,
+                       Variadic::Integer(priority));
+    }
+
     storage_->mutable_android_log_table()->Insert(
         {ts_, *utid_,
-         /*priority*/ 0,
+         /*priority*/ static_cast<uint32_t>(priority),
          /*tag_id*/ source_location_id, log_message_id});
 
     return util::OkStatus();
@@ -1346,9 +1404,9 @@ class TrackEventParser::EventImporter {
     row.category = category_id_;
     row.name = name_id_;
     row.thread_ts = thread_timestamp_;
-    row.thread_dur = base::nullopt;
+    row.thread_dur = std::nullopt;
     row.thread_instruction_count = thread_instruction_count_;
-    row.thread_instruction_delta = base::nullopt;
+    row.thread_instruction_delta = std::nullopt;
     return row;
   }
 
@@ -1370,15 +1428,15 @@ class TrackEventParser::EventImporter {
   StringId name_id_;
   uint64_t track_uuid_;
   TrackId track_id_;
-  base::Optional<UniqueTid> utid_;
-  base::Optional<UniqueTid> upid_;
-  base::Optional<int64_t> thread_timestamp_;
-  base::Optional<int64_t> thread_instruction_count_;
+  std::optional<UniqueTid> utid_;
+  std::optional<UniqueTid> upid_;
+  std::optional<int64_t> thread_timestamp_;
+  std::optional<int64_t> thread_instruction_count_;
   // All events in legacy JSON require a thread ID, but for some types of
   // events (e.g. async events or process/global-scoped instants), we don't
   // store it in the slice/track model. To pass the utid through to the json
   // export, we store it in an arg.
-  base::Optional<UniqueTid> legacy_passthrough_utid_;
+  std::optional<UniqueTid> legacy_passthrough_utid_;
 
   uint32_t packet_sequence_id_;
 };
@@ -1408,6 +1466,8 @@ TrackEventParser::TrackEventParser(TraceProcessorContext* context,
       log_message_source_location_line_number_key_id_(
           context->storage->InternString(
               "track_event.log_message.line_number")),
+      log_message_priority_id_(
+          context->storage->InternString("track_event.priority")),
       source_location_function_name_key_id_(
           context->storage->InternString("source.function_name")),
       source_location_file_name_key_id_(
@@ -1469,6 +1529,8 @@ TrackEventParser::TrackEventParser(TraceProcessorContext* context,
           context->storage->InternString("chrome.process_label")),
       chrome_process_type_id_(
           context_->storage->InternString("chrome.process_type")),
+      event_category_key_id_(context_->storage->InternString("event.category")),
+      event_name_key_id_(context_->storage->InternString("event.name")),
       chrome_string_lookup_(context->storage.get()),
       counter_unit_ids_{{kNullStringId, context_->storage->InternString("ns"),
                          context_->storage->InternString("count"),
@@ -1528,12 +1590,9 @@ TrackEventParser::TrackEventParser(TraceProcessorContext* context,
   args_parser_.AddParsingOverrideForField(
       "active_processes.pid", [&](const protozero::Field& field,
                                   util::ProtoToArgsParser::Delegate& delegate) {
-        UniquePid upid = context_->process_tracker->GetOrCreateProcess(
-            static_cast<uint32_t>(field.as_int32()));
-        active_chrome_processes_tracker_.AddActiveProcessMetadata(
-            delegate.packet_timestamp(), upid);
+        AddActiveProcess(delegate.packet_timestamp(), field.as_int32());
         // Fallthrough so that the parser adds pid as a regular arg.
-        return base::nullopt;
+        return std::nullopt;
       });
 
   for (uint16_t index : kReflectFields) {
@@ -1709,6 +1768,17 @@ void TrackEventParser::ParseTrackEvent(int64_t ts,
                                        const TrackEventData* event_data,
                                        ConstBytes blob,
                                        uint32_t packet_sequence_id) {
+  const auto range_of_interest_start_us =
+      track_event_tracker_->range_of_interest_start_us();
+  if (context_->config.drop_track_event_data_before ==
+          DropTrackEventDataBefore::kTrackEventRangeOfInterest &&
+      range_of_interest_start_us && ts < *range_of_interest_start_us * 1000) {
+    // The event is outside of the range of interest, and dropping is enabled.
+    // So we drop the event.
+    context_->storage->IncrementStats(
+        stats::track_event_dropped_packets_outside_of_range_of_interest);
+    return;
+  }
   util::Status status =
       EventImporter(this, ts, event_data, std::move(blob), packet_sequence_id)
           .Import();
@@ -1716,6 +1786,13 @@ void TrackEventParser::ParseTrackEvent(int64_t ts,
     context_->storage->IncrementStats(stats::track_event_parser_errors);
     PERFETTO_DLOG("ParseTrackEvent error: %s", status.c_message());
   }
+}
+
+void TrackEventParser::AddActiveProcess(int64_t packet_timestamp, int32_t pid) {
+  UniquePid upid =
+      context_->process_tracker->GetOrCreateProcess(static_cast<uint32_t>(pid));
+  active_chrome_processes_tracker_.AddActiveProcessMetadata(packet_timestamp,
+                                                            upid);
 }
 
 void TrackEventParser::NotifyEndOfFile() {

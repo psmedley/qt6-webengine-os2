@@ -41,33 +41,33 @@ import {alert} from './ARIAUtils.js';
 
 const UIStrings = {
   /**
-  *@description Text to close something
-  */
+   *@description Text to close something
+   */
   close: 'Close',
   /**
-  *@description Text to dock the DevTools to the right of the browser tab
-  */
+   *@description Text to dock the DevTools to the right of the browser tab
+   */
   dockToRight: 'Dock to right',
   /**
-  *@description Text to dock the DevTools to the bottom of the browser tab
-  */
+   *@description Text to dock the DevTools to the bottom of the browser tab
+   */
   dockToBottom: 'Dock to bottom',
   /**
-  *@description Text to dock the DevTools to the left of the browser tab
-  */
+   *@description Text to dock the DevTools to the left of the browser tab
+   */
   dockToLeft: 'Dock to left',
   /**
-  *@description Text to undock the DevTools
-  */
+   *@description Text to undock the DevTools
+   */
   undockIntoSeparateWindow: 'Undock into separate window',
   /**
-  *@description Text announced when the DevTools are undocked
-  */
+   *@description Text announced when the DevTools are undocked
+   */
   devtoolsUndocked: 'DevTools is undocked',
   /**
-  *@description Text announced when the DevTools are docked to the left, right, or bottom of the browser tab
-  *@example {bottom} PH1
-  */
+   *@description Text announced when the DevTools are docked to the left, right, or bottom of the browser tab
+   *@example {bottom} PH1
+   */
   devToolsDockedTo: 'DevTools is docked to {PH1}',
 };
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/DockController.ts', UIStrings);
@@ -87,7 +87,7 @@ export class DockController extends Common.ObjectWrapper.ObjectWrapper<EventType
     super();
     this.canDockInternal = canDock;
 
-    this.closeButton = new ToolbarButton(i18nString(UIStrings.close), 'largeicon-delete');
+    this.closeButton = new ToolbarButton(i18nString(UIStrings.close), 'cross');
     this.closeButton.element.classList.add('close-devtools');
     this.closeButton.addEventListener(
         ToolbarButton.Events.Click,
@@ -241,20 +241,7 @@ export type EventTypes = {
   [Events.AfterDockSideChanged]: ChangeEvent,
 };
 
-let toggleDockActionDelegateInstance: ToggleDockActionDelegate;
-
 export class ToggleDockActionDelegate implements ActionDelegate {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): ToggleDockActionDelegate {
-    const {forceNew} = opts;
-    if (!toggleDockActionDelegateInstance || forceNew) {
-      toggleDockActionDelegateInstance = new ToggleDockActionDelegate();
-    }
-
-    return toggleDockActionDelegateInstance;
-  }
-
   handleAction(_context: Context, _actionId: string): boolean {
     DockController.instance().toggleDockSide();
     return true;

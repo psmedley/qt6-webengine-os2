@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef RESOURCEREQUESTPOLICYQT_H
 #define RESOURCEREQUESTPOLICYQT_H
@@ -39,7 +40,7 @@ public:
     bool CanRequestResource(const GURL &resource_url,
                             blink::WebLocalFrame *frame,
                             ui::PageTransition transition_type,
-                            const absl::optional<url::Origin> &initiator_origin);
+                            const url::Origin *initiator_origin);
 
 private:
     Dispatcher *m_dispatcher;

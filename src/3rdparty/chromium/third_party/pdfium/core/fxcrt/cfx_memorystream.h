@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_stream.h"
 #include "core/fxcrt/retain_ptr.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CFX_MemoryStream final : public IFX_SeekableStream {
  public:
@@ -20,13 +20,11 @@ class CFX_MemoryStream final : public IFX_SeekableStream {
   FX_FILESIZE GetSize() override;
   FX_FILESIZE GetPosition() override;
   bool IsEOF() override;
-  bool ReadBlockAtOffset(void* buffer,
-                         FX_FILESIZE offset,
-                         size_t size) override;
-  size_t ReadBlock(void* buffer, size_t size) override;
-  bool WriteBlockAtOffset(const void* buffer,
-                          FX_FILESIZE offset,
-                          size_t size) override;
+  size_t ReadBlock(pdfium::span<uint8_t> buffer) override;
+  bool ReadBlockAtOffset(pdfium::span<uint8_t> buffer,
+                         FX_FILESIZE offset) override;
+  bool WriteBlockAtOffset(pdfium::span<const uint8_t> buffer,
+                          FX_FILESIZE offset) override;
   bool Flush() override;
 
   pdfium::span<const uint8_t> GetSpan() const;

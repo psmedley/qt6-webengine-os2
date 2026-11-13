@@ -9,9 +9,11 @@
 #include <stdlib.h>
 #include <vector>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/rand_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_propvariant.h"
@@ -110,6 +112,15 @@ int GetHdcpValue(HdcpVersion hdcp_version) {
     case HdcpVersion::kHdcpVersion2_3:
       return 2;
   }
+}
+
+// Generatea a dummy session ID for resolving the new session promise during
+// GenerateRequest() when DRM_E_TEE_INVALID_HWDRM_STATE happens. An example of
+// the generated session ID is `DUMMY_9F656F4D76BE30D4`.
+std::string GenerateDummySessionId() {
+  uint8_t random_bytes[8];
+  base::RandBytes(random_bytes, sizeof(random_bytes));
+  return "DUMMY_" + base::HexEncode(random_bytes, sizeof(random_bytes));
 }
 
 class CdmProxyImpl : public MediaFoundationCdmProxy {
@@ -214,6 +225,9 @@ class CdmProxyImpl : public MediaFoundationCdmProxy {
     input_trust_authorities_.clear();
     last_key_ids_.clear();
 
+    // `CdmEvent::kHardwareContextReset` will be reported in
+    // `hardware_context_reset_cb_` below.
+
     // Must be the last call because `this` could be destructed when running
     // the callback. We are not certain because `this` is ref-counted.
     hardware_context_reset_cb_.Run();
@@ -223,8 +237,8 @@ class CdmProxyImpl : public MediaFoundationCdmProxy {
     cdm_event_cb_.Run(CdmEvent::kSignificantPlayback, S_OK);
   }
 
-  void OnPlaybackError(HRESULT hresult) override {
-    cdm_event_cb_.Run(CdmEvent::kPlaybackError, hresult);
+  void OnPlaybackError(HRESULT hr) override {
+    cdm_event_cb_.Run(CdmEvent::kPlaybackError, hr);
   }
 
  private:
@@ -307,16 +321,19 @@ MediaFoundationCdm::~MediaFoundationCdm() {
 }
 
 HRESULT MediaFoundationCdm::Initialize() {
-  HRESULT hresult = E_FAIL;
+  HRESULT hr = E_FAIL;
   ComPtr<IMFContentDecryptionModule> mf_cdm;
-  create_mf_cdm_cb_.Run(hresult, mf_cdm);
+  create_mf_cdm_cb_.Run(hr, mf_cdm);
   if (!mf_cdm) {
-    DCHECK(FAILED(hresult));
-    // Only report CdmEvent::kCdmError here as this is where most failures
-    // happen, and other errors can be easily triggered by sites, e.g. a bad
-    // server certificate or a bad license.
-    OnCdmEvent(CdmEvent::kCdmError, hresult);
-    return hresult;
+    DCHECK(FAILED(hr));
+
+    if (hr == DRM_E_TEE_INVALID_HWDRM_STATE) {
+      OnCdmEvent(CdmEvent::kHardwareContextReset, hr);
+    } else {
+      OnCdmEvent(CdmEvent::kCdmError, hr);
+    }
+
+    return hr;
   }
 
   mf_cdm_.Swap(mf_cdm);
@@ -337,6 +354,10 @@ void MediaFoundationCdm::SetServerCertificate(
       mf_cdm_->SetServerCertificate(certificate.data(), certificate.size());
   base::UmaHistogramSparse(uma_prefix_ + "SetServerCertificate", hr);
 
+  // Not handling DRM_E_TEE_INVALID_HWDRM_STATE separately because it's
+  // extremely rare to happen in `SetServerCertificate()` and there might be no
+  // session to close, so resolving the promise would be confusing to the JS
+  // player.
   if (FAILED(hr)) {
     promise->reject(Exception::NOT_SUPPORTED_ERROR, 0, "Failed to set cert");
     return;
@@ -383,16 +404,31 @@ void MediaFoundationCdm::CreateSessionAndGenerateRequest(
     return;
   }
 
+  // Create and initialize session.
+
   // TODO(xhwang): Implement session expiration update.
   auto session = std::make_unique<MediaFoundationCdmSession>(
       uma_prefix_, session_message_cb_, session_keys_change_cb_,
       session_expiration_update_cb_);
 
-  if (FAILED(session->Initialize(mf_cdm_.Get(), session_type))) {
+  HRESULT hr = session->Initialize(mf_cdm_.Get(), session_type);
+
+  if (hr == DRM_E_TEE_INVALID_HWDRM_STATE) {
+    auto dummy_session_id = GenerateDummySessionId();
+    promise->resolve(dummy_session_id);
+    session_closed_cb_.Run(dummy_session_id,
+                           CdmSessionClosedReason::kHardwareContextReset);
+    OnHardwareContextReset();
+    return;
+  }
+
+  if (FAILED(hr)) {
     promise->reject(Exception::INVALID_STATE_ERROR, 0,
                     "Failed to create session");
     return;
   }
+
+  // Generate Request
 
   int session_token = next_session_token_++;
 
@@ -403,9 +439,21 @@ void MediaFoundationCdm::CreateSessionAndGenerateRequest(
       base::BindOnce(&MediaFoundationCdm::OnSessionId, base::Unretained(this),
                      session_token, std::move(promise));
 
-  if (FAILED(session->GenerateRequest(init_data_type, init_data,
-                                      std::move(session_id_cb)))) {
-    raw_promise->reject(Exception::INVALID_STATE_ERROR, 0, "Init failure");
+  hr = session->GenerateRequest(init_data_type, init_data,
+                                std::move(session_id_cb));
+
+  if (hr == DRM_E_TEE_INVALID_HWDRM_STATE) {
+    auto dummy_session_id = GenerateDummySessionId();
+    raw_promise->resolve(dummy_session_id);
+    session_closed_cb_.Run(dummy_session_id,
+                           CdmSessionClosedReason::kHardwareContextReset);
+    OnHardwareContextReset();
+    return;
+  }
+
+  if (FAILED(hr)) {
+    raw_promise->reject(Exception::INVALID_STATE_ERROR, 0,
+                        "Generate Request failed");
     return;
   }
 
@@ -444,7 +492,15 @@ void MediaFoundationCdm::UpdateSession(
     return;
   }
 
-  if (FAILED(session->Update(response))) {
+  HRESULT hr = session->Update(response);
+
+  if (hr == DRM_E_TEE_INVALID_HWDRM_STATE) {
+    promise->resolve();
+    OnHardwareContextReset();
+    return;
+  }
+
+  if (FAILED(hr)) {
     promise->reject(Exception::INVALID_STATE_ERROR, 0, "Update failed");
     return;
   }
@@ -461,6 +517,9 @@ void MediaFoundationCdm::CloseSession(
     std::unique_ptr<SimpleCdmPromise> promise) {
   DVLOG_FUNC(1);
 
+  // TODO(crbug.com/1298192): Handle DRM_E_TEE_INVALID_HWDRM_STATE. Right now
+  // DRM_E_TEE_INVALID_HWDRM_STATE is very rare in CloseSession() and there's
+  // an open discussion on how this should behave in EME spec discussion.
   CloseSessionInternal(session_id, CdmSessionClosedReason::kClose,
                        std::move(promise));
 }
@@ -481,7 +540,15 @@ void MediaFoundationCdm::RemoveSession(
     return;
   }
 
-  if (FAILED(session->Remove())) {
+  HRESULT hr = session->Remove();
+
+  if (hr == DRM_E_TEE_INVALID_HWDRM_STATE) {
+    promise->resolve();
+    OnHardwareContextReset();
+    return;
+  }
+
+  if (FAILED(hr)) {
     promise->reject(Exception::INVALID_STATE_ERROR, 0, "Remove failed");
     return;
   }
@@ -592,8 +659,13 @@ void MediaFoundationCdm::CloseSessionInternal(
 
 // When hardware context is reset, all sessions are in a bad state. Close all
 // the sessions and hopefully the player will create new sessions to resume.
+// If there's a pending promise, resolve that promise instead of rejecting it
+// to avoid player error. See https://crbug.com/1298192 and
+// https://github.com/w3c/encrypted-media/issues/494#issuecomment-1249845581.
 void MediaFoundationCdm::OnHardwareContextReset() {
   DVLOG_FUNC(1);
+
+  OnCdmEvent(CdmEvent::kHardwareContextReset, DRM_E_TEE_INVALID_HWDRM_STATE);
 
   // Collect all the session IDs to avoid iterating the map while we delete
   // entries in the map (in `CloseSession()`).
@@ -619,9 +691,9 @@ void MediaFoundationCdm::OnHardwareContextReset() {
   }
 }
 
-void MediaFoundationCdm::OnCdmEvent(CdmEvent event, HRESULT hresult) {
-  DVLOG_FUNC(1);
-  cdm_event_cb_.Run(event, hresult);
+void MediaFoundationCdm::OnCdmEvent(CdmEvent event, HRESULT hr) {
+  DVLOG_FUNC(1) << "event=" << static_cast<int>(event) << ": " << PrintHr(hr);
+  cdm_event_cb_.Run(event, hr);
 }
 
 void MediaFoundationCdm::OnIsTypeSupportedResult(

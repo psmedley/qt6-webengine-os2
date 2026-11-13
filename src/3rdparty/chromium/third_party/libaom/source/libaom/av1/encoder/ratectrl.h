@@ -204,6 +204,15 @@ typedef struct {
 
   int decimation_factor;
   int decimation_count;
+  int prev_frame_is_dropped;
+  int drop_count_consec;
+  int max_consec_drop;
+
+  /*!
+   * Frame number for encoded frames (non-dropped).
+   * Use for setting the rtc reference structure.
+   */
+  unsigned int frame_number_encoded;
 
   /*!\endcond */
   /*!
@@ -257,8 +266,19 @@ typedef struct {
 
   double frame_level_rate_correction_factors[RATE_FACTOR_LEVELS];
 
+  int frame_num_last_gf_refresh;
+
   int prev_coded_width;
   int prev_coded_height;
+
+  // The ratio used for inter frames in bit estimation.
+  // TODO(yunqing): if golden frame is treated differently (e.g. gf_cbr_boost_
+  // pct > THR), consider to add bit_est_ratio_g for golden frames.
+  int bit_est_ratio;
+
+  // Whether to use a fixed qp for the frame, bypassing internal rate control.
+  // This flag will reset to 0 after every frame.
+  int use_external_qp_one_pass;
   /*!\endcond */
 } RATE_CONTROL;
 
@@ -459,11 +479,6 @@ typedef struct {
    */
   int temp_extend_maxq;
 
-  /*!
-   * Temporary variable used in simulating the delayed update of
-   * extend_minq_fast.
-   */
-  int temp_extend_minq_fast;
 #endif
   /*!
    * Proposed minimum allowed Q different layers in a coding pyramid
@@ -556,9 +571,8 @@ void av1_primary_rc_init(const struct AV1EncoderConfig *oxcf,
 
 void av1_rc_init(const struct AV1EncoderConfig *oxcf, RATE_CONTROL *rc);
 
-int av1_estimate_bits_at_q(FRAME_TYPE frame_kind, int q, int mbs,
-                           double correction_factor, aom_bit_depth_t bit_depth,
-                           const int is_screen_content_type);
+int av1_estimate_bits_at_q(const struct AV1_COMP *cpi, int q,
+                           double correction_factor);
 
 double av1_convert_qindex_to_q(int qindex, aom_bit_depth_t bit_depth);
 
@@ -661,10 +675,14 @@ int av1_rc_regulate_q(const struct AV1_COMP *cpi, int target_bits_per_frame,
                       int width, int height);
 
 /*!\cond */
+// Gets the appropriate bpmb ennumerator based on the frame and content type
+int av1_get_bpmb_enumerator(FRAME_TYPE frame_type,
+                            const int is_screen_content_type);
+
 // Estimates bits per mb for a given qindex and correction factor.
-int av1_rc_bits_per_mb(FRAME_TYPE frame_type, int qindex,
-                       double correction_factor, aom_bit_depth_t bit_depth,
-                       const int is_screen_content_type);
+int av1_rc_bits_per_mb(const struct AV1_COMP *cpi, FRAME_TYPE frame_type,
+                       int qindex, double correction_factor,
+                       int accurate_estimate);
 
 // Clamping utilities for bitrate targets for iframes and pframes.
 int av1_rc_clamp_iframe_target_size(const struct AV1_COMP *const cpi,
@@ -686,10 +704,9 @@ int av1_compute_qdelta(const RATE_CONTROL *rc, double qstart, double qtarget,
 
 // Computes a q delta (in "q index" terms) to get from a starting q value
 // to a value that should equate to the given rate ratio.
-int av1_compute_qdelta_by_rate(const RATE_CONTROL *rc, FRAME_TYPE frame_type,
-                               int qindex, double rate_target_ratio,
-                               const int is_screen_content_type,
-                               aom_bit_depth_t bit_depth);
+int av1_compute_qdelta_by_rate(const struct AV1_COMP *cpi,
+                               FRAME_TYPE frame_type, int qindex,
+                               double rate_target_ratio);
 
 int av1_frame_type_qdelta(const struct AV1_COMP *cpi, int q);
 

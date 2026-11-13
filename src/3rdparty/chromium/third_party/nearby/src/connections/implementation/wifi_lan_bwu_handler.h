@@ -22,7 +22,6 @@
 #include "connections/implementation/endpoint_channel_manager.h"
 #include "connections/implementation/mediums/mediums.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -30,7 +29,9 @@ namespace connections {
 // per-Medium-specific operations needed to upgrade an EndpointChannel.
 class WifiLanBwuHandler : public BaseBwuHandler {
  public:
-  explicit WifiLanBwuHandler(Mediums& mediums, BwuNotifications notifications);
+  explicit WifiLanBwuHandler(
+      Mediums& mediums,
+      IncomingConnectionCallback incoming_connection_callback);
 
  private:
   class WifiLanIncomingSocket : public BwuHandler::IncomingSocket {
@@ -73,6 +74,5 @@ class WifiLanBwuHandler : public BaseBwuHandler {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_WIFI_LAN_BWU_HANDLER_H_

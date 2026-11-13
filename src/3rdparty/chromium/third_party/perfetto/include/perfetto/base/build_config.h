@@ -105,21 +105,20 @@
 #error OS not supported (see build_config.h)
 #endif
 
+// These are NOT exclusive!
+#if defined(__GNUC__)
+#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_GCC() 1
+#else
+#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_GCC() 0
+#endif
 #if defined(__clang__)
 #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_CLANG() 1
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_GCC() 0
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_MSVC() 0
-#elif defined(__GNUC__) // Careful: Clang also defines this!
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_CLANG() 0
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_GCC() 1
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_MSVC() 0
-#elif defined(_MSC_VER)
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_CLANG() 0
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_GCC() 0
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_MSVC() 1
 #else
 #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_CLANG() 0
-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_GCC() 0
+#endif
+#if defined(_MSC_VER)
+#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_MSVC() 1
+#else
 #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_COMPILER_MSVC() 0
 #endif
 
@@ -127,6 +126,16 @@
 #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_ANDROID_USERDEBUG_BUILD() 1
 #else
 #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_ANDROID_USERDEBUG_BUILD() 0
+#endif
+
+// Processor architecture detection.  For more info on what's defined, see:
+//   http://msdn.microsoft.com/en-us/library/b0084kay.aspx
+//   http://www.agner.org/optimize/calling_conventions.pdf
+//   or with gcc, run: "echo | gcc -E -dM -"
+#if defined(__aarch64__) || defined(_M_ARM64)
+#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_ARCH_CPU_ARM64() 1
+#else
+#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_ARCH_CPU_ARM64() 0
 #endif
 
 // perfetto_build_flags.h contains the tweakable build flags defined via GN.

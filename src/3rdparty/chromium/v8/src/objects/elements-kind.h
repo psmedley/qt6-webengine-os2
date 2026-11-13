@@ -169,8 +169,64 @@ constexpr int kFastElementsKindBits = 3;
 static_assert((1 << kFastElementsKindBits) > LAST_FAST_ELEMENTS_KIND);
 static_assert((1 << (kFastElementsKindBits - 1)) <= LAST_FAST_ELEMENTS_KIND);
 
-V8_EXPORT_PRIVATE int ElementsKindToShiftSize(ElementsKind elements_kind);
-V8_EXPORT_PRIVATE int ElementsKindToByteSize(ElementsKind elements_kind);
+const uint8_t* TypedArrayAndRabGsabTypedArrayElementsKindShifts();
+const uint8_t* TypedArrayAndRabGsabTypedArrayElementsKindSizes();
+inline constexpr int ElementsKindToShiftSize(ElementsKind elements_kind) {
+  switch (elements_kind) {
+    case UINT8_ELEMENTS:
+    case INT8_ELEMENTS:
+    case UINT8_CLAMPED_ELEMENTS:
+    case RAB_GSAB_UINT8_ELEMENTS:
+    case RAB_GSAB_INT8_ELEMENTS:
+    case RAB_GSAB_UINT8_CLAMPED_ELEMENTS:
+      return 0;
+    case UINT16_ELEMENTS:
+    case INT16_ELEMENTS:
+    case RAB_GSAB_UINT16_ELEMENTS:
+    case RAB_GSAB_INT16_ELEMENTS:
+      return 1;
+    case UINT32_ELEMENTS:
+    case INT32_ELEMENTS:
+    case FLOAT32_ELEMENTS:
+    case RAB_GSAB_UINT32_ELEMENTS:
+    case RAB_GSAB_INT32_ELEMENTS:
+    case RAB_GSAB_FLOAT32_ELEMENTS:
+      return 2;
+    case PACKED_DOUBLE_ELEMENTS:
+    case HOLEY_DOUBLE_ELEMENTS:
+    case FLOAT64_ELEMENTS:
+    case BIGINT64_ELEMENTS:
+    case BIGUINT64_ELEMENTS:
+    case RAB_GSAB_FLOAT64_ELEMENTS:
+    case RAB_GSAB_BIGINT64_ELEMENTS:
+    case RAB_GSAB_BIGUINT64_ELEMENTS:
+      return 3;
+    case PACKED_SMI_ELEMENTS:
+    case PACKED_ELEMENTS:
+    case PACKED_FROZEN_ELEMENTS:
+    case PACKED_SEALED_ELEMENTS:
+    case PACKED_NONEXTENSIBLE_ELEMENTS:
+    case HOLEY_SMI_ELEMENTS:
+    case HOLEY_ELEMENTS:
+    case HOLEY_FROZEN_ELEMENTS:
+    case HOLEY_SEALED_ELEMENTS:
+    case HOLEY_NONEXTENSIBLE_ELEMENTS:
+    case DICTIONARY_ELEMENTS:
+    case FAST_SLOPPY_ARGUMENTS_ELEMENTS:
+    case SLOW_SLOPPY_ARGUMENTS_ELEMENTS:
+    case FAST_STRING_WRAPPER_ELEMENTS:
+    case SLOW_STRING_WRAPPER_ELEMENTS:
+    case SHARED_ARRAY_ELEMENTS:
+      return kTaggedSizeLog2;
+    case WASM_ARRAY_ELEMENTS:
+    case NO_ELEMENTS:
+      CONSTEXPR_UNREACHABLE();
+  }
+  CONSTEXPR_UNREACHABLE();
+}
+inline constexpr int ElementsKindToByteSize(ElementsKind elements_kind) {
+  return 1 << ElementsKindToShiftSize(elements_kind);
+}
 int GetDefaultHeaderSizeForElementsKind(ElementsKind elements_kind);
 const char* ElementsKindToString(ElementsKind kind);
 
@@ -229,6 +285,20 @@ inline bool IsFloatTypedArrayElementsKind(ElementsKind kind) {
          kind == RAB_GSAB_FLOAT32_ELEMENTS || kind == RAB_GSAB_FLOAT64_ELEMENTS;
 }
 
+inline bool IsSignedIntTypedArrayElementsKind(ElementsKind kind) {
+  return kind == INT8_ELEMENTS || kind == RAB_GSAB_INT8_ELEMENTS ||
+         kind == INT16_ELEMENTS || kind == RAB_GSAB_INT16_ELEMENTS ||
+         kind == INT32_ELEMENTS || kind == RAB_GSAB_INT32_ELEMENTS;
+}
+
+inline bool IsUnsignedIntTypedArrayElementsKind(ElementsKind kind) {
+  return kind == UINT8_CLAMPED_ELEMENTS ||
+         kind == RAB_GSAB_UINT8_CLAMPED_ELEMENTS || kind == UINT8_ELEMENTS ||
+         kind == RAB_GSAB_UINT8_ELEMENTS || kind == UINT16_ELEMENTS ||
+         kind == RAB_GSAB_UINT16_ELEMENTS || kind == UINT32_ELEMENTS ||
+         kind == RAB_GSAB_UINT32_ELEMENTS;
+}
+
 inline bool IsWasmArrayElementsKind(ElementsKind kind) {
   return kind == WASM_ARRAY_ELEMENTS;
 }
@@ -255,7 +325,7 @@ inline bool IsTransitionElementsKind(ElementsKind kind) {
          kind == FAST_STRING_WRAPPER_ELEMENTS;
 }
 
-inline bool IsDoubleElementsKind(ElementsKind kind) {
+constexpr bool IsDoubleElementsKind(ElementsKind kind) {
   return base::IsInRange(kind, PACKED_DOUBLE_ELEMENTS, HOLEY_DOUBLE_ELEMENTS);
 }
 
@@ -303,11 +373,20 @@ inline bool IsFrozenElementsKind(ElementsKind kind) {
   return base::IsInRange(kind, PACKED_FROZEN_ELEMENTS, HOLEY_FROZEN_ELEMENTS);
 }
 
+inline bool IsFastOrNonextensibleOrSealedElementsKind(ElementsKind kind) {
+  const bool result = kind <= HOLEY_SEALED_ELEMENTS;
+  DCHECK_IMPLIES(result, IsFastElementsKind(kind) ||
+                             IsNonextensibleElementsKind(kind) ||
+                             IsSealedElementsKind(kind));
+  DCHECK_IMPLIES(result, !IsFrozenElementsKind(kind));
+  return result;
+}
+
 inline bool IsSmiOrObjectElementsKind(ElementsKind kind) {
   return base::IsInRange(kind, PACKED_SMI_ELEMENTS, HOLEY_ELEMENTS);
 }
 
-inline bool IsSmiElementsKind(ElementsKind kind) {
+constexpr bool IsSmiElementsKind(ElementsKind kind) {
   return base::IsInRange(kind, PACKED_SMI_ELEMENTS, HOLEY_SMI_ELEMENTS);
 }
 
@@ -315,7 +394,7 @@ inline bool IsFastNumberElementsKind(ElementsKind kind) {
   return IsSmiElementsKind(kind) || IsDoubleElementsKind(kind);
 }
 
-inline bool IsObjectElementsKind(ElementsKind kind) {
+constexpr bool IsObjectElementsKind(ElementsKind kind) {
   return base::IsInRange(kind, PACKED_ELEMENTS, HOLEY_ELEMENTS);
 }
 
@@ -328,7 +407,7 @@ inline bool IsAnyHoleyNonextensibleElementsKind(ElementsKind kind) {
          kind == HOLEY_SEALED_ELEMENTS || kind == HOLEY_FROZEN_ELEMENTS;
 }
 
-inline bool IsHoleyElementsKind(ElementsKind kind) {
+constexpr bool IsHoleyElementsKind(ElementsKind kind) {
   return kind % 2 == 1 && kind <= HOLEY_DOUBLE_ELEMENTS;
 }
 

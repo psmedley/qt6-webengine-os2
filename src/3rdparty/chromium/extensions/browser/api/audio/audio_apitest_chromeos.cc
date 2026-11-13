@@ -8,15 +8,11 @@
 #include <memory>
 
 #include "base/auto_reset.h"
-#include "base/command_line.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
-#include "chromeos/ash/components/audio/audio_devices_pref_handler_stub.h"
 #include "chromeos/ash/components/audio/cras_audio_handler.h"
 #include "chromeos/ash/components/dbus/audio/fake_cras_audio_client.h"
 #include "extensions/common/features/feature_session_type.h"
-#include "extensions/common/mojom/feature_session_type.mojom.h"
-#include "extensions/common/switches.h"
 #include "extensions/shell/test/shell_apitest.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
@@ -209,7 +205,8 @@ IN_PROC_BROWSER_TEST_F(AudioApiTest, OnInputMuteChanged) {
   EXPECT_EQ(kJabraMic1.id, audio_handler()->GetPrimaryActiveInputNode());
 
   // Un-mute the input.
-  audio_handler()->SetInputMute(false);
+  audio_handler()->SetInputMute(
+      false, CrasAudioHandler::InputMuteChangeMethod::kOther);
   EXPECT_FALSE(audio_handler()->IsInputMuted());
 
   // Loads background app.
@@ -219,7 +216,8 @@ IN_PROC_BROWSER_TEST_F(AudioApiTest, OnInputMuteChanged) {
   ASSERT_TRUE(load_listener.WaitUntilSatisfied());
 
   // Mute the input.
-  audio_handler()->SetInputMute(true);
+  audio_handler()->SetInputMute(
+      true, CrasAudioHandler::InputMuteChangeMethod::kOther);
   EXPECT_TRUE(audio_handler()->IsInputMuted());
 
   // Verify the background app got the OnMuteChanged event

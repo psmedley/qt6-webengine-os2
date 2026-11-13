@@ -30,7 +30,7 @@ public:
 
 #else
 
-#include "GrVulkanMemoryAllocator.h"
+#include "VulkanMemoryAllocatorWrapper.h"  // NO_G3_REWRITE
 
 class VulkanAMDMemoryAllocator : public VulkanMemoryAllocator {
 public:
@@ -65,8 +65,7 @@ public:
     VkResult invalidateMemory(const VulkanBackendMemory&, VkDeviceSize offset,
                               VkDeviceSize size) override;
 
-    uint64_t totalUsedMemory() const override;
-    uint64_t totalAllocatedMemory() const override;
+    std::pair<uint64_t, uint64_t> totalAllocatedAndUsedMemory() const override;
 
 private:
     VulkanAMDMemoryAllocator(VmaAllocator allocator, sk_sp<const VulkanInterface> interface,

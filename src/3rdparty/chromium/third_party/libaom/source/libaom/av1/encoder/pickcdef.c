@@ -22,6 +22,7 @@
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/ethread.h"
 #include "av1/encoder/pickcdef.h"
+#include "av1/encoder/mcomp.h"
 
 // Get primary and secondary filter strength for the given strength index and
 // search method
@@ -41,17 +42,29 @@ static INLINE void get_cdef_filter_strengths(CDEF_PICK_METHOD pick_method,
   if (pick_method == CDEF_FULL_SEARCH) return;
 
   switch (pick_method) {
-    case CDEF_FAST_SEARCH_LVL1: *pri_strength = priconv_lvl1[pri_idx]; break;
-    case CDEF_FAST_SEARCH_LVL2: *pri_strength = priconv_lvl2[pri_idx]; break;
+    case CDEF_FAST_SEARCH_LVL1:
+      assert(pri_idx < REDUCED_PRI_STRENGTHS_LVL1);
+      *pri_strength = priconv_lvl1[pri_idx];
+      break;
+    case CDEF_FAST_SEARCH_LVL2:
+      assert(pri_idx < REDUCED_PRI_STRENGTHS_LVL2);
+      *pri_strength = priconv_lvl2[pri_idx];
+      break;
     case CDEF_FAST_SEARCH_LVL3:
+      assert(pri_idx < REDUCED_PRI_STRENGTHS_LVL2);
+      assert(sec_idx < REDUCED_SEC_STRENGTHS_LVL3);
       *pri_strength = priconv_lvl2[pri_idx];
       *sec_strength = secconv_lvl3[sec_idx];
       break;
     case CDEF_FAST_SEARCH_LVL4:
+      assert(pri_idx < REDUCED_PRI_STRENGTHS_LVL4);
+      assert(sec_idx < REDUCED_SEC_STRENGTHS_LVL3);
       *pri_strength = priconv_lvl4[pri_idx];
       *sec_strength = secconv_lvl3[sec_idx];
       break;
     case CDEF_FAST_SEARCH_LVL5:
+      assert(pri_idx < REDUCED_PRI_STRENGTHS_LVL4);
+      assert(sec_idx < REDUCED_SEC_STRENGTHS_LVL5);
       *pri_strength = priconv_lvl5[pri_idx];
       *sec_strength = secconv_lvl5[sec_idx];
       break;
@@ -210,29 +223,6 @@ static uint64_t joint_strength_search_dual(int *best_lev0, int *best_lev1,
   return best_tot_mse;
 }
 
-#if CONFIG_AV1_HIGHBITDEPTH
-static void copy_sb16_16_highbd(uint16_t *dst, int dstride, const void *src,
-                                int src_voffset, int src_hoffset, int sstride,
-                                int vsize, int hsize) {
-  int r;
-  const uint16_t *src16 = CONVERT_TO_SHORTPTR((uint8_t *)src);
-  const uint16_t *base = &src16[src_voffset * sstride + src_hoffset];
-  for (r = 0; r < vsize; r++)
-    memcpy(dst + r * dstride, base + r * sstride, hsize * sizeof(*base));
-}
-#endif
-
-static void copy_sb16_16(uint16_t *dst, int dstride, const void *src,
-                         int src_voffset, int src_hoffset, int sstride,
-                         int vsize, int hsize) {
-  int r, c;
-  const uint8_t *src8 = (uint8_t *)src;
-  const uint8_t *base = &src8[src_voffset * sstride + src_hoffset];
-  for (r = 0; r < vsize; r++)
-    for (c = 0; c < hsize; c++)
-      dst[r * dstride + c] = (uint16_t)base[r * sstride + c];
-}
-
 static INLINE void init_src_params(int *src_stride, int *width, int *height,
                                    int *width_log2, int *height_log2,
                                    BLOCK_SIZE bsize) {
@@ -380,6 +370,143 @@ static INLINE void fill_borders_for_fbs_on_frame_boundary(
   }
 }
 
+// Calculate the number of 8x8/4x4 filter units for which SSE can be calculated
+// after CDEF filtering in single function call
+static AOM_FORCE_INLINE int get_error_calc_width_in_filt_units(
+    cdef_list *dlist, int cdef_count, int bi, int subsampling_x,
+    int subsampling_y) {
+  // TODO(Ranjit): Extend the optimization for 422
+  if (subsampling_x != subsampling_y) return 1;
+
+  // Combining more blocks seems to increase encode time due to increase in
+  // control code
+  if (bi + 3 < cdef_count && dlist[bi].by == dlist[bi + 3].by &&
+      dlist[bi].bx + 3 == dlist[bi + 3].bx) {
+    /* Calculate error for four 8x8/4x4 blocks using 32x8/16x4 block specific
+     * logic if y co-ordinates match and x co-ordinates are
+     * separated by 3 for first and fourth 8x8/4x4 blocks in dlist[]. */
+    return 4;
+  }
+  if (bi + 1 < cdef_count && dlist[bi].by == dlist[bi + 1].by &&
+      dlist[bi].bx + 1 == dlist[bi + 1].bx) {
+    /* Calculate error for two 8x8/4x4 blocks using 16x8/8x4 block specific
+     * logic if their y co-ordinates match and x co-ordinates are
+     * separated by 1 for first and second 8x8/4x4 blocks in dlist[]. */
+    return 2;
+  }
+  return 1;
+}
+
+// Returns the block error after CDEF filtering for a given strength
+static INLINE uint64_t get_filt_error(
+    const CdefSearchCtx *cdef_search_ctx, const struct macroblockd_plane *pd,
+    cdef_list *dlist, int dir[CDEF_NBLOCKS][CDEF_NBLOCKS], int *dirinit,
+    int var[CDEF_NBLOCKS][CDEF_NBLOCKS], uint16_t *in, uint8_t *ref_buffer,
+    int ref_stride, int row, int col, int pri_strength, int sec_strength,
+    int cdef_count, int pli, int coeff_shift, BLOCK_SIZE bs) {
+  uint64_t curr_sse = 0;
+  const BLOCK_SIZE plane_bsize =
+      get_plane_block_size(bs, pd->subsampling_x, pd->subsampling_y);
+  const int bw_log2 = 3 - pd->subsampling_x;
+  const int bh_log2 = 3 - pd->subsampling_y;
+
+  // TODO(Ranjit): Extend this optimization for HBD
+  if (!cdef_search_ctx->use_highbitdepth) {
+    // If all 8x8/4x4 blocks in CDEF block need to be filtered, calculate the
+    // error at CDEF block level
+    const int tot_blk_count =
+        (block_size_wide[plane_bsize] * block_size_high[plane_bsize]) >>
+        (bw_log2 + bh_log2);
+    if (cdef_count == tot_blk_count) {
+      // Calculate the offset in the buffer based on block position
+      const FULLPEL_MV this_mv = { row, col };
+      const int buf_offset = get_offset_from_fullmv(&this_mv, ref_stride);
+      if (pri_strength == 0 && sec_strength == 0) {
+        // When CDEF strength is zero, filtering is not applied. Hence
+        // error is calculated between source and unfiltered pixels
+        curr_sse =
+            aom_sse(&ref_buffer[buf_offset], ref_stride,
+                    get_buf_from_fullmv(&pd->dst, &this_mv), pd->dst.stride,
+                    block_size_wide[plane_bsize], block_size_high[plane_bsize]);
+      } else {
+        DECLARE_ALIGNED(32, uint8_t, tmp_dst8[1 << (MAX_SB_SIZE_LOG2 * 2)]);
+
+        av1_cdef_filter_fb(tmp_dst8, NULL, (1 << MAX_SB_SIZE_LOG2), in,
+                           cdef_search_ctx->xdec[pli],
+                           cdef_search_ctx->ydec[pli], dir, dirinit, var, pli,
+                           dlist, cdef_count, pri_strength,
+                           sec_strength + (sec_strength == 3),
+                           cdef_search_ctx->damping, coeff_shift);
+        curr_sse =
+            aom_sse(&ref_buffer[buf_offset], ref_stride, tmp_dst8,
+                    (1 << MAX_SB_SIZE_LOG2), block_size_wide[plane_bsize],
+                    block_size_high[plane_bsize]);
+      }
+    } else {
+      // If few 8x8/4x4 blocks in CDEF block need to be filtered, filtering
+      // functions produce 8-bit output and the error is calculated in 8-bit
+      // domain
+      if (pri_strength == 0 && sec_strength == 0) {
+        int num_error_calc_filt_units = 1;
+        for (int bi = 0; bi < cdef_count; bi = bi + num_error_calc_filt_units) {
+          const uint8_t by = dlist[bi].by;
+          const uint8_t bx = dlist[bi].bx;
+          const int16_t by_pos = (by << bh_log2);
+          const int16_t bx_pos = (bx << bw_log2);
+          // Calculate the offset in the buffer based on block position
+          const FULLPEL_MV this_mv = { row + by_pos, col + bx_pos };
+          const int buf_offset = get_offset_from_fullmv(&this_mv, ref_stride);
+          num_error_calc_filt_units = get_error_calc_width_in_filt_units(
+              dlist, cdef_count, bi, pd->subsampling_x, pd->subsampling_y);
+          curr_sse += aom_sse(
+              &ref_buffer[buf_offset], ref_stride,
+              get_buf_from_fullmv(&pd->dst, &this_mv), pd->dst.stride,
+              num_error_calc_filt_units * (1 << bw_log2), (1 << bh_log2));
+        }
+      } else {
+        DECLARE_ALIGNED(32, uint8_t, tmp_dst8[1 << (MAX_SB_SIZE_LOG2 * 2)]);
+        av1_cdef_filter_fb(tmp_dst8, NULL, (1 << MAX_SB_SIZE_LOG2), in,
+                           cdef_search_ctx->xdec[pli],
+                           cdef_search_ctx->ydec[pli], dir, dirinit, var, pli,
+                           dlist, cdef_count, pri_strength,
+                           sec_strength + (sec_strength == 3),
+                           cdef_search_ctx->damping, coeff_shift);
+        int num_error_calc_filt_units = 1;
+        for (int bi = 0; bi < cdef_count; bi = bi + num_error_calc_filt_units) {
+          const uint8_t by = dlist[bi].by;
+          const uint8_t bx = dlist[bi].bx;
+          const int16_t by_pos = (by << bh_log2);
+          const int16_t bx_pos = (bx << bw_log2);
+          // Calculate the offset in the buffer based on block position
+          const FULLPEL_MV this_mv = { row + by_pos, col + bx_pos };
+          const FULLPEL_MV tmp_buf_pos = { by_pos, bx_pos };
+          const int buf_offset = get_offset_from_fullmv(&this_mv, ref_stride);
+          const int tmp_buf_offset =
+              get_offset_from_fullmv(&tmp_buf_pos, (1 << MAX_SB_SIZE_LOG2));
+          num_error_calc_filt_units = get_error_calc_width_in_filt_units(
+              dlist, cdef_count, bi, pd->subsampling_x, pd->subsampling_y);
+          curr_sse += aom_sse(
+              &ref_buffer[buf_offset], ref_stride, &tmp_dst8[tmp_buf_offset],
+              (1 << MAX_SB_SIZE_LOG2),
+              num_error_calc_filt_units * (1 << bw_log2), (1 << bh_log2));
+        }
+      }
+    }
+  } else {
+    DECLARE_ALIGNED(32, uint16_t, tmp_dst[1 << (MAX_SB_SIZE_LOG2 * 2)]);
+
+    av1_cdef_filter_fb(NULL, tmp_dst, CDEF_BSTRIDE, in,
+                       cdef_search_ctx->xdec[pli], cdef_search_ctx->ydec[pli],
+                       dir, dirinit, var, pli, dlist, cdef_count, pri_strength,
+                       sec_strength + (sec_strength == 3),
+                       cdef_search_ctx->damping, coeff_shift);
+    curr_sse = cdef_search_ctx->compute_cdef_dist_fn(
+        ref_buffer, ref_stride, tmp_dst, dlist, cdef_count,
+        cdef_search_ctx->bsize[pli], coeff_shift, row, col);
+  }
+  return curr_sse;
+}
+
 // Calculates MSE at block level.
 // Inputs:
 //   cdef_search_ctx: Pointer to the structure containing parameters related to
@@ -388,8 +515,12 @@ static INLINE void fill_borders_for_fbs_on_frame_boundary(
 //   fbc: Column index in units of 64x64 block
 // Returns:
 //   Nothing will be returned. Contents of cdef_search_ctx will be modified.
-void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx, int fbr, int fbc,
-                             int sb_count) {
+void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx,
+                             struct aom_internal_error_info *error_info,
+                             int fbr, int fbc, int sb_count) {
+  // TODO(aomedia:3276): Pass error_info to the low-level functions as required
+  // in future to handle error propagation.
+  (void)error_info;
   const CommonModeInfoParams *const mi_params = cdef_search_ctx->mi_params;
   const YV12_BUFFER_CONFIG *ref = cdef_search_ctx->ref;
   const int coeff_shift = cdef_search_ctx->coeff_shift;
@@ -397,7 +528,6 @@ void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx, int fbr, int fbc,
   const int *mi_high_l2 = cdef_search_ctx->mi_high_l2;
 
   // Declare and initialize the temporary buffers.
-  DECLARE_ALIGNED(32, uint16_t, tmp_dst[1 << (MAX_SB_SIZE_LOG2 * 2)]);
   DECLARE_ALIGNED(32, uint16_t, inbuf[CDEF_INBUF_SIZE]);
   cdef_list dlist[MI_SIZE_128X128 * MI_SIZE_128X128];
   int dir[CDEF_NBLOCKS][CDEF_NBLOCKS] = { { 0 } };
@@ -435,7 +565,6 @@ void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx, int fbr, int fbc,
   // 8x8 blocks which are not skip.
   const int cdef_count = av1_cdef_compute_sb_list(
       mi_params, fbr * MI_SIZE_64X64, fbc * MI_SIZE_64X64, dlist, bs);
-
   const bool is_fb_on_frm_left_boundary = (fbc == 0);
   const bool is_fb_on_frm_right_boundary =
       (fbc + hb_step == cdef_search_ctx->nhfb);
@@ -469,14 +598,10 @@ void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx, int fbr, int fbc,
       int pri_strength, sec_strength;
       get_cdef_filter_strengths(cdef_search_ctx->pick_method, &pri_strength,
                                 &sec_strength, gi);
-      av1_cdef_filter_fb(NULL, tmp_dst, CDEF_BSTRIDE, in,
-                         cdef_search_ctx->xdec[pli], cdef_search_ctx->ydec[pli],
-                         dir, &dirinit, var, pli, dlist, cdef_count,
-                         pri_strength, sec_strength + (sec_strength == 3),
-                         cdef_search_ctx->damping, coeff_shift);
-      const uint64_t curr_mse = cdef_search_ctx->compute_cdef_dist_fn(
-          ref_buffer[pli], ref_stride[pli], tmp_dst, dlist, cdef_count,
-          cdef_search_ctx->bsize[pli], coeff_shift, row, col);
+      const uint64_t curr_mse = get_filt_error(
+          cdef_search_ctx, &pd, dlist, dir, &dirinit, var, in, ref_buffer[pli],
+          ref_stride[pli], row, col, pri_strength, sec_strength, cdef_count,
+          pli, coeff_shift, bs);
       if (pli < 2)
         cdef_search_ctx->mse[pli][sb_count][gi] = curr_mse;
       else
@@ -493,14 +618,15 @@ void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx, int fbr, int fbc,
 //   CDEF search context.
 // Returns:
 //   Nothing will be returned. Contents of cdef_search_ctx will be modified.
-static void cdef_mse_calc_frame(CdefSearchCtx *cdef_search_ctx) {
+static void cdef_mse_calc_frame(CdefSearchCtx *cdef_search_ctx,
+                                struct aom_internal_error_info *error_info) {
   // Loop over each sb.
   for (int fbr = 0; fbr < cdef_search_ctx->nvfb; ++fbr) {
     for (int fbc = 0; fbc < cdef_search_ctx->nhfb; ++fbc) {
       // Checks if cdef processing can be skipped for particular sb.
       if (cdef_sb_skip(cdef_search_ctx->mi_params, fbr, fbc)) continue;
       // Calculate mse for each sb and store the relevant sb index.
-      av1_cdef_mse_calc_block(cdef_search_ctx, fbr, fbc,
+      av1_cdef_mse_calc_block(cdef_search_ctx, error_info, fbr, fbc,
                               cdef_search_ctx->sb_count);
       cdef_search_ctx->sb_count++;
     }
@@ -513,24 +639,17 @@ static void cdef_mse_calc_frame(CdefSearchCtx *cdef_search_ctx) {
 //   related to CDEF search context.
 // Returns:
 //   Nothing will be returned. Contents of cdef_search_ctx will be modified.
-static AOM_INLINE bool cdef_alloc_data(CdefSearchCtx *cdef_search_ctx) {
+static void cdef_alloc_data(AV1_COMMON *cm, CdefSearchCtx *cdef_search_ctx) {
   const int nvfb = cdef_search_ctx->nvfb;
   const int nhfb = cdef_search_ctx->nhfb;
-  cdef_search_ctx->sb_index =
-      aom_malloc(nvfb * nhfb * sizeof(cdef_search_ctx->sb_index));
+  CHECK_MEM_ERROR(
+      cm, cdef_search_ctx->sb_index,
+      aom_malloc(nvfb * nhfb * sizeof(cdef_search_ctx->sb_index[0])));
   cdef_search_ctx->sb_count = 0;
-  cdef_search_ctx->mse[0] =
-      aom_malloc(sizeof(**cdef_search_ctx->mse) * nvfb * nhfb);
-  cdef_search_ctx->mse[1] =
-      aom_malloc(sizeof(**cdef_search_ctx->mse) * nvfb * nhfb);
-  if (!(cdef_search_ctx->sb_index && cdef_search_ctx->mse[0] &&
-        cdef_search_ctx->mse[1])) {
-    aom_free(cdef_search_ctx->sb_index);
-    aom_free(cdef_search_ctx->mse[0]);
-    aom_free(cdef_search_ctx->mse[1]);
-    return false;
-  }
-  return true;
+  CHECK_MEM_ERROR(cm, cdef_search_ctx->mse[0],
+                  aom_malloc(sizeof(**cdef_search_ctx->mse) * nvfb * nhfb));
+  CHECK_MEM_ERROR(cm, cdef_search_ctx->mse[1],
+                  aom_malloc(sizeof(**cdef_search_ctx->mse) * nvfb * nhfb));
 }
 
 // Deallocates the memory allocated for members of CdefSearchCtx.
@@ -539,10 +658,15 @@ static AOM_INLINE bool cdef_alloc_data(CdefSearchCtx *cdef_search_ctx) {
 //   related to CDEF search context.
 // Returns:
 //   Nothing will be returned.
-static AOM_INLINE void cdef_dealloc_data(CdefSearchCtx *cdef_search_ctx) {
-  aom_free(cdef_search_ctx->mse[0]);
-  aom_free(cdef_search_ctx->mse[1]);
-  aom_free(cdef_search_ctx->sb_index);
+void av1_cdef_dealloc_data(CdefSearchCtx *cdef_search_ctx) {
+  if (cdef_search_ctx) {
+    aom_free(cdef_search_ctx->mse[0]);
+    cdef_search_ctx->mse[0] = NULL;
+    aom_free(cdef_search_ctx->mse[1]);
+    cdef_search_ctx->mse[1] = NULL;
+    aom_free(cdef_search_ctx->sb_index);
+    cdef_search_ctx->sb_index = NULL;
+  }
 }
 
 // Initialize the parameters related to CDEF search context.
@@ -575,6 +699,7 @@ static AOM_INLINE void cdef_params_init(const YV12_BUFFER_CONFIG *frame,
   cdef_search_ctx->num_planes = num_planes;
   cdef_search_ctx->pick_method = pick_method;
   cdef_search_ctx->sb_count = 0;
+  cdef_search_ctx->use_highbitdepth = cm->seq_params->use_highbitdepth;
   av1_setup_dst_planes(xd->plane, cm->seq_params->sb_size, frame, 0, 0, 0,
                        num_planes);
   // Initialize plane wise information.
@@ -594,20 +719,20 @@ static AOM_INLINE void cdef_params_init(const YV12_BUFFER_CONFIG *frame,
   // Function pointer initialization.
 #if CONFIG_AV1_HIGHBITDEPTH
   if (cm->seq_params->use_highbitdepth) {
-    cdef_search_ctx->copy_fn = copy_sb16_16_highbd;
+    cdef_search_ctx->copy_fn = av1_cdef_copy_sb8_16_highbd;
     cdef_search_ctx->compute_cdef_dist_fn = compute_cdef_dist_highbd;
   } else {
-    cdef_search_ctx->copy_fn = copy_sb16_16;
+    cdef_search_ctx->copy_fn = av1_cdef_copy_sb8_16_lowbd;
     cdef_search_ctx->compute_cdef_dist_fn = compute_cdef_dist;
   }
 #else
-  cdef_search_ctx->copy_fn = copy_sb16_16;
+  cdef_search_ctx->copy_fn = av1_cdef_copy_sb8_16_lowbd;
   cdef_search_ctx->compute_cdef_dist_fn = compute_cdef_dist;
 #endif
 }
 
-static void pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
-                              int is_screen_content) {
+void av1_pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
+                           int is_screen_content) {
   const int bd = cm->seq_params->bit_depth;
   const int q =
       av1_ac_quant_QTX(cm->quant_params.base_qindex, 0, bd) >> (bd - 8);
@@ -685,6 +810,8 @@ static void pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
   const int nvfb = (mi_params->mi_rows + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
   const int nhfb = (mi_params->mi_cols + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
   MB_MODE_INFO **mbmi = mi_params->mi_grid_base;
+  // mbmi is NULL when real-time rate control library is used.
+  if (!mbmi) return;
   for (int r = 0; r < nvfb; ++r) {
     for (int c = 0; c < nhfb; ++c) {
       MB_MODE_INFO *current_mbmi = mbmi[MI_SIZE_64X64 * c];
@@ -694,13 +821,12 @@ static void pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
   }
 }
 
-void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
-                     const YV12_BUFFER_CONFIG *ref, AV1_COMMON *cm,
-                     MACROBLOCKD *xd, CDEF_PICK_METHOD pick_method, int rdmult,
-                     int skip_cdef_feature, CDEF_CONTROL cdef_control,
-                     const int is_screen_content, int non_reference_frame) {
+void av1_cdef_search(AV1_COMP *cpi) {
+  AV1_COMMON *cm = &cpi->common;
+  CDEF_CONTROL cdef_control = cpi->oxcf.tool_cfg.cdef_control;
+
   assert(cdef_control != CDEF_NONE);
-  if (cdef_control == CDEF_REFERENCE && non_reference_frame) {
+  if (cdef_control == CDEF_REFERENCE && cpi->ppi->rtc_ref.non_reference_frame) {
     CdefInfo *const cdef_info = &cm->cdef_info;
     cdef_info->nb_cdef_strengths = 1;
     cdef_info->cdef_bits = 0;
@@ -709,8 +835,21 @@ void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
     return;
   }
 
+  // Indicate if external RC is used for testing
+  const int rtc_ext_rc = cpi->rc.rtc_external_ratectrl;
+  if (rtc_ext_rc) {
+    av1_pick_cdef_from_qp(cm, 0, 0);
+    return;
+  }
+  CDEF_PICK_METHOD pick_method = cpi->sf.lpf_sf.cdef_pick_method;
   if (pick_method == CDEF_PICK_FROM_Q) {
-    pick_cdef_from_qp(cm, skip_cdef_feature, is_screen_content);
+    const int use_screen_content_model =
+        cm->quant_params.base_qindex >
+            AOMMAX(cpi->sf.rt_sf.screen_content_cdef_filter_qindex_thresh,
+                   cpi->rc.best_quality + 5) &&
+        cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN;
+    av1_pick_cdef_from_qp(cm, cpi->sf.rt_sf.skip_cdef_sb,
+                          use_screen_content_model);
     return;
   }
   const CommonModeInfoParams *const mi_params = &cm->mi_params;
@@ -718,34 +857,43 @@ void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
   const int fast = (pick_method >= CDEF_FAST_SEARCH_LVL1 &&
                     pick_method <= CDEF_FAST_SEARCH_LVL5);
   const int num_planes = av1_num_planes(cm);
-  CdefSearchCtx cdef_search_ctx;
+  MACROBLOCKD *xd = &cpi->td.mb.e_mbd;
+
+  if (!cpi->cdef_search_ctx)
+    CHECK_MEM_ERROR(cm, cpi->cdef_search_ctx,
+                    aom_malloc(sizeof(*cpi->cdef_search_ctx)));
+  CdefSearchCtx *cdef_search_ctx = cpi->cdef_search_ctx;
+
   // Initialize parameters related to CDEF search context.
-  cdef_params_init(frame, ref, cm, xd, &cdef_search_ctx, pick_method);
+  cdef_params_init(&cm->cur_frame->buf, cpi->source, cm, xd, cdef_search_ctx,
+                   pick_method);
   // Allocate CDEF search context buffers.
-  if (!cdef_alloc_data(&cdef_search_ctx)) {
-    CdefInfo *const cdef_info = &cm->cdef_info;
-    cdef_info->nb_cdef_strengths = 0;
-    cdef_info->cdef_bits = 0;
-    cdef_info->cdef_strengths[0] = 0;
-    cdef_info->cdef_uv_strengths[0] = 0;
-    return;
-  }
+  cdef_alloc_data(cm, cdef_search_ctx);
   // Frame level mse calculation.
-  if (mt_info->num_workers > 1) {
-    av1_cdef_mse_calc_frame_mt(cm, mt_info, &cdef_search_ctx);
+  if (cpi->mt_info.num_workers > 1) {
+    av1_cdef_mse_calc_frame_mt(cpi);
   } else {
-    cdef_mse_calc_frame(&cdef_search_ctx);
+    cdef_mse_calc_frame(cdef_search_ctx, cm->error);
   }
 
   /* Search for different number of signaling bits. */
   int nb_strength_bits = 0;
   uint64_t best_rd = UINT64_MAX;
   CdefInfo *const cdef_info = &cm->cdef_info;
-  int sb_count = cdef_search_ctx.sb_count;
+  int sb_count = cdef_search_ctx->sb_count;
   uint64_t(*mse[2])[TOTAL_STRENGTHS];
-  mse[0] = cdef_search_ctx.mse[0];
-  mse[1] = cdef_search_ctx.mse[1];
+  mse[0] = cdef_search_ctx->mse[0];
+  mse[1] = cdef_search_ctx->mse[1];
+  /* Calculate the maximum number of bits required to signal CDEF strengths at
+   * block level */
+  const int total_strengths = nb_cdef_strengths[pick_method];
+  const int joint_strengths =
+      num_planes > 1 ? total_strengths * total_strengths : total_strengths;
+  const int max_signaling_bits =
+      joint_strengths == 1 ? 0 : get_msb(joint_strengths - 1) + 1;
+  int rdmult = cpi->td.mb.rdmult;
   for (int i = 0; i <= 3; i++) {
+    if (i > max_signaling_bits) break;
     int best_lev0[CDEF_MAX_STRENGTHS];
     int best_lev1[CDEF_MAX_STRENGTHS] = { 0 };
     const int nb_strengths = 1 << i;
@@ -788,7 +936,7 @@ void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
         best_mse = curr;
       }
     }
-    mi_params->mi_grid_base[cdef_search_ctx.sb_index[i]]->cdef_strength =
+    mi_params->mi_grid_base[cdef_search_ctx->sb_index[i]]->cdef_strength =
         best_gi;
   }
   if (fast) {
@@ -806,5 +954,5 @@ void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
 
   cdef_info->cdef_damping = damping;
   // Deallocate CDEF search context buffers.
-  cdef_dealloc_data(&cdef_search_ctx);
+  av1_cdef_dealloc_data(cdef_search_ctx);
 }

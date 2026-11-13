@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,8 @@ namespace {
 
 RetainPtr<CPDF_ReadValidator> MakeValidatorFromFile(
     const std::string& file_name) {
-  std::string file_path;
-  PathService::GetTestFilePath(file_name, &file_path);
-  DCHECK(!file_path.empty());
+  std::string file_path = PathService::GetTestFilePath(file_name);
+  CHECK(!file_path.empty());
   return pdfium::MakeRetain<CPDF_ReadValidator>(
       IFX_SeekableReadStream::CreateFromFilename(file_path.c_str()), nullptr);
 }

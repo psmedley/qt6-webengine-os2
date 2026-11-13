@@ -1,31 +1,109 @@
-import { Browser } from '../api/Browser.js';
-import { BrowserLaunchArgumentOptions, ChromeReleaseChannel, PuppeteerNodeLaunchOptions } from './LaunchOptions.js';
-import { Product } from '../common/Product.js';
-import { ChromeLauncher } from './ChromeLauncher.js';
-import { FirefoxLauncher } from './FirefoxLauncher.js';
+import { launch } from '@puppeteer/browsers';
+import type { Browser, BrowserCloseCallback } from '../api/Browser.js';
+import { Connection } from '../cdp/Connection.js';
+import type { Product } from '../common/Product.js';
+import type { Viewport } from '../common/Viewport.js';
+import type { BrowserLaunchArgumentOptions, ChromeReleaseChannel, PuppeteerNodeLaunchOptions } from './LaunchOptions.js';
+import type { PuppeteerNode } from './PuppeteerNode.js';
 /**
- * Describes a launcher - a class that is able to create and launch a browser instance.
- * @public
+ * @internal
  */
-export interface ProductLauncher {
-    launch(object: PuppeteerNodeLaunchOptions): Promise<Browser>;
-    executablePath: (path?: any) => string;
-    defaultArgs(object: BrowserLaunchArgumentOptions): string[];
-    product: Product;
+export interface ResolvedLaunchArgs {
+    isTempUserDataDir: boolean;
+    userDataDir: string;
+    executablePath: string;
+    args: string[];
 }
 /**
- * @internal
+ * Describes a launcher - a class that is able to create and launch a browser instance.
+ *
+ * @public
  */
-export declare function executablePathForChannel(channel: ChromeReleaseChannel): string;
-/**
- * @internal
- */
-export declare function resolveExecutablePath(launcher: ChromeLauncher | FirefoxLauncher): {
-    executablePath: string;
-    missingText?: string;
-};
-/**
- * @internal
- */
-export declare function createLauncher(projectRoot: string | undefined, preferredRevision: string, isPuppeteerCore: boolean, product?: Product): ProductLauncher;
+export declare abstract class ProductLauncher {
+    #private;
+    /**
+     * @internal
+     */
+    puppeteer: PuppeteerNode;
+    /**
+     * @internal
+     */
+    protected actualBrowserRevision?: string;
+    /**
+     * @internal
+     */
+    constructor(puppeteer: PuppeteerNode, product: Product);
+    get product(): Product;
+    launch(options?: PuppeteerNodeLaunchOptions): Promise<Browser>;
+    abstract executablePath(channel?: ChromeReleaseChannel): string;
+    abstract defaultArgs(object: BrowserLaunchArgumentOptions): string[];
+    /**
+     * Set only for Firefox, after the launcher resolves the `latest` revision to
+     * the actual revision.
+     * @internal
+     */
+    getActualBrowserRevision(): string | undefined;
+    /**
+     * @internal
+     */
+    protected abstract computeLaunchArguments(options: PuppeteerNodeLaunchOptions): Promise<ResolvedLaunchArgs>;
+    /**
+     * @internal
+     */
+    protected abstract cleanUserDataDir(path: string, opts: {
+        isTemp: boolean;
+    }): Promise<void>;
+    /**
+     * @internal
+     */
+    protected closeBrowser(browserProcess: ReturnType<typeof launch>, cdpConnection?: Connection): Promise<void>;
+    /**
+     * @internal
+     */
+    protected waitForPageTarget(browser: Browser, timeout: number): Promise<void>;
+    /**
+     * @internal
+     */
+    protected createCdpSocketConnection(browserProcess: ReturnType<typeof launch>, opts: {
+        timeout: number;
+        protocolTimeout: number | undefined;
+        slowMo: number;
+    }): Promise<Connection>;
+    /**
+     * @internal
+     */
+    protected createCdpPipeConnection(browserProcess: ReturnType<typeof launch>, opts: {
+        timeout: number;
+        protocolTimeout: number | undefined;
+        slowMo: number;
+    }): Promise<Connection>;
+    /**
+     * @internal
+     */
+    protected createBiDiOverCdpBrowser(browserProcess: ReturnType<typeof launch>, connection: Connection, closeCallback: BrowserCloseCallback, opts: {
+        timeout: number;
+        protocolTimeout: number | undefined;
+        slowMo: number;
+        defaultViewport: Viewport | null;
+        ignoreHTTPSErrors?: boolean;
+    }): Promise<Browser>;
+    /**
+     * @internal
+     */
+    protected createBiDiBrowser(browserProcess: ReturnType<typeof launch>, closeCallback: BrowserCloseCallback, opts: {
+        timeout: number;
+        protocolTimeout: number | undefined;
+        slowMo: number;
+        defaultViewport: Viewport | null;
+        ignoreHTTPSErrors?: boolean;
+    }): Promise<Browser>;
+    /**
+     * @internal
+     */
+    protected getProfilePath(): string;
+    /**
+     * @internal
+     */
+    protected resolveExecutablePath(): string;
+}
 //# sourceMappingURL=ProductLauncher.d.ts.map

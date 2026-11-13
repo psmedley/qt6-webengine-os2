@@ -1,4 +1,4 @@
-# Copyright 2018 The PDFium Authors. All rights reserved.
+# Copyright 2018 The PDFium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -155,7 +155,12 @@ pdfium_embeddertest_source_set("embeddertests") {
     "../core/fpdfapi/font",
     "../core/fpdfapi/page",
     "../core/fpdfapi/parser",
+    "../core/fxcrt:test_support",
     "../core/fxge",
   ]
   pdfium_root_dir = "../"
+
+  if (pdf_use_skia) {
+    deps += [ "//skia" ]
+  }
 }

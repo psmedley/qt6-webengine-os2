@@ -29,7 +29,7 @@ class QuicCryptoClientStreamPeer;
 
 class TlsClientHandshaker;
 
-class QUIC_EXPORT_PRIVATE QuicCryptoClientStreamBase : public QuicCryptoStream {
+class QUICHE_EXPORT QuicCryptoClientStreamBase : public QuicCryptoStream {
  public:
   explicit QuicCryptoClientStreamBase(QuicSession* session);
 
@@ -46,6 +46,9 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStreamBase : public QuicCryptoStream {
   // have been sent. If the handshake has completed then this is one greater
   // than the number of round-trips needed for the handshake.
   virtual int num_sent_client_hellos() const = 0;
+
+  // Whether TLS resumption was attempted by this client. IETF QUIC only.
+  virtual bool ResumptionAttempted() const = 0;
 
   // Returns true if the handshake performed was a resumption instead of a full
   // handshake. Resumption only makes sense for TLS handshakes - there is no
@@ -98,8 +101,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStreamBase : public QuicCryptoStream {
   }
 };
 
-class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
-    : public QuicCryptoClientStreamBase {
+class QUICHE_EXPORT QuicCryptoClientStream : public QuicCryptoClientStreamBase {
  public:
   // kMaxClientHellos is the maximum number of times that we'll send a client
   // hello. The value 4 accounts for:
@@ -123,7 +125,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
   // This setup of the crypto stream delegating its implementation to the
   // handshaker results in the handshaker reading and writing bytes on the
   // crypto stream, instead of the handshaker passing the stream bytes to send.
-  class QUIC_EXPORT_PRIVATE HandshakerInterface {
+  class QUICHE_EXPORT HandshakerInterface {
    public:
     virtual ~HandshakerInterface() {}
 
@@ -138,6 +140,9 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
     // have been sent. If the handshake has completed then this is one greater
     // than the number of round-trips needed for the handshake.
     virtual int num_sent_client_hellos() const = 0;
+
+    // Whether TLS resumption was attempted by this client. IETF QUIC only.
+    virtual bool ResumptionAttempted() const = 0;
 
     // Returns true if the handshake performed was a resumption instead of a
     // full handshake. Resumption only makes sense for TLS handshakes - there is
@@ -234,7 +239,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
 
   // ProofHandler is an interface that handles callbacks from the crypto
   // stream when the client has proof verification details of the server.
-  class QUIC_EXPORT_PRIVATE ProofHandler {
+  class QUICHE_EXPORT ProofHandler {
    public:
     virtual ~ProofHandler() {}
 
@@ -264,6 +269,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
   // From QuicCryptoClientStreamBase
   bool CryptoConnect() override;
   int num_sent_client_hellos() const override;
+  bool ResumptionAttempted() const override;
   bool IsResumption() const override;
   bool EarlyDataAccepted() const override;
   ssl_early_data_reason_t EarlyDataReason() const override;

@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,10 @@
 #include "core/fxcodec/progressive_decoder_iface.h"
 #include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/retain_ptr.h"
+#include "core/fxcrt/unowned_ptr_exclusion.h"
 #include "core/fxge/dib/cstretchengine.h"
 #include "core/fxge/dib/fx_dib.h"
+#include "third_party/base/containers/span.h"
 
 #ifdef PDF_ENABLE_XFA_BMP
 #include "core/fxcodec/bmp/bmp_decoder.h"
@@ -69,7 +71,7 @@ class ProgressiveDecoder final :
   ProgressiveDecoder();
   virtual ~ProgressiveDecoder();
 
-  FXCODEC_STATUS LoadImageInfo(const RetainPtr<IFX_SeekableReadStream>& pFile,
+  FXCODEC_STATUS LoadImageInfo(RetainPtr<IFX_SeekableReadStream> pFile,
                                FXCODEC_IMAGE_TYPE imageType,
                                CFX_DIBAttribute* pAttribute,
                                bool bSkipImageTypeCheck);
@@ -77,8 +79,7 @@ class ProgressiveDecoder final :
   FXCODEC_IMAGE_TYPE GetType() const { return m_imageType; }
   int32_t GetWidth() const { return m_SrcWidth; }
   int32_t GetHeight() const { return m_SrcHeight; }
-  int32_t GetNumComponents() const { return m_SrcComponents; }
-  int32_t GetBPC() const { return m_SrcBPC; }
+  int32_t GetBitsPerPixel() const { return m_SrcComponents * m_SrcBPC; }
   void SetClipBox(FX_RECT* clip);
 
   std::pair<FXCODEC_STATUS, size_t> GetFrames();
@@ -111,7 +112,7 @@ class ProgressiveDecoder final :
                                  CFX_GifPalette* pal_ptr,
                                  int32_t trans_index,
                                  bool interlace) override;
-  void GifReadScanline(int32_t row_num, uint8_t* row_buf) override;
+  void GifReadScanline(int32_t row_num, pdfium::span<uint8_t> row_buf) override;
 #endif  // PDF_ENABLE_XFA_GIF
 
 #ifdef PDF_ENABLE_XFA_BMP
@@ -137,7 +138,7 @@ class ProgressiveDecoder final :
     }
 
    private:
-    int m_ItemSize;
+    int m_ItemSize = 0;
     DataVector<uint8_t> m_pWeightTables;
   };
 
@@ -153,7 +154,7 @@ class ProgressiveDecoder final :
     }
 
    private:
-    int m_ItemSize;
+    int m_ItemSize = 0;
     DataVector<uint8_t> m_pWeightTables;
   };
 
@@ -178,7 +179,7 @@ class ProgressiveDecoder final :
 #ifdef PDF_ENABLE_XFA_PNG
   void PngOneOneMapResampleHorz(const RetainPtr<CFX_DIBitmap>& pDeviceBitmap,
                                 int32_t dest_line,
-                                uint8_t* src_scan,
+                                pdfium::span<uint8_t> src_span,
                                 FXCodec_Format src_format);
   bool PngDetectImageTypeInBuffer(CFX_DIBAttribute* pAttribute);
   FXCODEC_STATUS PngStartDecode();
@@ -206,7 +207,7 @@ class ProgressiveDecoder final :
 
   void ResampleScanline(const RetainPtr<CFX_DIBitmap>& pDeviceBitmap,
                         int32_t dest_line,
-                        uint8_t* src_scan,
+                        pdfium::span<uint8_t> src_span,
                         FXCodec_Format src_format);
   void Resample(const RetainPtr<CFX_DIBitmap>& pDeviceBitmap,
                 int32_t src_line,
@@ -262,7 +263,7 @@ class ProgressiveDecoder final :
   size_t m_FrameCur = 0;
 #ifdef PDF_ENABLE_XFA_GIF
   int m_GifBgIndex = 0;
-  CFX_GifPalette* m_pGifPalette = nullptr;
+  UNOWNED_PTR_EXCLUSION CFX_GifPalette* m_pGifPalette = nullptr;
   int32_t m_GifPltNumber = 0;
   int m_GifTransIndex = -1;
   FX_RECT m_GifFrameRect;

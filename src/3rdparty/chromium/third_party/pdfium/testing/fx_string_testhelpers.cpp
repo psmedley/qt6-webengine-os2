@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,9 @@
 
 #include "core/fxcrt/cfx_datetime.h"
 #include "core/fxcrt/fx_string.h"
+#include "fpdfsdk/cpdfsdk_helpers.h"
 #include "third_party/base/check_op.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 std::ostream& operator<<(std::ostream& os, const CFX_DateTime& dt) {
   os << dt.GetYear() << "-" << std::to_string(dt.GetMonth()) << "-"
@@ -38,8 +39,7 @@ std::vector<std::string> StringSplit(const std::string& str, char delimiter) {
 }
 
 std::string GetPlatformString(FPDF_WIDESTRING wstr) {
-  WideString wide_string =
-      WideString::FromUTF16LE(wstr, WideString::WStringLength(wstr));
+  WideString wide_string = WideStringFromFPDFWideString(wstr);
   return std::string(wide_string.ToUTF8().c_str());
 }
 
@@ -76,6 +76,6 @@ ScopedFPDFWideString GetFPDFWideString(const std::wstring& wstr) {
 }
 
 std::vector<FPDF_WCHAR> GetFPDFWideStringBuffer(size_t length_bytes) {
-  DCHECK_EQ(length_bytes % sizeof(FPDF_WCHAR), 0);
+  DCHECK_EQ(length_bytes % sizeof(FPDF_WCHAR), 0u);
   return std::vector<FPDF_WCHAR>(length_bytes / sizeof(FPDF_WCHAR));
 }

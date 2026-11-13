@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/navigation_body_loader.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/scoped_feature_list.h"
@@ -83,7 +83,7 @@ class NavigationBodyLoaderTest : public ::testing::Test,
         std::move(endpoints), scheduler::GetSingleThreadTaskRunnerForTesting(),
         std::make_unique<ResourceLoadInfoNotifierWrapper>(
             /*resource_load_info_notifier=*/nullptr),
-        /*is_main_frame=*/true, &navigation_params);
+        /*is_main_frame=*/true, &navigation_params, /*is_ad_frame=*/false);
     loader_ = std::move(navigation_params.body_loader);
   }
 
@@ -143,7 +143,6 @@ class NavigationBodyLoaderTest : public ::testing::Test,
                            int64_t total_encoded_data_length,
                            int64_t total_encoded_body_length,
                            int64_t total_decoded_body_length,
-                           bool should_report_corb_blocking,
                            const absl::optional<WebURLError>& error) override {
     ASSERT_TRUE(expecting_finished_);
     did_finish_ = true;
@@ -459,7 +458,7 @@ TEST_F(NavigationBodyLoaderTest, FillResponseWithSecurityDetails) {
       scheduler::GetSingleThreadTaskRunnerForTesting(),
       std::make_unique<ResourceLoadInfoNotifierWrapper>(
           /*resource_load_info_notifier=*/nullptr),
-      /*is_main_frame=*/true, &navigation_params);
+      /*is_main_frame=*/true, &navigation_params, /*is_ad_frame=*/false);
   EXPECT_TRUE(
       navigation_params.response.ToResourceResponse().GetSSLInfo().has_value());
 }
@@ -508,7 +507,7 @@ TEST_F(NavigationBodyLoaderTest, FillResponseReferrerRedirects) {
       scheduler::GetSingleThreadTaskRunnerForTesting(),
       std::make_unique<ResourceLoadInfoNotifierWrapper>(
           /*resource_load_info_notifier=*/nullptr),
-      /*is_main_frame=*/true, &navigation_params);
+      /*is_main_frame=*/true, &navigation_params, /*is_ad_frame=*/false);
   ASSERT_EQ(navigation_params.redirects.size(), 2u);
   ASSERT_EQ(navigation_params.redirects[0].new_referrer,
             WebString(Referrer::NoReferrer()));
@@ -533,7 +532,6 @@ class ChunkingLoaderClient : public WebNavigationBodyLoader::Client {
                            int64_t total_encoded_data_length,
                            int64_t total_encoded_body_length,
                            int64_t total_decoded_body_length,
-                           bool should_report_corb_blocking,
                            const absl::optional<WebURLError>& error) override {
     scheduler::GetSingleThreadTaskRunnerForTesting()->PostTask(
         FROM_HERE, run_loop_.QuitClosure());

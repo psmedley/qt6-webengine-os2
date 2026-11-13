@@ -42,8 +42,6 @@ target(link_target_type, "renderer_sources") {
     "render_thread_observer.cc",
     "render_thread_observer.h",
     "v8_value_converter.h",
-    "video_encode_accelerator.cc",
-    "video_encode_accelerator.h",
     "window_features_converter.cc",
     "window_features_converter.h",
     "worker_thread.h",
@@ -52,18 +50,17 @@ target(link_target_type, "renderer_sources") {
   configs += [ "//content:content_implementation" ]
 
   public_deps = [
+    "//build:chromecast_buildflags",
     "//media",
     "//ui/accessibility",
   ]
 
   deps = [
-    "//components/cast_streaming/renderer:resource_provider",
     "//content/public/child:child_sources",
     "//content/public/common:common_sources",
     "//content/renderer",
     "//gin",
     "//media/capture",
-    "//media/gpu/ipc/client",
     "//net",
     "//ppapi/buildflags",
     "//skia",
@@ -108,7 +105,7 @@ target(link_target_type, "renderer_sources") {
     ]
   }
 
-  if (enable_library_cdms) {
+  if (enable_library_cdms || is_win || is_android) {
     sources += [
       "key_system_support.cc",
       "key_system_support.h",

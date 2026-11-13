@@ -17,7 +17,7 @@
 
 namespace skgpu::graphite {
 
-sk_sp<RenderPassTask> RenderPassTask::Make(std::vector<std::unique_ptr<DrawPass>> passes,
+sk_sp<RenderPassTask> RenderPassTask::Make(DrawPassList passes,
                                            const RenderPassDesc& desc,
                                            sk_sp<TextureProxy> target) {
     // For now we have one DrawPass per RenderPassTask
@@ -26,22 +26,31 @@ sk_sp<RenderPassTask> RenderPassTask::Make(std::vector<std::unique_ptr<DrawPass>
         return nullptr;
     }
 
+    if (desc.fColorAttachment.fTextureInfo.isValid()) {
+        // The color attachment's samples count must ether match the render pass's samples count
+        // or be 1 (when multisampled render to single sampled is used).
+        SkASSERT(desc.fSampleCount == desc.fColorAttachment.fTextureInfo.numSamples() ||
+                 1 == desc.fColorAttachment.fTextureInfo.numSamples());
+    }
+
+    if (desc.fDepthStencilAttachment.fTextureInfo.isValid()) {
+        SkASSERT(desc.fSampleCount == desc.fDepthStencilAttachment.fTextureInfo.numSamples());
+    }
+
     return sk_sp<RenderPassTask>(new RenderPassTask(std::move(passes), desc, target));
 }
 
-RenderPassTask::RenderPassTask(std::vector<std::unique_ptr<DrawPass>> passes,
+RenderPassTask::RenderPassTask(DrawPassList passes,
                                const RenderPassDesc& desc,
                                sk_sp<TextureProxy> target)
-        : fDrawPasses(std::move(passes))
-        , fRenderPassDesc(desc)
-        , fTarget(std::move(target)) {}
+        : fDrawPasses(std::move(passes)), fRenderPassDesc(desc), fTarget(std::move(target)) {}
 
 RenderPassTask::~RenderPassTask() = default;
 
 bool RenderPassTask::prepareResources(ResourceProvider* resourceProvider,
-                                      const SkRuntimeEffectDictionary* runtimeDict) {
+                                      const RuntimeEffectDictionary* runtimeDict) {
     SkASSERT(fTarget);
-    if (!fTarget->instantiate(resourceProvider)) {
+    if (!TextureProxy::InstantiateIfNotLazy(resourceProvider, fTarget.get())) {
         SKGPU_LOG_W("Failed to instantiate RenderPassTask target. Will not create renderpass!");
         SKGPU_LOG_W("Dimensions are (%d, %d).",
                     fTarget->dimensions().width(), fTarget->dimensions().height());
@@ -58,7 +67,9 @@ bool RenderPassTask::prepareResources(ResourceProvider* resourceProvider,
     return true;
 }
 
-bool RenderPassTask::addCommands(ResourceProvider* resourceProvider, CommandBuffer* commandBuffer) {
+bool RenderPassTask::addCommands(Context* context,
+                                 CommandBuffer* commandBuffer,
+                                 ReplayTargetData replayData) {
     // TBD: Expose the surfaces that will need to be attached within the renderpass?
 
     // TODO: for task execution, start the render pass, then iterate passes and
@@ -68,8 +79,15 @@ bool RenderPassTask::addCommands(ResourceProvider* resourceProvider, CommandBuff
     // Instantiate the target
     SkASSERT(fTarget && fTarget->isInstantiated());
 
+    if (fTarget->texture() == replayData.fTarget) {
+        commandBuffer->setReplayTranslation(replayData.fTranslation);
+    } else {
+        commandBuffer->clearReplayTranslation();
+    }
+
     // We don't instantiate the MSAA or DS attachments in prepareResources because we want to use
     // the discardable attachments from the Context.
+    ResourceProvider* resourceProvider = context->priv().resourceProvider();
     sk_sp<Texture> colorAttachment;
     sk_sp<Texture> resolveAttachment;
     if (fRenderPassDesc.fColorResolveAttachment.fTextureInfo.isValid()) {
@@ -104,10 +122,14 @@ bool RenderPassTask::addCommands(ResourceProvider* resourceProvider, CommandBuff
     // single sample resolve as an input attachment in that subpass, and then do a draw. The big
     // thing with Vulkan is that this input attachment and subpass means we also need to update
     // the fRenderPassDesc here.
+    // TODO(b/313629288) we always pass in the render target's dimensions as the viewport here.
+    // Using the dimensions of the logical device that we're drawing to could reduce flakiness in
+    // rendering.
     return commandBuffer->addRenderPass(fRenderPassDesc,
                                         std::move(colorAttachment),
                                         std::move(resolveAttachment),
                                         std::move(depthStencilAttachment),
+                                        SkRect::Make(fTarget->dimensions()),
                                         fDrawPasses);
 }
 

@@ -1,5 +1,5 @@
 # Copyright (C) 2023 The Qt Company Ltd.
-# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 cmake_minimum_required(VERSION 3.16)
 project(recipebrowser LANGUAGES CXX)
@@ -53,6 +53,11 @@ set(recipebrowser_resource_files
     "assets/pages/skewers.html"
     "assets/pages/soup.html"
     "assets/pages/steak.html"
+    "assets/icons/edit.svg"
+    "assets/icons/stylesheets.svg"
+    "assets/icons/add.svg"
+    "assets/icons/remove.svg"
+    "assets/icons/view.svg"
 )
 
 qt_add_resources(recipebrowser "recipebrowser"

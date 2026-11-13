@@ -1,20 +1,32 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/samples/SampleUtils.h"
 
-#include "dawn/utils/ScopedAutoreleasePool.h"
 #include "dawn/utils/SystemUtils.h"
 #include "dawn/utils/WGPUHelpers.h"
 
@@ -26,29 +38,29 @@ WGPURenderPipeline pipeline;
 WGPUTextureFormat swapChainFormat;
 
 void init() {
-    device = CreateCppDawnDevice().Release();
+    device = CreateCppDawnDevice().MoveToCHandle();
     queue = wgpuDeviceGetQueue(device);
-    swapchain = GetSwapChain().Release();
+    swapchain = GetSwapChain().MoveToCHandle();
     swapChainFormat = static_cast<WGPUTextureFormat>(GetPreferredSwapChainTextureFormat());
 
     const char* vs = R"(
         @vertex fn main(
             @builtin(vertex_index) VertexIndex : u32
-        ) -> @builtin(position) vec4<f32> {
-            var pos = array<vec2<f32>, 3>(
-                vec2<f32>( 0.0,  0.5),
-                vec2<f32>(-0.5, -0.5),
-                vec2<f32>( 0.5, -0.5)
+        ) -> @builtin(position) vec4f {
+            var pos = array(
+                vec2f( 0.0,  0.5),
+                vec2f(-0.5, -0.5),
+                vec2f( 0.5, -0.5)
             );
-            return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+            return vec4f(pos[VertexIndex], 0.0, 1.0);
         })";
-    WGPUShaderModule vsModule = utils::CreateShaderModule(device, vs).Release();
+    WGPUShaderModule vsModule = dawn::utils::CreateShaderModule(device, vs).MoveToCHandle();
 
     const char* fs = R"(
-        @fragment fn main() -> @location(0) vec4<f32> {
-            return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+        @fragment fn main() -> @location(0) vec4f {
+            return vec4f(1.0, 0.0, 0.0, 1.0);
         })";
-    WGPUShaderModule fsModule = utils::CreateShaderModule(device, fs).Release();
+    WGPUShaderModule fsModule = dawn::utils::CreateShaderModule(device, fs).MoveToCHandle();
 
     {
         WGPURenderPipelineDescriptor descriptor = {};
@@ -105,6 +117,8 @@ void frame() {
     WGPURenderPassColorAttachment colorAttachment = {};
     {
         colorAttachment.view = backbufferView;
+        // The depthSlice must be initialized with the 'undefined' value for 2d color attachments.
+        colorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
         colorAttachment.resolveTarget = nullptr;
         colorAttachment.clearValue = {0.0f, 0.0f, 0.0f, 0.0f};
         colorAttachment.loadOp = WGPULoadOp_Clear;
@@ -142,8 +156,8 @@ int main(int argc, const char* argv[]) {
     init();
 
     while (!ShouldQuit()) {
-        utils::ScopedAutoreleasePool pool;
+        ProcessEvents();
         frame();
-        utils::USleep(16000);
+        dawn::utils::USleep(16000);
     }
 }

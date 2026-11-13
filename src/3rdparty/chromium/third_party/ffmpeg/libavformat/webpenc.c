@@ -23,6 +23,7 @@
 #include "libavutil/opt.h"
 #include "avformat.h"
 #include "internal.h"
+#include "mux.h"
 
 typedef struct WebpContext{
     AVClass *class;
@@ -176,8 +177,8 @@ static int webp_write_trailer(AVFormatContext *s)
 
     if (w->using_webp_anim_encoder) {
         if (w->loop) {  // Write loop count.
-            avio_seek(s->pb, 42, SEEK_SET);
-            avio_wl16(s->pb, w->loop);
+            if (avio_seek(s->pb, 42, SEEK_SET) == 42)
+                avio_wl16(s->pb, w->loop);
         }
     } else {
         int ret;
@@ -185,10 +186,11 @@ static int webp_write_trailer(AVFormatContext *s)
             return ret;
 
         filesize = avio_tell(s->pb);
-        avio_seek(s->pb, 4, SEEK_SET);
-        avio_wl32(s->pb, filesize - 8);
-        // Note: without the following, avio only writes 8 bytes to the file.
-        avio_seek(s->pb, filesize, SEEK_SET);
+        if (avio_seek(s->pb, 4, SEEK_SET) == 4) {
+            avio_wl32(s->pb, filesize - 8);
+            // Note: without the following, avio only writes 8 bytes to the file.
+            avio_seek(s->pb, filesize, SEEK_SET);
+        }
     }
 
     return 0;
@@ -208,15 +210,15 @@ static const AVClass webp_muxer_class = {
     .version    = LIBAVUTIL_VERSION_INT,
     .option     = options,
 };
-const AVOutputFormat ff_webp_muxer = {
-    .name           = "webp",
-    .long_name      = NULL_IF_CONFIG_SMALL("WebP"),
-    .extensions     = "webp",
+const FFOutputFormat ff_webp_muxer = {
+    .p.name         = "webp",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("WebP"),
+    .p.extensions   = "webp",
     .priv_data_size = sizeof(WebpContext),
-    .video_codec    = AV_CODEC_ID_WEBP,
+    .p.video_codec  = AV_CODEC_ID_WEBP,
     .init           = webp_init,
     .write_packet   = webp_write_packet,
     .write_trailer  = webp_write_trailer,
-    .priv_class     = &webp_muxer_class,
-    .flags          = AVFMT_VARIABLE_FPS,
+    .p.priv_class   = &webp_muxer_class,
+    .p.flags        = AVFMT_VARIABLE_FPS,
 };

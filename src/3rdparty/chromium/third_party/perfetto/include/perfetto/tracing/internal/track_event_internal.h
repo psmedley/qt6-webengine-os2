@@ -83,6 +83,18 @@ class PERFETTO_EXPORT_COMPONENT TrackEventSessionObserver {
       const DataSourceBase::ClearIncrementalStateArgs&);
 };
 
+// A class that the embedder can store arbitrary data user data per thread.
+class PERFETTO_EXPORT_COMPONENT TrackEventTlsStateUserData {
+ public:
+  TrackEventTlsStateUserData() = default;
+  // Not clonable.
+  TrackEventTlsStateUserData(const TrackEventTlsStateUserData&) = delete;
+  TrackEventTlsStateUserData& operator=(const TrackEventTlsStateUserData&) =
+      delete;
+
+  virtual ~TrackEventTlsStateUserData();
+};
+
 namespace internal {
 class TrackEventCategoryRegistry;
 
@@ -104,6 +116,7 @@ struct TrackEventTlsState {
   bool filter_dynamic_event_names = false;
   uint64_t timestamp_unit_multiplier = 1;
   uint32_t default_clock;
+  std::map<const void*, std::unique_ptr<TrackEventTlsStateUserData>> user_data;
 };
 
 struct TrackEventIncrementalState {
@@ -183,8 +196,10 @@ class PERFETTO_EXPORT_COMPONENT TrackEventInternal {
                             const DataSourceBase::SetupArgs&);
   static void OnStart(const TrackEventCategoryRegistry&,
                       const DataSourceBase::StartArgs&);
+  static void OnStop(const TrackEventCategoryRegistry&,
+                     const DataSourceBase::StopArgs&);
   static void DisableTracing(const TrackEventCategoryRegistry& registry,
-                             const DataSourceBase::StopArgs&);
+                             uint32_t internal_instance_index);
   static void WillClearIncrementalState(
       const TrackEventCategoryRegistry&,
       const DataSourceBase::ClearIncrementalStateArgs&);
@@ -204,7 +219,7 @@ class PERFETTO_EXPORT_COMPONENT TrackEventInternal {
   static perfetto::EventContext WriteEvent(
       TraceWriterBase*,
       TrackEventIncrementalState*,
-      const TrackEventTlsState& tls_state,
+      TrackEventTlsState& tls_state,
       const Category* category,
       perfetto::protos::pbzero::TrackEvent::Type,
       const TraceTimestamp& timestamp,
@@ -268,14 +283,17 @@ class PERFETTO_EXPORT_COMPONENT TrackEventInternal {
 
   static TraceTimestamp GetTraceTime();
 
-  // Get the clock used by GetTimeNs().
-  static constexpr protos::pbzero::BuiltinClock GetClockId() {
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE) && \
-    !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-    return protos::pbzero::BUILTIN_CLOCK_BOOTTIME;
-#else
-    return protos::pbzero::BUILTIN_CLOCK_MONOTONIC;
-#endif
+  static inline protos::pbzero::BuiltinClock GetClockId() { return clock_; }
+  static inline void SetClockId(protos::pbzero::BuiltinClock clock) {
+    clock_ = clock;
+  }
+
+  static inline bool GetDisallowMergingWithSystemTracks() {
+    return disallow_merging_with_system_tracks_;
+  }
+  static inline void SetDisallowMergingWithSystemTracks(
+      bool disallow_merging_with_system_tracks) {
+    disallow_merging_with_system_tracks_ = disallow_merging_with_system_tracks;
   }
 
   static int GetSessionCount();
@@ -306,6 +324,9 @@ class PERFETTO_EXPORT_COMPONENT TrackEventInternal {
       perfetto::DynamicString name);
 
   static std::atomic<int> session_count_;
+
+  static protos::pbzero::BuiltinClock clock_;
+  static bool disallow_merging_with_system_tracks_;
 };
 
 template <typename TraceContext>
@@ -324,7 +345,7 @@ TrackEventTlsState::TrackEventTlsState(const TraceContext& trace_context) {
   }
   if (disable_incremental_timestamps) {
     if (timestamp_unit_multiplier == 1) {
-      default_clock = TrackEventInternal::GetClockId();
+      default_clock = static_cast<uint32_t>(TrackEventInternal::GetClockId());
     } else {
       default_clock = TrackEventIncrementalState::kClockIdAbsolute;
     }

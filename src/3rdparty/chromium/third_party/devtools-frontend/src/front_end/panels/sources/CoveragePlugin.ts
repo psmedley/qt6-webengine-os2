@@ -5,12 +5,12 @@
 import * as i18n from '../../core/i18n/i18n.js';
 import type * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
-import * as Formatter from '../../models/formatter/formatter.js';
+import * as TextUtils from '../../models/text_utils/text_utils.js';
 import type * as Workspace from '../../models/workspace/workspace.js';
 import * as CodeMirror from '../../third_party/codemirror.next/codemirror.next.js';
+import type * as TextEditor from '../../ui/components/text_editor/text_editor.js';
 import * as SourceFrame from '../../ui/legacy/components/source_frame/source_frame.js';
 import * as UI from '../../ui/legacy/legacy.js';
-import type * as TextEditor from '../../ui/components/text_editor/text_editor.js';
 import * as Coverage from '../coverage/coverage.js';
 
 import {Plugin} from './Plugin.js';
@@ -19,21 +19,21 @@ import {Plugin} from './Plugin.js';
 
 const UIStrings = {
   /**
-  *@description Text for Coverage Status Bar Item in Sources Panel
-  */
+   *@description Text for Coverage Status Bar Item in Sources Panel
+   */
   clickToShowCoveragePanel: 'Click to show Coverage Panel',
   /**
-  *@description Text for Coverage Status Bar Item in Sources Panel
-  */
+   *@description Text for Coverage Status Bar Item in Sources Panel
+   */
   showDetails: 'Show Details',
   /**
-  *@description Text to show in the status bar if coverage data is available
-  *@example {12.3} PH1
-  */
+   *@description Text to show in the status bar if coverage data is available
+   *@example {12.3} PH1
+   */
   coverageS: 'Coverage: {PH1}',
   /**
-  *@description Text to be shown in the status bar if no coverage data is available
-  */
+   *@description Text to be shown in the status bar if no coverage data is available
+   */
   coverageNa: 'Coverage: n/a',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/sources/CoveragePlugin.ts', UIStrings);
@@ -45,17 +45,19 @@ export class CoveragePlugin extends Plugin {
   private model: Coverage.CoverageModel.CoverageModel|null|undefined;
   private coverage: Coverage.CoverageModel.URLCoverageInfo|null|undefined;
 
-  constructor(uiSourceCode: Workspace.UISourceCode.UISourceCode) {
+  readonly #transformer: SourceFrame.SourceFrame.Transformer;
+
+  constructor(uiSourceCode: Workspace.UISourceCode.UISourceCode, transformer: SourceFrame.SourceFrame.Transformer) {
     super(uiSourceCode);
-    this.originalSourceCode =
-        Formatter.SourceFormatter.SourceFormatter.instance().getOriginalUISourceCode(this.uiSourceCode);
+    this.originalSourceCode = this.uiSourceCode;
+    this.#transformer = transformer;
     this.infoInToolbar = new UI.Toolbar.ToolbarButton(i18nString(UIStrings.clickToShowCoveragePanel));
     this.infoInToolbar.setSecondary();
     this.infoInToolbar.addEventListener(UI.Toolbar.ToolbarButton.Events.Click, () => {
       void UI.ViewManager.ViewManager.instance().showView('coverage');
     });
 
-    const mainTarget = SDK.TargetManager.TargetManager.instance().mainTarget();
+    const mainTarget = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (mainTarget) {
       this.model = mainTarget.model(Coverage.CoverageModel.CoverageModel);
       if (this.model) {
@@ -72,7 +74,7 @@ export class CoveragePlugin extends Plugin {
     this.updateStats();
   }
 
-  dispose(): void {
+  override dispose(): void {
     if (this.coverage) {
       this.coverage.removeEventListener(
           Coverage.CoverageModel.URLCoverageInfo.Events.SizesChanged, this.handleCoverageSizesChanged, this);
@@ -82,7 +84,7 @@ export class CoveragePlugin extends Plugin {
     }
   }
 
-  static accepts(uiSourceCode: Workspace.UISourceCode.UISourceCode): boolean {
+  static override accepts(uiSourceCode: Workspace.UISourceCode.UISourceCode): boolean {
     return uiSourceCode.contentType().isDocumentOrScriptOrStyleSheet();
   }
 
@@ -110,11 +112,11 @@ export class CoveragePlugin extends Plugin {
     }
   }
 
-  async rightToolbarItems(): Promise<UI.Toolbar.ToolbarItem[]> {
+  override rightToolbarItems(): UI.Toolbar.ToolbarItem[] {
     return [this.infoInToolbar];
   }
 
-  editorExtension(): CodeMirror.Extension {
+  override editorExtension(): CodeMirror.Extension {
     return coverageCompartment.of([]);
   }
 
@@ -122,13 +124,13 @@ export class CoveragePlugin extends Plugin {
     return this.uiSourceCode.getDecorationData(SourceFrame.SourceFrame.DecoratorType.COVERAGE);
   }
 
-  editorInitialized(editor: TextEditor.TextEditor.TextEditor): void {
+  override editorInitialized(editor: TextEditor.TextEditor.TextEditor): void {
     if (this.getCoverageManager()) {
       this.startDecoUpdate(editor);
     }
   }
 
-  decorationChanged(type: SourceFrame.SourceFrame.DecoratorType, editor: TextEditor.TextEditor.TextEditor): void {
+  override decorationChanged(type: SourceFrame.SourceFrame.DecoratorType, editor: TextEditor.TextEditor.TextEditor): void {
     if (type === SourceFrame.SourceFrame.DecoratorType.COVERAGE) {
       this.startDecoUpdate(editor);
     }
@@ -136,7 +138,8 @@ export class CoveragePlugin extends Plugin {
 
   private startDecoUpdate(editor: TextEditor.TextEditor.TextEditor): void {
     const manager = this.getCoverageManager();
-    void (manager ? manager.usageByLine(this.uiSourceCode) : Promise.resolve([])).then(usageByLine => {
+    void (manager ? manager.usageByLine(this.uiSourceCode, this.#editorLines(editor)) : Promise.resolve([
+    ])).then(usageByLine => {
       const enabled = Boolean(editor.state.field(coverageState, false));
       if (!usageByLine.length) {
         if (enabled) {
@@ -155,14 +158,30 @@ export class CoveragePlugin extends Plugin {
       }
     });
   }
+
+  /**
+   * @returns The current lines of the CodeMirror editor expressed in terms of UISourceCode.
+   */
+  #editorLines(editor: TextEditor.TextEditor.TextEditor): TextUtils.TextRange.TextRange[] {
+    const result: TextUtils.TextRange.TextRange[] = [];
+    for (let n = 1; n <= editor.state.doc.lines; ++n) {
+      const line = editor.state.doc.line(n);
+      // CodeMirror lines are 1-based where-as the transformer expects 0-based.
+      const {lineNumber: startLine, columnNumber: startColumn} = this.#transformer.editorLocationToUILocation(n - 1, 0);
+      const {lineNumber: endLine, columnNumber: endColumn} =
+          this.#transformer.editorLocationToUILocation(n - 1, line.length);
+      result.push(new TextUtils.TextRange.TextRange(startLine, startColumn, endLine, endColumn));
+    }
+    return result;
+  }
 }
 
 const coveredMarker = new (class extends CodeMirror.GutterMarker {
-  elementClass = 'cm-coverageUsed';
+  override elementClass = 'cm-coverageUsed';
 })();
 
 const notCoveredMarker = new (class extends CodeMirror.GutterMarker {
-  elementClass = 'cm-coverageUnused';
+  override elementClass = 'cm-coverageUnused';
 })();
 
 function markersFromCoverageData(
@@ -224,9 +243,9 @@ const theme = CodeMirror.EditorView.baseTheme({
     marginLeft: '3px',
   },
   '.cm-coverageUnused': {
-    backgroundColor: 'var(--color-accent-red)',
+    backgroundColor: 'var(--sys-color-error-bright)',
   },
   '.cm-coverageUsed': {
-    backgroundColor: 'var(--color-coverage-used)',
+    backgroundColor: 'var(--sys-color-green-bright)',
   },
 });

@@ -14,13 +14,14 @@
 
 #include "connections/implementation/offline_simulation_user.h"
 
+#include "absl/functional/any_invocable.h"
 #include "absl/functional/bind_front.h"
 #include "connections/listeners.h"
+#include "internal/interop/device.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/system_clock.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -73,13 +74,13 @@ void OfflineSimulationUser::OnEndpointLost(const std::string& endpoint_id) {
   if (lost_latch_) lost_latch_->CountDown();
 }
 
-void OfflineSimulationUser::OnPayload(const std::string& endpoint_id,
+void OfflineSimulationUser::OnPayload(absl::string_view endpoint_id,
                                       Payload payload) {
   payload_ = std::move(payload);
   if (payload_latch_) payload_latch_->CountDown();
 }
 
-void OfflineSimulationUser::OnPayloadProgress(const std::string& endpoint_id,
+void OfflineSimulationUser::OnPayloadProgress(absl::string_view endpoint_id,
                                               const PayloadProgressInfo& info) {
   MutexLock lock(&progress_mutex_);
   progress_info_ = info;
@@ -87,7 +88,7 @@ void OfflineSimulationUser::OnPayloadProgress(const std::string& endpoint_id,
 }
 
 bool OfflineSimulationUser::WaitForProgress(
-    std::function<bool(const PayloadProgressInfo&)> predicate,
+    absl::AnyInvocable<bool(const PayloadProgressInfo&)> predicate,
     absl::Duration timeout) {
   Future<bool> future;
   {
@@ -131,6 +132,11 @@ void OfflineSimulationUser::StopAdvertising() {
   ctrl_.StopAdvertising(&client_);
 }
 
+Status OfflineSimulationUser::UpdateAdvertisingOptions(
+    absl::string_view service_id, const AdvertisingOptions& options) {
+  return ctrl_.UpdateAdvertisingOptions(&client_, service_id, options);
+}
+
 Status OfflineSimulationUser::StartDiscovery(const std::string& service_id,
                                              CountDownLatch* found_latch,
                                              CountDownLatch* lost_latch) {
@@ -147,6 +153,11 @@ Status OfflineSimulationUser::StartDiscovery(const std::string& service_id,
 }
 
 void OfflineSimulationUser::StopDiscovery() { ctrl_.StopDiscovery(&client_); }
+
+Status OfflineSimulationUser::UpdateDiscoveryOptions(
+    absl::string_view service_id, const DiscoveryOptions& options) {
+  return ctrl_.UpdateDiscoveryOptions(&client_, service_id, options);
+}
 
 void OfflineSimulationUser::InjectEndpoint(
     const std::string& service_id,
@@ -176,6 +187,30 @@ Status OfflineSimulationUser::RequestConnection(CountDownLatch* latch) {
                                  connection_options_);
 }
 
+Status OfflineSimulationUser::RequestConnectionV3(
+    CountDownLatch* latch, const NearbyDevice& remote_device) {
+  initiated_latch_ = latch;
+  ConnectionListener listener = {
+      .initiated_cb =
+          std::bind(&OfflineSimulationUser::OnConnectionInitiated, this,
+                    std::placeholders::_1, std::placeholders::_2, true),
+      .accepted_cb =
+          absl::bind_front(&OfflineSimulationUser::OnConnectionAccepted, this),
+      .rejected_cb =
+          absl::bind_front(&OfflineSimulationUser::OnConnectionRejected, this),
+      .disconnected_cb =
+          absl::bind_front(&OfflineSimulationUser::OnEndpointDisconnect, this),
+  };
+  client_.AddCancellationFlag(remote_device.GetEndpointId());
+  return ctrl_.RequestConnectionV3(
+      &client_, remote_device,
+      {
+          .endpoint_info = discovered_.endpoint_info,
+          .listener = std::move(listener),
+      },
+      connection_options_);
+}
+
 Status OfflineSimulationUser::AcceptConnection(CountDownLatch* latch) {
   accept_latch_ = latch;
   PayloadListener listener = {
@@ -199,4 +234,3 @@ void OfflineSimulationUser::Disconnect() {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

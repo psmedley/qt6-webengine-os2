@@ -9,7 +9,7 @@
 #define GrVkUniformHandler_DEFINED
 
 #include "include/gpu/vk/GrVkTypes.h"
-#include "src/core/SkTBlockList.h"
+#include "src/base/SkTBlockList.h"
 #include "src/gpu/ganesh/GrSamplerState.h"
 #include "src/gpu/ganesh/GrShaderVar.h"
 #include "src/gpu/ganesh/glsl/GrGLSLProgramBuilder.h"
@@ -155,7 +155,7 @@ private:
 
     UniformInfoArray         fUniforms;
     UniformInfoArray         fSamplers;
-    SkTArray<skgpu::Swizzle> fSamplerSwizzles;
+    skia_private::TArray<skgpu::Swizzle> fSamplerSwizzles;
     UniformInfo              fInputUniform;
     skgpu::Swizzle           fInputSwizzle;
     mutable bool             fUsePushConstants;

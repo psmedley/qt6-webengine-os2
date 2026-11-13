@@ -8,10 +8,11 @@
 #ifndef SKSL_CONSTRUCTOR_COMPOUND
 #define SKSL_CONSTRUCTOR_COMPOUND
 
-#include "include/private/SkSLDefines.h"
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLDefines.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLConstructor.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 
 #include <memory>
 #include <utility>
@@ -31,15 +32,20 @@ class Type;
  */
 class ConstructorCompound final : public MultiArgumentConstructor {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kConstructorCompound;
+    inline static constexpr Kind kIRNodeKind = Kind::kConstructorCompound;
 
     ConstructorCompound(Position pos, const Type& type, ExpressionArray args)
-            : INHERITED(pos, kExpressionKind, &type, std::move(args)) {}
+            : INHERITED(pos, kIRNodeKind, &type, std::move(args)) {}
 
     static std::unique_ptr<Expression> Make(const Context& context,
                                             Position pos,
                                             const Type& type,
                                             ExpressionArray args);
+
+    static std::unique_ptr<Expression> MakeFromConstants(const Context& context,
+                                                         Position pos,
+                                                         const Type& type,
+                                                         const double values[]);
 
     std::unique_ptr<Expression> clone(Position pos) const override {
         return std::make_unique<ConstructorCompound>(pos, this->type(), this->arguments().clone());

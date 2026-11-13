@@ -18,6 +18,7 @@ namespace cc {
 
 class ContentLayerClient;
 class DisplayItemList;
+class RasterSource;
 class RecordingSource;
 
 class CC_EXPORT PictureLayer : public Layer {
@@ -47,6 +48,7 @@ class CC_EXPORT PictureLayer : public Layer {
                         const CommitState& commit_state,
                         const ThreadUnsafeCommitState& unsafe_state) override;
   void SetNeedsDisplayRect(const gfx::Rect& layer_rect) override;
+  bool RequiresSetNeedsDisplayOnHdrHeadroomChange() const override;
   sk_sp<const SkPicture> GetPicture() const override;
   bool Update() override;
   void RunMicroBenchmark(MicroBenchmark* benchmark) override;
@@ -63,8 +65,6 @@ class CC_EXPORT PictureLayer : public Layer {
     return recording_source_.Read(*this);
   }
 
-  const DisplayItemList* GetDisplayItemList() const;
-
   gfx::Vector2dF DirectlyCompositedImageDefaultRasterScaleForTesting() const {
     return picture_layer_inputs_.directly_composited_image_default_raster_scale;
   }
@@ -75,20 +75,19 @@ class CC_EXPORT PictureLayer : public Layer {
     PictureLayerInputs();
     ~PictureLayerInputs();
 
-    raw_ptr<ContentLayerClient> client = nullptr;
+    raw_ptr<ContentLayerClient, DanglingUntriaged> client = nullptr;
     bool nearest_neighbor = false;
     bool is_backdrop_filter_mask = false;
-    scoped_refptr<DisplayItemList> display_list;
     gfx::Vector2dF directly_composited_image_default_raster_scale;
   };
 
   explicit PictureLayer(ContentLayerClient* client);
-  // Allow tests to inject a recording source.
-  PictureLayer(ContentLayerClient* client,
-               std::unique_ptr<RecordingSource> source);
   ~PictureLayer() override;
 
   bool HasDrawableContent() const override;
+
+  // Can be overridden in tests to customize RasterSource.
+  virtual scoped_refptr<RasterSource> CreateRasterSource() const;
 
   PictureLayerInputs picture_layer_inputs_;
 
@@ -97,6 +96,8 @@ class CC_EXPORT PictureLayer : public Layer {
 
   // Called on impl thread
   void DropRecordingSourceContentIfInvalid(int source_frame_number);
+
+  const DisplayItemList* GetDisplayItemList() const;
 
   ProtectedSequenceWritable<std::unique_ptr<RecordingSource>> recording_source_;
   ProtectedSequenceForbidden<devtools_instrumentation::ScopedLayerObjectTracker>

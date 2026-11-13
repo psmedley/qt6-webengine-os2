@@ -1,16 +1,29 @@
-// Copyright 2018 The Dawn Authors
+// Copyright 2018 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_ERROR_H_
 #define SRC_DAWN_NATIVE_ERROR_H_
@@ -19,14 +32,20 @@
 #include <string>
 #include <utility>
 
-#include "absl/strings/str_format.h"
 #include "dawn/common/Result.h"
 #include "dawn/native/ErrorData.h"
+#include "dawn/native/Toggles.h"
 #include "dawn/native/webgpu_absl_format.h"
 
 namespace dawn::native {
 
-enum class InternalErrorType : uint32_t { Validation, DeviceLost, Internal, OutOfMemory };
+enum class InternalErrorType : uint32_t {
+    None = 0,
+    Validation = 1,
+    DeviceLost = 2,
+    Internal = 4,
+    OutOfMemory = 8
+};
 
 // MaybeError and ResultOrError are meant to be used as return value for function that are not
 // expected to, but might fail. The handling of error is potentially much slower than successes.
@@ -34,6 +53,30 @@ using MaybeError = Result<void, ErrorData>;
 
 template <typename T>
 using ResultOrError = Result<T, ErrorData>;
+
+namespace detail {
+
+template <typename T>
+struct UnwrapResultOrError {
+    using type = T;
+};
+
+template <typename T>
+struct UnwrapResultOrError<ResultOrError<T>> {
+    using type = T;
+};
+
+template <typename T>
+struct IsResultOrError {
+    static constexpr bool value = false;
+};
+
+template <typename T>
+struct IsResultOrError<ResultOrError<T>> {
+    static constexpr bool value = true;
+};
+
+}  // namespace detail
 
 // Returning a success is done like so:
 //   return {}; // for Error
@@ -92,6 +135,13 @@ using ResultOrError = Result<T, ErrorData>;
 #define DAWN_FORMAT_INTERNAL_ERROR(...) \
     DAWN_MAKE_ERROR(InternalErrorType::Internal, absl::StrFormat(__VA_ARGS__))
 
+#define DAWN_INTERNAL_ERROR_IF(EXPR, ...)                                                  \
+    if (DAWN_UNLIKELY(EXPR)) {                                                             \
+        return DAWN_MAKE_ERROR(InternalErrorType::Internal, absl::StrFormat(__VA_ARGS__)); \
+    }                                                                                      \
+    for (;;)                                                                               \
+    break
+
 #define DAWN_UNIMPLEMENTED_ERROR(MESSAGE) \
     DAWN_MAKE_ERROR(InternalErrorType::Internal, std::string("Unimplemented: ") + MESSAGE)
 
@@ -102,7 +152,19 @@ using ResultOrError = Result<T, ErrorData>;
 
 #define DAWN_CONCAT1(x, y) x##y
 #define DAWN_CONCAT2(x, y) DAWN_CONCAT1(x, y)
-#define DAWN_LOCAL_VAR DAWN_CONCAT2(_localVar, __LINE__)
+#define DAWN_LOCAL_VAR(name) DAWN_CONCAT2(DAWN_CONCAT2(_localVar, __LINE__), name)
+
+// Backtrace information adds a lot of binary size with the name of all the files and functions,
+// plus additional calls to AppendBacktrace. Only add the backtrace in Debug so as to save binary
+// size in release. Most backtrace information useful to developers is already added via
+// DAWN_TRY_CONTEXT anyway.
+#if defined(DAWN_ENABLE_ASSERTS)
+#define DAWN_APPEND_ERROR_BACKTRACE(error) error->AppendBacktrace(__FILE__, __func__, __LINE__)
+#else  // defined(DAWN_ENABLE_ASSERTS)
+#define DAWN_APPEND_ERROR_BACKTRACE(error) \
+    for (;;)                               \
+    break
+#endif  // defined(DAWN_ENABLE_ASSERTS)
 
 // When Errors aren't handled explicitly, calls to functions returning errors should be
 // wrapped in an DAWN_TRY. It will return the error if any, otherwise keep executing
@@ -110,30 +172,32 @@ using ResultOrError = Result<T, ErrorData>;
 #define DAWN_TRY(EXPR) DAWN_TRY_WITH_CLEANUP(EXPR, {})
 
 #define DAWN_TRY_CONTEXT(EXPR, ...) \
-    DAWN_TRY_WITH_CLEANUP(EXPR, { error->AppendContext(absl::StrFormat(__VA_ARGS__)); })
+    DAWN_TRY_WITH_CLEANUP(EXPR,     \
+                          { DAWN_LOCAL_VAR(Error)->AppendContext(absl::StrFormat(__VA_ARGS__)); })
 
-#define DAWN_TRY_WITH_CLEANUP(EXPR, BODY)                                                     \
-    {                                                                                         \
-        auto DAWN_LOCAL_VAR = EXPR;                                                           \
-        if (DAWN_UNLIKELY(DAWN_LOCAL_VAR.IsError())) {                                        \
-            std::unique_ptr<::dawn::native::ErrorData> error = DAWN_LOCAL_VAR.AcquireError(); \
-            {BODY} /* comment to force the formatter to insert a newline */                   \
-            error->AppendBacktrace(__FILE__, __func__, __LINE__);                             \
-            return {std::move(error)};                                                        \
-        }                                                                                     \
-    }                                                                                         \
-    for (;;)                                                                                  \
+#define DAWN_TRY_WITH_CLEANUP(EXPR, BODY)                                       \
+    {                                                                           \
+        auto DAWN_LOCAL_VAR(Result) = EXPR;                                     \
+        if (DAWN_UNLIKELY(DAWN_LOCAL_VAR(Result).IsError())) {                  \
+            auto DAWN_LOCAL_VAR(Error) = DAWN_LOCAL_VAR(Result).AcquireError(); \
+            {BODY} /* comment to force the formatter to insert a newline */     \
+            DAWN_APPEND_ERROR_BACKTRACE(DAWN_LOCAL_VAR(Error));                 \
+            return {std::move(DAWN_LOCAL_VAR(Error))};                          \
+        }                                                                       \
+    }                                                                           \
+    for (;;)                                                                    \
     break
 
 // DAWN_TRY_ASSIGN is the same as DAWN_TRY for ResultOrError and assigns the success value, if
 // any, to VAR.
 #define DAWN_TRY_ASSIGN(VAR, EXPR) DAWN_TRY_ASSIGN_WITH_CLEANUP(VAR, EXPR, {})
 #define DAWN_TRY_ASSIGN_CONTEXT(VAR, EXPR, ...) \
-    DAWN_TRY_ASSIGN_WITH_CLEANUP(VAR, EXPR, { error->AppendContext(absl::StrFormat(__VA_ARGS__)); })
+    DAWN_TRY_ASSIGN_WITH_CLEANUP(               \
+        VAR, EXPR, { DAWN_LOCAL_VAR(Error)->AppendContext(absl::StrFormat(__VA_ARGS__)); })
 
 // Argument helpers are used to determine which macro implementations should be called when
 // overloading with different number of variables.
-#define DAWN_ERROR_UNIMPLEMENTED_MACRO_(...) UNREACHABLE()
+#define DAWN_ERROR_UNIMPLEMENTED_MACRO_(...) DAWN_UNREACHABLE()
 #define DAWN_ERROR_GET_5TH_ARG_HELPER_(_1, _2, _3, _4, NAME, ...) NAME
 #define DAWN_ERROR_GET_5TH_ARG_(args) DAWN_ERROR_GET_5TH_ARG_HELPER_ args
 
@@ -141,20 +205,23 @@ using ResultOrError = Result<T, ErrorData>;
 // return value of the macro when necessary. This is particularly useful if the function
 // calling the macro may want to return void instead of the error, i.e. in a test where we may
 // just want to assert and fail if the assign cannot go through. In both the cleanup and return
-// clauses, users can use the `error` variable to access the pointer to the acquired error.
+// clauses, users can use the `DAWN_LOCAL_VAR(Error)` variable to access the pointer to the
+// acquired error.
 //
 // Example usages:
 //     3 Argument Case:
 //          Result res;
 //          DAWN_TRY_ASSIGN_WITH_CLEANUP(
-//              res, GetResultOrErrorFunction(), { AddAdditionalErrorInformation(error.get()); }
-//          );
+//              res, GetResultOrErrorFunction(), {
+//                  AddAdditionalErrorInformation(DAWN_LOCAL_VAR(Error).get());
+//              });
 //
 //     4 Argument Case:
 //          bool FunctionThatReturnsBool() {
 //              DAWN_TRY_ASSIGN_WITH_CLEANUP(
-//                  res, GetResultOrErrorFunction(),
-//                  { AddAdditionalErrorInformation(error.get()); },
+//                  res, GetResultOrErrorFunction(), {
+//                      AddAdditionalErrorInformation(DAWN_LOCAL_VAR(Error).get());
+//                  },
 //                  false
 //              );
 //          }
@@ -165,20 +232,20 @@ using ResultOrError = Result<T, ErrorData>;
     (__VA_ARGS__)
 
 #define DAWN_TRY_ASSIGN_WITH_CLEANUP_IMPL_3_(VAR, EXPR, BODY) \
-    DAWN_TRY_ASSIGN_WITH_CLEANUP_IMPL_4_(VAR, EXPR, BODY, std::move(error))
+    DAWN_TRY_ASSIGN_WITH_CLEANUP_IMPL_4_(VAR, EXPR, BODY, std::move(DAWN_LOCAL_VAR(Error)))
 
-#define DAWN_TRY_ASSIGN_WITH_CLEANUP_IMPL_4_(VAR, EXPR, BODY, RET)            \
-    {                                                                         \
-        auto DAWN_LOCAL_VAR = EXPR;                                           \
-        if (DAWN_UNLIKELY(DAWN_LOCAL_VAR.IsError())) {                        \
-            std::unique_ptr<ErrorData> error = DAWN_LOCAL_VAR.AcquireError(); \
-            {BODY} /* comment to force the formatter to insert a newline */   \
-            error->AppendBacktrace(__FILE__, __func__, __LINE__);             \
-            return (RET);                                                     \
-        }                                                                     \
-        VAR = DAWN_LOCAL_VAR.AcquireSuccess();                                \
-    }                                                                         \
-    for (;;)                                                                  \
+#define DAWN_TRY_ASSIGN_WITH_CLEANUP_IMPL_4_(VAR, EXPR, BODY, RET)              \
+    {                                                                           \
+        auto DAWN_LOCAL_VAR(Result) = EXPR;                                     \
+        if (DAWN_UNLIKELY(DAWN_LOCAL_VAR(Result).IsError())) {                  \
+            auto DAWN_LOCAL_VAR(Error) = DAWN_LOCAL_VAR(Result).AcquireError(); \
+            {BODY} /* comment to force the formatter to insert a newline */     \
+            DAWN_APPEND_ERROR_BACKTRACE(DAWN_LOCAL_VAR(Error));                 \
+            return (RET);                                                       \
+        }                                                                       \
+        VAR = DAWN_LOCAL_VAR(Result).AcquireSuccess();                          \
+    }                                                                           \
+    for (;;)                                                                    \
     break
 
 // Assert that errors are device loss so that we can continue with destruction
@@ -187,6 +254,18 @@ void IgnoreErrors(MaybeError maybeError);
 wgpu::ErrorType ToWGPUErrorType(InternalErrorType type);
 InternalErrorType FromWGPUErrorType(wgpu::ErrorType type);
 
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString |
+                          absl::FormatConversionCharSet::kIntegral>
+AbslFormatConvert(InternalErrorType value,
+                  const absl::FormatConversionSpec& spec,
+                  absl::FormatSink* s);
+
 }  // namespace dawn::native
+
+// Enable dawn enum bitmask for error types.
+template <>
+struct wgpu::IsWGPUBitmask<dawn::native::InternalErrorType> {
+    static constexpr bool enable = true;
+};
 
 #endif  // SRC_DAWN_NATIVE_ERROR_H_

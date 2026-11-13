@@ -1,9 +1,10 @@
-// Copyright 2021 PDFium Authors. All rights reserved.
+// Copyright 2021 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "testing/test_fonts.h"
 
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -46,7 +47,7 @@ class SystemFontInfoWrapper : public SystemFontInfoIface {
  public:
   explicit SystemFontInfoWrapper(std::unique_ptr<SystemFontInfoIface> impl)
       : impl_(std::move(impl)) {}
-  ~SystemFontInfoWrapper() { CHECK(active_fonts_.empty()); }
+  ~SystemFontInfoWrapper() override { CHECK(active_fonts_.empty()); }
 
   bool EnumFontList(CFX_FontMapper* pMapper) override {
     return impl_->EnumFontList(pMapper);
@@ -96,9 +97,7 @@ TestFonts::TestFonts() {
     return;
   font_path_.push_back(PATH_SEPARATOR);
   font_path_.append("test_fonts");
-  font_paths_ = std::make_unique<const char*[]>(2);
-  font_paths_[0] = font_path_.c_str();
-  font_paths_[1] = nullptr;
+  font_paths_ = std::vector<const char*>{font_path_.c_str(), nullptr};
 }
 
 TestFonts::~TestFonts() = default;

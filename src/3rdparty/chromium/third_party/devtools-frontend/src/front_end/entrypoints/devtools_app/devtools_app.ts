@@ -12,6 +12,7 @@ import '../../panels/sensors/sensors-meta.js';
 import '../../panels/accessibility/accessibility-meta.js';
 import '../../panels/animation/animation-meta.js';
 import '../../panels/developer_resources/developer_resources-meta.js';
+import '../../panels/autofill/autofill-meta.js';
 import '../inspector_main/inspector_main-meta.js';
 import '../../panels/application/application-meta.js';
 import '../../panels/issues/issues-meta.js';
@@ -24,6 +25,7 @@ import '../../panels/timeline/timeline-meta.js';
 import '../../panels/web_audio/web_audio-meta.js';
 import '../../panels/webauthn/webauthn-meta.js';
 import '../../panels/layer_viewer/layer_viewer-meta.js';
+import '../../panels/recorder/recorder-meta.js';
 
 import * as Root from '../../core/root/root.js';
 import * as Main from '../main/main.js';

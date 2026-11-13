@@ -2,45 +2,44 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import nodeConnectionsPanelStyles from './nodeConnectionsPanel.css.js';
 import type * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
+import nodeConnectionsPanelStyles from './nodeConnectionsPanel.css.js';
+
 const UIStrings = {
   /**
-  *@description Text in Node Connections Panel of the Sources panel when debugging a Node.js app
-  */
+   *@description Text in Node Connections Panel of the Sources panel when debugging a Node.js app
+   */
   nodejsDebuggingGuide: 'Node.js debugging guide',
   /**
-  *@description Text in Node Connections Panel of the Sources panel when debugging a Node.js app
-  *@example {Node.js debugging guide} PH1
-  */
+   *@description Text in Node Connections Panel of the Sources panel when debugging a Node.js app
+   *@example {Node.js debugging guide} PH1
+   */
   specifyNetworkEndpointAnd:
       'Specify network endpoint and DevTools will connect to it automatically. Read {PH1} to learn more.',
   /**
-  *@description Placeholder text content in Node Connections Panel of the Sources panel when debugging a Node.js app
-  */
+   *@description Placeholder text content in Node Connections Panel of the Sources panel when debugging a Node.js app
+   */
   noConnectionsSpecified: 'No connections specified',
   /**
-  *@description Text of add network target button in Node Connections Panel of the Sources panel when debugging a Node.js app
-  */
+   *@description Text of add network target button in Node Connections Panel of the Sources panel when debugging a Node.js app
+   */
   addConnection: 'Add connection',
   /**
-  *@description Text in Node Connections Panel of the Sources panel when debugging a Node.js app
-  */
+   *@description Text in Node Connections Panel of the Sources panel when debugging a Node.js app
+   */
   networkAddressEgLocalhost: 'Network address (e.g. localhost:9229)',
 };
 const str_ = i18n.i18n.registerUIStrings('entrypoints/node_app/NodeConnectionsPanel.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
-let nodeConnectionsPanelInstance: NodeConnectionsPanel;
-
 export class NodeConnectionsPanel extends UI.Panel.Panel {
   #config!: Adb.Config;
   readonly #networkDiscoveryView: NodeConnectionsView;
-  private constructor() {
+  constructor() {
     super('node-connection');
 
     this.contentElement.classList.add('node-panel');
@@ -67,22 +66,11 @@ export class NodeConnectionsPanel extends UI.Panel.Panel {
     this.#networkDiscoveryView.show(container);
   }
 
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): NodeConnectionsPanel {
-    const {forceNew} = opts;
-    if (!nodeConnectionsPanelInstance || forceNew) {
-      nodeConnectionsPanelInstance = new NodeConnectionsPanel();
-    }
-
-    return nodeConnectionsPanelInstance;
-  }
-
   #devicesDiscoveryConfigChanged({data: config}: Common.EventTarget.EventTargetEvent<Adb.Config>): void {
     this.#config = config;
     this.#networkDiscoveryView.discoveryConfigChanged(this.#config.networkDiscoveryConfig);
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([nodeConnectionsPanelStyles]);
   }
@@ -101,8 +89,9 @@ export class NodeConnectionsView extends UI.Widget.VBox implements UI.ListWidget
     this.element.classList.add('network-discovery-view');
 
     const networkDiscoveryFooter = this.element.createChild('div', 'network-discovery-footer');
-    const documentationLink =
-        UI.XLink.XLink.create('https://nodejs.org/en/docs/inspector/', i18nString(UIStrings.nodejsDebuggingGuide));
+    const documentationLink = UI.XLink.XLink.create(
+        'https://nodejs.org/en/docs/inspector/', i18nString(UIStrings.nodejsDebuggingGuide), undefined, undefined,
+        'node-js-debugging');
     networkDiscoveryFooter.appendChild(
         i18n.i18n.getFormatLocalizedString(str_, UIStrings.specifyNetworkEndpointAnd, {PH1: documentationLink}));
 
@@ -118,7 +107,7 @@ export class NodeConnectionsView extends UI.Widget.VBox implements UI.ListWidget
 
     const addButton = UI.UIUtils.createTextButton(
         i18nString(UIStrings.addConnection), this.#addNetworkTargetButtonClicked.bind(this),
-        'add-network-target-button', true /* primary */);
+        {className: 'add-network-target-button', primary: true});
     this.element.appendChild(addButton);
 
     this.#networkDiscoveryConfig = [];
@@ -202,7 +191,7 @@ export class NodeConnectionsView extends UI.Widget.VBox implements UI.ListWidget
       };
     }
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.#list.registerCSSFiles([nodeConnectionsPanelStyles]);
   }

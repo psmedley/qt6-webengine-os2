@@ -11,13 +11,13 @@
 #include "include/core/SkStream.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
-#include "include/private/SkFixed.h"
-#include "include/private/SkMutex.h"
-#include "include/private/SkTArray.h"
-#include "include/private/SkTDArray.h"
-#include "include/private/SkTemplates.h"
-#include "src/core/SkAutoMalloc.h"
-#include "src/core/SkBuffer.h"
+#include "include/private/base/SkFixed.h"
+#include "include/private/base/SkMutex.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTDArray.h"
+#include "include/private/base/SkTemplates.h"
+#include "src/base/SkAutoMalloc.h"
+#include "src/base/SkBuffer.h"
 #include "src/ports/SkFontConfigInterface_direct.h"
 
 #include <fontconfig/fontconfig.h>
@@ -57,7 +57,7 @@ struct FCLocker {
     ) }
 };
 
-using UniqueFCConfig = std::unique_ptr<FcConfig, SkFunctionWrapper<decltype(FcConfigDestroy), FcConfigDestroy>>;
+using UniqueFCConfig = std::unique_ptr<FcConfig, SkFunctionObject<FcConfigDestroy>>;
 
 } // namespace
 
@@ -97,7 +97,7 @@ size_t SkFontConfigInterface::FontIdentity::readFromMemory(const void* addr,
     SkFontStyle::Slant slant = (SkFontStyle::Slant)u8;
     fStyle = SkFontStyle(weight, width, slant);
     fString.resize(strLen);
-    (void)buffer.read(fString.writable_str(), strLen);
+    (void)buffer.read(fString.data(), strLen);
     buffer.skipToAlign4();
 
     return buffer.pos();    // the actual number of bytes read
@@ -149,7 +149,7 @@ static void fontconfiginterface_unittest() {
 
 // Returns the string from the pattern, or nullptr
 static const char* get_string(FcPattern* pattern, const char field[], int index = 0) {
-    const char* name;
+    char* name;
     if (FcPatternGetString(pattern, field, index, (FcChar8**)&name) != FcResultMatch) {
         name = nullptr;
     }
@@ -606,7 +606,7 @@ bool SkFontConfigInterfaceDirect::matchFamilyName(const char familyName[],
     FcPattern* pattern = FcPatternCreate();
 
     if (familyName) {
-        FcPatternAddString(pattern, FC_FAMILY, (FcChar8*)familyName);
+        FcPatternAddString(pattern, FC_FAMILY, (const FcChar8*)familyName);
     }
     fcpattern_from_skfontstyle(style, pattern);
 

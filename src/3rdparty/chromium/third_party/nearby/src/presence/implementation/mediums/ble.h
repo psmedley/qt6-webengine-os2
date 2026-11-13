@@ -16,10 +16,13 @@
 #define THIRD_PARTY_NEARBY_PRESENCE_IMPLEMENTATION_MEDIUMS_BLE_H_
 
 #include <memory>
+#include <string>
+#include <utility>
 
+#include "internal/platform/ble_v2.h"
 #include "internal/platform/bluetooth_adapter.h"
-#include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/uuid.h"
+#include "presence/implementation/mediums/advertisement_data.h"
 #include "presence/power_mode.h"
 #include "presence/scan_request.h"
 
@@ -27,14 +30,8 @@ namespace nearby {
 namespace presence {
 
 /** Presence advertisement service data uuid. */
-ABSL_CONST_INIT const location::nearby::Uuid kPresenceServiceUuid(
-    0x0000fcf100001000, 0x800000805f9b34fb);
-
-using ScanningSession =
-    ::location::nearby::api::ble_v2::BleMedium::ScanningSession;
-using ScanningCallback =
-    ::location::nearby::api::ble_v2::BleMedium::ScanningCallback;
-using ::location::nearby::api::ble_v2::TxPowerLevel;
+ABSL_CONST_INIT const nearby::Uuid kPresenceServiceUuid(0x0000fcf100001000,
+                                                        0x800000805f9b34fb);
 
 /*
  * This Ble class utilizes platform/ble_v2 BleV2Medium, provides ble functions
@@ -42,30 +39,55 @@ using ::location::nearby::api::ble_v2::TxPowerLevel;
  * This class would have states like if ble is available or not, if it's doing
  * broadcast/scan.
  */
-template <typename Medium>
-// since we are using template for test, then we need to keep functions defs in
-// the header, more details: go/cstyle#Self_contained_Headers.
 class Ble {
  public:
-  explicit Ble(location::nearby::BluetoothAdapter& bluetooth_adapter)
-      : adapter_(bluetooth_adapter),
-        medium_(std::make_unique<Medium>(bluetooth_adapter)) {}
-  ~Ble() = default;
+  using TxPowerLevel = ::nearby::api::ble_v2::TxPowerLevel;
+  using ScanningSession = ::nearby::api::ble_v2::BleMedium::ScanningSession;
+  using ScanningCallback = ::nearby::api::ble_v2::BleMedium::ScanningCallback;
+  using AdvertiseParameters = ::nearby::api::ble_v2::AdvertiseParameters;
+  using AdvertisingSession =
+      ::nearby::api::ble_v2::BleMedium::AdvertisingSession;
+  using AdvertisingCallback =
+      ::nearby::api::ble_v2::BleMedium::AdvertisingCallback;
+  using BleAdvertisementData = ::nearby::api::ble_v2::BleAdvertisementData;
+  using BleMedium = ::nearby::api::ble_v2::BleMedium;
 
-  bool IsAvailable() const { return medium_->IsValid(); }
+  explicit Ble(nearby::BluetoothAdapter& bluetooth_adapter)
+      : medium_(bluetooth_adapter) {}
 
-  std::unique_ptr<ScanningSession> StartScanning(ScanRequest scan_request,
-                                                 ScanningCallback callback) {
-    return medium_->StartScanning(
-        kPresenceServiceUuid,
-        ConvertPowerModeToPowerLevel(scan_request.power_mode), callback);
+  bool IsAvailable() const { return medium_.IsValid(); }
+
+  // Starts broadcasting NP advertisement in `payload`. The caller should use
+  // the returned `AdvertisingSession` to stop the broadcast.
+  std::unique_ptr<AdvertisingSession> StartAdvertising(
+      const AdvertisementData& payload, PowerMode power_mode,
+      AdvertisingCallback callback) {
+    BleAdvertisementData advertising_data = {
+        .is_extended_advertisement = payload.is_extended_advertisement};
+    advertising_data.service_data.insert(
+        {kPresenceServiceUuid, nearby::ByteArray(payload.content)});
+    AdvertiseParameters advertise_set_parameters = {
+        .tx_power_level = ConvertPowerModeToPowerLevel(power_mode),
+        .is_connectable = true,
+    };
+    return medium_.StartAdvertising(advertising_data, advertise_set_parameters,
+                                    std::move(callback));
   }
 
- private:
-  friend class BleTest;
-  location::nearby::BluetoothAdapter& adapter_;
-  std::unique_ptr<Medium> medium_;
+  // Starts scanning for NP advertisements. The caller should use the returned
+  // `ScanningSession` to stop scanning.
+  std::unique_ptr<ScanningSession> StartScanning(ScanRequest scan_request,
+                                                 ScanningCallback callback) {
+    return medium_.StartScanning(
+        kPresenceServiceUuid,
+        ConvertPowerModeToPowerLevel(scan_request.power_mode),
+        std::move(callback));
+  }
 
+  // Provides access to platform implementation. It's used in tests.
+  BleMedium* GetImpl() const { return medium_.GetImpl(); }
+
+ private:
   TxPowerLevel ConvertPowerModeToPowerLevel(PowerMode power_mode) {
     switch (power_mode) {
       case PowerMode::kNoPower:
@@ -79,6 +101,8 @@ class Ble {
     }
     return TxPowerLevel::kUnknown;
   }
+
+  nearby::BleV2Medium medium_;
 };
 
 }  // namespace presence

@@ -8,8 +8,9 @@
 #ifndef SKSL_EXPRESSIONSTATEMENT
 #define SKSL_EXPRESSIONSTATEMENT
 
-#include "include/private/SkSLStatement.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
+#include "src/sksl/ir/SkSLStatement.h"
 
 #include <memory>
 #include <string>
@@ -24,10 +25,10 @@ class Context;
  */
 class ExpressionStatement final : public Statement {
 public:
-    inline static constexpr Kind kStatementKind = Kind::kExpression;
+    inline static constexpr Kind kIRNodeKind = Kind::kExpression;
 
     ExpressionStatement(std::unique_ptr<Expression> expression)
-        : INHERITED(expression->fPosition, kStatementKind)
+        : INHERITED(expression->fPosition, kIRNodeKind)
         , fExpression(std::move(expression)) {}
 
     // Creates an SkSL expression-statement; reports errors via ErrorReporter.
@@ -46,13 +47,7 @@ public:
         return fExpression;
     }
 
-    std::unique_ptr<Statement> clone() const override {
-        return std::make_unique<ExpressionStatement>(this->expression()->clone());
-    }
-
-    std::string description() const override {
-        return this->expression()->description() + ";";
-    }
+    std::string description() const override;
 
 private:
     std::unique_ptr<Expression> fExpression;

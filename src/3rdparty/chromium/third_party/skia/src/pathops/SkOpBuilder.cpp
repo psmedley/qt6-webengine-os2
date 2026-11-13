@@ -11,10 +11,11 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkTypes.h"
 #include "include/pathops/SkPathOps.h"
-#include "include/private/SkPathRef.h"
-#include "include/private/SkTArray.h"
-#include "include/private/SkTDArray.h"
-#include "src/core/SkArenaAlloc.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTDArray.h"
+#include "include/private/base/SkTo.h"
+#include "src/base/SkArenaAlloc.h"
+#include "src/core/SkPathEnums.h"
 #include "src/core/SkPathPriv.h"
 #include "src/pathops/SkOpContour.h"
 #include "src/pathops/SkOpEdgeBuilder.h"
@@ -132,7 +133,7 @@ void SkOpBuilder::add(const SkPath& path, SkPathOp op) {
 }
 
 void SkOpBuilder::reset() {
-    fPathRefs.reset();
+    fPathRefs.clear();
     fOps.reset();
 }
 

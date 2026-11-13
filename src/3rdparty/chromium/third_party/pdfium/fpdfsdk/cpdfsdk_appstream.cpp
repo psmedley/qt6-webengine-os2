@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,8 +38,8 @@
 #include "fpdfsdk/pwl/cpwl_edit.h"
 #include "fpdfsdk/pwl/cpwl_edit_impl.h"
 #include "fpdfsdk/pwl/cpwl_wnd.h"
+#include "third_party/base/containers/span.h"
 #include "third_party/base/numerics/safe_conversions.h"
-#include "third_party/base/span.h"
 
 namespace {
 
@@ -465,7 +465,6 @@ ByteString GetCircleBorderAppStream(const CFX_FloatRect& rect,
     float div = fHalfWidth * 0.75f;
     CFX_FloatRect rect_by_75 = rect.GetDeflated(div, div);
     switch (nStyle) {
-      default:
       case BorderStyle::kSolid:
       case BorderStyle::kUnderline: {
         sColor = GetStrokeColorAppStream(color);
@@ -545,7 +544,6 @@ ByteString GetCheckBoxAppStream(const CFX_FloatRect& rcBBox,
                                 const CFX_Color& crText) {
   CFX_FloatRect rcCenter = rcBBox.GetCenterSquare();
   switch (nStyle) {
-    default:
     case CheckStyle::kCheck:
       return GetAppStream_Check(rcCenter, crText);
     case CheckStyle::kCircle:
@@ -570,7 +568,6 @@ ByteString GetRadioButtonAppStream(const CFX_FloatRect& rcBBox,
                                    const CFX_Color& crText) {
   CFX_FloatRect rcCenter = rcBBox.GetCenterSquare();
   switch (nStyle) {
-    default:
     case CheckStyle::kCheck:
       return GetAppStream_Check(rcCenter, crText);
     case CheckStyle::kCircle:
@@ -957,7 +954,6 @@ ByteString GetBorderAppStreamInternal(const CFX_FloatRect& rect,
     AutoClosedQCommand q(&sAppStream);
 
     switch (nStyle) {
-      default:
       case BorderStyle::kSolid:
         sColor = GetFillColorAppStream(color);
         if (sColor.GetLength() > 0) {
@@ -1862,7 +1858,7 @@ void CPDFSDK_AppStream::Write(const ByteString& sAPType,
         pStreamDict->SetFor("Resources", pResources->Clone());
     }
 
-    pStream->InitStream({}, pStreamDict);
+    pStream->InitStreamWithEmptyData(pStreamDict);
   }
   pStreamDict->SetMatrixFor("Matrix", widget_->GetMatrix());
   pStreamDict->SetRectFor("BBox", widget_->GetRotatedRect());

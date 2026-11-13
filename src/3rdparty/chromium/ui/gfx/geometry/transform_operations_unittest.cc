@@ -6,11 +6,11 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 #include <vector>
 
-#include "base/cxx17_backports.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/geometry/box_f.h"
@@ -1803,6 +1803,13 @@ TEST(TransformOperationTest, BlendSkewMatch) {
   ASSERT_EQ(blended_ops.size(), 2u);
   ExpectTransformOperationEqual(blended_ops.at(0), expected_ops.at(0));
   ExpectTransformOperationEqual(blended_ops.at(1), expected_ops.at(1));
+}
+
+TEST(TransformOperationsTest, Rotate360IsNotIdentityOperation) {
+  TransformOperations operations;
+  operations.AppendRotate(0, 0, 2, 360);
+  EXPECT_FALSE(operations.IsIdentity());
+  EXPECT_TRUE(operations.Apply().IsIdentity());
 }
 
 }  // namespace gfx

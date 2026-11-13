@@ -1,16 +1,29 @@
-// Copyright 2022 The Tint Authors
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     https://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package bench_test
 
@@ -141,7 +154,7 @@ func TestParseJson(t *testing.T) {
 		return
 	}
 
-	expectedDate, err := time.Parse(time.RFC1123, "Mon, 24 Jan 2022 10:28:13 GMT")
+	expectedDate, err := time.Parse(time.RFC3339, "2022-01-24T10:28:13+00:00")
 	if err != nil {
 		t.Errorf("time.Parse() returned %v", err)
 		return
@@ -149,11 +162,11 @@ func TestParseJson(t *testing.T) {
 
 	expect := bench.Run{
 		Benchmarks: []bench.Benchmark{
-			{Name: "MyBenchmark", Duration: time.Nanosecond * 1639227, AggregateType: ""},
-			{Name: "MyBenchmark", Duration: time.Nanosecond * 1714393, AggregateType: ""},
-			{Name: "MyBenchmark", Duration: time.Nanosecond * 1676810, AggregateType: "mean"},
-			{Name: "MyBenchmark", Duration: time.Nanosecond * 1676810, AggregateType: "median"},
-			{Name: "MyBenchmark", Duration: time.Nanosecond * 53150, AggregateType: "stddev"},
+			{Name: "MyBenchmark", Duration: time.Nanosecond * 1638741, AggregateType: ""},
+			{Name: "MyBenchmark", Duration: time.Nanosecond * 1712400, AggregateType: ""},
+			{Name: "MyBenchmark", Duration: time.Nanosecond * 1675570, AggregateType: "mean"},
+			{Name: "MyBenchmark", Duration: time.Nanosecond * 1675570, AggregateType: "median"},
+			{Name: "MyBenchmark", Duration: time.Nanosecond * 52084, AggregateType: "stddev"},
 		},
 		Context: &bench.Context{
 			Date:       expectedDate,
@@ -171,7 +184,7 @@ func TestParseJson(t *testing.T) {
 	}
 
 	expectEqual(t, "bench.Parse().Benchmarks", got.Benchmarks, expect.Benchmarks)
-	expectEqual(t, "bench.Parse().Context", got.Benchmarks, expect.Benchmarks)
+	expectEqual(t, "bench.Parse().Context", got.Context, expect.Context)
 }
 
 func TestCompare(t *testing.T) {

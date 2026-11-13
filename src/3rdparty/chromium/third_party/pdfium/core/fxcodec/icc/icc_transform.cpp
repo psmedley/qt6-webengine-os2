@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,9 @@
 #include <memory>
 
 #include "core/fxcrt/data_vector.h"
-#include "third_party/base/cxx17_backports.h"
+#include "third_party/base/memory/ptr_util.h"
 #include "third_party/base/notreached.h"
 #include "third_party/base/numerics/safe_conversions.h"
-#include "third_party/base/ptr_util.h"
 
 namespace fxcodec {
 
@@ -68,9 +67,9 @@ std::unique_ptr<IccTransform> IccTransform::CreateTransformSRGB(
   cmsColorSpaceSignature srcCS = cmsGetColorSpace(srcProfile.get());
   uint32_t nSrcComponents = cmsChannelsOf(srcCS);
 
-  // According to PDF spec, number of components must be 1, 3, or 4.
-  if (nSrcComponents != 1 && nSrcComponents != 3 && nSrcComponents != 4)
+  if (!IsValidIccComponents(nSrcComponents)) {
     return nullptr;
+  }
 
   int srcFormat;
   bool bLab = false;
@@ -101,8 +100,7 @@ std::unique_ptr<IccTransform> IccTransform::CreateTransformSRGB(
     case cmsSigGrayData:
     case cmsSigCmykData:
       // Check3Components() already filtered these types.
-      NOTREACHED();
-      break;
+      NOTREACHED_NORETURN();
     default:
       break;
   }
@@ -129,8 +127,7 @@ void IccTransform::Translate(pdfium::span<const float> pSrcValues,
   } else {
     DataVector<uint8_t> inputs(std::max<size_t>(pSrcValues.size(), 16));
     for (size_t i = 0; i < pSrcValues.size(); ++i) {
-      inputs[i] =
-          pdfium::clamp(static_cast<int>(pSrcValues[i] * 255.0f), 0, 255);
+      inputs[i] = std::clamp(static_cast<int>(pSrcValues[i] * 255.0f), 0, 255);
     }
     cmsDoTransform(m_hTransform, inputs.data(), output, 1);
   }
@@ -143,6 +140,12 @@ void IccTransform::TranslateScanline(pdfium::span<uint8_t> pDest,
                                      pdfium::span<const uint8_t> pSrc,
                                      int32_t pixels) {
   cmsDoTransform(m_hTransform, pSrc.data(), pDest.data(), pixels);
+}
+
+// static
+bool IccTransform::IsValidIccComponents(int components) {
+  // According to PDF spec, number of components must be 1, 3, or 4.
+  return components == 1 || components == 3 || components == 4;
 }
 
 }  // namespace fxcodec

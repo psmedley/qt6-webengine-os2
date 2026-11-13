@@ -9,21 +9,24 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/ref_counted.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "build/build_config.h"
+#include "build/chromecast_buildflags.h"
 #include "content/common/content_export.h"
 #include "content/public/common/alternative_error_page_override_info.mojom.h"
 #include "content/public/common/content_client.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/key_system_info.h"
 #include "media/base/supported_types.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/url_loader_throttle_provider.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/public/platform/websocket_handshake_throttle_provider.h"
@@ -60,9 +63,11 @@ struct WebURLError;
 enum class ProtocolHandlerSecurityLevel;
 }  // namespace blink
 
+#if BUILDFLAG(ENABLE_CAST_RECEIVER)
 namespace cast_streaming {
 class ResourceProvider;
 }  // namespace cast_streaming
+#endif
 
 namespace media {
 class DecoderFactory;
@@ -74,6 +79,10 @@ class RendererFactory;
 
 namespace mojo {
 class BinderMap;
+}
+
+namespace url {
+class Origin;
 }
 
 namespace content {
@@ -180,7 +189,7 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual std::unique_ptr<media::Demuxer> OverrideDemuxerForUrl(
       RenderFrame* render_frame,
       const GURL& url,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+      scoped_refptr<base::SequencedTaskRunner> task_runner);
 
   // Allows the embedder to provide a WebSocketHandshakeThrottleProvider. If it
   // returns NULL then none will be used.
@@ -209,8 +218,14 @@ class CONTENT_EXPORT ContentRendererClient {
   // Returns true if a popup window should be allowed.
   virtual bool AllowPopup();
 
+  // Service worker may react on the activity. For example, reset the idle
+  // timer.
+  virtual bool ShouldNotifyServiceWorkerOnWebSocketActivity(
+      v8::Local<v8::Context> context);
+
   // Returns the security level to use for Navigator.RegisterProtocolHandler().
-  virtual blink::ProtocolHandlerSecurityLevel GetProtocolHandlerSecurityLevel();
+  virtual blink::ProtocolHandlerSecurityLevel GetProtocolHandlerSecurityLevel(
+      const url::Origin& origin);
 
 #if BUILDFLAG(IS_ANDROID)
   // TODO(sgurun) This callback is deprecated and will be removed as soon
@@ -246,7 +261,7 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual bool IsPrefetchOnly(RenderFrame* render_frame);
 
   // See blink::Platform.
-  virtual uint64_t VisitedLinkHash(const char* canonical_url, size_t length);
+  virtual uint64_t VisitedLinkHash(std::string_view canonical_url);
   virtual bool IsLinkVisited(uint64_t link_hash);
 
   // Creates a WebPrescientNetworking instance for |render_frame|. The returned
@@ -290,9 +305,7 @@ class CONTENT_EXPORT ContentRendererClient {
 #if !BUILDFLAG(IS_ANDROID)
   // Creates a speech recognition client used to transcribe audio into captions.
   virtual std::unique_ptr<media::SpeechRecognitionClient>
-  CreateSpeechRecognitionClient(
-      RenderFrame* render_frame,
-      media::SpeechRecognitionClient::OnReadyCallback callback);
+  CreateSpeechRecognitionClient(RenderFrame* render_frame);
 #endif
 
   // Returns true if the page at |url| can use Pepper CameraDevice APIs.
@@ -399,7 +412,7 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual void DidSetUserAgent(const std::string& user_agent);
 
   // Optionally returns audio renderer algorithm parameters.
-  virtual absl::optional<::media::AudioRendererAlgorithmParameters>
+  virtual std::optional<::media::AudioRendererAlgorithmParameters>
   GetAudioRendererAlgorithmParameters(
       ::media::AudioParameters audio_parameters);
 
@@ -419,10 +432,12 @@ class CONTENT_EXPORT ContentRendererClient {
       base::RepeatingCallback<media::GpuVideoAcceleratorFactories*()>
           get_gpu_factories_cb);
 
+#if BUILDFLAG(ENABLE_CAST_RECEIVER)
   // Creates a new cast_streaming::ResourceProvider. Will only be called once
   // per RenderFrame.
   virtual std::unique_ptr<cast_streaming::ResourceProvider>
   CreateCastStreamingResourceProvider();
+#endif
 };
 
 }  // namespace content

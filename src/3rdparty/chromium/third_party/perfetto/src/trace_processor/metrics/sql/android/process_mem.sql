@@ -43,7 +43,7 @@ CREATE VIRTUAL TABLE anon_and_swap_join
 USING SPAN_OUTER_JOIN(anon_rss_span PARTITIONED upid, swap_span PARTITIONED upid);
 
 DROP VIEW IF EXISTS anon_and_swap_span;
-CREATE VIEW anon_and_swap_span AS
+CREATE PERFETTO VIEW anon_and_swap_span AS
 SELECT
   ts, dur, upid,
   IFNULL(anon_rss_val, 0) + IFNULL(swap_val, 0) AS anon_and_swap_val
@@ -66,17 +66,17 @@ USING SPAN_OUTER_JOIN(
 );
 
 DROP VIEW IF EXISTS rss_and_swap_span;
-CREATE VIEW rss_and_swap_span AS
+CREATE PERFETTO VIEW rss_and_swap_span AS
 SELECT
   ts, dur, upid,
-  CAST(IFNULL(file_rss_val, 0) AS INT) file_rss_val,
-  CAST(IFNULL(anon_rss_val, 0) AS INT) anon_rss_val,
-  CAST(IFNULL(shmem_rss_val, 0) AS INT) shmem_rss_val,
-  CAST(IFNULL(swap_val, 0) AS INT) swap_val,
+  CAST(IFNULL(file_rss_val, 0) AS INT) AS file_rss_val,
+  CAST(IFNULL(anon_rss_val, 0) AS INT) AS anon_rss_val,
+  CAST(IFNULL(shmem_rss_val, 0) AS INT) AS shmem_rss_val,
+  CAST(IFNULL(swap_val, 0) AS INT) AS swap_val,
   CAST(
-    IFNULL(anon_rss_val, 0) +
-    IFNULL(file_rss_val, 0) +
-    IFNULL(shmem_rss_val, 0) AS int) AS rss_val,
+    IFNULL(anon_rss_val, 0)
+    + IFNULL(file_rss_val, 0)
+    + IFNULL(shmem_rss_val, 0) AS int) AS rss_val,
   CAST(
     IFNULL(anon_rss_val, 0)
     + IFNULL(swap_val, 0)
@@ -90,7 +90,7 @@ SELECT RUN_METRIC('android/process_counter_span_view.sql',
   'counter_name', 'Heap size (KB)');
 
 DROP VIEW IF EXISTS java_heap_span;
-CREATE VIEW java_heap_span AS
+CREATE PERFETTO VIEW java_heap_span AS
 SELECT ts, dur, upid, java_heap_kb_val * 1024 AS java_heap_val
 FROM java_heap_kb_span;
 

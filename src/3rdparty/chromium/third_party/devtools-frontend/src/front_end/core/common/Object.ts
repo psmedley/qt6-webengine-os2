@@ -28,12 +28,13 @@
  */
 
 import type * as Platform from '../platform/platform.js';
+
 import {
   type EventDescriptor,
   type EventListener,
+  type EventPayloadToRestParameters,
   type EventTarget,
   type EventTargetEvent,
-  type EventPayloadToRestParameters,
 } from './EventTarget.js';
 
 export interface ListenerCallbackTuple<Events, T extends keyof Events> {
@@ -104,7 +105,7 @@ export class ObjectWrapper<Events> implements EventTarget<Events> {
     //   - `Events[T]` otherwise.
     // We cast it to `Events[T]` which is the correct type in all instances, as
     // `void` will be cast and used as `undefined`.
-    const event = {data: eventData as Events[T]};
+    const event = {data: eventData as Events[T], source: this};
     // Work on a snapshot of the current listeners, callbacks might remove/add
     // new listeners.
     for (const listener of [...listeners]) {
@@ -115,7 +116,6 @@ export class ObjectWrapper<Events> implements EventTarget<Events> {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Constructor = new (...args: any[]) => {};
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type

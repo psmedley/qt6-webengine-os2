@@ -1,71 +1,45 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/metal/SwapChainMTL.h"
 
+#include "dawn/native/ChainUtils.h"
 #include "dawn/native/Surface.h"
 #include "dawn/native/metal/DeviceMTL.h"
 #include "dawn/native/metal/TextureMTL.h"
-
-#include "dawn/dawn_wsi.h"
 
 #import <QuartzCore/CAMetalLayer.h>
 
 namespace dawn::native::metal {
 
-// OldSwapChain
-
-// static
-Ref<OldSwapChain> OldSwapChain::Create(Device* device, const SwapChainDescriptor* descriptor) {
-    return AcquireRef(new OldSwapChain(device, descriptor));
-}
-
-OldSwapChain::OldSwapChain(Device* device, const SwapChainDescriptor* descriptor)
-    : OldSwapChainBase(device, descriptor) {
-    const auto& im = GetImplementation();
-    DawnWSIContextMetal wsiContext = {};
-    wsiContext.device = ToBackend(GetDevice())->GetMTLDevice();
-    wsiContext.queue = ToBackend(GetDevice())->GetMTLQueue();
-    im.Init(im.userData, &wsiContext);
-}
-
-OldSwapChain::~OldSwapChain() {}
-
-TextureBase* OldSwapChain::GetNextTextureImpl(const TextureDescriptor* descriptor) {
-    const auto& im = GetImplementation();
-    DawnSwapChainNextTexture next = {};
-    DawnSwapChainError error = im.GetNextTexture(im.userData, &next);
-    if (error) {
-        GetDevice()->HandleError(InternalErrorType::Internal, error);
-        return nullptr;
-    }
-
-    id<MTLTexture> nativeTexture = reinterpret_cast<id<MTLTexture>>(next.texture.ptr);
-
-    return Texture::CreateWrapping(ToBackend(GetDevice()), descriptor, nativeTexture).Detach();
-}
-
-MaybeError OldSwapChain::OnBeforePresent(TextureViewBase*) {
-    return {};
-}
-
-// SwapChain
-
 // static
 ResultOrError<Ref<SwapChain>> SwapChain::Create(Device* device,
                                                 Surface* surface,
-                                                NewSwapChainBase* previousSwapChain,
+                                                SwapChainBase* previousSwapChain,
                                                 const SwapChainDescriptor* descriptor) {
     Ref<SwapChain> swapchain = AcquireRef(new SwapChain(device, surface, descriptor));
     DAWN_TRY(swapchain->Initialize(previousSwapChain));
@@ -73,7 +47,7 @@ ResultOrError<Ref<SwapChain>> SwapChain::Create(Device* device,
 }
 
 SwapChain::SwapChain(DeviceBase* dev, Surface* sur, const SwapChainDescriptor* desc)
-    : NewSwapChainBase(dev, sur, desc) {}
+    : SwapChainBase(dev, sur, desc) {}
 
 SwapChain::~SwapChain() = default;
 
@@ -82,8 +56,8 @@ void SwapChain::DestroyImpl() {
     DetachFromSurface();
 }
 
-MaybeError SwapChain::Initialize(NewSwapChainBase* previousSwapChain) {
-    ASSERT(GetSurface()->GetType() == Surface::Type::MetalLayer);
+MaybeError SwapChain::Initialize(SwapChainBase* previousSwapChain) {
+    DAWN_ASSERT(GetSurface()->GetType() == Surface::Type::MetalLayer);
 
     if (previousSwapChain != nullptr) {
         // TODO(crbug.com/dawn/269): figure out what should happen when surfaces are used by
@@ -97,7 +71,7 @@ MaybeError SwapChain::Initialize(NewSwapChainBase* previousSwapChain) {
     }
 
     mLayer = static_cast<CAMetalLayer*>(GetSurface()->GetMetalLayer());
-    ASSERT(mLayer != nullptr);
+    DAWN_ASSERT(mLayer != nullptr);
 
     CGSize size = {};
     size.width = GetWidth();
@@ -106,12 +80,10 @@ MaybeError SwapChain::Initialize(NewSwapChainBase* previousSwapChain) {
 
     [*mLayer setFramebufferOnly:(GetUsage() == wgpu::TextureUsage::RenderAttachment)];
     [*mLayer setDevice:ToBackend(GetDevice())->GetMTLDevice()];
-    [*mLayer setPixelFormat:MetalPixelFormat(GetFormat())];
+    [*mLayer setPixelFormat:MetalPixelFormat(GetDevice(), GetFormat())];
 
 #if DAWN_PLATFORM_IS(MACOS)
-    if (@available(macos 10.13, *)) {
-        [*mLayer setDisplaySyncEnabled:(GetPresentMode() != wgpu::PresentMode::Immediate)];
-    }
+    [*mLayer setDisplaySyncEnabled:(GetPresentMode() != wgpu::PresentMode::Immediate)];
 #endif  // DAWN_PLATFORM_IS(MACOS)
 
     // There is no way to control Fifo vs. Mailbox in Metal.
@@ -120,7 +92,7 @@ MaybeError SwapChain::Initialize(NewSwapChainBase* previousSwapChain) {
 }
 
 MaybeError SwapChain::PresentImpl() {
-    ASSERT(mCurrentDrawable != nullptr);
+    DAWN_ASSERT(mCurrentDrawable != nullptr);
     [*mCurrentDrawable present];
 
     mTexture->APIDestroy();
@@ -131,19 +103,21 @@ MaybeError SwapChain::PresentImpl() {
     return {};
 }
 
-ResultOrError<Ref<TextureViewBase>> SwapChain::GetCurrentTextureViewImpl() {
-    ASSERT(mCurrentDrawable == nullptr);
-    mCurrentDrawable = [*mLayer nextDrawable];
+ResultOrError<Ref<TextureBase>> SwapChain::GetCurrentTextureImpl() {
+    @autoreleasepool {
+        DAWN_ASSERT(mCurrentDrawable == nullptr);
+        mCurrentDrawable = [*mLayer nextDrawable];
 
-    TextureDescriptor textureDesc = GetSwapChainBaseTextureDescriptor(this);
+        TextureDescriptor textureDesc = GetSwapChainBaseTextureDescriptor(this);
 
-    mTexture =
-        Texture::CreateWrapping(ToBackend(GetDevice()), &textureDesc, [*mCurrentDrawable texture]);
-    return mTexture->CreateView();
+        mTexture = Texture::CreateWrapping(ToBackend(GetDevice()), Unpack(&textureDesc),
+                                           NSPRef<id<MTLTexture>>([*mCurrentDrawable texture]));
+        return mTexture;
+    }
 }
 
 void SwapChain::DetachFromSurfaceImpl() {
-    ASSERT((mTexture == nullptr) == (mCurrentDrawable == nullptr));
+    DAWN_ASSERT((mTexture == nullptr) == (mCurrentDrawable == nullptr));
 
     if (mTexture != nullptr) {
         mTexture->APIDestroy();

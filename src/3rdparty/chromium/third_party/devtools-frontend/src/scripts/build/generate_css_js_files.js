@@ -3,22 +3,48 @@
 // found in the LICENSE file.
 const fs = require('fs');
 const path = require('path');
-const CleanCSS = require('clean-css');
 const {writeIfChanged} = require('./ninja/write-if-changed.js');
-const [, , buildTimestamp, isDebugString, legacyString, targetName, srcDir, targetGenDir, files] = process.argv;
+const postcss = require('postcss');
+const cssnano = require('cssnano');
 
-const filenames = files.split(',');
-const configFiles = [];
-const cleanCSS = new CleanCSS();
-const isDebug = isDebugString === 'true';
-const isLegacy = legacyString === 'true';
+async function runCSSMinification(input, fileName) {
+  // postcss needs to be given a fileName, even though it doesn't read from it nor write to it.
+  // So we pass in the correct name, even though it has no impact on the resulting code.
+  const result = await postcss([cssnano({preset: require('cssnano-preset-lite')})]).process(input, {from: fileName});
+  return result.css;
+}
 
-for (const fileName of filenames) {
-  let output = fs.readFileSync(path.join(srcDir, fileName), {encoding: 'utf8', flag: 'r'});
-  output = output.replace(/\`/g, '\\\'');
-  output = output.replace(/\\/g, '\\\\');
+async function codeForFile({srcDir, fileName, input, isDebug, hotReloadEnabled, isLegacy = false, buildTimestamp}) {
+  input = input.replace(/\`/g, '\\\'');
+  input = input.replace(/\\/g, '\\\\');
 
-  const stylesheetContents = isDebug ? output : cleanCSS.minify(output).styles;
+  const stylesheetContents = isDebug ? input : await runCSSMinification(input, fileName);
+
+  // clang-format off
+  const hotReloadListener = (isDebug && hotReloadEnabled) ? `
+// CSS hot reloading code for 'watch' script
+window.HOT_STYLE_SHEETS = window.HOT_STYLE_SHEETS || {};
+window.HOT_STYLE_SHEETS["${path.resolve(srcDir, fileName)}"] = styles;
+if (!window.HOT_STYLE_SHEETS_WEB_SOCKET) {
+  const ws = new WebSocket("ws://localhost:8080");
+  ws.addEventListener('close', () => {
+    console.warn("Connection to watch script is closed, CSS changes won't be applied");
+  });
+  ws.addEventListener('message', (message) => {
+    const parsedData = JSON.parse(message.data);
+    if (parsedData.event === 'css-change') {
+      const styleSheet = window.HOT_STYLE_SHEETS[parsedData.file];
+      if (styleSheet) {
+        styleSheet.replace(parsedData.content);
+      }
+    } else if (parsedData.event === 'log-warn') {
+      console.warn(parsedData.message);
+    }
+  });
+  window.HOT_STYLE_SHEETS_WEB_SOCKET = ws;
+}
+` : '';
+  // clang-format on
 
   let exportStatement;
   if (isLegacy) {
@@ -31,11 +57,10 @@ styles.replaceSync(
 \`${stylesheetContents}
 /*# sourceURL=${fileName} */
 \`);
+${hotReloadListener}
 export default styles;`;
   }
 
-  const generatedFileName = `${fileName}${isLegacy ? '.legacy' : ''}.js`;
-  const generatedFileLocation = path.join(targetGenDir, generatedFileName);
   const newContents = `// Copyright ${
       new Date(Number(buildTimestamp) * 1000).getUTCFullYear()} The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -44,13 +69,35 @@ export default styles;`;
 /* istanbul ignore file */
 ${exportStatement}
 `;
-
-  writeIfChanged(generatedFileLocation, newContents);
-
-  configFiles.push(`\"${generatedFileName}\"`);
+  return newContents;
 }
 
-writeIfChanged(path.join(targetGenDir, `${targetName}-tsconfig.json`), `{
+// Exported only so it can be unit tested.
+exports.codeForFile = codeForFile;
+
+async function runMain() {
+  const [, , buildTimestamp, isDebugString, legacyString, targetName, srcDir, targetGenDir, files, hotReloadEnabledString] =
+      process.argv;
+
+  const filenames = files.split(',');
+  const configFiles = [];
+  const isDebug = isDebugString === 'true';
+  const isLegacy = legacyString === 'true';
+  const hotReloadEnabled = hotReloadEnabledString === 'true';
+
+  for (const fileName of filenames) {
+    const contents = fs.readFileSync(path.join(srcDir, fileName), {encoding: 'utf8', flag: 'r'});
+    const newContents =
+        await codeForFile({srcDir, fileName, isDebug, hotReloadEnabled, input: contents, isLegacy, buildTimestamp});
+    const generatedFileName = `${fileName}${isLegacy ? '.legacy' : ''}.js`;
+    const generatedFileLocation = path.join(targetGenDir, generatedFileName);
+
+    writeIfChanged(generatedFileLocation, newContents);
+
+    configFiles.push(`\"${generatedFileName}\"`);
+  }
+
+  writeIfChanged(path.join(targetGenDir, `${targetName}-tsconfig.json`), `{
     "compilerOptions": {
         "composite": true,
         "outDir": "."
@@ -60,3 +107,8 @@ writeIfChanged(path.join(targetGenDir, `${targetName}-tsconfig.json`), `{
     ]
 }
 `);
+}
+
+if (require.main === module) {
+  runMain();
+}

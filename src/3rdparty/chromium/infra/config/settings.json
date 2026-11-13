@@ -1,9 +1,29 @@
 {
-    "project": "chromium-m108",
-    "project_title": "Chromium M108",
-    "ref": "refs/branch-heads/5359",
-    "chrome_project": "chrome-m108",
-    "branch_types": [
-        "standard"
-    ]
+    "project": "chromium-m122",
+    "project_title": "Chromium M122",
+    "ref": "refs/branch-heads/6261",
+    "chrome_project": "chrome-m122",
+    "is_main": false,
+    "platforms": {
+        "android": {
+            "description": "beta/stable",
+            "sheriff_rotation": "chrome_browser_release"
+        },
+        "cros": {
+            "description": "beta/stable",
+            "sheriff_rotation": "chrome_browser_release"
+        },
+        "fuchsia": {
+            "description": "beta/stable",
+            "sheriff_rotation": "chrome_browser_release"
+        },
+        "mac": {
+            "description": "beta/stable",
+            "sheriff_rotation": "chrome_browser_release"
+        },
+        "windows": {
+            "description": "beta/stable",
+            "sheriff_rotation": "chrome_browser_release"
+        }
+    }
 }

@@ -29,52 +29,47 @@
  */
 
 import type * as Common from '../../core/common/common.js';
-import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 import * as SourceMapScopes from '../../models/source_map_scopes/source_map_scopes.js';
-import * as LinearMemoryInspector from '../../ui/components/linear_memory_inspector/linear_memory_inspector.js';
 import * as ObjectUI from '../../ui/legacy/components/object_ui/object_ui.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import scopeChainSidebarPaneStyles from './scopeChainSidebarPane.css.js';
 
 const UIStrings = {
   /**
-  *@description Loading indicator in Scope Sidebar Pane of the Sources panel
-  */
+   *@description Loading indicator in Scope Sidebar Pane of the Sources panel
+   */
   loading: 'Loading...',
   /**
-  *@description Not paused message element text content in Call Stack Sidebar Pane of the Sources panel
-  */
+   *@description Not paused message element text content in Call Stack Sidebar Pane of the Sources panel
+   */
   notPaused: 'Not paused',
   /**
-  *@description Empty placeholder in Scope Chain Sidebar Pane of the Sources panel
-  */
+   *@description Empty placeholder in Scope Chain Sidebar Pane of the Sources panel
+   */
   noVariables: 'No variables',
   /**
-  *@description Text in the Sources panel Scope pane describing a closure scope.
-  *@example {func} PH1
-  */
+   *@description Text in the Sources panel Scope pane describing a closure scope.
+   *@example {func} PH1
+   */
   closureS: 'Closure ({PH1})',
   /**
-  *@description Text that refers to closure as a programming term
-  */
+   *@description Text that refers to closure as a programming term
+   */
   closure: 'Closure',
   /**
-  *@description Text in Scope Chain Sidebar Pane of the Sources panel
-  */
+   *@description Text in Scope Chain Sidebar Pane of the Sources panel
+   */
   exception: 'Exception',
   /**
-  *@description Text in Scope Chain Sidebar Pane of the Sources panel
-  */
+   *@description Text in Scope Chain Sidebar Pane of the Sources panel
+   */
   returnValue: 'Return value',
-  /**
-  *@description A context menu item in the Scope View of the Sources Panel
-  */
-  revealInMemoryInspectorPanel: 'Reveal in Memory Inspector panel',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/sources/ScopeChainSidebarPane.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -90,7 +85,9 @@ export class ScopeChainSidebarPane extends UI.Widget.VBox implements UI.ContextF
   private constructor() {
     super(true);
 
+    this.contentElement.setAttribute('jslog', `${VisualLogging.pane().context('debugger-scope')}`);
     this.treeOutline = new ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeOutline();
+    this.treeOutline.hideOverflow();
 
     this.treeOutline.setShowSelectionOnKeyboardFocus(/* show */ true);
     this.expandController =
@@ -115,7 +112,7 @@ export class ScopeChainSidebarPane extends UI.Widget.VBox implements UI.ContextF
     void this.update();
   }
 
-  focus(): void {
+  override focus(): void {
     if (this.hasFocus()) {
       return;
     }
@@ -292,42 +289,9 @@ export class ScopeChainSidebarPane extends UI.Widget.VBox implements UI.ContextF
 
   private sidebarPaneUpdatedForTest(): void {
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.treeOutline.registerCSSFiles([scopeChainSidebarPaneStyles]);
     this.registerCSSFiles([scopeChainSidebarPaneStyles]);
-  }
-}
-
-let openLinearMemoryInspectorInstance: OpenLinearMemoryInspector;
-
-export class OpenLinearMemoryInspector extends UI.Widget.VBox implements UI.ContextMenu.Provider {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): OpenLinearMemoryInspector {
-    const {forceNew} = opts;
-    if (!openLinearMemoryInspectorInstance || forceNew) {
-      openLinearMemoryInspectorInstance = new OpenLinearMemoryInspector();
-    }
-
-    return openLinearMemoryInspectorInstance;
-  }
-
-  appendApplicableItems(event: Event, contextMenu: UI.ContextMenu.ContextMenu, target: Object): void {
-    if (target instanceof ObjectUI.ObjectPropertiesSection.ObjectPropertyTreeElement) {
-      if (target.property && target.property.value &&
-          LinearMemoryInspector.LinearMemoryInspectorController.isMemoryObjectProperty(target.property.value)) {
-        const expression = target.path();
-        contextMenu.debugSection().appendItem(
-            i18nString(UIStrings.revealInMemoryInspectorPanel),
-            this.openMemoryInspector.bind(this, expression, target.property.value));
-      }
-    }
-  }
-
-  private async openMemoryInspector(expression: string, obj: SDK.RemoteObject.RemoteObject): Promise<void> {
-    const controller = LinearMemoryInspector.LinearMemoryInspectorController.LinearMemoryInspectorController.instance();
-    Host.userMetrics.linearMemoryInspectorRevealedFrom(Host.UserMetrics.LinearMemoryInspectorRevealedFrom.ContextMenu);
-    void controller.openInspectorView(obj, /* address */ undefined, expression);
   }
 }

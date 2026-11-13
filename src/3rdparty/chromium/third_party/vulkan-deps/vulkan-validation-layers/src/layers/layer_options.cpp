@@ -1,6 +1,6 @@
-/* Copyright (c) 2020-2022 The Khronos Group Inc.
- * Copyright (c) 2020-2022 Valve Corporation
- * Copyright (c) 2020-2022 LunarG, Inc.
+/* Copyright (c) 2020-2023 The Khronos Group Inc.
+ * Copyright (c) 2020-2023 Valve Corporation
+ * Copyright (c) 2020-2023 LunarG, Inc.
  * Modifications Copyright (C) 2020 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,13 +14,54 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
- * Author: Mark Lobodzinski <mark@lunarg.com>
- * Author: John Zulauf <jzulauf@lunarg.com>
- * Author: Nadav Geva <nadav.geva@amd.com>
  */
 
 #include "layer_options.h"
+#include "utils/hash_util.h"
+#include <vulkan/layer/vk_layer_settings.hpp>
+
+// Include new / delete overrides if using mimalloc. This needs to be include exactly once in a file that is
+// part of the VVL but not the layer utils library.
+#if defined(USE_MIMALLOC) && defined(_WIN64)
+#include "mimalloc-new-delete.h"
+#endif
+
+const char *SETTING_ENABLES = "enables";
+const char *SETTING_VALIDATE_BEST_PRACTICES = "validate_best_practices";
+const char *SETTING_VALIDATE_BEST_PRACTICES_ARM = "validate_best_practices_arm";
+const char *SETTING_VALIDATE_BEST_PRACTICES_AMD = "validate_best_practices_amd";
+const char *SETTING_VALIDATE_BEST_PRACTICES_IMG = "validate_best_practices_img";
+const char *SETTING_VALIDATE_BEST_PRACTICES_NVIDIA = "validate_best_practices_nvidia";
+const char *SETTING_VALIDATE_SYNC = "validate_sync";
+const char *SETTING_VALIDATE_GPU_BASED = "validate_gpu_based";
+const char *SETTING_RESERVE_BINDING_SLOT = "reserve_binding_slot";
+
+const char *SETTING_DISABLES = "disables";
+const char *SETTING_STATELESS_PARAM = "stateless_param";
+const char *SETTING_THREAD_SAFETY = "thread_safety";
+const char *SETTING_VALIDATE_CORE = "validate_core";
+const char *SETTING_CHECK_COMMAND_BUFFER = "check_command_buffer";
+const char *SETTING_CHECK_OBJECT_IN_USE = "check_object_in_use";
+const char *SETTING_CHECK_QUERY = "check_query";
+const char *SETTING_CHECK_IMAGE_LAYOUT = "check_image_layout";
+const char *SETTING_UNIQUE_HANDLES = "unique_handles";
+const char *SETTING_OBJECT_LIFETIME = "object_lifetime";
+const char *SETTING_CHECK_SHADERS = "check_shaders";
+const char *SETTING_CHECK_SHADERS_CACHING = "check_shaders_caching";
+const char *SETTING_VALIDATE_SYNC_QUEUE_SUBMIT = "sync_queue_submit";
+
+const char *SETTING_MESSAGE_ID_FILTER = "message_id_filter";
+const char *SETTING_CUSTOM_STYPE_LIST = "custom_stype_list";
+const char *SETTING_DUPLICATE_MESSAGE_LIMIT = "duplicate_message_limit";
+const char *SETTING_FINE_GRAINED_LOCKING = "fine_grained_locking";
+
+const char *SETTING_GPUAV_VALIDATE_DESCRIPTORS = "gpuav_descriptor_checks";
+const char *SETTING_GPUAV_VALIDATE_INDIRECT_BUFFER = "validate_indirect_buffer";
+const char *SETTING_GPUAV_VMA_LINEAR_OUTPUT = "vma_linear_output";
+const char *SETTING_GPUAV_WARN_ON_ROBUST_OOB = "warn_on_robust_oob";
+const char *SETTING_GPUAV_USE_INSTRUMENTED_SHADER_CACHE = "use_instrumented_shader_cache";
+const char *SETTING_GPUAV_SELECT_INSTRUMENTED_SHADERS = "select_instrumented_shaders";
+const char *SETTING_GPUAV_MAX_BUFFER_DEVICE_ADDRESS_BUFFERS = "gpuav_max_buffer_device_addresses";
 
 // Set the local disable flag for the appropriate VALIDATION_CHECK_DISABLE enum
 void SetValidationDisable(CHECK_DISABLED &disable_data, const ValidationCheckDisables disable_id) {
@@ -36,6 +77,9 @@ void SetValidationDisable(CHECK_DISABLED &disable_data, const ValidationCheckDis
             break;
         case VALIDATION_CHECK_DISABLE_IMAGE_LAYOUT_VALIDATION:
             disable_data[image_layout_validation] = true;
+            break;
+        case VALIDATION_CHECK_DISABLE_SYNCHRONIZATION_VALIDATION_QUEUE_SUBMIT:
+            disable_data[sync_validation_queue_submit] = true;
             break;
         default:
             assert(true);
@@ -96,8 +140,6 @@ void SetValidationEnable(CHECK_ENABLED &enable_data, const ValidationCheckEnable
             enable_data[vendor_specific_img] = true;
             enable_data[vendor_specific_nvidia] = true;
             break;
-        case VALIDATION_CHECK_ENABLE_SYNCHRONIZATION_VALIDATION_QUEUE_SUBMIT:
-            enable_data[sync_validation_queue_submit] = true;
         default:
             assert(true);
     }
@@ -116,7 +158,7 @@ void SetValidationFeatureEnable(CHECK_ENABLED &enable_data, const VkValidationFe
             enable_data[best_practices] = true;
             break;
         case VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT:
-            enable_data[debug_printf] = true;
+            enable_data[debug_printf_validation] = true;
             break;
         case VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT:
             enable_data[sync_validation] = true;
@@ -186,7 +228,7 @@ std::string GetNextToken(std::string *token_list, const std::string &delimiter, 
 }
 
 // Given a string representation of a list of enable enum values, call the appropriate setter function
-void SetLocalEnableSetting(std::string list_of_enables, std::string delimiter, CHECK_ENABLED &enables) {
+void SetLocalEnableSetting(std::string list_of_enables, const std::string &delimiter, CHECK_ENABLED &enables) {
     size_t pos = 0;
     std::string token;
     while (list_of_enables.length() != 0) {
@@ -211,7 +253,7 @@ void SetLocalEnableSetting(std::string list_of_enables, std::string delimiter, C
 }
 
 // Given a string representation of a list of disable enum values, call the appropriate setter function
-void SetLocalDisableSetting(std::string list_of_disables, std::string delimiter, CHECK_DISABLED &disables) {
+void SetLocalDisableSetting(std::string list_of_disables, const std::string &delimiter, CHECK_DISABLED &disables) {
     size_t pos = 0;
     std::string token;
     while (list_of_disables.length() != 0) {
@@ -240,191 +282,202 @@ uint32_t TokenToUint(std::string &token) {
     return int_id;
 }
 
-void CreateFilterMessageIdList(std::string raw_id_list, std::string delimiter, std::vector<uint32_t> &filter_list) {
+void CreateFilterMessageIdList(std::string raw_id_list, const std::string &delimiter, std::unordered_set<uint32_t> &filter_list) {
     size_t pos = 0;
     std::string token;
     while (raw_id_list.length() != 0) {
         token = GetNextToken(&raw_id_list, delimiter, &pos);
         uint32_t int_id = TokenToUint(token);
         if (int_id == 0) {
-            const uint32_t id_hash = XXH32(token.data(), token.size(), 8);  // String
+            const uint32_t id_hash = hash_util::VuidHash(token);
             if (id_hash != 0) {
                 int_id = id_hash;
             }
         }
-        if ((int_id != 0) && (std::find(filter_list.begin(), filter_list.end(), int_id)) == filter_list.end()) {
-            filter_list.push_back(int_id);
+        if ((int_id != 0) && filter_list.find(int_id) == filter_list.end()) {
+            filter_list.insert(int_id);
         }
     }
 }
 
-void SetCustomStypeInfo(std::string raw_id_list, std::string delimiter) {
-    size_t pos = 0;
-    std::string token;
-    // List format is a list of integer pairs
-    while (raw_id_list.length() != 0) {
-        token = GetNextToken(&raw_id_list, delimiter, &pos);
-        uint32_t stype_id = TokenToUint(token);
-        token = GetNextToken(&raw_id_list, delimiter, &pos);
-        uint32_t struct_size_in_bytes = TokenToUint(token);
-        if ((stype_id != 0) && (struct_size_in_bytes != 0)) {
-            bool found = false;
-            // Prevent duplicate entries
-            for (const auto &item : custom_stype_info) {
-                if (item.first == stype_id) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) custom_stype_info.push_back(std::make_pair(stype_id, struct_size_in_bytes));
-        }
+static void SetValidationSetting(VkuLayerSettingSet layer_setting_set, CHECK_DISABLED &disable_data,
+                                 const DisableFlags feature_disable, const char *setting) {
+    if (vkuHasLayerSetting(layer_setting_set, setting)) {
+        bool enabled = true;
+        vkuGetLayerSettingValue(layer_setting_set, setting, enabled);
+        disable_data[feature_disable] = !enabled;
     }
 }
 
-uint32_t SetMessageDuplicateLimit(std::string &config_message_limit, std::string &env_message_limit) {
-    uint32_t limit = 0;
-    auto get_num = [](std::string &source_string) {
-        uint32_t limit = 0;
-        int radix = ((source_string.find("0x") == 0) ? 16 : 10);
-        limit = static_cast<uint32_t>(std::strtoul(source_string.c_str(), nullptr, radix));
-        return limit;
-    };
-    // ENV var takes precedence over settings file
-    limit = get_num(env_message_limit);
-    if (limit == 0) {
-        limit = get_num(config_message_limit);
+static void SetValidationSetting(VkuLayerSettingSet layer_setting_set, CHECK_ENABLED &enable_data, const EnableFlags feature_enable,
+                                 const char *setting) {
+    if (vkuHasLayerSetting(layer_setting_set, setting)) {
+        bool enabled = true;
+        vkuGetLayerSettingValue(layer_setting_set, setting, enabled);
+        enable_data[feature_enable] = enabled;
     }
-    return limit;
 }
 
-const VkLayerSettingsEXT *FindSettingsInChain(const void *next) {
-    const VkBaseOutStructure *current = reinterpret_cast<const VkBaseOutStructure *>(next);
-    const VkLayerSettingsEXT *found = nullptr;
-    while (current) {
-        if (VK_STRUCTURE_TYPE_INSTANCE_LAYER_SETTINGS_EXT == static_cast<uint32_t>(current->sType)) {
-            found = reinterpret_cast<const VkLayerSettingsEXT *>(current);
-            current = nullptr;
-        } else {
-            current = current->pNext;
-        }
-    }
-    return found;
-}
+static std::string Merge(const std::vector<std::string> &strings) {
+    std::string result;
 
-static bool SetBool(std::string &config_string, std::string &env_string, bool default_val) {
-    bool result = default_val;
-
-    std::string setting;
-    if (!env_string.empty()) {
-        setting = env_string;
-    } else if (!config_string.empty()) {
-        setting = config_string;
-    }
-    if (!setting.empty()) {
-        transform(setting.begin(), setting.end(), setting.begin(), ::tolower);
-        if (setting == "true") {
-            result = true;
-        } else {
-            result = std::atoi(setting.c_str()) != 0;
+    for (std::size_t i = 0, n = strings.size(); i < n; ++i) {
+        if (!result.empty()) {
+            result += ",";
         }
+        result += strings[i];
     }
+
     return result;
+}
+
+static const char *GetDefaultPrefix() {
+#ifdef __ANDROID__
+    return "vvl";
+#else
+    return "LAYER";
+#endif
 }
 
 // Process enables and disables set though the vk_layer_settings.txt config file or through an environment variable
 void ProcessConfigAndEnvSettings(ConfigAndEnvSettings *settings_data) {
-    const auto layer_settings_ext = FindSettingsInChain(settings_data->pnext_chain);
-    if (layer_settings_ext) {
-        for (uint32_t i = 0; i < layer_settings_ext->settingCount; i++) {
-            auto cur_setting = layer_settings_ext->pSettings[i];
-            std::string name(cur_setting.name);
-            if (name == "enables") {
-                std::string data(cur_setting.data.arrayString.pCharArray);
-                SetLocalEnableSetting(data, ",", settings_data->enables);
-            } else if (name == "disables") {
-                std::string data(cur_setting.data.arrayString.pCharArray);
-                SetLocalDisableSetting(data, ",", settings_data->disables);
-            } else if (name == "message_id_filter") {
-                std::string data(cur_setting.data.arrayString.pCharArray);
-                CreateFilterMessageIdList(data, ",", settings_data->message_filter_list);
-            } else if (name == "duplicate_message_limit") {
-                *settings_data->duplicate_message_limit = cur_setting.data.value32;
-            } else if (name == "custom_stype_list") {
-                if (cur_setting.type == VK_LAYER_SETTING_VALUE_TYPE_STRING_ARRAY_EXT) {
-                    std::string data(cur_setting.data.arrayString.pCharArray);
-                    SetCustomStypeInfo(data, ",");
-                } else if (cur_setting.type == VK_LAYER_SETTING_VALUE_TYPE_UINT32_ARRAY_EXT) {
-                    for (uint32_t j = 0; j < cur_setting.data.arrayInt32.count / 2; j++) {
-                        auto stype_id = cur_setting.data.arrayInt32.pInt32Array[j * 2];
-                        auto struct_size = cur_setting.data.arrayInt32.pInt32Array[(j * 2) + 1];
-                        bool found = false;
-                        // Prevent duplicate entries
-                        for (const auto &item : custom_stype_info) {
-                            if (item.first == stype_id) {
-                                found = true;
-                                break;
-                            }
-                        }
-                        if (!found) custom_stype_info.push_back(std::make_pair(stype_id, struct_size));
-                    }
-                }
-            }
+    // If not cleared, garbage has been seen in some Android run effecting the error message
+    custom_stype_info.clear();
+
+    VkuLayerSettingSet layer_setting_set = VK_NULL_HANDLE;
+    vkuCreateLayerSettingSet(OBJECT_LAYER_NAME, vkuFindLayerSettingsCreateInfo(settings_data->create_info), nullptr, nullptr,
+                             &layer_setting_set);
+
+    vkuSetLayerSettingCompatibilityNamespace(layer_setting_set, GetDefaultPrefix());
+
+    // Read legacy "enables" flags for backward compatibility
+    std::vector<std::string> enables;
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_ENABLES)) {
+        vkuGetLayerSettingValues(layer_setting_set, SETTING_ENABLES, enables);
+    }
+    const std::string &string_enables = Merge(enables);
+    SetLocalEnableSetting(string_enables, ",", settings_data->enables);
+
+    // Read legacy "disables" flags for backward compatibility
+    std::vector<std::string> disables;
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_DISABLES)) {
+        vkuGetLayerSettingValues(layer_setting_set, SETTING_DISABLES, disables);
+    }
+    const std::string &string_disables = Merge(disables);
+    SetLocalDisableSetting(string_disables, ",", settings_data->disables);
+
+    // Fine Grained Locking
+    *settings_data->fine_grained_locking = true;
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_FINE_GRAINED_LOCKING)) {
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_FINE_GRAINED_LOCKING, *settings_data->fine_grained_locking);
+    }
+
+    // Message ID Filtering
+    std::vector<std::string> message_id_filter;
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_MESSAGE_ID_FILTER)) {
+        vkuGetLayerSettingValues(layer_setting_set, SETTING_MESSAGE_ID_FILTER, message_id_filter);
+    }
+    const std::string &string_message_id_filter = Merge(message_id_filter);
+    CreateFilterMessageIdList(string_message_id_filter, ",", settings_data->message_filter_list);
+
+    // Duplicate message limit
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_DUPLICATE_MESSAGE_LIMIT)) {
+        uint32_t config_limit_setting = 0;
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_DUPLICATE_MESSAGE_LIMIT, config_limit_setting);
+        if (config_limit_setting != 0) {
+            *settings_data->duplicate_message_limit = config_limit_setting;
         }
     }
-    const auto *validation_features_ext = LvlFindInChain<VkValidationFeaturesEXT>(settings_data->pnext_chain);
+
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_CUSTOM_STYPE_LIST)) {
+        vkuGetLayerSettingValues(layer_setting_set, SETTING_CUSTOM_STYPE_LIST, custom_stype_info);
+    }
+
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_GPUAV_VALIDATE_DESCRIPTORS)) {
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_GPUAV_VALIDATE_DESCRIPTORS,
+                                settings_data->gpuav_settings->validate_descriptors);
+    }
+
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_GPUAV_VALIDATE_INDIRECT_BUFFER)) {
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_GPUAV_VALIDATE_INDIRECT_BUFFER,
+                                settings_data->gpuav_settings->validate_indirect_buffer);
+    }
+
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_GPUAV_VMA_LINEAR_OUTPUT)) {
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_GPUAV_VMA_LINEAR_OUTPUT,
+                                settings_data->gpuav_settings->vma_linear_output);
+    }
+
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_GPUAV_WARN_ON_ROBUST_OOB)) {
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_GPUAV_WARN_ON_ROBUST_OOB,
+                                settings_data->gpuav_settings->warn_on_robust_oob);
+    }
+
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_GPUAV_USE_INSTRUMENTED_SHADER_CACHE)) {
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_GPUAV_USE_INSTRUMENTED_SHADER_CACHE,
+                                settings_data->gpuav_settings->cache_instrumented_shaders);
+    }
+
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_GPUAV_SELECT_INSTRUMENTED_SHADERS)) {
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_GPUAV_SELECT_INSTRUMENTED_SHADERS,
+                                settings_data->gpuav_settings->select_instrumented_shaders);
+    }
+
+    if (vkuHasLayerSetting(layer_setting_set, SETTING_GPUAV_MAX_BUFFER_DEVICE_ADDRESS_BUFFERS)) {
+        vkuGetLayerSettingValue(layer_setting_set, SETTING_GPUAV_MAX_BUFFER_DEVICE_ADDRESS_BUFFERS,
+                                settings_data->gpuav_settings->gpuav_max_buffer_device_addresses);
+    }
+
+    const auto *validation_features_ext = vku::FindStructInPNextChain<VkValidationFeaturesEXT>(settings_data->create_info);
     if (validation_features_ext) {
         SetValidationFeatures(settings_data->disables, settings_data->enables, validation_features_ext);
     }
-    const auto *validation_flags_ext = LvlFindInChain<VkValidationFlagsEXT>(settings_data->pnext_chain);
+    const auto *validation_flags_ext = vku::FindStructInPNextChain<VkValidationFlagsEXT>(settings_data->create_info);
     if (validation_flags_ext) {
         SetValidationFlags(settings_data->disables, validation_flags_ext);
     }
 
-    std::string enable_key(settings_data->layer_description);
-    std::string disable_key(settings_data->layer_description);
-    std::string stypes_key(settings_data->layer_description);
-    std::string filter_msg_key(settings_data->layer_description);
-    std::string message_limit(settings_data->layer_description);
-    std::string fine_grained_locking(settings_data->layer_description);
-    enable_key.append(".enables");
-    disable_key.append(".disables");
-    stypes_key.append(".custom_stype_list");
-    filter_msg_key.append(".message_id_filter");
-    message_limit.append(".duplicate_message_limit");
-    fine_grained_locking.append(".fine_grained_locking");
-    std::string list_of_config_enables = getLayerOption(enable_key.c_str());
-    std::string list_of_env_enables = GetEnvironment("VK_LAYER_ENABLES");
-    std::string list_of_config_disables = getLayerOption(disable_key.c_str());
-    std::string list_of_env_disables = GetEnvironment("VK_LAYER_DISABLES");
-    std::string list_of_config_filter_ids = getLayerOption(filter_msg_key.c_str());
-    std::string list_of_env_filter_ids = GetEnvironment("VK_LAYER_MESSAGE_ID_FILTER");
-    std::string list_of_config_stypes = getLayerOption(stypes_key.c_str());
-    std::string list_of_env_stypes = GetEnvironment("VK_LAYER_CUSTOM_STYPE_LIST");
-    std::string config_message_limit = getLayerOption(message_limit.c_str());
-    std::string env_message_limit = GetEnvironment("VK_LAYER_DUPLICATE_MESSAGE_LIMIT");
-    std::string config_fine_grained_locking = getLayerOption(fine_grained_locking.c_str());
-    std::string env_fine_grained_locking = GetEnvironment("VK_LAYER_FINE_GRAINED_LOCKING");
+    const bool use_fine_grained_settings = disables.empty() && enables.empty();
 
-#if defined(_WIN32)
-    std::string env_delimiter = ";";
-#else
-    std::string env_delimiter = ":";
-#endif
-    // Process layer enables and disable settings
-    SetLocalEnableSetting(list_of_config_enables, ",", settings_data->enables);
-    SetLocalEnableSetting(list_of_env_enables, env_delimiter, settings_data->enables);
-    SetLocalDisableSetting(list_of_config_disables, ",", settings_data->disables);
-    SetLocalDisableSetting(list_of_env_disables, env_delimiter, settings_data->disables);
-    // Process message filter ID list
-    CreateFilterMessageIdList(list_of_config_filter_ids, ",", settings_data->message_filter_list);
-    CreateFilterMessageIdList(list_of_env_filter_ids, env_delimiter, settings_data->message_filter_list);
-    // Process custom stype struct list
-    SetCustomStypeInfo(list_of_config_stypes, ",");
-    SetCustomStypeInfo(list_of_env_stypes, env_delimiter);
-    // Process message limit
-    uint32_t config_limit_setting = SetMessageDuplicateLimit(config_message_limit, env_message_limit);
-    if (config_limit_setting != 0) {
-        *settings_data->duplicate_message_limit = config_limit_setting;
+    // Only read the legacy enables flags when used, not their replacement.
+    // Avoid Android C.I. performance regression from reading Android env variables
+    if (use_fine_grained_settings) {
+        SetValidationSetting(layer_setting_set, settings_data->enables, best_practices, SETTING_VALIDATE_BEST_PRACTICES);
+        SetValidationSetting(layer_setting_set, settings_data->enables, vendor_specific_arm, SETTING_VALIDATE_BEST_PRACTICES_ARM);
+        SetValidationSetting(layer_setting_set, settings_data->enables, vendor_specific_amd, SETTING_VALIDATE_BEST_PRACTICES_AMD);
+        SetValidationSetting(layer_setting_set, settings_data->enables, vendor_specific_img, SETTING_VALIDATE_BEST_PRACTICES_IMG);
+        SetValidationSetting(layer_setting_set, settings_data->enables, vendor_specific_nvidia,
+                             SETTING_VALIDATE_BEST_PRACTICES_NVIDIA);
+        SetValidationSetting(layer_setting_set, settings_data->enables, sync_validation, SETTING_VALIDATE_SYNC);
+
+        if (vkuHasLayerSetting(layer_setting_set, SETTING_VALIDATE_GPU_BASED)) {
+            std::string setting_value;
+            vkuGetLayerSettingValue(layer_setting_set, SETTING_VALIDATE_GPU_BASED, setting_value);
+            settings_data->enables[gpu_validation] = setting_value == "GPU_BASED_GPU_ASSISTED";
+            settings_data->enables[debug_printf_validation] = setting_value == "GPU_BASED_DEBUG_PRINTF";
+        }
+
+        SetValidationSetting(layer_setting_set, settings_data->enables, gpu_validation_reserve_binding_slot,
+                             SETTING_RESERVE_BINDING_SLOT);
     }
-    *settings_data->fine_grained_locking = SetBool(config_fine_grained_locking, env_fine_grained_locking, true);
+
+    // Only read the legacy disables flags when used, not their replacement.
+    // Avoid Android C.I. performance regression from reading Android env variables
+    if (use_fine_grained_settings) {
+        SetValidationSetting(layer_setting_set, settings_data->disables, stateless_checks, SETTING_STATELESS_PARAM);
+        SetValidationSetting(layer_setting_set, settings_data->disables, thread_safety, SETTING_THREAD_SAFETY);
+        SetValidationSetting(layer_setting_set, settings_data->disables, core_checks, SETTING_VALIDATE_CORE);
+        SetValidationSetting(layer_setting_set, settings_data->disables, command_buffer_state, SETTING_CHECK_COMMAND_BUFFER);
+        SetValidationSetting(layer_setting_set, settings_data->disables, object_in_use, SETTING_CHECK_OBJECT_IN_USE);
+        SetValidationSetting(layer_setting_set, settings_data->disables, query_validation, SETTING_CHECK_QUERY);
+        SetValidationSetting(layer_setting_set, settings_data->disables, image_layout_validation, SETTING_CHECK_IMAGE_LAYOUT);
+        SetValidationSetting(layer_setting_set, settings_data->disables, handle_wrapping, SETTING_UNIQUE_HANDLES);
+        SetValidationSetting(layer_setting_set, settings_data->disables, object_tracking, SETTING_OBJECT_LIFETIME);
+        SetValidationSetting(layer_setting_set, settings_data->disables, shader_validation, SETTING_CHECK_SHADERS);
+        SetValidationSetting(layer_setting_set, settings_data->disables, shader_validation_caching, SETTING_CHECK_SHADERS_CACHING);
+        SetValidationSetting(layer_setting_set, settings_data->disables, sync_validation_queue_submit,
+                             SETTING_VALIDATE_SYNC_QUEUE_SUBMIT);
+    }
+
+    vkuDestroyLayerSettingSet(layer_setting_set, nullptr);
 }

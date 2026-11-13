@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,12 @@
 #include <sstream>
 #include <thread>
 
+#include "platform/base/span.h"
 #include "util/osp_logging.h"
 #include "util/std_util.h"
 #include "util/trace_logging.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 namespace {
 // The av_err2str macro uses a compound literal, which is a C99-only feature.
@@ -46,14 +46,14 @@ void Decoder::Buffer::Resize(int new_size) {
   memset(buffer_.data() + new_size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
 }
 
-absl::Span<const uint8_t> Decoder::Buffer::GetSpan() const {
-  return absl::Span<const uint8_t>(
-      buffer_.data(), buffer_.size() - AV_INPUT_BUFFER_PADDING_SIZE);
+ByteView Decoder::Buffer::AsByteView() const {
+  ByteView view(buffer_.data(), buffer_.size() - AV_INPUT_BUFFER_PADDING_SIZE);
+  return view;
 }
 
-absl::Span<uint8_t> Decoder::Buffer::GetSpan() {
-  return absl::Span<uint8_t>(buffer_.data(),
-                             buffer_.size() - AV_INPUT_BUFFER_PADDING_SIZE);
+ByteBuffer Decoder::Buffer::AsByteBuffer() {
+  return ByteBuffer(buffer_.data(),
+                    buffer_.size() - AV_INPUT_BUFFER_PADDING_SIZE);
 }
 
 Decoder::Client::Client() = default;
@@ -78,7 +78,7 @@ void Decoder::Decode(FrameId frame_id, const Decoder::Buffer& buffer) {
 
   // Parse the buffer for the required metadata and the packet to send to the
   // decoder.
-  const absl::Span<const uint8_t> input = buffer.GetSpan();
+  ByteView input = buffer.AsByteView();
   const int bytes_consumed = av_parser_parse2(
       parser_.get(), context_.get(), &packet_->data, &packet_->size,
       input.data(), input.size(), AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
@@ -240,5 +240,4 @@ void Decoder::OnError(const char* what, int av_errnum, FrameId frame_id) {
   }
 }
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

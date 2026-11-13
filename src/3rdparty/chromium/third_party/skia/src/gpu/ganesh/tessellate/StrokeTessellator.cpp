@@ -9,6 +9,7 @@
 
 #include "src/core/SkGeometry.h"
 #include "src/core/SkPathPriv.h"
+#include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrMeshDrawTarget.h"
 #include "src/gpu/ganesh/GrOpFlushState.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
@@ -17,7 +18,7 @@
 #include "src/gpu/tessellate/StrokeIterator.h"
 #include "src/gpu/tessellate/WangsFormula.h"
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 namespace {
 
@@ -190,4 +191,4 @@ void StrokeTessellator::draw(GrOpFlushState* flushState) const {
     }
 }
 
-}  // namespace skgpu::v1
+}  // namespace skgpu::ganesh

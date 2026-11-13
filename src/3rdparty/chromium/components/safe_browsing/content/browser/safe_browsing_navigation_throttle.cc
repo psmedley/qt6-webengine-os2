@@ -58,15 +58,11 @@ SafeBrowsingNavigationThrottle::WillFailRequest() {
     // from BaseUIManager::DisplayBlockingPage.
     DCHECK(handle->IsInPrimaryMainFrame() ||
            handle->IsInPrerenderedMainFrame());
-    SafeBrowsingBlockingPage* blocking_page =
-        manager_->blocking_page_factory()->CreateSafeBrowsingPage(
-            manager_, handle->GetWebContents(), handle->GetURL(), {resource},
-            true);
-    manager_->ForwardSecurityInterstitialShownExtensionEventToEmbedder(
-        handle->GetWebContents(), handle->GetURL(),
-        SafeBrowsingUIManager::GetThreatTypeStringForInterstitial(
-            resource.threat_type),
-        /*net_error_code=*/0);
+
+    security_interstitials::SecurityInterstitialPage* blocking_page =
+        manager_->CreateBlockingPage(handle->GetWebContents(), handle->GetURL(),
+                                     {resource},
+                                     /*forward_extension_event=*/true);
     std::string error_page_content = blocking_page->GetHTMLContents();
     security_interstitials::SecurityInterstitialTabHelper::
         AssociateBlockingPage(handle, base::WrapUnique(blocking_page));

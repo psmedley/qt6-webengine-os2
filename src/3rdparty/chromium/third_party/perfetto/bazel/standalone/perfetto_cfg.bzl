@@ -40,6 +40,10 @@ PERFETTO_CONFIG = struct(
         # internal builds.
         version_header = ["//:cc_perfetto_version_header"],
 
+        # Target exposing platform-specific functionality for base. This is
+        # overriden in Google internal builds.
+        base_platform = ["//:perfetto_base_default_platform"],
+
         zlib = ["@perfetto_dep_zlib//:zlib"],
         jsoncpp = ["@perfetto_dep_jsoncpp//:jsoncpp"],
         linenoise = ["@perfetto_dep_linenoise//:linenoise"],
@@ -124,5 +128,12 @@ PERFETTO_CONFIG = struct(
         py_proto_library = None,
 
         go_proto_library = None,
+
+        jspb_proto_library = None,
     ),
+
+    # The default copts which we use to compile C++ code.
+    default_copts = [
+        "-std=c++17",
+    ]
 )

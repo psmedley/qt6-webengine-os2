@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qwebengineurlschemehandler.h"
 
@@ -50,7 +51,7 @@ QT_BEGIN_NAMESPACE
             const QUrl url = job->requestUrl();
 
             if (isValidUrl(url)) {
-                if (method == QByteArrayLiteral("GET")) {
+                if (method == QByteArrayLiteral("GET"))
                     job->reply(QByteArrayLiteral("text/html"), makeReply(url));
                 else // Unsupported method
                     job->fail(QWebEngineUrlRequestJob::RequestDenied);

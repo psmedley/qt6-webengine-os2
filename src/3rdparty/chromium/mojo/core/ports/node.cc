@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/stack_container.h"
+#include <optional>
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -23,7 +23,7 @@
 #include "mojo/core/ports/event.h"
 #include "mojo/core/ports/node_delegate.h"
 #include "mojo/core/ports/port_locker.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/abseil-cpp/absl/container/inlined_vector.h"
 
 #if !BUILDFLAG(IS_NACL)
 #include "crypto/random.h"
@@ -598,8 +598,7 @@ int Node::MergePorts(const PortRef& port_ref,
                      const PortName& destination_port_name) {
   PortName new_port_name;
   Event::PortDescriptor new_port_descriptor;
-  PendingUpdatePreviousPeer pending_update_event = {};
-  pending_update_event.from_port = port_ref.name();
+  PendingUpdatePreviousPeer pending_update_event{.from_port = port_ref.name()};
   {
     // Must be held for ConvertToProxy.
     PortLocker::AssertNoPortsLockedOnCurrentThread();
@@ -1291,7 +1290,7 @@ int Node::MergePortsInternal(const PortRef& port0_ref,
     PortLocker::AssertNoPortsLockedOnCurrentThread();
     base::ReleasableAutoLock ports_locker(&ports_lock_);
 
-    absl::optional<PortLocker> locker(absl::in_place, port_refs, 2);
+    std::optional<PortLocker> locker(std::in_place, port_refs, 2);
     auto* port0 = locker->GetPort(port0_ref);
     auto* port1 = locker->GetPort(port1_ref);
 
@@ -1329,19 +1328,19 @@ int Node::MergePortsInternal(const PortRef& port0_ref,
     }
 
     pending_update_events[0] = {
-        /*.receiver =*/ port0->peer_node_name,
-        /*.port =*/ port0->peer_port_name,
-        /*.from_port =*/ port0_ref.name(),
-        /*.sequence_num =*/ port0->next_control_sequence_num_to_send++,
-        /*.new_prev_node =*/ name_,
-        /*.new_prev_port =*/ port1_ref.name()};
+        .receiver = port0->peer_node_name,
+        .port = port0->peer_port_name,
+        .from_port = port0_ref.name(),
+        .sequence_num = port0->next_control_sequence_num_to_send++,
+        .new_prev_node = name_,
+        .new_prev_port = port1_ref.name()};
     pending_update_events[1] = {
-        /*.receiver =*/ port1->peer_node_name,
-        /*.port =*/ port1->peer_port_name,
-        /*.from_port =*/ port1_ref.name(),
-        /*.sequence_num =*/ port1->next_control_sequence_num_to_send++,
-        /*.new_prev_node =*/ name_,
-        /*.new_prev_port =*/ port0_ref.name()};
+        .receiver = port1->peer_node_name,
+        .port = port1->peer_port_name,
+        .from_port = port1_ref.name(),
+        .sequence_num = port1->next_control_sequence_num_to_send++,
+        .new_prev_node = name_,
+        .new_prev_port = port0_ref.name()};
 
     // Swap the ports' peer information and switch them both to proxying mode.
     SwapPortPeers(port0_ref.name(), port0, port1_ref.name(), port1);
@@ -1544,10 +1543,10 @@ int Node::PrepareToForwardUserMessage(const PortRef& forwarding_port_ref,
     base::AutoLock ports_locker(ports_lock_);
 
     // Simultaneously lock the forwarding port as well as all attached ports.
-    base::StackVector<PortRef, 4> attached_port_refs;
-    base::StackVector<const PortRef*, 5> ports_to_lock;
-    attached_port_refs.container().resize(message->num_ports());
-    ports_to_lock.container().resize(message->num_ports() + 1);
+    absl::InlinedVector<PortRef, 4> attached_port_refs;
+    absl::InlinedVector<const PortRef*, 5> ports_to_lock;
+    attached_port_refs.resize(message->num_ports());
+    ports_to_lock.resize(message->num_ports() + 1);
     ports_to_lock[0] = &forwarding_port_ref;
     for (size_t i = 0; i < message->num_ports(); ++i) {
       const PortName& attached_port_name = message->ports()[i];
@@ -1556,8 +1555,7 @@ int Node::PrepareToForwardUserMessage(const PortRef& forwarding_port_ref,
       attached_port_refs[i] = PortRef(attached_port_name, iter->second);
       ports_to_lock[i + 1] = &attached_port_refs[i];
     }
-    PortLocker locker(ports_to_lock.container().data(),
-                      ports_to_lock.container().size());
+    PortLocker locker(ports_to_lock.data(), ports_to_lock.size());
     auto* forwarding_port = locker.GetPort(forwarding_port_ref);
 
     if (forwarding_port->peer_node_name != target_node_name) {
@@ -1594,7 +1592,7 @@ int Node::PrepareToForwardUserMessage(const PortRef& forwarding_port_ref,
       // Sanity check to make sure we can actually send all the attached ports.
       // They must all be in the |kReceiving| state and must not be the sender's
       // own peer.
-      DCHECK_EQ(message->num_ports(), attached_port_refs.container().size());
+      DCHECK_EQ(message->num_ports(), attached_port_refs.size());
       for (size_t i = 0; i < message->num_ports(); ++i) {
         auto* attached_port = locker.GetPort(attached_port_refs[i]);
         int error = OK;
@@ -1621,8 +1619,8 @@ int Node::PrepareToForwardUserMessage(const PortRef& forwarding_port_ref,
         Event::PortDescriptor* port_descriptors = message->port_descriptors();
         for (size_t i = 0; i < message->num_ports(); ++i) {
           auto* port = locker.GetPort(attached_port_refs[i]);
-          PendingUpdatePreviousPeer update_event = {};
-          update_event.from_port = attached_port_refs[i].name();
+          PendingUpdatePreviousPeer update_event = {
+              .from_port = attached_port_refs[i].name()};
           ConvertToProxy(port, target_node_name, message->ports() + i,
                          port_descriptors + i, &update_event);
           peer_update_events.push(update_event);
@@ -1810,12 +1808,12 @@ void Node::TryRemoveProxy(const PortRef& port_ref) {
       }
       // Tell the peer_node to accept messages from prev_node from now.
       pending_update_event = {
-          /*.receiver =*/ port->peer_node_name,
-          /*.port =*/ port->peer_port_name,
-          /*.from_port =*/ port_ref.name(),
-          /*.sequence_num =*/ port->next_control_sequence_num_to_send++,
-          /*.new_prev_node =*/ port->prev_node_name,
-          /*.new_prev_port =*/ port->prev_port_name};
+          .receiver = port->peer_node_name,
+          .port = port->peer_port_name,
+          .from_port = port_ref.name(),
+          .sequence_num = port->next_control_sequence_num_to_send++,
+          .new_prev_node = port->prev_node_name,
+          .new_prev_port = port->prev_port_name};
     } else {
       DVLOG(2) << "Cannot remove port " << port_ref.name() << "@" << name_
                << " now; waiting for more messages";

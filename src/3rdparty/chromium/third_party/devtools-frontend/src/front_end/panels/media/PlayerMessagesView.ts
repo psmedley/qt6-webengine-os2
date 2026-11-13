@@ -4,68 +4,68 @@
 
 import type * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import type * as Protocol from '../../generated/protocol.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import playerMessagesViewStyles from './playerMessagesView.css.js';
 
-import type * as Protocol from '../../generated/protocol.js';
-
 const UIStrings = {
   /**
-  *@description A context menu item in the Console View of the Console panel
-  */
+   *@description A context menu item in the Console View of the Console panel
+   */
   default: 'Default',
   /**
-  *@description Text in Network Throttling Selector of the Network panel
-  */
+   *@description Text in Network Throttling Selector of the Network panel
+   */
   custom: 'Custom',
   /**
-  *@description Text for everything
-  */
+   *@description Text for everything
+   */
   all: 'All',
   /**
-  *@description Text for errors
-  */
+   *@description Text for errors
+   */
   error: 'Error',
   /**
-  *@description Text to indicate an item is a warning
-  */
+   *@description Text to indicate an item is a warning
+   */
   warning: 'Warning',
   /**
-  *@description Sdk console message message level info of level Labels in Console View of the Console panel
-  */
+   *@description Sdk console message message level info of level Labels in Console View of the Console panel
+   */
   info: 'Info',
   /**
-  *@description Debug log level
-  */
+   *@description Debug log level
+   */
   debug: 'Debug',
   /**
-  *@description Label for selecting between the set of log levels to show.
-  */
+   *@description Label for selecting between the set of log levels to show.
+   */
   logLevel: 'Log level:',
   /**
-  *@description Default text for user-text-entry for searching log messages.
-  */
+   *@description Default text for user-text-entry for searching log messages.
+   */
   filterLogMessages: 'Filter log messages',
   /**
-  *@description The label for the group name that this error belongs to.
-  */
+   *@description The label for the group name that this error belongs to.
+   */
   errorGroupLabel: 'Error Group:',
   /**
-  *@description The label for the numeric code associated with this error.
-  */
+   *@description The label for the numeric code associated with this error.
+   */
   errorCodeLabel: 'Error Code:',
   /**
-  *@description The label for extra data associated with an error.
-  */
+   *@description The label for extra data associated with an error.
+   */
   errorDataLabel: 'Data:',
   /**
-  *@description The label for the stacktrace associated with the error.
-  */
+   *@description The label for the stacktrace associated with the error.
+   */
   errorStackLabel: 'Stacktrace:',
   /**
-  *@description The label for a root cause error associated with this error.
-  */
+   *@description The label for a root cause error associated with this error.
+   */
   errorCauseLabel: 'Caused by:',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/media/PlayerMessagesView.ts', UIStrings);
@@ -257,6 +257,8 @@ export class PlayerMessagesView extends UI.Widget.VBox {
   constructor() {
     super();
 
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('messages')}`);
+
     this.headerPanel = this.contentElement.createChild('div', 'media-messages-header');
     this.bodyPanel = this.contentElement.createChild('div', 'media-messages-body');
 
@@ -274,7 +276,7 @@ export class PlayerMessagesView extends UI.Widget.VBox {
   private createDropdown(): UI.Toolbar.ToolbarItem {
     const items = new UI.ListModel.ListModel<SelectableLevel>();
     this.messageLevelSelector = new MessageLevelSelector(items, this);
-    const dropDown = new UI.SoftDropDown.SoftDropDown<SelectableLevel>(items, this.messageLevelSelector);
+    const dropDown = new UI.SoftDropDown.SoftDropDown<SelectableLevel>(items, this.messageLevelSelector, 'log-level');
     dropDown.setRowHeight(18);
 
     this.messageLevelSelector.populate();
@@ -284,6 +286,8 @@ export class PlayerMessagesView extends UI.Widget.VBox {
     dropDownItem.element.classList.add('toolbar-has-dropdown');
     dropDownItem.setEnabled(true);
     dropDownItem.setTitle(this.messageLevelSelector.defaultTitle());
+    UI.ARIAUtils.setLabel(
+        dropDownItem.element, `${i18nString(UIStrings.logLevel)} ${this.messageLevelSelector.defaultTitle()}`);
     return dropDownItem;
   }
 
@@ -394,7 +398,7 @@ export class PlayerMessagesView extends UI.Widget.VBox {
     container.appendChild(this.errorToDiv(error));
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([playerMessagesViewStyles]);
   }

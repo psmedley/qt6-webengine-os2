@@ -7,6 +7,7 @@ from recipe_engine.recipe_api import Property
 
 DEPS = [
     'recipe_engine/buildbucket',
+    'recipe_engine/cas',
     'recipe_engine/cipd',
     'recipe_engine/context',
     'recipe_engine/file',
@@ -14,7 +15,6 @@ DEPS = [
     'recipe_engine/path',
     'recipe_engine/platform',
     'recipe_engine/properties',
-    'recipe_engine/python',
     'recipe_engine/raw_io',
     'recipe_engine/step',
     'target',
@@ -26,26 +26,19 @@ PROPERTIES = {
     'repository': Property(kind=str, default='https://gn.googlesource.com/gn'),
 }
 
-# On select platforms, link the GN executable against rpmalloc for a small 10% speed boost.
-RPMALLOC_GIT_URL = 'https://fuchsia.googlesource.com/third_party/github.com/mjansson/rpmalloc'
-RPMALLOC_REVISION = 'f4b7c52c858675f732a76bd1c73447e0fcf84b1e'
-
-# Used to convert os and arch strings to rpmalloc format
-RPMALLOC_MAP = {
-    'amd64': 'x86-64',
-    'mac': 'macos',
-}
-
+# On select platforms, link the GN executable against jemalloc for a drastic speed boost.
+JEMALLOC_GIT_URL = 'https://fuchsia.googlesource.com/third_party/github.com/jemalloc/jemalloc.git'
+JEMALLOC_TAG = '5.3.0'
 
 def _get_libcxx_include_path(api):
   # Run the preprocessor with an empty input and print all include paths.
   lines = api.step(
       'xcrun toolchain', [
           'xcrun', '--toolchain', 'clang', 'clang++', '-xc++', '-fsyntax-only',
-          '-Wp,-v', '-'
+          '-Wp,-v', '/dev/null'
       ],
-      stderr=api.raw_io.output(name='toolchain', add_output_log=True),
-      step_test_data=lambda: api.raw_io.test_api.stream_output(
+      stderr=api.raw_io.output_text(name='toolchain', add_output_log=True),
+      step_test_data=lambda: api.raw_io.test_api.stream_output_text(
           str(api.macos_sdk.sdk_dir.join('include', 'c++', 'v1')),
           stream='stderr')).stderr.splitlines()
   # Iterate over all include paths and look for the SDK libc++ one.
@@ -60,7 +53,10 @@ def _get_libcxx_include_path(api):
 def _get_compilation_environment(api, target, cipd_dir):
   if target.is_linux:
     triple = '--target=%s' % target.triple
-    sysroot = '--sysroot=%s' % cipd_dir.join('sysroot')
+    if target.triple == 'riscv64-linux-gnu':
+      sysroot = '--sysroot=%s' % cipd_dir.join('sysroot-focal')
+    else:
+      sysroot = '--sysroot=%s' % cipd_dir.join('sysroot')
     env = {
         'CC': cipd_dir.join('bin', 'clang'),
         'CXX': cipd_dir.join('bin', 'clang++'),
@@ -72,8 +68,8 @@ def _get_compilation_environment(api, target, cipd_dir):
     triple = '--target=%s' % target.triple
     sysroot = '--sysroot=%s' % api.step(
         'xcrun sdk-path', ['xcrun', '--show-sdk-path'],
-        stdout=api.raw_io.output(name='sdk-path', add_output_log=True),
-        step_test_data=lambda: api.raw_io.test_api.stream_output(
+        stdout=api.raw_io.output_text(name='sdk-path', add_output_log=True),
+        step_test_data=lambda: api.raw_io.test_api.stream_output_text(
             '/some/xcode/path')).stdout.strip()
     stdlib = cipd_dir.join('lib', 'libc++.a')
     cxx_include = _get_libcxx_include_path(api)
@@ -102,7 +98,7 @@ def _get_compilation_environment(api, target, cipd_dir):
 def RunSteps(api, repository):
   src_dir = api.path['start_dir'].join('gn')
 
-  # TODO: Verify that building and linking rpmalloc works on OS X and Windows as
+  # TODO: Verify that building and linking jemalloc works on OS X and Windows as
   # well.
   with api.step.nest('git'), api.context(infra_steps=True):
     api.step('init', ['git', 'init', src_dir])
@@ -117,7 +113,7 @@ def RunSteps(api, repository):
       api.step('checkout', ['git', 'checkout', 'FETCH_HEAD'])
       revision = api.step(
           'rev-parse', ['git', 'rev-parse', 'HEAD'],
-          stdout=api.raw_io.output()).stdout.strip()
+          stdout=api.raw_io.output_text()).stdout.strip()
       for change in build_input.gerrit_changes:
         api.step('fetch %s/%s' % (change.change, change.patchset), [
             'git', 'fetch', repository,
@@ -137,11 +133,19 @@ def RunSteps(api, repository):
       pkgs.add_package('fuchsia/third_party/sysroot/linux',
                        'git_revision:c912d089c3d46d8982fdef76a50514cca79b6132',
                        'sysroot')
+      # RISCV64 support starts in focal.
+      pkgs.add_package('fuchsia/third_party/sysroot/focal',
+                       'git_revision:fa7a5a9710540f30ff98ae48b62f2cdf72ed2acd',
+                       'sysroot-focal')
     api.cipd.ensure(cipd_dir, pkgs)
 
   def release_targets():
     if api.platform.is_linux:
-      return [api.target('linux-amd64'), api.target('linux-arm64')]
+      return [
+          api.target('linux-amd64'),
+          api.target('linux-arm64'),
+          api.target('linux-riscv64')
+      ]
     elif api.platform.is_mac:
       return [api.target('mac-amd64'), api.target('mac-arm64')]
     else:
@@ -159,69 +163,88 @@ def RunSteps(api, repository):
           'args': ['--use-lto', '--use-icf'],
           'targets': release_targets(),
           # TODO: Enable this for OS X and Windows.
-          'use_rpmalloc': api.platform.is_linux,
+          'use_jemalloc': api.platform.is_linux,
       },
   ]
 
-  # True if any config uses rpmalloc.
-  use_rpmalloc = any(c.get('use_rpmalloc', False) for c in configs)
+  use_jemalloc = any(c.get('use_jemalloc', False) for c in configs)
 
   with api.macos_sdk(), api.windows_sdk():
-    # Build the rpmalloc static libraries if needed.
-    if use_rpmalloc:
+    # Build the jemalloc static library if needed.
+    if use_jemalloc:
       # Maps a target.platform string to the location of the corresponding
-      # rpmalloc static library.
-      rpmalloc_static_libs = {}
+      # jemalloc static library.
+      jemalloc_static_libs = {}
 
       # Get the list of all target platforms that are listed in `configs`
       # above. Note that this is a list of Target instances, some of them
       # may refer to the same platform string (e.g. linux-amd64).
       #
-      # For each platform, a version of rpmalloc will be built if necessary,
+      # For each platform, a version of jemalloc will be built if necessary,
       # but doing this properly requires having a valid target instance to
       # call _get_compilation_environment. So create a { platform -> Target }
       # map to do that later.
       all_config_platforms = {}
       for c in configs:
-        if not c.get('use_rpmalloc', False):
+        if not c.get('use_jemalloc', False):
           continue
         for t in c['targets']:
           if t.platform not in all_config_platforms:
             all_config_platforms[t.platform] = t
 
-      rpmalloc_src_dir = api.path['start_dir'].join('rpmalloc')
-      with api.step.nest('rpmalloc'):
-        api.step('init', ['git', 'init', rpmalloc_src_dir])
-        with api.context(cwd=rpmalloc_src_dir, infra_steps=True):
+      jemalloc_src_dir = api.path['start_dir'].join('jemalloc')
+      with api.step.nest('jemalloc'):
+        api.step('init', ['git', 'init', jemalloc_src_dir])
+        with api.context(cwd=jemalloc_src_dir, infra_steps=True):
           api.step(
               'fetch',
-              ['git', 'fetch', '--tags', RPMALLOC_GIT_URL, RPMALLOC_REVISION])
+              ['git', 'fetch', JEMALLOC_GIT_URL, 'refs/tags/' + JEMALLOC_TAG, '--depth=1'])
           api.step('checkout', ['git', 'checkout', 'FETCH_HEAD'])
+          api.step('autoconf', ['autoconf'])
 
         for platform in all_config_platforms:
-          # Convert target architecture and os to rpmalloc format.
-          rpmalloc_os, rpmalloc_arch = platform.split('-')
-          rpmalloc_os = RPMALLOC_MAP.get(rpmalloc_os, rpmalloc_os)
-          rpmalloc_arch = RPMALLOC_MAP.get(rpmalloc_arch, rpmalloc_arch)
+          # Convert target architecture and os to jemalloc format.
+          jemalloc_build_dir = jemalloc_src_dir.join('build-' + platform)
 
-          env = _get_compilation_environment(api,
-                                             all_config_platforms[platform],
-                                             cipd_dir)
-          with api.step.nest('build rpmalloc-' + platform), api.context(
-              env=env, cwd=rpmalloc_src_dir):
-            api.python(
+          target = all_config_platforms[platform]
+          host_target = api.target.host
+          env = _get_compilation_environment(api, target, cipd_dir)
+
+          # Prepare environment for configuring and building jemalloc
+          #
+          # CFLAGS: -Wno-error is required to avoid warnings that break
+          #         compilation with Clang 17.
+          #
+          # CXXFLAGS: Required to pass the right --target=<target> argument
+          #           to the C++ compiler when building jemalloc_cpp.o,
+          #           otherwise that file will not be properly cross-compiled.
+          #
+          # Note that -flto is never passed to CFLAGS/CXXFLAGS/LDFLAGS, since
+          # benchmarking shows that this leads to no performance difference
+          # for the resulting GN binary.
+          #
+          env['CFLAGS'] += " -Wno-error"
+          env['CXXFLAGS'] = env['CFLAGS']
+
+          api.step('prepare %s build' % platform, ['mkdir', '-p', jemalloc_build_dir])
+
+          with api.step.nest('build jemalloc-' + platform), api.context(
+              env=env, cwd=jemalloc_build_dir):
+            api.step(
                 'configure',
-                rpmalloc_src_dir.join('configure.py'),
-                args=['-c', 'release', '-a', rpmalloc_arch, '--lto'])
+                [
+                  '../configure',
+                  '--build=' + host_target.triple,
+                  '--host=' + target.triple,
+                  '--disable-shared',
+                  '--enable-static',
+                  '--disable-syscall',
+                  '--disable-stats',
+                ])
+            api.step('build', ['make', '-j%d' % api.platform.cpu_count, 'build_lib_static'])
+            jemalloc_static_lib = jemalloc_build_dir.join('lib', 'libjemalloc.a')
 
-            # NOTE: Only build the static library.
-            rpmalloc_static_lib = api.path.join('lib', rpmalloc_os, 'release',
-                                                rpmalloc_arch,
-                                                'librpmallocwrap.a')
-            api.step('ninja', [cipd_dir.join('ninja'), rpmalloc_static_lib])
-
-          rpmalloc_static_libs[platform] = rpmalloc_src_dir.join(
-              rpmalloc_static_lib)
+          jemalloc_static_libs[platform]  = jemalloc_static_lib
 
     for config in configs:
       with api.step.nest(config['name']):
@@ -230,12 +253,13 @@ def RunSteps(api, repository):
           with api.step.nest(target.platform), api.context(
               env=env, cwd=src_dir):
             args = config['args']
-            if config.get('use_rpmalloc', False):
+            if config.get('use_jemalloc', False):
               args = args[:] + [
-                  '--link-lib=%s' % rpmalloc_static_libs[target.platform]
+                  '--link-lib=%s' % jemalloc_static_libs[target.platform]
               ]
 
-            api.python('generate', src_dir.join('build', 'gen.py'), args=args)
+            api.step('generate',
+                     ['python3', '-u', src_dir.join('build', 'gen.py')] + args)
 
             # Windows requires the environment modifications when building too.
             api.step('build',
@@ -245,15 +269,19 @@ def RunSteps(api, repository):
             if target.is_host:
               api.step('test', [src_dir.join('out', 'gn_unittests')])
 
-            if build_input.gerrit_changes:
-              continue
-
             if config['name'] != 'release':
               continue
 
             with api.step.nest('upload'):
-              cipd_pkg_name = 'gn/gn/%s' % target.platform
               gn = 'gn' + ('.exe' if target.is_win else '')
+
+              if build_input.gerrit_changes:
+                # Upload to CAS from CQ.
+                api.cas.archive('upload binary to CAS', src_dir.join('out'),
+                                src_dir.join('out', gn))
+                continue
+
+              cipd_pkg_name = 'gn/gn/%s' % target.platform
 
               pkg_def = api.cipd.PackageDefinition(
                   package_name=cipd_pkg_name,
@@ -306,7 +334,7 @@ def GenTests(api):
       git_repo='gn.googlesource.com/gn',
       revision='a' * 40,
   ) + api.step_data(
-      'git.rev-parse', api.raw_io.stream_output('a' * 40)
+      'git.rev-parse', api.raw_io.stream_output_text('a' * 40)
   ) + api.step_data(
       'release.linux-amd64.upload.cipd search gn/gn/linux-amd64 git_revision:' +
       'a' * 40,
@@ -318,7 +346,7 @@ def GenTests(api):
       git_repo='gn.googlesource.com/gn',
       revision='a' * 40,
   ) + api.step_data(
-      'git.rev-parse', api.raw_io.stream_output('a' * 40)
+      'git.rev-parse', api.raw_io.stream_output_text('a' * 40)
   ) + api.step_data(
       'release.linux-amd64.upload.cipd search gn/gn/linux-amd64 git_revision:' +
       'a' * 40, api.cipd.example_search('gn/gn/linux-amd64', [])))

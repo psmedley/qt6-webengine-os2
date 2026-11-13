@@ -19,6 +19,7 @@
  */
 
 #include "libavutil/channel_layout.h"
+#include "libavutil/emms.h"
 #include "dcaadpcm.h"
 #include "dcadec.h"
 #include "dcadata.h"
@@ -2235,7 +2236,8 @@ static int filter_frame_float(DCACoreDecoder *s, AVFrame *frame)
         // Filter bank reconstruction
         s->dcadsp->sub_qmf_float[x96_synth](
             &s->synth,
-            &s->imdct[x96_synth],
+            s->imdct[x96_synth],
+            s->imdct_fn[x96_synth],
             output_samples[spkr],
             s->subband_samples[ch],
             ch < x96_nchannels ? s->x96_subband_samples[ch] : NULL,
@@ -2385,13 +2387,13 @@ int ff_dca_core_filter_frame(DCACoreDecoder *s, AVFrame *frame)
 
     // Set profile, bit rate, etc
     if (s->ext_audio_mask & DCA_EXSS_MASK)
-        avctx->profile = FF_PROFILE_DTS_HD_HRA;
+        avctx->profile = AV_PROFILE_DTS_HD_HRA;
     else if (s->ext_audio_mask & (DCA_CSS_XXCH | DCA_CSS_XCH))
-        avctx->profile = FF_PROFILE_DTS_ES;
+        avctx->profile = AV_PROFILE_DTS_ES;
     else if (s->ext_audio_mask & DCA_CSS_X96)
-        avctx->profile = FF_PROFILE_DTS_96_24;
+        avctx->profile = AV_PROFILE_DTS_96_24;
     else
-        avctx->profile = FF_PROFILE_DTS;
+        avctx->profile = AV_PROFILE_DTS;
 
     if (s->bit_rate > 3 && !(s->ext_audio_mask & DCA_EXSS_MASK))
         avctx->bit_rate = s->bit_rate;
@@ -2424,16 +2426,24 @@ av_cold void ff_dca_core_flush(DCACoreDecoder *s)
 
 av_cold int ff_dca_core_init(DCACoreDecoder *s)
 {
+    int ret;
+    float scale = 1.0f;
+
     if (!(s->float_dsp = avpriv_float_dsp_alloc(0)))
         return -1;
     if (!(s->fixed_dsp = avpriv_alloc_fixed_dsp(0)))
         return -1;
 
     ff_dcadct_init(&s->dcadct);
-    if (ff_mdct_init(&s->imdct[0], 6, 1, 1.0) < 0)
-        return -1;
-    if (ff_mdct_init(&s->imdct[1], 7, 1, 1.0) < 0)
-        return -1;
+
+    if ((ret = av_tx_init(&s->imdct[0], &s->imdct_fn[0], AV_TX_FLOAT_MDCT,
+                          1, 32, &scale, 0)) < 0)
+        return ret;
+
+    if ((ret = av_tx_init(&s->imdct[1], &s->imdct_fn[1], AV_TX_FLOAT_MDCT,
+                          1, 64, &scale, 0)) < 0)
+        return ret;
+
     ff_synth_filter_init(&s->synth);
 
     s->x96_rand = 1;
@@ -2445,8 +2455,8 @@ av_cold void ff_dca_core_close(DCACoreDecoder *s)
     av_freep(&s->float_dsp);
     av_freep(&s->fixed_dsp);
 
-    ff_mdct_end(&s->imdct[0]);
-    ff_mdct_end(&s->imdct[1]);
+    av_tx_uninit(&s->imdct[0]);
+    av_tx_uninit(&s->imdct[1]);
 
     av_freep(&s->subband_buffer);
     s->subband_size = 0;

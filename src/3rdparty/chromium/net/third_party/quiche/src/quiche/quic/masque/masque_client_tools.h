@@ -5,6 +5,9 @@
 #ifndef QUICHE_QUIC_MASQUE_MASQUE_CLIENT_TOOLS_H_
 #define QUICHE_QUIC_MASQUE_MASQUE_CLIENT_TOOLS_H_
 
+#include <string>
+
+#include "quiche/quic/core/io/quic_event_loop.h"
 #include "quiche/quic/masque/masque_client.h"
 
 namespace quic {
@@ -17,7 +20,9 @@ namespace tools {
 bool SendEncapsulatedMasqueRequest(MasqueClient* masque_client,
                                    QuicEventLoop* event_loop,
                                    std::string url_string,
-                                   bool disable_certificate_verification);
+                                   bool disable_certificate_verification,
+                                   int address_family_for_lookup,
+                                   bool dns_on_client);
 
 }  // namespace tools
 }  // namespace quic

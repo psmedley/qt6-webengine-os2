@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,13 +31,11 @@ class CPDF_ObjectStream;
 class CPDF_ReadValidator;
 class CPDF_SecurityHandler;
 class CPDF_SyntaxParser;
+class IFX_ArchiveStream;
 class IFX_SeekableReadStream;
 
 class CPDF_Parser {
  public:
-  using ObjectType = CPDF_CrossRefTable::ObjectType;
-  using ObjectInfo = CPDF_CrossRefTable::ObjectInfo;
-
   class ParsedObjectsHolder : public CPDF_IndirectObjectHolder {
    public:
     virtual bool TryInit() = 0;
@@ -64,7 +62,7 @@ class CPDF_Parser {
   CPDF_Parser();
   ~CPDF_Parser();
 
-  Error StartParse(const RetainPtr<IFX_SeekableReadStream>& pFile,
+  Error StartParse(RetainPtr<IFX_SeekableReadStream> pFile,
                    const ByteString& password);
   Error StartLinearizedParse(RetainPtr<CPDF_ReadValidator> validator,
                              const ByteString& password);
@@ -78,6 +76,7 @@ class CPDF_Parser {
 
   const CPDF_Dictionary* GetTrailer() const;
   CPDF_Dictionary* GetMutableTrailerForTesting();
+  uint32_t GetTrailerObjectNumber() const;
 
   // Returns a new trailer which combines the last read trailer with the /Root
   // and /Info from previous ones.
@@ -85,7 +84,7 @@ class CPDF_Parser {
 
   FX_FILESIZE GetLastXRefOffset() const { return m_LastXRefOffset; }
 
-  uint32_t GetPermissions() const;
+  uint32_t GetPermissions(bool get_owner_perms) const;
   uint32_t GetRootObjNum() const;
   uint32_t GetInfoObjNum() const;
   RetainPtr<const CPDF_Array> GetIDArray() const;
@@ -109,6 +108,7 @@ class CPDF_Parser {
   RetainPtr<CPDF_Object> ParseIndirectObjectAt(FX_FILESIZE pos,
                                                uint32_t objnum);
 
+  FX_FILESIZE GetDocumentSize() const;
   uint32_t GetFirstPageNo() const;
   const CPDF_LinearizedHeader* GetLinearizedHeader() const {
     return m_pLinearized.get();
@@ -120,7 +120,8 @@ class CPDF_Parser {
 
   bool xref_table_rebuilt() const { return m_bXRefTableRebuilt; }
 
-  CPDF_SyntaxParser* GetSyntax() const { return m_pSyntax.get(); }
+  std::vector<unsigned int> GetTrailerEnds();
+  bool WriteToArchive(IFX_ArchiveStream* archive, FX_FILESIZE src_size);
 
   void SetLinearizedHeaderForTesting(
       std::unique_ptr<CPDF_LinearizedHeader> pLinearized);
@@ -139,15 +140,18 @@ class CPDF_Parser {
 
   struct CrossRefObjData {
     uint32_t obj_num = 0;
-    ObjectInfo info;
+    CPDF_CrossRefTable::ObjectInfo info;
   };
 
   bool LoadAllCrossRefV4(FX_FILESIZE xref_offset);
   bool LoadAllCrossRefV5(FX_FILESIZE xref_offset);
-  bool LoadCrossRefV5(FX_FILESIZE* pos, bool bMainXRef);
+  bool LoadCrossRefV5(FX_FILESIZE* pos,
+                      bool is_main_xref,
+                      bool overwrite_existing);
   void ProcessCrossRefV5Entry(pdfium::span<const uint8_t> entry_span,
                               pdfium::span<const uint32_t> field_widths,
-                              uint32_t obj_num);
+                              uint32_t obj_num,
+                              bool overwrite_existing);
   RetainPtr<CPDF_Dictionary> LoadTrailerV4();
   Error SetEncryptHandler();
   void ReleaseEncryptHandler();
@@ -155,7 +159,6 @@ class CPDF_Parser {
   bool LoadLinearizedAllCrossRefV5(FX_FILESIZE main_xref_offset);
   Error LoadLinearizedMainXRefTable();
   const CPDF_ObjectStream* GetObjectStream(uint32_t object_number);
-  void ShrinkObjectMap(uint32_t size);
   // A simple check whether the cross reference table matches with
   // the objects.
   bool VerifyCrossRefV4();
@@ -172,7 +175,7 @@ class CPDF_Parser {
   bool InitSyntaxParser(RetainPtr<CPDF_ReadValidator> validator);
   bool ParseFileVersion();
 
-  ObjectType GetObjectType(uint32_t objnum) const;
+  CPDF_CrossRefTable::ObjectType GetObjectType(uint32_t objnum) const;
 
   std::unique_ptr<CPDF_SyntaxParser> m_pSyntax;
   std::unique_ptr<ParsedObjectsHolder> m_pOwnedObjectsHolder;
@@ -186,7 +189,7 @@ class CPDF_Parser {
   // m_CrossRefTable must be destroyed after m_pSecurityHandler due to the
   // ownership of the ID array data.
   std::unique_ptr<CPDF_CrossRefTable> m_CrossRefTable;
-  FX_FILESIZE m_LastXRefOffset;
+  FX_FILESIZE m_LastXRefOffset = 0;
   ByteString m_Password;
   std::unique_ptr<CPDF_LinearizedHeader> m_pLinearized;
 

@@ -30,7 +30,6 @@ class SingleThreadTaskRunner;
 
 namespace blink {
 
-class ApplyConstraintsProcessor;
 class LocalFrame;
 
 // UserMediaClient handles requests coming from the Blink MediaDevices
@@ -49,14 +48,9 @@ class MODULES_EXPORT UserMediaClient
   // |frame| and its respective RenderFrame must outlive this instance.
   UserMediaClient(LocalFrame* frame,
                   scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-  UserMediaClient(LocalFrame* frame,
-                  UserMediaProcessor* user_media_processor,
-                  scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   UserMediaClient(const UserMediaClient&) = delete;
   UserMediaClient& operator=(const UserMediaClient&) = delete;
-
-  ~UserMediaClient() override;
 
   void RequestUserMedia(UserMediaRequest* user_media_request);
   void CancelUserMediaRequest(UserMediaRequest* user_media_request);
@@ -70,7 +64,7 @@ class MODULES_EXPORT UserMediaClient
 
   static UserMediaClient* From(LocalDOMWindow*);
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   void FocusCapturedSurface(const String& label, bool focus);
 #endif
 
@@ -88,6 +82,14 @@ class MODULES_EXPORT UserMediaClient
       base::UnguessableToken transfer_id,
       UserMediaProcessor::KeepDeviceAliveForTransferCallback keep_alive_cb);
 
+ protected:
+  // Production code forwards the main ctor to this one.
+  // Tests use this ctor directly.
+  UserMediaClient(LocalFrame* frame,
+                  UserMediaProcessor* user_media_processor,
+                  UserMediaProcessor* display_user_media_processor,
+                  scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
  private:
   class Request final : public GarbageCollected<Request> {
    public:
@@ -102,11 +104,13 @@ class MODULES_EXPORT UserMediaClient
 
     UserMediaRequest* MoveUserMediaRequest();
 
-    UserMediaRequest* user_media_request() const { return user_media_request_; }
-    blink::ApplyConstraintsRequest* apply_constraints_request() const {
-      return apply_constraints_request_;
+    UserMediaRequest* user_media_request() const {
+      return user_media_request_.Get();
     }
-    MediaStreamComponent* track_to_stop() const { return track_to_stop_; }
+    blink::ApplyConstraintsRequest* apply_constraints_request() const {
+      return apply_constraints_request_.Get();
+    }
+    MediaStreamComponent* track_to_stop() const { return track_to_stop_.Get(); }
 
     bool IsUserMedia() const { return !!user_media_request_; }
     bool IsApplyConstraints() const { return !!apply_constraints_request_; }
@@ -124,28 +128,22 @@ class MODULES_EXPORT UserMediaClient
     Member<MediaStreamComponent> track_to_stop_;
   };
 
-  void MaybeProcessNextRequestInfo();
-  void CurrentRequestCompleted();
+  class RequestQueue;
 
   void DeleteAllUserMediaRequests();
 
   blink::mojom::blink::MediaDevicesDispatcherHost* GetMediaDevicesDispatcher();
+  RequestQueue* GetRequestQueue(
+      mojom::blink::MediaStreamType user_media_request);
 
   // LocalFrame instance that own this UserMediaClient.
   WeakMember<LocalFrame> frame_;
 
-  Member<UserMediaProcessor> user_media_processor_;
-  Member<ApplyConstraintsProcessor> apply_constraints_processor_;
-
   HeapMojoRemote<blink::mojom::blink::MediaDevicesDispatcherHost>
       media_devices_dispatcher_;
 
-  // UserMedia requests are processed sequentially. |is_processing_request_|
-  // is a flag that indicates if a request is being processed at a given time,
-  // and |pending_request_infos_| is a list of queued requests.
-  bool is_processing_request_ = false;
-
-  HeapDeque<Member<Request>> pending_request_infos_;
+  Member<RequestQueue> pending_device_requests_;
+  Member<RequestQueue> pending_display_requests_;
 
   THREAD_CHECKER(thread_checker_);
 };

@@ -1,23 +1,35 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <vector>
 
 #include "dawn/samples/SampleUtils.h"
 
 #include "dawn/utils/ComboRenderPipelineDescriptor.h"
-#include "dawn/utils/ScopedAutoreleasePool.h"
 #include "dawn/utils/SystemUtils.h"
 #include "dawn/utils/WGPUHelpers.h"
 
@@ -41,14 +53,14 @@ void initBuffers() {
         1,
         2,
     };
-    indexBuffer =
-        utils::CreateBufferFromData(device, indexData, sizeof(indexData), wgpu::BufferUsage::Index);
+    indexBuffer = dawn::utils::CreateBufferFromData(device, indexData, sizeof(indexData),
+                                                    wgpu::BufferUsage::Index);
 
     static const float vertexData[12] = {
         0.0f, 0.5f, 0.0f, 1.0f, -0.5f, -0.5f, 0.0f, 1.0f, 0.5f, -0.5f, 0.0f, 1.0f,
     };
-    vertexBuffer = utils::CreateBufferFromData(device, vertexData, sizeof(vertexData),
-                                               wgpu::BufferUsage::Vertex);
+    vertexBuffer = dawn::utils::CreateBufferFromData(device, vertexData, sizeof(vertexData),
+                                                     wgpu::BufferUsage::Vertex);
 }
 
 void initTextures() {
@@ -71,11 +83,12 @@ void initTextures() {
         data[i] = static_cast<uint8_t>(i % 253);
     }
 
-    wgpu::Buffer stagingBuffer = utils::CreateBufferFromData(
+    wgpu::Buffer stagingBuffer = dawn::utils::CreateBufferFromData(
         device, data.data(), static_cast<uint32_t>(data.size()), wgpu::BufferUsage::CopySrc);
     wgpu::ImageCopyBuffer imageCopyBuffer =
-        utils::CreateImageCopyBuffer(stagingBuffer, 0, 4 * 1024);
-    wgpu::ImageCopyTexture imageCopyTexture = utils::CreateImageCopyTexture(texture, 0, {0, 0, 0});
+        dawn::utils::CreateImageCopyBuffer(stagingBuffer, 0, 4 * 1024);
+    wgpu::ImageCopyTexture imageCopyTexture =
+        dawn::utils::CreateImageCopyTexture(texture, 0, {0, 0, 0});
     wgpu::Extent3D copySize = {1024, 1024, 1};
 
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
@@ -94,33 +107,33 @@ void init() {
     initBuffers();
     initTextures();
 
-    wgpu::ShaderModule vsModule = utils::CreateShaderModule(device, R"(
-        @vertex fn main(@location(0) pos : vec4<f32>)
-                            -> @builtin(position) vec4<f32> {
+    wgpu::ShaderModule vsModule = dawn::utils::CreateShaderModule(device, R"(
+        @vertex fn main(@location(0) pos : vec4f)
+                            -> @builtin(position) vec4f {
             return pos;
         })");
 
-    wgpu::ShaderModule fsModule = utils::CreateShaderModule(device, R"(
+    wgpu::ShaderModule fsModule = dawn::utils::CreateShaderModule(device, R"(
         @group(0) @binding(0) var mySampler: sampler;
         @group(0) @binding(1) var myTexture : texture_2d<f32>;
 
-        @fragment fn main(@builtin(position) FragCoord : vec4<f32>)
-                              -> @location(0) vec4<f32> {
-            return textureSample(myTexture, mySampler, FragCoord.xy / vec2<f32>(640.0, 480.0));
+        @fragment fn main(@builtin(position) FragCoord : vec4f)
+                              -> @location(0) vec4f {
+            return textureSample(myTexture, mySampler, FragCoord.xy / vec2f(640.0, 480.0));
         })");
 
-    auto bgl = utils::MakeBindGroupLayout(
+    auto bgl = dawn::utils::MakeBindGroupLayout(
         device, {
                     {0, wgpu::ShaderStage::Fragment, wgpu::SamplerBindingType::Filtering},
                     {1, wgpu::ShaderStage::Fragment, wgpu::TextureSampleType::Float},
                 });
 
-    wgpu::PipelineLayout pl = utils::MakeBasicPipelineLayout(device, &bgl);
+    wgpu::PipelineLayout pl = dawn::utils::MakeBasicPipelineLayout(device, &bgl);
 
     depthStencilView = CreateDefaultDepthStencilView(device);
 
-    utils::ComboRenderPipelineDescriptor descriptor;
-    descriptor.layout = utils::MakeBasicPipelineLayout(device, &bgl);
+    dawn::utils::ComboRenderPipelineDescriptor descriptor;
+    descriptor.layout = dawn::utils::MakeBasicPipelineLayout(device, &bgl);
     descriptor.vertex.module = vsModule;
     descriptor.vertex.bufferCount = 1;
     descriptor.cBuffers[0].arrayStride = 4 * sizeof(float);
@@ -134,7 +147,7 @@ void init() {
 
     wgpu::TextureView view = texture.CreateView();
 
-    bindGroup = utils::MakeBindGroup(device, bgl, {{0, sampler}, {1, view}});
+    bindGroup = dawn::utils::MakeBindGroup(device, bgl, {{0, sampler}, {1, view}});
 }
 
 struct {
@@ -149,7 +162,7 @@ void frame() {
     }
 
     wgpu::TextureView backbufferView = swapchain.GetCurrentTextureView();
-    utils::ComboRenderPassDescriptor renderPass({backbufferView}, depthStencilView);
+    dawn::utils::ComboRenderPassDescriptor renderPass({backbufferView}, depthStencilView);
 
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
     {
@@ -175,8 +188,8 @@ int main(int argc, const char* argv[]) {
     init();
 
     while (!ShouldQuit()) {
-        utils::ScopedAutoreleasePool pool;
+        ProcessEvents();
         frame();
-        utils::USleep(16000);
+        dawn::utils::USleep(16000);
     }
 }

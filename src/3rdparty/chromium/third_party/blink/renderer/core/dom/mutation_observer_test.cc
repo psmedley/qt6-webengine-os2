@@ -9,8 +9,10 @@
 #include "third_party/blink/renderer/core/dom/mutation_observer_registration.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 
 namespace blink {
 
@@ -38,7 +40,10 @@ class EmptyMutationCallback : public MutationObserver::Delegate {
 }  // namespace
 
 TEST(MutationObserverTest, DisconnectCrash) {
-  Persistent<Document> document = HTMLDocument::CreateForTest();
+  test::TaskEnvironment task_environment;
+  ScopedNullExecutionContext execution_context;
+  Persistent<Document> document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   auto* root =
       To<HTMLElement>(document->CreateRawElement(html_names::kHTMLTag));
   document->AppendChild(root);

@@ -11,14 +11,13 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/ranges/algorithm.h"
 #include "services/device/public/cpp/usb/usb_utils.h"
-#include "services/device/usb/usb_descriptors.h"
 #include "services/device/usb/usb_device.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -40,15 +39,19 @@ void OnTransferIn(mojom::UsbDevice::GenericTransferInCallback callback,
                   size_t buffer_size) {
   auto data = buffer ? base::make_span(buffer->front(), buffer_size)
                      : base::span<const uint8_t>();
-  std::move(callback).Run(mojo::ConvertTo<mojom::UsbTransferStatus>(status),
-                          data);
+  std::move(callback).Run(
+      mojo::TypeConverter<mojom::UsbTransferStatus, UsbTransferStatus>::Convert(
+          status),
+      data);
 }
 
 void OnTransferOut(mojom::UsbDevice::GenericTransferOutCallback callback,
                    UsbTransferStatus status,
                    scoped_refptr<base::RefCountedBytes> buffer,
                    size_t buffer_size) {
-  std::move(callback).Run(mojo::ConvertTo<mojom::UsbTransferStatus>(status));
+  std::move(callback).Run(
+      mojo::TypeConverter<mojom::UsbTransferStatus, UsbTransferStatus>::Convert(
+          status));
 }
 
 void OnIsochronousTransferIn(
@@ -98,7 +101,7 @@ absl::optional<uint32_t> TotalPacketLength(
   for (const uint32_t packet_length : packet_lengths) {
     // Check for overflow.
     if (std::numeric_limits<uint32_t>::max() - total_bytes < packet_length) {
-      return absl::nullopt;
+      return std::nullopt;
     }
     total_bytes += packet_length;
   }
@@ -194,9 +197,13 @@ void DeviceImpl::OnOpen(base::WeakPtr<DeviceImpl> self,
   if (self->device_handle_ && self->client_)
     self->client_->OnDeviceOpened();
 
-  std::move(callback).Run(self->device_handle_
-                              ? mojom::UsbOpenDeviceError::OK
-                              : mojom::UsbOpenDeviceError::ACCESS_DENIED);
+  if (self->device_handle_) {
+    std::move(callback).Run(mojom::UsbOpenDeviceResult::NewSuccess(
+        mojom::UsbOpenDeviceSuccess::OK));
+  } else {
+    std::move(callback).Run(mojom::UsbOpenDeviceResult::NewError(
+        mojom::UsbOpenDeviceError::ACCESS_DENIED));
+  }
 }
 
 void DeviceImpl::OnPermissionGrantedForOpen(OpenCallback callback,
@@ -206,13 +213,15 @@ void DeviceImpl::OnPermissionGrantedForOpen(OpenCallback callback,
         &DeviceImpl::OnOpen, weak_factory_.GetWeakPtr(), std::move(callback)));
   } else {
     opening_ = false;
-    std::move(callback).Run(mojom::UsbOpenDeviceError::ACCESS_DENIED);
+    std::move(callback).Run(mojom::UsbOpenDeviceResult::NewError(
+        mojom::UsbOpenDeviceError::ACCESS_DENIED));
   }
 }
 
 void DeviceImpl::Open(OpenCallback callback) {
   if (opening_ || device_handle_) {
-    std::move(callback).Run(mojom::UsbOpenDeviceError::ALREADY_OPEN);
+    std::move(callback).Run(mojom::UsbOpenDeviceResult::NewError(
+        mojom::UsbOpenDeviceError::ALREADY_OPEN));
     return;
   }
 

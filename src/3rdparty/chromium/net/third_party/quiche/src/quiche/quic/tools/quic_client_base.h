@@ -15,10 +15,10 @@
 #include "absl/strings/string_view.h"
 #include "quiche/quic/core/crypto/crypto_handshake.h"
 #include "quiche/quic/core/deterministic_connection_id_generator.h"
-#include "quiche/quic/core/http/quic_client_push_promise_index.h"
 #include "quiche/quic/core/http/quic_spdy_client_session.h"
 #include "quiche/quic/core/http/quic_spdy_client_stream.h"
 #include "quiche/quic/core/quic_config.h"
+#include "quiche/quic/core/quic_connection_id.h"
 #include "quiche/quic/platform/api/quic_socket_address.h"
 
 namespace quic {
@@ -51,7 +51,7 @@ class QUIC_EXPORT_PRIVATE PathMigrationContext
 // Subclasses derived from this class are responsible for creating the
 // actual QuicSession instance, as well as defining functions that
 // create and run the underlying network transport.
-class QuicClientBase {
+class QuicClientBase : public QuicSession::Visitor {
  public:
   // An interface to various network events that the QuicClient will need to
   // interact with.
@@ -91,6 +91,26 @@ class QuicClientBase {
   QuicClientBase& operator=(const QuicClientBase&) = delete;
 
   virtual ~QuicClientBase();
+
+  // Implmenets QuicSession::Visitor
+  void OnConnectionClosed(QuicConnectionId /*server_connection_id*/,
+                          QuicErrorCode /*error*/,
+                          const std::string& /*error_details*/,
+                          ConnectionCloseSource /*source*/) override {}
+
+  void OnWriteBlocked(QuicBlockedWriterInterface* /*blocked_writer*/) override {
+  }
+  void OnRstStreamReceived(const QuicRstStreamFrame& /*frame*/) override {}
+  void OnStopSendingReceived(const QuicStopSendingFrame& /*frame*/) override {}
+  bool TryAddNewConnectionId(
+      const QuicConnectionId& /*server_connection_id*/,
+      const QuicConnectionId& /*new_connection_id*/) override {
+    return false;
+  }
+  void OnConnectionIdRetired(
+      const QuicConnectionId& /*server_connection_id*/) override {}
+  void OnServerPreferredAddressAvailable(
+      const QuicSocketAddress& server_preferred_address) override;
 
   // Initializes the client to create a connection. Should be called exactly
   // once before calling StartConnect or Connect. Returns true if the
@@ -256,6 +276,8 @@ class QuicClientBase {
 
   QuicConnectionHelperInterface* helper() { return helper_.get(); }
 
+  QuicAlarmFactory* alarm_factory() { return alarm_factory_.get(); }
+
   NetworkHelper* network_helper();
   const NetworkHelper* network_helper() const;
 
@@ -276,7 +298,12 @@ class QuicClientBase {
     interface_name_ = interface_name;
   }
 
-  std::string interface_name() { return interface_name_; }
+  std::string interface_name() const { return interface_name_; }
+
+  void set_server_connection_id_override(
+      const QuicConnectionId& connection_id) {
+    server_connection_id_override_ = connection_id;
+  }
 
   void set_server_connection_id_length(uint8_t server_connection_id_length) {
     server_connection_id_length_ = server_connection_id_length;
@@ -338,8 +365,6 @@ class QuicClientBase {
 
   // Returns the client connection ID to use.
   virtual QuicConnectionId GetClientConnectionId();
-
-  QuicAlarmFactory* alarm_factory() { return alarm_factory_.get(); }
 
   // Subclasses may need to explicitly clear the session on destruction
   // if they create it with objects that will be destroyed before this is.
@@ -423,6 +448,11 @@ class QuicClientBase {
   // The debug visitor set on the connection right after it is constructed.
   // Not owned, must be valid for the lifetime of the QuicClientBase instance.
   QuicConnectionDebugVisitor* connection_debug_visitor_;
+
+  // If set,
+  // - GetNextConnectionId will use this as the next server connection id.
+  // - GenerateNewConnectionId will not be called.
+  std::optional<QuicConnectionId> server_connection_id_override_;
 
   // GenerateNewConnectionId creates a random connection ID of this length.
   // Defaults to 8.

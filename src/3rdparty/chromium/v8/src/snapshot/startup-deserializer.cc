@@ -9,6 +9,8 @@
 #include "src/execution/v8threads.h"
 #include "src/handles/handles-inl.h"
 #include "src/heap/paged-spaces-inl.h"
+#include "src/logging/counters-scopes.h"
+#include "src/logging/log.h"
 #include "src/objects/oddball.h"
 #include "src/roots/roots-inl.h"
 
@@ -16,6 +18,12 @@ namespace v8 {
 namespace internal {
 
 void StartupDeserializer::DeserializeIntoIsolate() {
+  TRACE_EVENT0("v8", "V8.DeserializeIsolate");
+  RCS_SCOPE(isolate(), RuntimeCallCounterId::kDeserializeIsolate);
+  base::ElapsedTimer timer;
+  if (V8_UNLIKELY(v8_flags.profile_deserialization)) timer.Start();
+  NestedTimedHistogramScope histogram_timer(
+      isolate()->counters()->snapshot_deserialize_isolate());
   HandleScope scope(isolate());
 
   // No active threads.
@@ -31,7 +39,8 @@ void StartupDeserializer::DeserializeIntoIsolate() {
     isolate()->heap()->IterateSmiRoots(this);
     isolate()->heap()->IterateRoots(
         this,
-        base::EnumSet<SkipRoot>{SkipRoot::kUnserializable, SkipRoot::kWeak});
+        base::EnumSet<SkipRoot>{SkipRoot::kUnserializable, SkipRoot::kWeak,
+                                SkipRoot::kTracedHandles});
     IterateStartupObjectCache(isolate(), this);
 
     isolate()->heap()->IterateWeakRoots(
@@ -70,6 +79,14 @@ void StartupDeserializer::DeserializeIntoIsolate() {
   if (should_rehash()) {
     // Hash seed was initialized in ReadOnlyDeserializer.
     Rehash();
+  }
+
+  if (V8_UNLIKELY(v8_flags.profile_deserialization)) {
+    // ATTENTION: The Memory.json benchmark greps for this exact output. Do not
+    // change it without also updating Memory.json.
+    const int bytes = source()->length();
+    const double ms = timer.Elapsed().InMillisecondsF();
+    PrintF("[Deserializing isolate (%d bytes) took %0.3f ms]\n", bytes, ms);
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,16 +14,14 @@
 #include "cast/streaming/encoded_frame.h"
 #include "cast/streaming/environment.h"
 #include "cast/streaming/sender.h"
+#include "platform/base/span.h"
 #include "util/chrono_helpers.h"
 #include "util/osp_logging.h"
 #include "util/saturate_cast.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
-// TODO(issuetracker.google.com/issues/155336511): Fix the declarations and then
-// remove this:
-using openscreen::operator<<;  // For std::chrono::duration pretty-printing.
+using clock_operators::operator<<;
 
 namespace {
 
@@ -46,7 +44,7 @@ constexpr int kLowestEncodingSpeed = 6;
 }  // namespace
 
 StreamingVpxEncoder::StreamingVpxEncoder(const Parameters& params,
-                                         TaskRunner* task_runner,
+                                         TaskRunner& task_runner,
                                          std::unique_ptr<Sender> sender)
     : StreamingVideoEncoder(params, task_runner, std::move(sender)) {
   ideal_speed_setting_ = kHighestEncodingSpeed;
@@ -129,6 +127,8 @@ void StreamingVpxEncoder::EncodeAndSend(
     Clock::time_point reference_time,
     std::function<void(Stats)> stats_callback) {
   WorkUnit work_unit;
+  work_unit.capture_begin_time = frame.capture_begin_time;
+  work_unit.capture_end_time = frame.capture_end_time;
 
   // TODO(jophba): The |VideoFrame| struct should provide the media timestamp,
   // instead of this code inferring it from the reference timestamps, since: 1)
@@ -232,7 +232,7 @@ void StreamingVpxEncoder::ProcessWorkUnitsUntilTimeToQuit() {
                             work_unit);
     UpdateSpeedSettingForNextFrame(work_unit.stats);
 
-    main_task_runner_->PostTask(
+    main_task_runner_.PostTask(
         [this, results = std::move(work_unit)]() mutable {
           SendEncodedFrame(std::move(results));
         });
@@ -391,7 +391,7 @@ void StreamingVpxEncoder::ComputeFrameEncodeStats(
 }
 
 void StreamingVpxEncoder::SendEncodedFrame(WorkUnitWithResults results) {
-  OSP_DCHECK(main_task_runner_->IsRunningOnTaskRunner());
+  OSP_DCHECK(main_task_runner_.IsRunningOnTaskRunner());
 
   EncodedFrame frame;
   frame.frame_id = sender_->GetNextFrameId();
@@ -403,8 +403,10 @@ void StreamingVpxEncoder::SendEncodedFrame(WorkUnitWithResults results) {
     frame.referenced_frame_id = frame.frame_id - 1;
   }
   frame.rtp_timestamp = results.rtp_timestamp;
+  frame.capture_begin_time = results.capture_begin_time;
+  frame.capture_end_time = results.capture_end_time;
   frame.reference_time = results.reference_time;
-  frame.data = absl::Span<uint8_t>(results.payload);
+  frame.data = results.payload;
 
   if (sender_->EnqueueFrame(frame) != Sender::OK) {
     // Since the frame will not be sent, the encoder's frame dependency chain
@@ -443,5 +445,4 @@ StreamingVpxEncoder::VpxImageUniquePtr StreamingVpxEncoder::CloneAsVpxImage(
   return image;
 }
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

@@ -31,155 +31,155 @@
 import * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import renderingOptionsStyles from './renderingOptions.css.js';
 
 const UIStrings = {
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting highlights areas
-  * of the webpage that need to be repainted (re-drawn by the browser).
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting highlights areas
+   * of the webpage that need to be repainted (re-drawn by the browser).
+   */
   paintFlashing: 'Paint flashing',
   /**
-  * @description Explanation text for the 'Paint flashing' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Paint flashing' setting in the Rendering tool.
+   */
   highlightsAreasOfThePageGreen:
       'Highlights areas of the page (green) that need to be repainted. May not be suitable for people prone to photosensitive epilepsy.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting highlights areas
-  * (regions) of the page that were shifted (where a 'layout shift' occurred). A layout shift is
-  * where elements on the webpage move around and cause other nearby elements to move as well.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting highlights areas
+   * (regions) of the page that were shifted (where a 'layout shift' occurred). A layout shift is
+   * where elements on the webpage move around and cause other nearby elements to move as well.
+   */
   layoutShiftRegions: 'Layout Shift Regions',
   /**
-  * @description Explanation text for the 'Layout Shift Regions' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Layout Shift Regions' setting in the Rendering tool.
+   */
   highlightsAreasOfThePageBlueThat:
       'Highlights areas of the page (blue) that were shifted. May not be suitable for people prone to photosensitive epilepsy.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting shows the
-  * borders of layers on the page. Layer is a noun.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting shows the
+   * borders of layers on the page. Layer is a noun.
+   */
   layerBorders: 'Layer borders',
   /**
-  * @description Explanation text for the 'Layer borders' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Layer borders' setting in the Rendering tool.
+   */
   showsLayerBordersOrangeoliveAnd: 'Shows layer borders (orange/olive) and tiles (cyan).',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting shows the
-  * rendering statistics for frames e.g. frames per second. Frame is a noun.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting shows the
+   * rendering statistics for frames e.g. frames per second. Frame is a noun.
+   */
   frameRenderingStats: 'Frame Rendering Stats',
   /**
-  * @description Explanation text for the 'Frame Rendering Stats' setting in the Rendering tool.
-  * Plots is a verb. GPU = Graphics Processing Unit.
-  */
+   * @description Explanation text for the 'Frame Rendering Stats' setting in the Rendering tool.
+   * Plots is a verb. GPU = Graphics Processing Unit.
+   */
   plotsFrameThroughputDropped: 'Plots frame throughput, dropped frames distribution, and GPU memory.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting highlights
-  * elements that can slow down scrolling on the page.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting highlights
+   * elements that can slow down scrolling on the page.
+   */
   scrollingPerformanceIssues: 'Scrolling performance issues',
   /**
-  * @description Explanation text for the 'Scrolling performance issues' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Scrolling performance issues' setting in the Rendering tool.
+   */
   highlightsElementsTealThatCan:
       'Highlights elements (teal) that can slow down scrolling, including touch & wheel event handlers and other main-thread scrolling situations.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting highlights the
-  * rendering frames for ads that are found on the page.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting highlights the
+   * rendering frames for ads that are found on the page.
+   */
   highlightAdFrames: 'Highlight ad frames',
   /**
-  * @description Explanation text for the 'Highlight ad frames' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Highlight ad frames' setting in the Rendering tool.
+   */
   highlightsFramesRedDetectedToBe: 'Highlights frames (red) detected to be ads.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting shows an overlay
-  * with Core Web Vitals. Core Web Vitals: https://support.google.com/webmasters/answer/9205520?hl=en
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting shows an overlay
+   * with Core Web Vitals. Core Web Vitals: https://support.google.com/webmasters/answer/9205520?hl=en
+   */
   coreWebVitals: 'Core Web Vitals',
   /**
-  * @description Explanation text for the 'Core Web Vitals' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Core Web Vitals' setting in the Rendering tool.
+   */
   showsAnOverlayWithCoreWebVitals: 'Shows an overlay with Core Web Vitals.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting prevents the
-  * webpage from loading 'local' fonts. Local fonts are fonts that are installed on the user's
-  * computer, and not loaded over the network.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting prevents the
+   * webpage from loading 'local' fonts. Local fonts are fonts that are installed on the user's
+   * computer, and not loaded over the network.
+   */
   disableLocalFonts: 'Disable local fonts',
   /**
-  * @description Explanation text for the 'Disable local fonts' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Disable local fonts' setting in the Rendering tool.
+   */
   disablesLocalSourcesInFontface: 'Disables `local()` sources in `@font-face` rules. Requires a page reload to apply.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting
-  * emulates/pretends that the webpage is focused i.e. that the user interacted with it most
-  * recently.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting
+   * emulates/pretends that the webpage is focused i.e. that the user interacted with it most
+   * recently.
+   */
   emulateAFocusedPage: 'Emulate a focused page',
   /**
-  * @description Explanation text for the 'Emulate a focused page' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Emulate a focused page' setting in the Rendering tool.
+   */
   emulatesAFocusedPage: 'Emulates a focused page.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting enables auto dark mode emulation.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting enables auto dark mode emulation.
+   */
   emulateAutoDarkMode: 'Enable automatic dark mode',
   /**
-  * @description Explanation text for the 'Emulate automatic dark mode' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Emulate automatic dark mode' setting in the Rendering tool.
+   */
   emulatesAutoDarkMode: 'Enables automatic dark mode and sets `prefers-color-scheme` to `dark`.',
   /**
-  * @description Explanation text for the 'Emulate CSS media type' setting in the Rendering tool.
-  * This setting overrides the CSS media type on the page:
-  * https://developer.mozilla.org/en-US/docs/Web/CSS/@media#media_types
-  */
+   * @description Explanation text for the 'Emulate CSS media type' setting in the Rendering tool.
+   * This setting overrides the CSS media type on the page:
+   * https://developer.mozilla.org/en-US/docs/Web/CSS/@media#media_types
+   */
   forcesMediaTypeForTestingPrint: 'Forces media type for testing print and screen styles',
   /**
-  * @description Explanation text for the 'Forces CSS prefers-color-scheme media' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Forces CSS prefers-color-scheme media' setting in the Rendering tool.
+   */
   forcesCssPreferscolorschemeMedia: 'Forces CSS `prefers-color-scheme` media feature',
   /**
-  * @description Explanation text for the 'Forces CSS prefers-reduced-motion media' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Forces CSS prefers-reduced-motion media' setting in the Rendering tool.
+   */
   forcesCssPrefersreducedmotion: 'Forces CSS `prefers-reduced-motion` media feature',
   /**
    * @description Explanation text for the 'Forces CSS prefers-contrast media' setting in the Rendering tool.
    */
   forcesCssPreferscontrastMedia: 'Forces CSS `prefers-contrast` media feature',
   /**
-  * @description Explanation text for the 'Forces CSS prefers-reduced-data media' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Forces CSS prefers-reduced-data media' setting in the Rendering tool.
+   */
   forcesCssPrefersreduceddataMedia: 'Forces CSS `prefers-reduced-data` media feature',
   /**
-  * @description Explanation text for the 'Forces CSS color-gamut media' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Forces CSS prefers-reduced-transparency media' setting in the Rendering tool.
+   */
+  forcesCssPrefersreducedtransparencyMedia: 'Forces CSS `prefers-reduced-transparency` media feature',
+  /**
+   * @description Explanation text for the 'Forces CSS color-gamut media' setting in the Rendering tool.
+   */
   forcesCssColorgamutMediaFeature: 'Forces CSS `color-gamut` media feature',
   /**
-  * @description Explanation text for the 'Emulate vision deficiencies' setting in the Rendering tool.
-  */
+   * @description Explanation text for the 'Emulate vision deficiencies' setting in the Rendering tool.
+   */
   forcesVisionDeficiencyEmulation: 'Forces vision deficiency emulation',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting disables the
-  * page from loading images with the AVIF format.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting disables the
+   * page from loading images with the AVIF format.
+   */
   disableAvifImageFormat: 'Disable `AVIF` image format',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting disables the
-  * page from loading images with the JPEG XL format.
-  */
-  disableJpegXlImageFormat: 'Disable `JPEG XL` image format',
-  /**
-  * @description Explanation text for both the 'Disable AVIF image format' and 'Disable WebP image
-  * format' settings in the Rendering tool.
-  */
+   * @description Explanation text for both the 'Disable AVIF image format' and 'Disable WebP image
+   * format' settings in the Rendering tool.
+   */
   requiresAPageReloadToApplyAnd: 'Requires a page reload to apply and disables caching for image requests.',
   /**
-  * @description The name of a checkbox setting in the Rendering tool. This setting disables the
-  * page from loading images with the WebP format.
-  */
+   * @description The name of a checkbox setting in the Rendering tool. This setting disables the
+   * page from loading images with the WebP format.
+   */
   disableWebpImageFormat: 'Disable `WebP` image format',
   /**
    * @description Explanation text for the 'Forces CSS forced-colors' setting in the Rendering tool.
@@ -195,32 +195,27 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 // `front_end/sdk/module.json` to make this feature available in the
 // Command Menu.
 const supportsPrefersReducedData = (): boolean => {
-  const query = '(prefers-reduced-data)';
-  // Note: `media` serializes to `'not all'` for unsupported queries.
-  return window.matchMedia(query).media === query;
+  const query = 'not all and (prefers-reduced-data), (prefers-reduced-data)';
+  return window.matchMedia(query).matches;
+};
+
+// TODO(1424879): remove this feature detection and expose the UI
+// unconditionally once prefers-reduced-transparency ships unflagged.
+const supportsPrefersReducedTransparency = (): boolean => {
+  const query = 'not all and (prefers-reduced-transparency), (prefers-reduced-transparency)';
+  return window.matchMedia(query).matches;
 };
 
 const supportsPrefersContrast = (): boolean => {
-  const query = '(prefers-contrast)';
-  return window.matchMedia(query).media === query;
+  const query = 'not all and (prefers-contrast), (prefers-contrast)';
+  return window.matchMedia(query).matches;
 };
-
-const supportsJpegXl = async(): Promise<boolean> => {
-  const JPEG_XL_IMAGE_URL = 'data:image/jxl;base64,/wr/BwiDBAwASyAY';
-  const promise = new Promise<boolean>((resolve): void => {
-    const img = document.createElement('img');
-    img.onload = (): void => resolve(true);
-    img.onerror = (): void => resolve(false);
-    img.src = JPEG_XL_IMAGE_URL;
-  });
-  return promise;
-};
-
-let renderingOptionsViewInstance: RenderingOptionsView;
 
 export class RenderingOptionsView extends UI.Widget.VBox {
-  private constructor() {
+  constructor() {
     super(true);
+
+    this.element.setAttribute('jslog', `${VisualLogging.panel().context('rendering')}`);
 
     this.#appendCheckbox(
         i18nString(UIStrings.paintFlashing), i18nString(UIStrings.highlightsAreasOfThePageGreen),
@@ -277,6 +272,11 @@ export class RenderingOptionsView extends UI.Widget.VBox {
           i18nString(UIStrings.forcesCssPrefersreduceddataMedia),
           Common.Settings.Settings.instance().moduleSetting('emulatedCSSMediaFeaturePrefersReducedData'));
     }
+    if (supportsPrefersReducedTransparency()) {
+      this.#appendSelect(
+          i18nString(UIStrings.forcesCssPrefersreducedtransparencyMedia),
+          Common.Settings.Settings.instance().moduleSetting('emulatedCSSMediaFeaturePrefersReducedTransparency'));
+    }
     this.#appendSelect(
         i18nString(UIStrings.forcesCssColorgamutMediaFeature),
         Common.Settings.Settings.instance().moduleSetting('emulatedCSSMediaFeatureColorGamut'));
@@ -292,76 +292,35 @@ export class RenderingOptionsView extends UI.Widget.VBox {
         i18nString(UIStrings.disableAvifImageFormat), i18nString(UIStrings.requiresAPageReloadToApplyAnd),
         Common.Settings.Settings.instance().moduleSetting('avifFormatDisabled'));
 
-    const webpCheckbox = this.#appendCheckbox(
+    this.#appendCheckbox(
         i18nString(UIStrings.disableWebpImageFormat), i18nString(UIStrings.requiresAPageReloadToApplyAnd),
         Common.Settings.Settings.instance().moduleSetting('webpFormatDisabled'));
 
     this.contentElement.createChild('div').classList.add('panel-section-separator');
-
-    void supportsJpegXl().then(hasSupport => {
-      if (!hasSupport) {
-        return;
-      }
-      webpCheckbox.before(this.#createCheckbox(
-          i18nString(UIStrings.disableJpegXlImageFormat), i18nString(UIStrings.requiresAPageReloadToApplyAnd),
-          Common.Settings.Settings.instance().moduleSetting('jpegXlFormatDisabled')));
-    });
-  }
-
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): RenderingOptionsView {
-    const {forceNew} = opts;
-    if (!renderingOptionsViewInstance || forceNew) {
-      renderingOptionsViewInstance = new RenderingOptionsView();
-    }
-
-    return renderingOptionsViewInstance;
-  }
-
-  #createCheckbox(label: string, subtitle: string, setting: Common.Settings.Setting<boolean>):
-      UI.UIUtils.CheckboxLabel {
-    const checkboxLabel = UI.UIUtils.CheckboxLabel.create(label, false, subtitle);
-    UI.SettingsUI.bindCheckbox(checkboxLabel.checkboxElement, setting);
-    return checkboxLabel;
   }
 
   #appendCheckbox(label: string, subtitle: string, setting: Common.Settings.Setting<boolean>):
       UI.UIUtils.CheckboxLabel {
-    const checkbox = this.#createCheckbox(label, subtitle, setting);
+    const checkbox = UI.UIUtils.CheckboxLabel.create(label, false, subtitle, setting.name);
+    UI.SettingsUI.bindCheckbox(checkbox.checkboxElement, setting);
     this.contentElement.appendChild(checkbox);
     return checkbox;
   }
 
-  // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  #appendSelect(label: string, setting: Common.Settings.Setting<any>): void {
+  #appendSelect(label: string, setting: Common.Settings.Setting<unknown>): void {
     const control = UI.SettingsUI.createControlForSetting(setting, label);
     if (control) {
       this.contentElement.appendChild(control);
     }
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([renderingOptionsStyles]);
   }
 }
 
-let reloadActionDelegateInstance: ReloadActionDelegate;
-
 export class ReloadActionDelegate implements UI.ActionRegistration.ActionDelegate {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): ReloadActionDelegate {
-    const {forceNew} = opts;
-    if (!reloadActionDelegateInstance || forceNew) {
-      reloadActionDelegateInstance = new ReloadActionDelegate();
-    }
-
-    return reloadActionDelegateInstance;
-  }
-
-  handleAction(context: UI.Context.Context, actionId: string): boolean {
+  handleAction(_context: UI.Context.Context, actionId: string): boolean {
     const emulatedCSSMediaFeaturePrefersColorSchemeSetting =
         Common.Settings.Settings.instance().moduleSetting('emulatedCSSMediaFeaturePrefersColorScheme');
 

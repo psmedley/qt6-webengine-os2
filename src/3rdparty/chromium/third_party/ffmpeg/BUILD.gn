@@ -62,9 +62,9 @@ if (has_nasm_deps) {
       "-P" + rebase_path("$platform_config_root/config.asm", root_build_dir),
     ]
 
-    if (is_mac) {
+    if (is_apple) {
       # Necessary to ensure symbols end up with a _ prefix; added by
-      # yasm_assemble.gni for Windows, but not Mac.
+      # yasm_assemble.gni for Windows, but not for Apple.
       defines += [ "PREFIX" ]
     }
 
@@ -366,7 +366,7 @@ target(link_target_type, "ffmpeg_internal") {
       configs += [ "//build/config/gcc:symbol_visibility_default" ]
     }
   }
-  if (is_mac) {
+  if (is_apple) {
     if (is_component_ffmpeg) {
       # Export all symbols when building as component.
       configs -= [ "//build/config/gcc:symbol_visibility_hidden" ]
@@ -374,6 +374,11 @@ target(link_target_type, "ffmpeg_internal") {
     }
 
     defines += [ "_DARWIN_C_SOURCE" ]
+    if (is_ios) {
+      libs -= [
+        "rt",
+      ]
+    }
   } else if (is_win) {
     defines += [
       "_ISOC99_SOURCE",

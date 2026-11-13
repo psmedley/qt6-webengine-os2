@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,10 @@
 #include <utility>
 
 #include "core/fxcrt/fx_extension.h"
+#include "core/fxcrt/span_util.h"
 #include "core/fxge/text_char_pos.h"
 #include "third_party/base/check.h"
-#include "third_party/base/notreached.h"
+#include "third_party/base/check_op.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "xfa/fde/cfde_textout.h"
 #include "xfa/fde/cfde_wordbreak_data.h"
@@ -325,8 +326,8 @@ void CFDE_TextEditEngine::Insert(size_t idx,
     previous_text = GetText();
 
   // Copy the new text into the gap.
-  static const size_t char_size = sizeof(WideString::CharType);
-  memcpy(content_.data() + gap_position_, text.c_str(), length * char_size);
+  fxcrt::spancpy(pdfium::make_span(content_).subspan(gap_position_),
+                 text.span().first(length));
   gap_position_ += length;
   gap_size_ -= length;
   text_length_ += length;
@@ -1129,11 +1130,7 @@ std::pair<int32_t, CFX_RectF> CFDE_TextEditEngine::GetCharacterInfo(
     if (it->nStart <= start_idx && start_idx < it->nStart + it->nCount)
       break;
   }
-  if (it == text_piece_info_.end()) {
-    NOTREACHED();
-    return {0, CFX_RectF()};
-  }
-
+  CHECK_NE(it, text_piece_info_.end());
   return {it->nBidiLevel, GetCharRects(*it)[start_idx - it->nStart]};
 }
 

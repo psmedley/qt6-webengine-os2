@@ -3,7 +3,10 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/frame/location_report_body.h"
+
+#include "third_party/blink/public/common/scheme_registry.h"
 #include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 
 namespace blink {
@@ -44,11 +47,21 @@ unsigned LocationReportBody::MatchId() const {
   const absl::optional<uint32_t> line = lineNumber(), column = columnNumber();
 
   unsigned hash = sourceFile().IsNull() ? 0 : sourceFile().Impl()->GetHash();
-  hash = WTF::HashInts(hash,
-                       line ? DefaultHash<uint32_t>::Hash::GetHash(*line) : 0);
-  hash = WTF::HashInts(
-      hash, column ? DefaultHash<uint32_t>::Hash::GetHash(*column) : 0);
+  hash = WTF::HashInts(hash, line ? WTF::GetHash(*line) : 0);
+  hash = WTF::HashInts(hash, column ? WTF::GetHash(*column) : 0);
   return hash;
+}
+
+bool LocationReportBody::IsExtensionSource() const {
+  // TODO(crbug.com/356098278): Either remove this KURL instantiation completely
+  // or store `source_file_` as a KURL and only convert to string when sending
+  // reports.
+  KURL source_file_url(source_file_);
+  if (!source_file_url.IsValid()) {
+    return false;
+  }
+  return CommonSchemeRegistry::IsExtensionScheme(
+      source_file_url.Protocol().Utf8());
 }
 
 }  // namespace blink

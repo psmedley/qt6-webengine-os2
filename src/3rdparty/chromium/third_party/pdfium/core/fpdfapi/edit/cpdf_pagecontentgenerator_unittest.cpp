@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/cpdf_test_document.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxge/cfx_fillrenderoptions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -36,12 +36,13 @@ class CPDF_PageContentGeneratorTest : public TestWithPageModule {
     pGen->ProcessPath(buf, pPathObj);
   }
 
-  const CPDF_Dictionary* TestGetResource(CPDF_PageContentGenerator* pGen,
-                                         const ByteString& type,
-                                         const ByteString& name) {
+  RetainPtr<const CPDF_Dictionary> TestGetResource(
+      CPDF_PageContentGenerator* pGen,
+      const ByteString& type,
+      const ByteString& name) {
     RetainPtr<const CPDF_Dictionary> pResources =
         pGen->m_pObjHolder->GetResources();
-    return pResources->GetDictFor(type)->GetDictFor(name).Get();
+    return pResources->GetDictFor(type)->GetDictFor(name);
   }
 
   void TestProcessText(CPDF_PageContentGenerator* pGen,
@@ -89,9 +90,9 @@ TEST_F(CPDF_PageContentGeneratorTest, BUG_937) {
     pPathObj->path().AppendRect(0.000000000000000000001,
                                 0.000000000000000000001, 100, 100);
 
-    pPathObj->m_ColorState.SetFillColor(pCS, rgb);
-    pPathObj->m_ColorState.SetStrokeColor(pCS, rgb);
-    pPathObj->m_GraphState.SetLineWidth(200000000000000000001.0);
+    pPathObj->mutable_color_state().SetFillColor(pCS, rgb);
+    pPathObj->mutable_color_state().SetStrokeColor(pCS, rgb);
+    pPathObj->mutable_graph_state().SetLineWidth(200000000000000000001.0);
     pPathObj->Transform(CFX_Matrix(1, 0, 0, 1, 0.000000000000000000001,
                                    200000000000000.000002));
 
@@ -110,9 +111,9 @@ TEST_F(CPDF_PageContentGeneratorTest, BUG_937) {
   {
     // Test code in ProcessPath that handles bezier operator
     auto pPathObj = std::make_unique<CPDF_PathObject>();
-    pPathObj->m_ColorState.SetFillColor(pCS, rgb);
-    pPathObj->m_ColorState.SetStrokeColor(pCS, rgb);
-    pPathObj->m_GraphState.SetLineWidth(2.000000000000000000001);
+    pPathObj->mutable_color_state().SetFillColor(pCS, rgb);
+    pPathObj->mutable_color_state().SetStrokeColor(pCS, rgb);
+    pPathObj->mutable_graph_state().SetLineWidth(2.000000000000000000001);
     pPathObj->Transform(CFX_Matrix(1, 0, 0, 1, 432, 500000000000000.000002));
 
     pPathObj->set_filltype(CFX_FillRenderOptions::FillType::kWinding);
@@ -192,12 +193,12 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessGraphics) {
   static const std::vector<float> rgb = {0.5f, 0.7f, 0.35f};
   RetainPtr<CPDF_ColorSpace> pCS =
       CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB);
-  pPathObj->m_ColorState.SetFillColor(pCS, rgb);
+  pPathObj->mutable_color_state().SetFillColor(pCS, rgb);
 
   static const std::vector<float> rgb2 = {1, 0.9f, 0};
-  pPathObj->m_ColorState.SetStrokeColor(pCS, rgb2);
-  pPathObj->m_GeneralState.SetFillAlpha(0.5f);
-  pPathObj->m_GeneralState.SetStrokeAlpha(0.8f);
+  pPathObj->mutable_color_state().SetStrokeColor(pCS, rgb2);
+  pPathObj->mutable_general_state().SetFillAlpha(0.5f);
+  pPathObj->mutable_general_state().SetStrokeAlpha(0.8f);
 
   auto pDoc = std::make_unique<CPDF_TestDocument>();
   pDoc->CreateNewDoc();
@@ -215,7 +216,7 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessGraphics) {
   EXPECT_EQ(" gs 1 0 0 1 0 0 cm 1 2 m 3 4 l 5 6 l h B Q\n",
             pathString.Last(43));
   ASSERT_GT(pathString.GetLength(), 91U);
-  const CPDF_Dictionary* externalGS =
+  RetainPtr<const CPDF_Dictionary> externalGS =
       TestGetResource(&generator, "ExtGState",
                       pathString.Substr(48, pathString.GetLength() - 91));
   ASSERT_TRUE(externalGS);
@@ -223,7 +224,7 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessGraphics) {
   EXPECT_EQ(0.8f, externalGS->GetFloatFor("CA"));
 
   // Same path, now with a stroke.
-  pPathObj->m_GraphState.SetLineWidth(10.5f);
+  pPathObj->mutable_graph_state().SetLineWidth(10.5f);
   buf.str("");
   TestProcessPath(&generator, &buf, pPathObj.get());
   ByteString pathString2(buf);
@@ -247,19 +248,19 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessStandardText) {
   auto pTestPage = pdfium::MakeRetain<CPDF_Page>(pDoc.get(), pPageDict);
   CPDF_PageContentGenerator generator(pTestPage.Get());
   auto pTextObj = std::make_unique<CPDF_TextObject>();
-  pTextObj->m_TextState.SetFont(
+  pTextObj->mutable_text_state().SetFont(
       CPDF_Font::GetStockFont(pDoc.get(), "Times-Roman"));
-  pTextObj->m_TextState.SetFontSize(10.0f);
+  pTextObj->mutable_text_state().SetFontSize(10.0f);
 
   static const std::vector<float> rgb = {0.5f, 0.7f, 0.35f};
   RetainPtr<CPDF_ColorSpace> pCS =
       CPDF_ColorSpace::GetStockCS(CPDF_ColorSpace::Family::kDeviceRGB);
-  pTextObj->m_ColorState.SetFillColor(pCS, rgb);
+  pTextObj->mutable_color_state().SetFillColor(pCS, rgb);
 
   static const std::vector<float> rgb2 = {1, 0.9f, 0};
-  pTextObj->m_ColorState.SetStrokeColor(pCS, rgb2);
-  pTextObj->m_GeneralState.SetFillAlpha(0.5f);
-  pTextObj->m_GeneralState.SetStrokeAlpha(0.8f);
+  pTextObj->mutable_color_state().SetStrokeColor(pCS, rgb2);
+  pTextObj->mutable_general_state().SetFillAlpha(0.5f);
+  pTextObj->mutable_general_state().SetStrokeAlpha(0.8f);
   pTextObj->Transform(CFX_Matrix(1, 0, 0, 1, 100, 100));
   pTextObj->SetText("Hello World");
   fxcrt::ostringstream buf;
@@ -289,13 +290,13 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessStandardText) {
   EXPECT_EQ(compareString1, firstString.First(compareString1.GetLength()));
   EXPECT_EQ(compareString2, midString.Last(compareString2.GetLength()));
   EXPECT_EQ(compareString3, lastString.Last(compareString3.GetLength()));
-  const CPDF_Dictionary* externalGS = TestGetResource(
+  RetainPtr<const CPDF_Dictionary> externalGS = TestGetResource(
       &generator, "ExtGState",
       midString.First(midString.GetLength() - compareString2.GetLength()));
   ASSERT_TRUE(externalGS);
   EXPECT_EQ(0.5f, externalGS->GetFloatFor("ca"));
   EXPECT_EQ(0.8f, externalGS->GetFloatFor("CA"));
-  const CPDF_Dictionary* fontDict = TestGetResource(
+  RetainPtr<const CPDF_Dictionary> fontDict = TestGetResource(
       &generator, "Font",
       lastString.First(lastString.GetLength() - compareString3.GetLength()));
   ASSERT_TRUE(fontDict);
@@ -330,9 +331,9 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessText) {
     pDict->SetNewFor<CPDF_Reference>("FontDescriptor", pDoc.get(),
                                      pDesc->GetObjNum());
 
-    pTextObj->m_TextState.SetFont(
+    pTextObj->mutable_text_state().SetFont(
         CPDF_DocPageData::FromDocument(pDoc.get())->GetFont(pDict));
-    pTextObj->m_TextState.SetFontSize(15.5f);
+    pTextObj->mutable_text_state().SetFontSize(15.5f);
     pTextObj->SetText("I am indirect");
     pTextObj->SetTextRenderMode(TextRenderingMode::MODE_FILL_CLIP);
 
@@ -342,9 +343,9 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessText) {
     pPath->AppendPoint(CFX_PointF(5, 0), CFX_Path::Point::Type::kLine);
     pPath->AppendPoint(CFX_PointF(5, 4), CFX_Path::Point::Type::kLine);
     pPath->AppendPointAndClose(CFX_PointF(0, 4), CFX_Path::Point::Type::kLine);
-    pTextObj->m_ClipPath.Emplace();
-    pTextObj->m_ClipPath.AppendPath(*pPath,
-                                    CFX_FillRenderOptions::FillType::kEvenOdd);
+    CPDF_ClipPath& clip_path = pTextObj->mutable_clip_path();
+    clip_path.Emplace();
+    clip_path.AppendPath(*pPath, CFX_FillRenderOptions::FillType::kEvenOdd);
 
     TestProcessText(&generator, &buf, pTextObj.get());
   }
@@ -364,7 +365,7 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessText) {
             textString.GetLength());
   EXPECT_EQ(compareString1, textString.First(compareString1.GetLength()));
   EXPECT_EQ(compareString2, textString.Last(compareString2.GetLength()));
-  const CPDF_Dictionary* fontDict = TestGetResource(
+  RetainPtr<const CPDF_Dictionary> fontDict = TestGetResource(
       &generator, "Font",
       textString.Substr(compareString1.GetLength(),
                         textString.GetLength() - compareString1.GetLength() -
@@ -385,8 +386,8 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessText) {
 TEST_F(CPDF_PageContentGeneratorTest, ProcessEmptyForm) {
   auto pDoc = std::make_unique<CPDF_TestDocument>();
   pDoc->CreateNewDoc();
-  auto pDict = pdfium::MakeRetain<CPDF_Dictionary>();
-  auto pStream = pdfium::MakeRetain<CPDF_Stream>(nullptr, 0, std::move(pDict));
+  auto pStream =
+      pdfium::MakeRetain<CPDF_Stream>(pdfium::MakeRetain<CPDF_Dictionary>());
 
   // Create an empty form.
   auto pTestForm = std::make_unique<CPDF_Form>(pDoc.get(), nullptr, pStream);
@@ -404,15 +405,12 @@ TEST_F(CPDF_PageContentGeneratorTest, ProcessEmptyForm) {
 TEST_F(CPDF_PageContentGeneratorTest, ProcessFormWithPath) {
   auto pDoc = std::make_unique<CPDF_TestDocument>();
   pDoc->CreateNewDoc();
-  auto pDict = pdfium::MakeRetain<CPDF_Dictionary>();
-  const char content[] =
+  static constexpr uint8_t kContents[] =
       "q 1 0 0 1 0 0 cm 3.102 4.6700001 m 5.4500012 .28999999 "
       "l 4.2399998 3.1499999 4.65 2.98 3.456 0.24 c 3.102 4.6700001 l h f Q\n";
-  size_t buf_len = std::size(content);
-  std::unique_ptr<uint8_t, FxFreeDeleter> buf(FX_AllocUninit(uint8_t, buf_len));
-  memcpy(buf.get(), content, buf_len);
-  auto pStream = pdfium::MakeRetain<CPDF_Stream>(std::move(buf), buf_len,
-                                                 std::move(pDict));
+  auto pStream = pdfium::MakeRetain<CPDF_Stream>(
+      DataVector<uint8_t>(std::begin(kContents), std::end(kContents)),
+      pdfium::MakeRetain<CPDF_Dictionary>());
 
   // Create a form with a non-empty stream.
   auto pTestForm = std::make_unique<CPDF_Form>(pDoc.get(), nullptr, pStream);

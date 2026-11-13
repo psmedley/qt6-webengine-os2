@@ -1,18 +1,32 @@
-# Copyright 2018 The Dawn Authors
+# Copyright 2018 The Dawn & Tint Authors
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import("//build_overrides/build.gni")
+import("dawn_overrides_with_defaults.gni")
 
 if (build_with_chromium) {
   import("//build/config/ozone.gni")
@@ -30,19 +44,21 @@ if (build_with_chromium) {
 
 # Enable the compilation for UWP
 dawn_is_winuwp = is_win && target_os == "winuwp"
+dawn_use_windows_ui = is_win
 
 declare_args() {
-  # TODO(dawn:1545): Re-enable dawn_use_angle on Android. In non-component
-  # builds, this is adding a dependency on ANGLE's libEGL.so and
-  # libGLESv2.so, apparently without regard for the use_static_angle=true
-  # GN variable. Chromium's linker on Android disallows production of more
-  # than one shared object per target (?).
-  dawn_use_angle = !is_android
+  dawn_tests_use_angle = true
 
   # Enables SwiftShader as the fallback adapter. Requires dawn_swiftshader_dir
   # to be set to take effect.
   # TODO(dawn:1536): Enable SwiftShader for Android.
-  dawn_use_swiftshader = !is_android
+  dawn_use_swiftshader = !is_android && !is_ios
+
+  # Whether we allow building DXC.
+  # DXC requires SM6.0+ which is blocklisted on x86,
+  # and arm64 support is not implemented yet.
+  # See crbug.com/tint/1753.
+  dawn_use_built_dxc = is_win && target_cpu != "x86" && target_cpu != "arm64"
 }
 
 declare_args() {
@@ -54,11 +70,14 @@ declare_args() {
   # standalone to produce static libraries to use in their projects.
   dawn_complete_static_libs = false
 
+  # Enables the compilation of Dawn's D3D11 backend
+  dawn_enable_d3d11 = is_win
+
   # Enables the compilation of Dawn's D3D12 backend
   dawn_enable_d3d12 = is_win
 
   # Enables the compilation of Dawn's Metal backend
-  dawn_enable_metal = is_mac
+  dawn_enable_metal = is_mac || is_ios
 
   # Enables the compilation of Dawn's Null backend
   # (required for unittests, obviously non-conformant)
@@ -96,6 +115,10 @@ declare_args() {
   # assume to have one present at the system level.
   dawn_enable_vulkan_loader =
       dawn_enable_vulkan && (is_mac || (is_linux && !is_android))
+
+  # Disable SPIR-V validation on Android because it adds a significant amount
+  # to the binary size, and Tint's output should be well-formed.
+  dawn_enable_spirv_validation = dawn_enable_vulkan && !is_android
 }
 
 # UWP only supports CoreWindow for windowing

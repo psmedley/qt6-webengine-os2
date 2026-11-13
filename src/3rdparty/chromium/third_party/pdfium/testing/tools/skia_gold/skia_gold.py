@@ -1,7 +1,6 @@
-# Copyright 2021 The PDFium Authors. All rights reserved.
+# Copyright 2021 The PDFium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-from __future__ import print_function
 
 import os
 import logging
@@ -113,7 +112,6 @@ class SkiaGoldTester:
                                       process_name)
       clear_gold_output_dir(self._output_dir)
     self._keys = _ParseKeyValuePairs(skia_gold_args.gold_key)
-    self._old_gold_props = _ParseKeyValuePairs(skia_gold_args.gold_properties)
     self._skia_gold_args = skia_gold_args
     self._skia_gold_session_manager = None
     self._skia_gold_properties = None
@@ -130,13 +128,6 @@ class SkiaGoldTester:
 
   def GetSkiaGoldProperties(self):
     if not self._skia_gold_properties:
-      if self._old_gold_props:
-        self._skia_gold_args.git_revision = self._old_gold_props['gitHash']
-        self._skia_gold_args.gerrit_issue = self._old_gold_props['issue']
-        self._skia_gold_args.gerrit_patchset = self._old_gold_props['patchset']
-        self._skia_gold_args.buildbucket_id = \
-            self._old_gold_props['buildbucket_build_id']
-
       if self._skia_gold_args.local_pixel_tests is None:
         self._skia_gold_args.local_pixel_tests = 'SWARMING_SERVER' \
             not in os.environ

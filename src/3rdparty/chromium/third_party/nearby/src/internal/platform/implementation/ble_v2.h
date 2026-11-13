@@ -17,24 +17,26 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/functional/any_invocable.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/input_stream.h"
-#include "internal/platform/listeners.h"
 #include "internal/platform/output_stream.h"
 #include "internal/platform/uuid.h"
 
-namespace location {
 namespace nearby {
 namespace api {
 namespace ble_v2 {
@@ -46,12 +48,6 @@ enum class TxPowerLevel {
   kLow = 2,
   kMedium = 3,
   kHigh = 4,
-};
-
-enum class BleOperationStatus {
-  kUnknown = 0,
-  kSucceeded = 1,
-  kFailed = 2,
 };
 
 // https://developer.android.com/reference/android/bluetooth/le/AdvertisingSetParameters.Builder
@@ -83,61 +79,99 @@ struct BleAdvertisementData {
   // iOS    : 16 bit service UUID (type=0x03) + LocalName data (type=0x08)
   // Windows: Service data (type=0x16)
   // Android: 16 bit service UUID (type=0x03) + Service data (type=0x16)
-  absl::flat_hash_map<Uuid, location::nearby::ByteArray> service_data;
+  absl::flat_hash_map<Uuid, nearby::ByteArray> service_data;
 };
 
 // Opaque wrapper over a BLE peripheral. Must be able to uniquely identify a
 // peripheral so that we can connect to its GATT server.
 class BlePeripheral {
  public:
+  using UniqueId = std::uint64_t;
   virtual ~BlePeripheral() = default;
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothDevice#getAddress()
   //
-  // This should be the MAC address when possible. If the implementation is
-  // unable to retrieve that, any unique identifier should suffice.
+  // Returns the current address.
+  //
+  // This will always be an empty string on Apple platforms.
   virtual std::string GetAddress() const = 0;
+
+  // Returns an immutable unique identifier. The identifier must not change when
+  // the BLE address is rotated.
+  virtual UniqueId GetUniqueId() const = 0;
 };
 
 // https://developer.android.com/reference/android/bluetooth/BluetoothGattCharacteristic
 //
 // Representation of a GATT characteristic.
 struct GattCharacteristic {
+  // Represents the GATT characteristic permissions
+  // This enumeration supports a bitwise combination of its member values.
+  // |, &, |= of the values are legal.
   enum class Permission {
-    kUnknown = 0,
-    kRead = 1,
-    kWrite = 2,
+    kNone = 0,
+    kRead = 1 << 0,
+    kWrite = 1 << 1,
     kLast,
   };
 
+  // Represents the GATT characteristic properties
+  // This enumeration supports a bitwise combination of its member values.
+  // |, &, |= of the values are legal.
   enum class Property {
-    kUnknown = 0,
-    kRead = 1,
-    kWrite = 2,
-    kIndicate = 3,
+    kNone = 0,
+    kRead = 1 << 0,
+    kWrite = 1 << 1,
+    kIndicate = 1 << 2,
+    kNotify = 1 << 3,
     kLast,
   };
 
   Uuid uuid;
   Uuid service_uuid;
-  std::vector<Permission> permissions;
-  std::vector<Property> properties;
+  Permission permission;
+  Property property;
+
+  // overloading operator for enum class Permission and Property
+  friend inline Permission operator|(Permission a, Permission b) {
+    return static_cast<Permission>(static_cast<int>(a) | static_cast<int>(b));
+  }
+
+  friend inline Permission operator&(Permission a, Permission b) {
+    return static_cast<Permission>(static_cast<int>(a) & static_cast<int>(b));
+  }
+  friend inline Permission& operator|=(Permission& a, Permission b) {
+    a = a | b;
+    return a;
+  }
+
+  friend inline Property operator|(Property a, Property b) {
+    return static_cast<Property>(static_cast<int>(a) | static_cast<int>(b));
+  }
+
+  friend inline Property operator&(Property a, Property b) {
+    return static_cast<Property>(static_cast<int>(a) & static_cast<int>(b));
+  }
+  friend inline Property& operator|=(Property& a, Property b) {
+    a = a | b;
+    return a;
+  }
 
   // Hashable
   template <typename H>
   friend H AbslHashValue(H h, const GattCharacteristic& s) {
-    return H::combine(std::move(h), s.uuid, s.service_uuid, s.permissions,
-                      s.properties);
+    return H::combine(std::move(h), s.uuid, s.service_uuid, s.permission,
+                      s.property);
   }
   bool operator==(const GattCharacteristic& rhs) const {
-    bool has_equal_permissions =
-        std::is_permutation(this->permissions.begin(), this->permissions.end(),
-                            rhs.permissions.begin(), rhs.permissions.end());
-    bool has_equal_properties =
-        std::is_permutation(this->properties.begin(), this->properties.end(),
-                            rhs.properties.begin(), rhs.properties.end());
     return this->uuid == rhs.uuid && this->service_uuid == rhs.service_uuid &&
-           has_equal_permissions && has_equal_properties;
+           this->permission == rhs.permission && this->property == rhs.property;
+  }
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const GattCharacteristic& c) {
+    absl::Format(&sink, "(service:%s, uuid:%s, permission:%v, property%v)",
+                 std::string(c.service_uuid), std::string(c.uuid), c.permission,
+                 c.property);
   }
 };
 
@@ -146,6 +180,12 @@ struct GattCharacteristic {
 // Representation of a client GATT connection to a remote GATT server.
 class GattClient {
  public:
+  // Specifies what type of GATT write should be performed.
+  enum class WriteType {
+    kWithResponse = 0,
+    kWithoutResponse = 1,
+  };
+
   virtual ~GattClient() = default;
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#discoverServices()
@@ -175,7 +215,7 @@ class GattClient {
   // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#readCharacteristic(android.bluetooth.BluetoothGattCharacteristic)
   // https://developer.android.com/reference/android/bluetooth/BluetoothGattCharacteristic.html#getValue()
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  virtual absl::optional<ByteArray> ReadCharacteristic(
+  virtual absl::optional<std::string> ReadCharacteristic(
       const GattCharacteristic& characteristic) = 0;
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGattCharacteristic.html#setValue(byte[])
@@ -184,7 +224,15 @@ class GattClient {
   // Sends a remote characteristic write request to the server and returns
   // whether or not it was successful.
   virtual bool WriteCharacteristic(const GattCharacteristic& characteristic,
-                                   const ByteArray& value) = 0;
+                                   absl::string_view value, WriteType type) = 0;
+
+  // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#setCharacteristicNotification(android.bluetooth.BluetoothGattCharacteristic,%20boolean)
+  //
+  // Enable or disable notifications/indications for a given characteristic.
+  virtual bool SetCharacteristicSubscription(
+      const GattCharacteristic& characteristic, bool enable,
+      absl::AnyInvocable<void(absl::string_view value)>
+          on_characteristic_changed_cb) = 0;
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#disconnect()
   virtual void Disconnect() = 0;
@@ -193,9 +241,13 @@ class GattClient {
 // https://developer.android.com/reference/android/bluetooth/BluetoothGattServer
 //
 // Representation of a BLE GATT server.
+// LINT.IfChange
 class GattServer {
  public:
   virtual ~GattServer() = default;
+
+  // Returns the local BlePeripheral.
+  virtual BlePeripheral& GetBlePeripheral() = 0;
 
   // Creates a characteristic and adds it to the GATT server under the given
   // characteristic and service UUIDs. Returns no value upon error.
@@ -212,39 +264,72 @@ class GattServer {
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
   virtual absl::optional<GattCharacteristic> CreateCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid,
-      const std::vector<GattCharacteristic::Permission>& permissions,
-      const std::vector<GattCharacteristic::Property>& properties) = 0;
+      GattCharacteristic::Permission permission,
+      GattCharacteristic::Property property) = 0;
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGattCharacteristic.html#setValue(byte[])
   //
   // Locally updates the value of a characteristic and returns whether or not
   // it was successful.
-  virtual bool UpdateCharacteristic(
-      const GattCharacteristic& characteristic,
-      const location::nearby::ByteArray& value) = 0;
+  virtual bool UpdateCharacteristic(const GattCharacteristic& characteristic,
+                                    const nearby::ByteArray& value) = 0;
+
+  // https://developer.android.com/reference/android/bluetooth/BluetoothGattServer#notifyCharacteristicChanged(android.bluetooth.BluetoothDevice,%20android.bluetooth.BluetoothGattCharacteristic,%20boolean,%20byte[])
+  //
+  // Send a notification or indication that a local characteristic has been
+  // updated and returns an absl::Status indicating success or what went wrong.
+  virtual absl::Status NotifyCharacteristicChanged(
+      const GattCharacteristic& characteristic, bool confirm,
+      const ByteArray& new_value) = 0;
 
   // Stops a GATT server.
   virtual void Stop() = 0;
 };
+// LINT.ThenChange(//depot/google3/third_party/nearby/internal/platform/ble_v2.h)
 
 // Callback for asynchronous events on the client side of a GATT connection.
 struct ClientGattConnectionCallback {
  public:
+  // Called when the characteristic is changed
+  absl::AnyInvocable<void(absl::string_view value)>
+      on_characteristic_changed_cb = [](absl::string_view) {};
+
   // Called when the client is disconnected from the GATT server.
-  std::function<void()> disconnected_cb = DefaultCallback<>();
+  absl::AnyInvocable<void()> disconnected_cb = []() {};
 };
 
 // Callback for asynchronous events on the server side of a GATT connection.
 struct ServerGattConnectionCallback {
+  using ReadValueCallback =
+      absl::AnyInvocable<void(absl::StatusOr<absl::string_view> data)>;
+  using WriteValueCallback = absl::AnyInvocable<void(absl::Status result)>;
   // Called when a remote peripheral connected to us and subscribed to one of
   // our characteristics.
-  std::function<void(const GattCharacteristic& characteristic)>
+  absl::AnyInvocable<void(const GattCharacteristic& characteristic)>
       characteristic_subscription_cb;
 
   // Called when a remote peripheral unsubscribed from one of our
   // characteristics.
-  std::function<void(const GattCharacteristic& characteristic)>
+  absl::AnyInvocable<void(const GattCharacteristic& characteristic)>
       characteristic_unsubscription_cb;
+
+  // Called when a gatt client is reading from the characteristic.
+  // Must call `callback` with the read result.
+  // When a characteristic has a static value set with
+  // `GattServer::UpdateCharacteristic()`, then reading from the characteristic
+  // yields that static value. The read callback is not called.
+  // Otherwise, the gatt server calls the read callback to get the value.
+  absl::AnyInvocable<void(const BlePeripheral& remote_device,
+                          const GattCharacteristic& characteristic, int offset,
+                          ReadValueCallback callback)>
+      on_characteristic_read_cb;
+
+  // Called when a gatt client is writing to the characteristic.
+  // Must call `callback` with the write result.
+  absl::AnyInvocable<void(const BlePeripheral& remote_device,
+                          const GattCharacteristic& characteristic, int offset,
+                          absl::string_view data, WriteValueCallback callback)>
+      on_characteristic_write_cb;
 };
 
 // A BLE GATT client socket for requesting GATT socket.
@@ -295,6 +380,7 @@ class BleServerSocket {
 // for all BLE and GATT related operations.
 class BleMedium {
  public:
+  using GetRemotePeripheralCallback = absl::AnyInvocable<void(BlePeripheral&)>;
   virtual ~BleMedium() = default;
 
   // https://developer.android.com/reference/android/bluetooth/le/BluetoothLeAdvertiser.html#startAdvertising(android.bluetooth.le.AdvertiseSettings,%20android.bluetooth.le.AdvertiseData,%20android.bluetooth.le.AdvertiseData,%20android.bluetooth.le.AdvertiseCallback)
@@ -305,11 +391,11 @@ class BleMedium {
       AdvertiseParameters advertise_set_parameters) = 0;
 
   struct AdvertisingCallback {
-    std::function<void(BleOperationStatus)> start_advertising_result;
+    absl::AnyInvocable<void(absl::Status)> start_advertising_result;
   };
 
   struct AdvertisingSession {
-    std::function<BleOperationStatus()> stop_advertising;
+    absl::AnyInvocable<absl::Status()> stop_advertising;
   };
 
   // Async interface for StartAdertising.
@@ -339,10 +425,9 @@ class BleMedium {
   // The peripheral is owned by platform implementation and it should outlive
   // for the whole peripheral(device) connection life cycle.
   struct ScanCallback {
-    std::function<void(BlePeripheral& peripheral,
-                       BleAdvertisementData advertisement_data)>
-        advertisement_found_cb =
-            DefaultCallback<BlePeripheral&, BleAdvertisementData>();
+    absl::AnyInvocable<void(BlePeripheral& peripheral,
+                            BleAdvertisementData advertisement_data)>
+        advertisement_found_cb = [](BlePeripheral&, BleAdvertisementData) {};
   };
 
   // https://developer.android.com/reference/android/bluetooth/le/BluetoothLeScanner.html#startScan(java.util.List%3Candroid.bluetooth.le.ScanFilter%3E,%20android.bluetooth.le.ScanSettings,%20android.bluetooth.le.ScanCallback)
@@ -366,16 +451,15 @@ class BleMedium {
   virtual bool StopScanning() = 0;
 
   struct ScanningSession {
-    std::function<BleOperationStatus()> stop_scanning;
+    absl::AnyInvocable<absl::Status()> stop_scanning;
   };
 
   struct ScanningCallback {
-    std::function<void(BleOperationStatus)> start_scanning_result =
-        DefaultCallback<BleOperationStatus>();
-    std::function<void(BlePeripheral& peripheral,
-                       BleAdvertisementData advertisement_data)>
-        advertisement_found_cb =
-            DefaultCallback<BlePeripheral&, BleAdvertisementData>();
+    absl::AnyInvocable<void(absl::Status)> start_scanning_result =
+        [](absl::Status) {};
+    absl::AnyInvocable<void(BlePeripheral& peripheral,
+                            BleAdvertisementData advertisement_data)>
+        advertisement_found_cb = [](BlePeripheral&, BleAdvertisementData) {};
   };
 
   // Async interface for StartScanning.
@@ -425,11 +509,23 @@ class BleMedium {
 
   // Requests if support extended advertisement.
   virtual bool IsExtendedAdvertisementsAvailable() = 0;
+
+  // Calls `callback` and returns true if `mac_address` is a valid BLE address.
+  // Otherwise, does not call the callback and returns false.
+  //
+  // This method is not available on Apple platforms and will always return
+  // false, ignoring the callback.
+  virtual bool GetRemotePeripheral(const std::string& mac_address,
+                                   GetRemotePeripheralCallback callback) = 0;
+
+  // Calls `callback` and returns true if `id` refers to a known BLE peripheral.
+  // Otherwise, does not call the callback and returns false.
+  virtual bool GetRemotePeripheral(BlePeripheral::UniqueId id,
+                                   GetRemotePeripheralCallback callback) = 0;
 };
 
 }  // namespace ble_v2
 }  // namespace api
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_API_BLE_V2_H_

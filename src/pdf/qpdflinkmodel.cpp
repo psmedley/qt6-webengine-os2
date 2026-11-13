@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qpdflink_p.h"
+#include "qpdflinkmodel.h"
 #include "qpdflinkmodel_p.h"
-#include "qpdflinkmodel_p_p.h"
 #include "qpdfdocument_p.h"
 
 #include "third_party/pdfium/public/fpdf_doc.h"
@@ -16,9 +16,9 @@ QT_BEGIN_NAMESPACE
 
 Q_LOGGING_CATEGORY(qLcLink, "qt.pdf.links")
 
-/*! \internal
+/*!
     \class QPdfLinkModel
-    \since 5.15
+    \since 6.6
     \inmodule QtPdf
     \inherits QAbstractListModel
 
@@ -28,7 +28,7 @@ Q_LOGGING_CATEGORY(qLcLink, "qt.pdf.links")
     This is used in PDF viewers to implement the hyperlink mechanism.
 */
 
-/*! \internal
+/*!
     \enum QPdfLinkModel::Role
 
     \value Link A QPdfLink object.
@@ -40,28 +40,31 @@ Q_LOGGING_CATEGORY(qLcLink, "qt.pdf.links")
     \omitvalue NRoles
 */
 
-/*! \internal
+/*!
     Constructs a new link model with parent object \a parent.
 */
 QPdfLinkModel::QPdfLinkModel(QObject *parent)
-    : QAbstractListModel(*(new QPdfLinkModelPrivate()), parent)
+    : QAbstractListModel(parent),
+      d_ptr{std::make_unique<QPdfLinkModelPrivate>(this)}
 {
+    Q_D(QPdfLinkModel);
     QMetaEnum rolesMetaEnum = metaObject()->enumerator(metaObject()->indexOfEnumerator("Role"));
     for (int r = Qt::UserRole; r < int(Role::NRoles); ++r)
-        m_roleNames.insert(r, QByteArray(rolesMetaEnum.valueToKey(r)).toLower());
+        d->roleNames.insert(r, QByteArray(rolesMetaEnum.valueToKey(r)).toLower());
 }
 
-/*! \internal
+/*!
     Destroys the model.
 */
 QPdfLinkModel::~QPdfLinkModel() {}
 
 QHash<int, QByteArray> QPdfLinkModel::roleNames() const
 {
-    return m_roleNames;
+    Q_D(const QPdfLinkModel);
+    return d->roleNames;
 }
 
-/*! \internal
+/*!
     \reimp
 */
 int QPdfLinkModel::rowCount(const QModelIndex &parent) const
@@ -71,7 +74,7 @@ int QPdfLinkModel::rowCount(const QModelIndex &parent) const
     return d->links.size();
 }
 
-/*! \internal
+/*!
     \reimp
 */
 QVariant QPdfLinkModel::data(const QModelIndex &index, int role) const
@@ -99,9 +102,9 @@ QVariant QPdfLinkModel::data(const QModelIndex &index, int role) const
     return QVariant();
 }
 
-/*! \internal
+/*!
     \property QPdfLinkModel::document
-    \brief the document to load links from
+    \brief The document to load links from.
 */
 QPdfDocument *QPdfLinkModel::document() const
 {
@@ -125,9 +128,9 @@ void QPdfLinkModel::setDocument(QPdfDocument *document)
         d->update();
 }
 
-/*! \internal
+/*!
     \property QPdfLinkModel::page
-    \brief the page to load links from
+    \brief The page to load links from.
 */
 int QPdfLinkModel::page() const
 {
@@ -146,8 +149,22 @@ void QPdfLinkModel::setPage(int page)
     d->update();
 }
 
-QPdfLinkModelPrivate::QPdfLinkModelPrivate() : QAbstractItemModelPrivate()
+/*!
+    Returns a \l {QPdfLink::isValid()}{valid} link if found under the \a point
+    (given in units of points, 1/72 of an inch), or an invalid link if it is
+    not found. In other words, this function is useful for picking, to handle
+    mouse click or hover.
+*/
+QPdfLink QPdfLinkModel::linkAt(QPointF point) const
 {
+    Q_D(const QPdfLinkModel);
+    for (const auto &link : std::as_const(d->links)) {
+        for (const auto &rect : link.rectangles()) {
+            if (rect.contains(point))
+                return link;
+        }
+    }
+    return {};
 }
 
 void QPdfLinkModelPrivate::update()
@@ -162,7 +179,6 @@ void QPdfLinkModelPrivate::update()
         qCWarning(qLcLink) << "failed to load page" << page;
         return;
     }
-    double pageHeight = FPDF_GetPageHeight(pdfPage);
     q->beginResetModel();
     links.clear();
 
@@ -187,8 +203,28 @@ void QPdfLinkModelPrivate::update()
             std::swap(rect.bottom, rect.top);
 
         QPdfLink linkData;
-        linkData.d->rects << QRectF(rect.left, pageHeight - rect.top,
-                               rect.right - rect.left, rect.top - rect.bottom);
+        // Use quad points if present; otherwise use the rect.
+        if (int quadPointsCount = FPDFLink_CountQuadPoints(linkAnnot) > 0) {
+            for (int i = 0; i < quadPointsCount; ++i) {
+                FS_QUADPOINTSF point;
+                if (FPDFLink_GetQuadPoints(linkAnnot, i, &point)) {
+                    // Quadpoints are counter clockwise from bottom left (x1, y1)
+                    QPolygonF poly;
+                    poly << QPointF(point.x1, point.y1);
+                    poly << QPointF(point.x2, point.y2);
+                    poly << QPointF(point.x3, point.y3);
+                    poly << QPointF(point.x4, point.y4);
+                    QRectF bounds = poly.boundingRect();
+                    bounds = document->d->mapPageToView(pdfPage, bounds.left(), bounds.top(), bounds.right(), bounds.bottom());
+                    qCDebug(qLcLink) << "quadpoints" << i << "of" << quadPointsCount << ":" << poly << "mapped bounds" << bounds;
+                    linkData.d->rects << bounds;
+                    // QPdfLink could store polygons rather than rects, to get the benefit of quadpoints;
+                    // so far we didn't bother. It would be an API change, and we'd need to use Shapes in PdfLinkDelegate.qml
+                }
+            }
+        } else {
+            linkData.d->rects << document->d->mapPageToView(pdfPage, rect.left, rect.top, rect.right, rect.bottom);
+        }
         FPDF_DEST dest = FPDFLink_GetDest(doc, linkAnnot);
         FPDF_ACTION action = FPDFLink_GetAction(linkAnnot);
         switch (FPDFAction_GetType(action)) {
@@ -196,7 +232,7 @@ void QPdfLinkModelPrivate::update()
         case PDFACTION_GOTO: {
             linkData.d->page = FPDFDest_GetDestPageIndex(doc, dest);
             if (linkData.d->page < 0) {
-                qCWarning(qLcLink) << "skipping link with invalid page number";
+                qCWarning(qLcLink) << "skipping link with invalid page number" << linkData.d->page;
                 continue; // while enumerating links
             }
             FPDF_BOOL hasX, hasY, hasZoom;
@@ -207,7 +243,7 @@ void QPdfLinkModelPrivate::update()
                 break; // at least we got a page number, so the link will jump there
             }
             if (hasX && hasY)
-                linkData.d->location = QPointF(x, pageHeight - y);
+                linkData.d->location = document->d->mapPageToView(pdfPage, x, y);
             if (hasZoom)
                 linkData.d->zoom = zoom;
             break;
@@ -270,7 +306,7 @@ void QPdfLinkModelPrivate::update()
                     double left, top, right, bottom;
                     bool success = FPDFLink_GetRect(webLinks, i, r, &left, &top, &right, &bottom);
                     if (success) {
-                        linkData.d->rects << QRectF(left, pageHeight - top, right - left, top - bottom);
+                        linkData.d->rects << document->d->mapPageToView(pdfPage, left, top, right, bottom);
                         links << linkData;
                     }
                 }
@@ -299,4 +335,4 @@ void QPdfLinkModel::onStatusChanged(QPdfDocument::Status status)
 
 QT_END_NAMESPACE
 
-#include "moc_qpdflinkmodel_p.cpp"
+#include "moc_qpdflinkmodel.cpp"

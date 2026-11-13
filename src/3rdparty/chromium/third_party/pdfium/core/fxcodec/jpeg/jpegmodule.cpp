@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,13 +23,13 @@
 #include "core/fxge/dib/fx_dib.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
-#include "third_party/base/notreached.h"
+#include "third_party/base/check_op.h"
 
 static pdfium::span<const uint8_t> JpegScanSOI(
     pdfium::span<const uint8_t> src_span) {
   DCHECK(!src_span.empty());
 
-  for (size_t offset = 0; offset < src_span.size() - 1; ++offset) {
+  for (size_t offset = 0; offset + 1 < src_span.size(); ++offset) {
     if (src_span[offset] == 0xff && src_span[offset + 1] == 0xd8)
       return src_span.subspan(offset);
   }
@@ -288,10 +288,7 @@ bool JpegDecoder::Rewind() {
     jpeg_destroy_decompress(&m_Cinfo);
     return false;
   }
-  if (static_cast<int>(m_Cinfo.output_width) > m_OrigWidth) {
-    NOTREACHED();
-    return false;
-  }
+  CHECK_LE(static_cast<int>(m_Cinfo.output_width), m_OrigWidth);
   m_bStarted = true;
   return true;
 }
@@ -406,7 +403,7 @@ absl::optional<JpegModule::ImageInfo> JpegModule::LoadInfo(
 }
 
 #if BUILDFLAG(IS_WIN)
-bool JpegModule::JpegEncode(const RetainPtr<CFX_DIBBase>& pSource,
+bool JpegModule::JpegEncode(const RetainPtr<const CFX_DIBBase>& pSource,
                             uint8_t** dest_buf,
                             size_t* dest_size) {
   jpeg_error_mgr jerr;
@@ -468,23 +465,25 @@ bool JpegModule::JpegEncode(const RetainPtr<CFX_DIBBase>& pSource,
   JSAMPROW row_pointer[1];
   JDIMENSION row;
   while (cinfo.next_scanline < cinfo.image_height) {
-    const uint8_t* src_scan = pSource->GetScanline(cinfo.next_scanline).data();
+    pdfium::span<const uint8_t> src_scan =
+        pSource->GetScanline(cinfo.next_scanline);
     if (nComponents > 1) {
       uint8_t* dest_scan = line_buf;
       if (nComponents == 3) {
         for (uint32_t i = 0; i < width; i++) {
-          ReverseCopy3Bytes(dest_scan, src_scan);
+          ReverseCopy3Bytes(dest_scan, src_scan.data());
           dest_scan += 3;
-          src_scan += Bpp;
+          src_scan = src_scan.subspan(Bpp);
         }
       } else {
         for (uint32_t i = 0; i < pitch; i++) {
-          *dest_scan++ = ~*src_scan++;
+          *dest_scan++ = ~src_scan.front();
+          src_scan = src_scan.subspan(1);
         }
       }
       row_pointer[0] = line_buf;
     } else {
-      row_pointer[0] = const_cast<uint8_t*>(src_scan);
+      row_pointer[0] = const_cast<uint8_t*>(src_scan.data());
     }
     row = cinfo.next_scanline;
     jpeg_write_scanlines(&cinfo, row_pointer, 1);

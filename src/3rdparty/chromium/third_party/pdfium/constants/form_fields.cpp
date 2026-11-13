@@ -1,11 +1,10 @@
-// Copyright 2021 PDFium Authors. All rights reserved.
+// Copyright 2021 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "constants/form_fields.h"
 
-namespace pdfium {
-namespace form_fields {
+namespace pdfium::form_fields {
 
 // ISO 32000-1:2008 table 220.
 // Entries common to all field dictionaries.
@@ -34,5 +33,4 @@ const char kQ[] = "Q";
 const char kDS[] = "DS";
 const char kRV[] = "RV";
 
-}  // namespace form_fields
-}  // namespace pdfium
+}  // namespace pdfium::form_fields

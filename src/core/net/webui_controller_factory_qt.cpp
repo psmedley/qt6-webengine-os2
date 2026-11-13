@@ -1,5 +1,6 @@
 // Copyright (C) 2017 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // Based on chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc:
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
@@ -10,13 +11,12 @@
 
 #include "build_config_qt.h"
 #include "devtools_frontend_qt.h"
-
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "build/build_config.h"
 #include "chrome/browser/accessibility/accessibility_ui.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/device_log_ui.h"
-#include "chrome/browser/ui/webui/devtools_ui.h"
+#include "chrome/browser/ui/webui/device_log/device_log_ui.h"
+#include "chrome/browser/ui/webui/devtools/devtools_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/browser/ui/webui/user_actions/user_actions_ui.h"
 #include "chrome/common/url_constants.h"
@@ -26,6 +26,7 @@
 #include "media/media_buildflags.h"
 #include "printing/buildflags/buildflags.h"
 #include "url/gurl.h"
+#include "version_ui_qt.h"
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 #include "chrome/browser/ui/webui/sandbox/sandbox_internals_ui.h"
@@ -86,11 +87,11 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI *web_ui, Profile *profile, co
     // This will get called a lot to check all URLs, so do a quick check of other
     // schemes to filter out most URLs.
     if (!content::HasWebUIScheme(url))
-        return NULL;
+        return nullptr;
 
     // We must compare hosts only since some of the Web UIs append extra stuff
     // after the host name.
-    if (url.host() == chrome::kChromeUINetInternalsHost)
+    if (url.host_piece() == chrome::kChromeUINetInternalsHost)
         return &NewWebUI<NetInternalsUI>;
 
     if (url.SchemeIs(content::kChromeDevToolsScheme)) {
@@ -98,7 +99,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI *web_ui, Profile *profile, co
             return nullptr;
         return &NewWebUI<DevToolsUI>;
     }
-    if (url.host() == chrome::kChromeUIAccessibilityHost)
+    if (url.host_piece() == chrome::kChromeUIAccessibilityHost)
         return &NewWebUI<AccessibilityUI>;
 
     if (url.host_piece() == chrome::kChromeUIUserActionsHost)
@@ -106,6 +107,9 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI *web_ui, Profile *profile, co
 
     if (url.host_piece() == chrome::kChromeUIDeviceLogHost)
         return &NewWebUI<chromeos::DeviceLogUI>;
+
+    if (url.host_piece() == chrome::kChromeUIVersionQtHost)
+        return &NewWebUI<VersionUIQt>;
 
 //    if (url.host_piece() == chrome::kChromeUIInspectHost)
 //        return &NewWebUI<InspectUI>;

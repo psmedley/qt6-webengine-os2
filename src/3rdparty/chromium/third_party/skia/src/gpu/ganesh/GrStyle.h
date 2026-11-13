@@ -11,7 +11,7 @@
 #include "include/core/SkMatrix.h"
 #include "include/core/SkStrokeRec.h"
 #include "include/gpu/GrTypes.h"
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkTemplates.h"
 #include "src/core/SkPathEffectBase.h"
 
 /**
@@ -156,8 +156,8 @@ public:
      * geometric approximations made by the path effect. It is typically computed from the view
      * matrix.
      */
-    bool SK_WARN_UNUSED_RESULT applyPathEffectToPath(SkPath* dst, SkStrokeRec* remainingStoke,
-                                                     const SkPath& src, SkScalar scale) const;
+    [[nodiscard]] bool applyPathEffectToPath(SkPath* dst, SkStrokeRec* remainingStoke,
+                                             const SkPath& src, SkScalar scale) const;
 
     /**
      * If this succeeds then the result path should be filled or hairlined as indicated by the
@@ -166,8 +166,8 @@ public:
      * been overwritten. Scale controls geometric approximations made by the path effect and
      * stroker. It is typically computed from the view matrix.
      */
-    bool SK_WARN_UNUSED_RESULT applyToPath(SkPath* dst, SkStrokeRec::InitStyle* fillOrHairline,
-                                           const SkPath& src, SkScalar scale) const;
+    [[nodiscard]] bool applyToPath(SkPath* dst, SkStrokeRec::InitStyle* fillOrHairline,
+                                   const SkPath& src, SkScalar scale) const;
 
     /** Given bounds of a path compute the bounds of path with the style applied. */
     void adjustBounds(SkRect* dst, const SkRect& src) const {
@@ -204,7 +204,7 @@ private:
         }
         SkPathEffect::DashType      fType;
         SkScalar                    fPhase{0};
-        SkAutoSTArray<4, SkScalar>  fIntervals;
+        skia_private::AutoSTArray<4, SkScalar>  fIntervals;
     };
 
     bool applyPathEffect(SkPath* dst, SkStrokeRec* strokeRec, const SkPath& src) const;

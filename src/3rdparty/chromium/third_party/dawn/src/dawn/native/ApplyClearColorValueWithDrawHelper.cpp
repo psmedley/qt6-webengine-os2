@@ -1,16 +1,29 @@
-// Copyright 2022 The Dawn Authors
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/ApplyClearColorValueWithDrawHelper.h"
 
@@ -19,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include "dawn/common/Enumerator.h"
+#include "dawn/common/Range.h"
 #include "dawn/native/BindGroup.h"
 #include "dawn/native/BindGroupLayout.h"
 #include "dawn/native/Device.h"
@@ -27,6 +42,7 @@
 #include "dawn/native/RenderPassEncoder.h"
 #include "dawn/native/RenderPipeline.h"
 #include "dawn/native/utils/WGPUHelpers.h"
+#include "dawn/native/webgpu_absl_format.h"
 
 namespace dawn::native {
 
@@ -35,32 +51,30 @@ namespace {
 // General helper functions and data structures for applying clear values with draw
 static const char kVSSource[] = R"(
 @vertex
-fn main(@builtin(vertex_index) VertexIndex : u32) -> @builtin(position) vec4<f32> {
-    var pos = array<vec2<f32>, 6>(
-        vec2<f32>( 0.0, -1.0),
-        vec2<f32>( 1.0, -1.0),
-        vec2<f32>( 0.0,  1.0),
-        vec2<f32>( 0.0,  1.0),
-        vec2<f32>( 1.0, -1.0),
-        vec2<f32>( 1.0,  1.0));
-        return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+fn main(@builtin(vertex_index) VertexIndex : u32) -> @builtin(position) vec4f {
+    var pos = array(
+        vec2f( 0.0, -1.0),
+        vec2f( 1.0, -1.0),
+        vec2f( 0.0,  1.0),
+        vec2f( 0.0,  1.0),
+        vec2f( 1.0, -1.0),
+        vec2f( 1.0,  1.0));
+        return vec4f(pos[VertexIndex], 0.0, 1.0);
 })";
 
 const char* GetTextureComponentTypeString(DeviceBase* device, wgpu::TextureFormat format) {
-    ASSERT(format != wgpu::TextureFormat::Undefined);
+    DAWN_ASSERT(format != wgpu::TextureFormat::Undefined);
 
     const Format& formatInfo = device->GetValidInternalFormat(format);
     switch (formatInfo.GetAspectInfo(Aspect::Color).baseType) {
-        case wgpu::TextureComponentType::Sint:
+        case TextureComponentType::Sint:
             return "i32";
-        case wgpu::TextureComponentType::Uint:
+        case TextureComponentType::Uint:
             return "u32";
-        case wgpu::TextureComponentType::Float:
-        case wgpu::TextureComponentType::DepthComparison:
-        default:
-            UNREACHABLE();
-            return "";
+        case TextureComponentType::Float:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 // Construct the fragment shader to apply the input color values to the corresponding color
@@ -75,18 +89,18 @@ std::string ConstructFragmentShader(DeviceBase* device,
     clearValueUniformBufferDeclarationStream << "struct ClearColors {" << std::endl;
 
     // Only generate the assignments we need.
-    for (uint32_t i : IterateBitSet(key.colorTargetsToApplyClearColorValue)) {
+    for (auto i : IterateBitSet(key.colorTargetsToApplyClearColorValue)) {
         wgpu::TextureFormat currentFormat = key.colorTargetFormats[i];
-        ASSERT(currentFormat != wgpu::TextureFormat::Undefined);
+        DAWN_ASSERT(currentFormat != wgpu::TextureFormat::Undefined);
 
         const char* type = GetTextureComponentTypeString(device, currentFormat);
 
-        outputColorDeclarationStream << "@location(" << i << ") output" << i << " : vec4<" << type
-                                     << ">," << std::endl;
-        clearValueUniformBufferDeclarationStream << "color" << i << " : vec4<" << type << ">,"
-                                                 << std::endl;
-        assignOutputColorStream << "outputColor.output" << i << " = clearColors.color" << i << ";"
-                                << std::endl;
+        outputColorDeclarationStream
+            << absl::StrFormat("@location(%u) output%u : vec4<%s>,\n", i, i, type);
+        clearValueUniformBufferDeclarationStream
+            << absl::StrFormat("color%u : vec4<%s>,\n", i, type);
+        assignOutputColorStream << absl::StrFormat("outputColor.output%u = clearColors.color%u;\n",
+                                                   i, i);
     }
     outputColorDeclarationStream << "}" << std::endl;
     clearValueUniformBufferDeclarationStream << "}" << std::endl;
@@ -141,12 +155,12 @@ ResultOrError<RenderPipelineBase*> GetOrCreateApplyClearValueWithDrawPipeline(
     fragment.entryPoint = "main";
 
     // Prepare the color states
-    std::array<ColorTargetState, kMaxColorAttachments> colorTargets = {};
-    for (uint32_t i = 0; i < kMaxColorAttachments; ++i) {
-        colorTargets[i].format = key.colorTargetFormats[i];
+    PerColorAttachment<ColorTargetState> colorTargets = {};
+    for (auto [i, target] : Enumerate(colorTargets)) {
+        target.format = key.colorTargetFormats[i];
         // We shouldn't change the color targets that are not involved in.
         if (!key.colorTargetsToApplyClearColorValue[i]) {
-            colorTargets[i].writeMask = wgpu::ColorWriteMask::None;
+            target.writeMask = wgpu::ColorWriteMask::None;
         }
     }
 
@@ -161,29 +175,32 @@ ResultOrError<RenderPipelineBase*> GetOrCreateApplyClearValueWithDrawPipeline(
 
     Ref<RenderPipelineBase> pipeline;
     DAWN_TRY_ASSIGN(pipeline, device->CreateRenderPipeline(&renderPipelineDesc));
-    store->applyClearColorValueWithDrawPipelines.insert({key, std::move(pipeline)});
+    store->applyClearColorValueWithDrawPipelines.emplace(key, std::move(pipeline));
 
     return GetCachedPipeline(store, key);
 }
 
 Color GetClearColorValue(const RenderPassColorAttachment& attachment) {
-    return HasDeprecatedColor(attachment) ? attachment.clearColor : attachment.clearValue;
+    return attachment.clearValue;
 }
 
 ResultOrError<Ref<BufferBase>> CreateUniformBufferWithClearValues(
     DeviceBase* device,
     const RenderPassDescriptor* renderPassDescriptor,
     const KeyOfApplyClearColorValueWithDrawPipelines& key) {
-    std::array<uint8_t, sizeof(uint32_t)* 4 * kMaxColorAttachments> clearValues = {};
-    uint32_t offset = 0;
-    for (uint32_t i : IterateBitSet(key.colorTargetsToApplyClearColorValue)) {
-        const Format& format = renderPassDescriptor->colorAttachments[i].view->GetFormat();
-        wgpu::TextureComponentType baseType = format.GetAspectInfo(Aspect::Color).baseType;
+    auto colorAttachments = ityp::SpanFromUntyped<ColorAttachmentIndex>(
+        renderPassDescriptor->colorAttachments, renderPassDescriptor->colorAttachmentCount);
 
-        Color initialClearValue = GetClearColorValue(renderPassDescriptor->colorAttachments[i]);
+    std::array<uint8_t, sizeof(uint32_t) * 4 * kMaxColorAttachments> clearValues = {};
+    uint32_t offset = 0;
+    for (auto i : IterateBitSet(key.colorTargetsToApplyClearColorValue)) {
+        const Format& format = colorAttachments[i].view->GetFormat();
+        TextureComponentType baseType = format.GetAspectInfo(Aspect::Color).baseType;
+
+        Color initialClearValue = GetClearColorValue(colorAttachments[i]);
         Color clearValue = ClampClearColorValueToLegalRange(initialClearValue, format);
         switch (baseType) {
-            case wgpu::TextureComponentType::Uint: {
+            case TextureComponentType::Uint: {
                 uint32_t* clearValuePtr = reinterpret_cast<uint32_t*>(clearValues.data() + offset);
                 clearValuePtr[0] = static_cast<uint32_t>(clearValue.r);
                 clearValuePtr[1] = static_cast<uint32_t>(clearValue.g);
@@ -191,7 +208,7 @@ ResultOrError<Ref<BufferBase>> CreateUniformBufferWithClearValues(
                 clearValuePtr[3] = static_cast<uint32_t>(clearValue.a);
                 break;
             }
-            case wgpu::TextureComponentType::Sint: {
+            case TextureComponentType::Sint: {
                 int32_t* clearValuePtr = reinterpret_cast<int32_t*>(clearValues.data() + offset);
                 clearValuePtr[0] = static_cast<int32_t>(clearValue.r);
                 clearValuePtr[1] = static_cast<int32_t>(clearValue.g);
@@ -199,7 +216,7 @@ ResultOrError<Ref<BufferBase>> CreateUniformBufferWithClearValues(
                 clearValuePtr[3] = static_cast<int32_t>(clearValue.a);
                 break;
             }
-            case wgpu::TextureComponentType::Float: {
+            case TextureComponentType::Float: {
                 float* clearValuePtr = reinterpret_cast<float*>(clearValues.data() + offset);
                 clearValuePtr[0] = static_cast<float>(clearValue.r);
                 clearValuePtr[1] = static_cast<float>(clearValue.g);
@@ -207,16 +224,11 @@ ResultOrError<Ref<BufferBase>> CreateUniformBufferWithClearValues(
                 clearValuePtr[3] = static_cast<float>(clearValue.a);
                 break;
             }
-
-            case wgpu::TextureComponentType::DepthComparison:
-            default:
-                UNREACHABLE();
-                break;
         }
         offset += sizeof(uint32_t) * 4;
     }
 
-    ASSERT(offset > 0);
+    DAWN_ASSERT(offset > 0);
 
     Ref<BufferBase> outputBuffer;
     DAWN_TRY_ASSIGN(
@@ -255,7 +267,7 @@ bool ShouldApplyClearBigIntegerColorValueWithDraw(
     // TODO(dawn:537): only check the color channels that are available in the current color format.
     Color clearValue = GetClearColorValue(colorAttachmentInfo);
     switch (format.GetAspectInfo(Aspect::Color).baseType) {
-        case wgpu::TextureComponentType::Uint: {
+        case TextureComponentType::Uint: {
             constexpr double kMaxUintRepresentableInFloat = 1 << std::numeric_limits<float>::digits;
             if (clearValue.r <= kMaxUintRepresentableInFloat &&
                 clearValue.g <= kMaxUintRepresentableInFloat &&
@@ -265,7 +277,7 @@ bool ShouldApplyClearBigIntegerColorValueWithDraw(
             }
             break;
         }
-        case wgpu::TextureComponentType::Sint: {
+        case TextureComponentType::Sint: {
             constexpr double kMaxSintRepresentableInFloat = 1 << std::numeric_limits<float>::digits;
             constexpr double kMinSintRepresentableInFloat = -kMaxSintRepresentableInFloat;
             if (clearValue.r <= kMaxSintRepresentableInFloat &&
@@ -280,10 +292,8 @@ bool ShouldApplyClearBigIntegerColorValueWithDraw(
             }
             break;
         }
-        case wgpu::TextureComponentType::Float:
-        case wgpu::TextureComponentType::DepthComparison:
-        default:
-            UNREACHABLE();
+        case TextureComponentType::Float:
+            DAWN_UNREACHABLE();
             return false;
     }
 
@@ -295,15 +305,16 @@ KeyOfApplyClearColorValueWithDrawPipelines GetKeyOfApplyClearColorValueWithDrawP
     KeyOfApplyClearColorValueWithDrawPipelines key;
     key.colorAttachmentCount = renderPassDescriptor->colorAttachmentCount;
 
+    auto colorAttachments = ityp::SpanFromUntyped<ColorAttachmentIndex>(
+        renderPassDescriptor->colorAttachments, renderPassDescriptor->colorAttachmentCount);
+
     key.colorTargetFormats.fill(wgpu::TextureFormat::Undefined);
-    for (uint32_t i = 0; i < renderPassDescriptor->colorAttachmentCount; ++i) {
-        if (renderPassDescriptor->colorAttachments[i].view != nullptr) {
-            key.colorTargetFormats[i] =
-                renderPassDescriptor->colorAttachments[i].view->GetFormat().format;
+    for (auto [i, attachment] : Enumerate(colorAttachments)) {
+        if (attachment.view != nullptr) {
+            key.colorTargetFormats[i] = attachment.view->GetFormat().format;
         }
 
-        if (ShouldApplyClearBigIntegerColorValueWithDraw(
-                renderPassDescriptor->colorAttachments[i])) {
+        if (ShouldApplyClearBigIntegerColorValueWithDraw(attachment)) {
             key.colorTargetsToApplyClearColorValue.set(i);
         }
     }
@@ -338,7 +349,7 @@ bool KeyOfApplyClearColorValueWithDrawPipelinesEqualityFunc::operator()(
         return false;
     }
 
-    for (uint32_t i = 0; i < kMaxColorAttachments; ++i) {
+    for (auto i : Range(key1.colorTargetFormats.size())) {
         if (key1.colorTargetFormats[i] != key2.colorTargetFormats[i]) {
             return false;
         }

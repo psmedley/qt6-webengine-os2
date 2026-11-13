@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef NO_WEBRTC
+
 #include "connections/implementation/mediums/webrtc/signaling_frames.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace mediums {
 namespace webrtc_frames {
-using WebRtcSignalingFrame = location::nearby::mediums::WebRtcSignalingFrame;
+using WebRtcSignalingFrame = ::location::nearby::mediums::WebRtcSignalingFrame;
 
 namespace {
 
@@ -131,4 +132,5 @@ location::nearby::mediums::IceCandidate EncodeIceCandidate(
 }  // namespace mediums
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
+
+#endif

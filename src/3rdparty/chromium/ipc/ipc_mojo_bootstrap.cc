@@ -13,29 +13,31 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include <optional>
 #include "base/check_op.h"
 #include "base/containers/circular_deque.h"
 #include "base/containers/contains.h"
+#include "base/feature_list.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/no_destructor.h"
 #include "base/ranges/algorithm.h"
+#include "base/sequence_checker.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/common/task_annotator.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_checker.h"
-#include "base/threading/thread_local.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/thread_annotations.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "base/trace_event/typed_macros.h"
 #include "ipc/ipc_channel.h"
+#include "ipc/urgent_message_observer.h"
 #include "mojo/public/cpp/bindings/associated_group.h"
 #include "mojo/public/cpp/bindings/associated_group_controller.h"
 #include "mojo/public/cpp/bindings/connector.h"
@@ -50,22 +52,19 @@
 #include "mojo/public/cpp/bindings/pipe_control_message_proxy.h"
 #include "mojo/public/cpp/bindings/sequence_local_sync_event_watcher.h"
 #include "mojo/public/cpp/bindings/tracing_helpers.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/abseil-cpp/absl/base/attributes.h"
 
 namespace IPC {
 
-namespace {
-
 class ChannelAssociatedGroupController;
 
-base::ThreadLocalBoolean& GetOffSequenceBindingAllowedFlag() {
-  static base::NoDestructor<base::ThreadLocalBoolean> flag;
-  return *flag;
-}
+namespace {
 
-bool CanBindOffSequence() {
-  return GetOffSequenceBindingAllowedFlag().Get();
-}
+ABSL_CONST_INIT thread_local bool off_sequence_binding_allowed = false;
+
+BASE_FEATURE(kMojoChannelAssociatedSendUsesRunOrPostTask,
+             "MojoChannelAssociatedSendUsesRunOrPostTask",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Used to track some internal Channel state in pursuit of message leaks.
 //
@@ -132,6 +131,37 @@ struct MessageMemoryDumpInfoHash {
   }
 };
 
+class ScopedUrgentMessageNotification {
+ public:
+  explicit ScopedUrgentMessageNotification(
+      UrgentMessageObserver* observer = nullptr)
+      : observer_(observer) {
+    if (observer_) {
+      observer_->OnUrgentMessageReceived();
+    }
+  }
+
+  ~ScopedUrgentMessageNotification() {
+    if (observer_) {
+      observer_->OnUrgentMessageProcessed();
+    }
+  }
+
+  ScopedUrgentMessageNotification(ScopedUrgentMessageNotification&& other)
+      : observer_(std::exchange(other.observer_, nullptr)) {}
+
+  ScopedUrgentMessageNotification& operator=(
+      ScopedUrgentMessageNotification&& other) {
+    observer_ = std::exchange(other.observer_, nullptr);
+    return *this;
+  }
+
+ private:
+  raw_ptr<UrgentMessageObserver> observer_;
+};
+
+}  // namespace
+
 class ChannelAssociatedGroupController
     : public mojo::AssociatedGroupController,
       public mojo::MessageReceiver,
@@ -140,23 +170,22 @@ class ChannelAssociatedGroupController
   ChannelAssociatedGroupController(
       bool set_interface_id_namespace_bit,
       const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner,
-      const scoped_refptr<base::SingleThreadTaskRunner>& proxy_task_runner,
-      const scoped_refptr<mojo::internal::MessageQuotaChecker>& quota_checker)
+      const scoped_refptr<base::SingleThreadTaskRunner>& proxy_task_runner)
       : task_runner_(ipc_task_runner),
         proxy_task_runner_(proxy_task_runner),
-        quota_checker_(quota_checker),
         set_interface_id_namespace_bit_(set_interface_id_namespace_bit),
         dispatcher_(this),
         control_message_handler_(this),
         control_message_proxy_thunk_(this),
         control_message_proxy_(&control_message_proxy_thunk_) {
-    thread_checker_.DetachFromThread();
     control_message_handler_.SetDescription(
         "IPC::mojom::Bootstrap [primary] PipeControlMessageHandler");
     dispatcher_.SetValidator(std::make_unique<mojo::MessageHeaderValidator>(
         "IPC::mojom::Bootstrap [primary] MessageHeaderValidator"));
 
     GetMemoryDumpProvider().AddController(this);
+
+    DETACH_FROM_SEQUENCE(sequence_checker_);
   }
 
   ChannelAssociatedGroupController(const ChannelAssociatedGroupController&) =
@@ -187,23 +216,28 @@ class ChannelAssociatedGroupController
   }
 
   void Pause() {
-    DCHECK(!paused_);
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    CHECK(was_bound_or_message_sent_);
+    CHECK(!paused_);
     paused_ = true;
   }
 
   void Unpause() {
-    DCHECK(paused_);
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    CHECK(was_bound_or_message_sent_);
+    CHECK(paused_);
     paused_ = false;
   }
 
   void FlushOutgoingMessages() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    CHECK(was_bound_or_message_sent_);
+
     std::vector<mojo::Message> outgoing_messages;
     {
       base::AutoLock lock(outgoing_messages_lock_);
       std::swap(outgoing_messages, outgoing_messages_);
     }
-    if (quota_checker_ && outgoing_messages.size())
-      quota_checker_->AfterMessagesDequeued(outgoing_messages.size());
 
     for (auto& message : outgoing_messages)
       SendMessage(&message);
@@ -212,6 +246,8 @@ class ChannelAssociatedGroupController
   void Bind(mojo::ScopedMessagePipeHandle handle,
             mojo::PendingAssociatedRemote<mojom::Channel>* sender,
             mojo::PendingAssociatedReceiver<mojom::Channel>* receiver) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
     connector_ = std::make_unique<mojo::Connector>(
         std::move(handle), mojo::Connector::SINGLE_THREADED_SEND,
         "IPC Channel");
@@ -220,8 +256,6 @@ class ChannelAssociatedGroupController
         base::BindOnce(&ChannelAssociatedGroupController::OnPipeError,
                        base::Unretained(this)));
     connector_->set_enforce_errors_from_incoming_receiver(false);
-    if (quota_checker_)
-      connector_->SetMessageQuotaChecker(quota_checker_);
 
     // Don't let the Connector do any sort of queuing on our behalf. Individual
     // messages bound for the IPC::ChannelProxy thread (i.e. that vast majority
@@ -259,12 +293,21 @@ class ChannelAssociatedGroupController
         std::move(sender_handle), 0);
     *receiver = mojo::PendingAssociatedReceiver<mojom::Channel>(
         std::move(receiver_handle));
+
+    if (!was_bound_or_message_sent_) {
+      was_bound_or_message_sent_ = true;
+      DETACH_FROM_SEQUENCE(sequence_checker_);
+    }
   }
 
-  void StartReceiving() { connector_->StartReceiving(task_runner_); }
+  void StartReceiving() {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    CHECK(was_bound_or_message_sent_);
+    connector_->StartReceiving(task_runner_);
+  }
 
   void ShutDown() {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     shut_down_ = true;
     if (connector_)
       connector_->CloseMessagePipe();
@@ -272,9 +315,6 @@ class ChannelAssociatedGroupController
     connector_.reset();
 
     base::AutoLock lock(outgoing_messages_lock_);
-    if (quota_checker_ && outgoing_messages_.size())
-      quota_checker_->AfterMessagesDequeued(outgoing_messages_.size());
-
     outgoing_messages_.clear();
   }
 
@@ -350,7 +390,7 @@ class ChannelAssociatedGroupController
 
   void CloseEndpointHandle(
       mojo::InterfaceId id,
-      const absl::optional<mojo::DisconnectReason>& reason) override {
+      const std::optional<mojo::DisconnectReason>& reason) override {
     if (!mojo::IsValidInterfaceId(id))
       return;
     {
@@ -427,6 +467,13 @@ class ChannelAssociatedGroupController
   }
 
   bool PrefersSerializedMessages() override { return true; }
+
+  void SetUrgentMessageObserver(UrgentMessageObserver* observer) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    CHECK(!was_bound_or_message_sent_);
+    urgent_message_observer_ = observer;
+    DETACH_FROM_SEQUENCE(sequence_checker_);
+  }
 
  private:
   class Endpoint;
@@ -522,12 +569,12 @@ class ChannelAssociatedGroupController
       handle_created_ = true;
     }
 
-    const absl::optional<mojo::DisconnectReason>& disconnect_reason() const {
+    const std::optional<mojo::DisconnectReason>& disconnect_reason() const {
       return disconnect_reason_;
     }
 
     void set_disconnect_reason(
-        const absl::optional<mojo::DisconnectReason>& disconnect_reason) {
+        const std::optional<mojo::DisconnectReason>& disconnect_reason) {
       disconnect_reason_ = disconnect_reason;
     }
 
@@ -551,8 +598,9 @@ class ChannelAssociatedGroupController
       task_runner_ = std::move(runner);
       client_ = client;
 
-      if (CanBindOffSequence())
+      if (off_sequence_binding_allowed) {
         was_bound_off_sequence_ = true;
+      }
     }
 
     void DetachClient() {
@@ -565,11 +613,11 @@ class ChannelAssociatedGroupController
       sync_watcher_.reset();
     }
 
-    absl::optional<uint32_t> EnqueueSyncMessage(MessageWrapper message) {
+    std::optional<uint32_t> EnqueueSyncMessage(MessageWrapper message) {
       controller_->lock_.AssertAcquired();
       if (exclusive_wait_ && exclusive_wait_->TryFulfillingWith(message)) {
         exclusive_wait_ = nullptr;
-        return absl::nullopt;
+        return std::nullopt;
       }
 
       uint32_t id = GenerateSyncMessageId();
@@ -617,11 +665,17 @@ class ChannelAssociatedGroupController
       DCHECK(controller_->proxy_task_runner_->BelongsToCurrentThread());
 
       EnsureSyncWatcherExists();
+      {
+        base::AutoLock locker(controller_->lock_);
+        if (peer_closed_) {
+          SignalSyncMessageEvent();
+        }
+      }
       return sync_watcher_->SyncWatch(&should_stop);
     }
 
     MessageWrapper WaitForIncomingSyncReply(uint64_t request_id) {
-      absl::optional<ExclusiveSyncWait> wait;
+      std::optional<ExclusiveSyncWait> wait;
       {
         base::AutoLock lock(controller_->lock_);
         for (auto& [id, message] : sync_messages_) {
@@ -761,12 +815,12 @@ class ChannelAssociatedGroupController
     bool peer_closed_ = false;
     bool handle_created_ = false;
     bool was_bound_off_sequence_ = false;
-    absl::optional<mojo::DisconnectReason> disconnect_reason_;
+    std::optional<mojo::DisconnectReason> disconnect_reason_;
     raw_ptr<mojo::InterfaceEndpointClient> client_ = nullptr;
     scoped_refptr<base::SequencedTaskRunner> task_runner_;
     std::unique_ptr<mojo::SequenceLocalSyncEventWatcher> sync_watcher_;
     base::circular_deque<std::pair<uint32_t, MessageWrapper>> sync_messages_;
-    ExclusiveSyncWait* exclusive_wait_ = nullptr;
+    raw_ptr<ExclusiveSyncWait> exclusive_wait_ = nullptr;
     uint32_t next_sync_message_id_ = 0;
   };
 
@@ -816,37 +870,47 @@ class ChannelAssociatedGroupController
   bool SendMessage(mojo::Message* message) {
     DCHECK(message->heap_profiler_tag());
     if (task_runner_->BelongsToCurrentThread()) {
-      DCHECK(thread_checker_.CalledOnValidThread());
-      if (!connector_ || paused_) {
-        if (!shut_down_) {
-          base::AutoLock lock(outgoing_messages_lock_);
-          if (quota_checker_)
-            quota_checker_->BeforeMessagesEnqueued(1);
-          outgoing_messages_.emplace_back(std::move(*message));
-        }
-        return true;
-      }
-      return connector_->Accept(message);
+      return SendMessageOnSequence(message);
+    }
+
+    // PostTask (or RunOrPostTask) so that `message` is sent after messages from
+    // tasks that are already queued (e.g. by `IPC::ChannelProxy::Send`).
+    auto callback = base::BindOnce(
+        &ChannelAssociatedGroupController::SendMessageOnSequenceViaTask, this,
+        std::move(*message));
+    if (base::FeatureList::IsEnabled(
+            kMojoChannelAssociatedSendUsesRunOrPostTask)) {
+      task_runner_->RunOrPostTask(base::subtle::RunOrPostTaskPassKey(),
+                                  FROM_HERE, std::move(callback));
     } else {
-      // We always post tasks to the primary endpoint thread when called from
-      // other threads in order to simulate IPC::ChannelProxy::Send behavior.
-      task_runner_->PostTask(
-          FROM_HERE,
-          base::BindOnce(
-              &ChannelAssociatedGroupController::SendMessageOnPrimaryThread,
-              this, std::move(*message)));
+      task_runner_->PostTask(FROM_HERE, std::move(callback));
+    }
+
+    return true;
+  }
+
+  bool SendMessageOnSequence(mojo::Message* message) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    was_bound_or_message_sent_ = true;
+
+    if (!connector_ || paused_) {
+      if (!shut_down_) {
+        base::AutoLock lock(outgoing_messages_lock_);
+        outgoing_messages_.emplace_back(std::move(*message));
+      }
       return true;
+    }
+    return connector_->Accept(message);
+  }
+
+  void SendMessageOnSequenceViaTask(mojo::Message message) {
+    if (!SendMessageOnSequence(&message)) {
+      RaiseError();
     }
   }
 
-  void SendMessageOnPrimaryThread(mojo::Message message) {
-    DCHECK(thread_checker_.CalledOnValidThread());
-    if (!SendMessage(&message))
-      RaiseError();
-  }
-
   void OnPipeError() {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
     // We keep |this| alive here because it's possible for the notifications
     // below to release all other references.
@@ -882,27 +946,31 @@ class ChannelAssociatedGroupController
     }
   }
 
-  void NotifyEndpointOfError(Endpoint* endpoint, bool force_async) {
-    lock_.AssertAcquired();
+  void NotifyEndpointOfError(Endpoint* endpoint, bool force_async)
+      EXCLUSIVE_LOCKS_REQUIRED(lock_) {
     DCHECK(endpoint->task_runner() && endpoint->client());
     if (endpoint->task_runner()->RunsTasksInCurrentSequence() && !force_async) {
       mojo::InterfaceEndpointClient* client = endpoint->client();
-      absl::optional<mojo::DisconnectReason> reason(
+      std::optional<mojo::DisconnectReason> reason(
           endpoint->disconnect_reason());
 
       base::AutoUnlock unlocker(lock_);
       client->NotifyError(reason);
     } else {
       endpoint->task_runner()->PostTask(
-          FROM_HERE, base::BindOnce(&ChannelAssociatedGroupController::
-                                        NotifyEndpointOfErrorOnEndpointThread,
-                                    this, endpoint->id(),
-                                    base::UnsafeDanglingUntriaged(endpoint)));
+          FROM_HERE,
+          base::BindOnce(&ChannelAssociatedGroupController::
+                             NotifyEndpointOfErrorOnEndpointThread,
+                         this, endpoint->id(),
+                         // This is safe as `endpoint` is verified to be in
+                         // `endpoints_` (a map with ownership) before use.
+                         base::UnsafeDangling(endpoint)));
     }
   }
 
+  // `endpoint` might be a dangling ptr and must be checked before dereference.
   void NotifyEndpointOfErrorOnEndpointThread(mojo::InterfaceId id,
-                                             Endpoint* endpoint) {
+                                             MayBeDangling<Endpoint> endpoint) {
     base::AutoLock locker(lock_);
     auto iter = endpoints_.find(id);
     if (iter == endpoints_.end() || iter->second.get() != endpoint)
@@ -916,35 +984,35 @@ class ChannelAssociatedGroupController
 
   // Marks `endpoint` as closed and returns true if and only if its peer was
   // also already closed.
-  bool MarkClosed(Endpoint* endpoint) {
-    lock_.AssertAcquired();
+  bool MarkClosed(Endpoint* endpoint) EXCLUSIVE_LOCKS_REQUIRED(lock_) {
     endpoint->set_closed();
     return endpoint->peer_closed();
   }
 
   // Marks `endpoint` as having a closed peer and returns true if and only if
   // `endpoint` itself was also already closed.
-  bool MarkPeerClosed(Endpoint* endpoint) {
-    lock_.AssertAcquired();
+  bool MarkPeerClosed(Endpoint* endpoint) EXCLUSIVE_LOCKS_REQUIRED(lock_) {
     endpoint->set_peer_closed();
     endpoint->SignalSyncMessageEvent();
     return endpoint->closed();
   }
 
-  void MarkClosedAndMaybeRemove(Endpoint* endpoint) {
+  void MarkClosedAndMaybeRemove(Endpoint* endpoint)
+      EXCLUSIVE_LOCKS_REQUIRED(lock_) {
     if (MarkClosed(endpoint)) {
       endpoints_.erase(endpoint->id());
     }
   }
 
-  void MarkPeerClosedAndMaybeRemove(Endpoint* endpoint) {
+  void MarkPeerClosedAndMaybeRemove(Endpoint* endpoint)
+      EXCLUSIVE_LOCKS_REQUIRED(lock_) {
     if (MarkPeerClosed(endpoint)) {
       endpoints_.erase(endpoint->id());
     }
   }
 
-  Endpoint* FindOrInsertEndpoint(mojo::InterfaceId id, bool* inserted) {
-    lock_.AssertAcquired();
+  Endpoint* FindOrInsertEndpoint(mojo::InterfaceId id, bool* inserted)
+      EXCLUSIVE_LOCKS_REQUIRED(lock_) {
     DCHECK(!inserted || !*inserted);
 
     Endpoint* endpoint = FindEndpoint(id);
@@ -957,15 +1025,14 @@ class ChannelAssociatedGroupController
     return endpoint;
   }
 
-  Endpoint* FindEndpoint(mojo::InterfaceId id) {
-    lock_.AssertAcquired();
+  Endpoint* FindEndpoint(mojo::InterfaceId id) EXCLUSIVE_LOCKS_REQUIRED(lock_) {
     auto iter = endpoints_.find(id);
     return iter != endpoints_.end() ? iter->second.get() : nullptr;
   }
 
   // mojo::MessageReceiver:
   bool Accept(mojo::Message* message) override {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
     if (!message->DeserializeAssociatedEndpointHandles(this))
       return false;
@@ -1013,6 +1080,11 @@ class ChannelAssociatedGroupController
               ? endpoint->task_runner()
               : proxy_task_runner_.get();
 
+      ScopedUrgentMessageNotification scoped_urgent_message_notification(
+          message->has_flag(mojo::Message::kFlagIsUrgent)
+              ? urgent_message_observer_
+              : nullptr);
+
       if (message->has_flag(mojo::Message::kFlagIsSync)) {
         MessageWrapper message_wrapper(this, std::move(*message));
         // Sync messages may need to be handled by the endpoint if it's blocking
@@ -1020,14 +1092,15 @@ class ChannelAssociatedGroupController
         // sync message queue. If the endpoint was blocking, it will dequeue the
         // message and dispatch it. Otherwise the posted |AcceptSyncMessage()|
         // call will dequeue the message and dispatch it.
-        absl::optional<uint32_t> message_id =
+        std::optional<uint32_t> message_id =
             endpoint->EnqueueSyncMessage(std::move(message_wrapper));
         if (message_id) {
           task_runner->PostTask(
               FROM_HERE,
               base::BindOnce(
                   &ChannelAssociatedGroupController::AcceptSyncMessage, this,
-                  id, *message_id));
+                  id, *message_id,
+                  std::move(scoped_urgent_message_notification)));
         }
         return true;
       }
@@ -1046,7 +1119,8 @@ class ChannelAssociatedGroupController
             FROM_HERE,
             base::BindOnce(
                 &ChannelAssociatedGroupController::AcceptOnEndpointThread, this,
-                std::move(*message)));
+                std::move(*message),
+                std::move(scoped_urgent_message_notification)));
       }
       return true;
     }
@@ -1058,7 +1132,9 @@ class ChannelAssociatedGroupController
     return client->HandleIncomingMessage(message);
   }
 
-  void AcceptOnEndpointThread(mojo::Message message) {
+  void AcceptOnEndpointThread(
+      mojo::Message message,
+      ScopedUrgentMessageNotification scoped_urgent_message_notification) {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("mojom"),
                  "ChannelAssociatedGroupController::AcceptOnEndpointThread");
 
@@ -1108,7 +1184,10 @@ class ChannelAssociatedGroupController
       RaiseError();
   }
 
-  void AcceptSyncMessage(mojo::InterfaceId interface_id, uint32_t message_id) {
+  void AcceptSyncMessage(
+      mojo::InterfaceId interface_id,
+      uint32_t message_id,
+      ScopedUrgentMessageNotification scoped_urgent_message_notification) {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("mojom"),
                  "ChannelAssociatedGroupController::AcceptSyncMessage");
 
@@ -1151,8 +1230,8 @@ class ChannelAssociatedGroupController
   // mojo::PipeControlMessageHandlerDelegate:
   bool OnPeerAssociatedEndpointClosed(
       mojo::InterfaceId id,
-      const absl::optional<mojo::DisconnectReason>& reason) override {
-    DCHECK(thread_checker_.CalledOnValidThread());
+      const std::optional<mojo::DisconnectReason>& reason) override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
     scoped_refptr<ChannelAssociatedGroupController> keepalive(this);
     base::AutoLock locker(lock_);
@@ -1174,42 +1253,50 @@ class ChannelAssociatedGroupController
     return false;
   }
 
-  // Checked in places which must be run on the primary endpoint's thread.
-  base::ThreadChecker thread_checker_;
-
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   const scoped_refptr<base::SingleThreadTaskRunner> proxy_task_runner_;
-  const scoped_refptr<mojo::internal::MessageQuotaChecker> quota_checker_;
   const bool set_interface_id_namespace_bit_;
-  bool paused_ = false;
-  std::unique_ptr<mojo::Connector> connector_;
-  mojo::MessageDispatcher dispatcher_;
-  mojo::PipeControlMessageHandler control_message_handler_;
-  ControlMessageProxyThunk control_message_proxy_thunk_;
+
+  // Ensures sequenced access to members below.
+  SEQUENCE_CHECKER(sequence_checker_);
+
+  // Whether `Bind()` or `SendMessageOnSequence()` was called.
+  // `sequence_checker_` can be detached when this is `false`.
+  bool was_bound_or_message_sent_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
+
+  bool paused_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
+  bool shut_down_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
+  std::unique_ptr<mojo::Connector> connector_
+      GUARDED_BY_CONTEXT(sequence_checker_);
+  mojo::MessageDispatcher dispatcher_ GUARDED_BY_CONTEXT(sequence_checker_);
+  mojo::PipeControlMessageHandler control_message_handler_
+      GUARDED_BY_CONTEXT(sequence_checker_);
+  ControlMessageProxyThunk control_message_proxy_thunk_
+      GUARDED_BY_CONTEXT(sequence_checker_);
+  raw_ptr<UrgentMessageObserver> urgent_message_observer_
+      GUARDED_BY_CONTEXT(sequence_checker_) = nullptr;
 
   // NOTE: It is unsafe to call into this object while holding |lock_|.
   mojo::PipeControlMessageProxy control_message_proxy_;
 
-  // Guards access to |outgoing_messages_| only. Used to support memory dumps
-  // which may be triggered from any thread.
+  // Outgoing messages sent before this controller Bound() to a pipe or while it
+  // was paused. Protected by a lock to support memory dumps from any thread.
   base::Lock outgoing_messages_lock_;
-
-  // Outgoing messages that were sent before this controller was bound to a
-  // real message pipe.
-  std::vector<mojo::Message> outgoing_messages_;
+  std::vector<mojo::Message> outgoing_messages_
+      GUARDED_BY(outgoing_messages_lock_);
 
   // Guards the fields below for thread-safe access.
   base::Lock lock_;
 
-  bool encountered_error_ = false;
-  bool shut_down_ = false;
+  bool encountered_error_ GUARDED_BY(lock_) = false;
 
   // ID #1 is reserved for the mojom::Channel interface.
-  uint32_t next_interface_id_ = 2;
+  uint32_t next_interface_id_ GUARDED_BY(lock_) = 2;
 
-  std::map<uint32_t, scoped_refptr<Endpoint>> endpoints_;
+  std::map<uint32_t, scoped_refptr<Endpoint>> endpoints_ GUARDED_BY(lock_);
 };
+
+namespace {
 
 bool ControllerMemoryDumpProvider::OnMemoryDump(
     const base::trace_event::MemoryDumpArgs& args,
@@ -1285,6 +1372,10 @@ class MojoBootstrapImpl : public MojoBootstrap {
     return &associated_group_;
   }
 
+  void SetUrgentMessageObserver(UrgentMessageObserver* observer) override {
+    controller_->SetUrgentMessageObserver(observer);
+  }
+
   scoped_refptr<ChannelAssociatedGroupController> controller_;
   mojo::AssociatedGroup associated_group_;
 
@@ -1295,26 +1386,21 @@ class MojoBootstrapImpl : public MojoBootstrap {
 
 ScopedAllowOffSequenceChannelAssociatedBindings::
     ScopedAllowOffSequenceChannelAssociatedBindings()
-    : outer_flag_(GetOffSequenceBindingAllowedFlag().Get()) {
-  GetOffSequenceBindingAllowedFlag().Set(true);
-}
+    : resetter_(&off_sequence_binding_allowed, true) {}
 
 ScopedAllowOffSequenceChannelAssociatedBindings::
-    ~ScopedAllowOffSequenceChannelAssociatedBindings() {
-  GetOffSequenceBindingAllowedFlag().Set(outer_flag_);
-}
+    ~ScopedAllowOffSequenceChannelAssociatedBindings() = default;
 
 // static
 std::unique_ptr<MojoBootstrap> MojoBootstrap::Create(
     mojo::ScopedMessagePipeHandle handle,
     Channel::Mode mode,
     const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner,
-    const scoped_refptr<base::SingleThreadTaskRunner>& proxy_task_runner,
-    const scoped_refptr<mojo::internal::MessageQuotaChecker>& quota_checker) {
+    const scoped_refptr<base::SingleThreadTaskRunner>& proxy_task_runner) {
   return std::make_unique<MojoBootstrapImpl>(
-      std::move(handle), base::MakeRefCounted<ChannelAssociatedGroupController>(
-                             mode == Channel::MODE_SERVER, ipc_task_runner,
-                             proxy_task_runner, quota_checker));
+      std::move(handle),
+      base::MakeRefCounted<ChannelAssociatedGroupController>(
+          mode == Channel::MODE_SERVER, ipc_task_runner, proxy_task_runner));
 }
 
 }  // namespace IPC

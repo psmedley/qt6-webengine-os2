@@ -1,8 +1,9 @@
 // Copyright (C) 2021 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include "testwindow.h"
 #include "quickutil.h"
+#include "visualutil.h"
 
 #include <QScopedPointer>
 #include <QtQml/QQmlEngine>
@@ -16,6 +17,8 @@ class tst_UIDelegates : public QObject
 {
     Q_OBJECT
 public:
+    static void initMain();
+
     tst_UIDelegates();
 
 private Q_SLOTS:
@@ -39,9 +42,13 @@ private:
     QScopedPointer<QQmlComponent> m_component;
 };
 
-tst_UIDelegates::tst_UIDelegates()
+void tst_UIDelegates::initMain()
 {
     QtWebEngineQuick::initialize();
+}
+
+tst_UIDelegates::tst_UIDelegates()
+{
     static QQmlEngine *engine = new QQmlEngine(this);
     m_component.reset(new QQmlComponent(engine, this));
     m_component->setData(QByteArrayLiteral("import QtQuick\n"
@@ -101,11 +108,14 @@ void tst_UIDelegates::javaScriptDialog_data()
 
 void tst_UIDelegates::javaScriptDialog()
 {
+    SKIP_IF_NO_WINDOW_ACTIVATION();
+
     QFETCH(QString, javaScriptCode);
     QFETCH(QString, expectedObjectName);
 
     m_window->show();
-    QTRY_VERIFY(qApp->focusObject());
+    m_window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(m_window.get()));
     QQuickWebEngineView *view = webEngineView();
 
     view->loadHtml("<html><body>"
@@ -118,8 +128,11 @@ void tst_UIDelegates::javaScriptDialog()
 
 void tst_UIDelegates::fileDialog()
 {
+    SKIP_IF_NO_WINDOW_ACTIVATION();
+
     m_window->show();
-    QTRY_VERIFY(qApp->focusObject());
+    m_window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(m_window.get()));
     QQuickWebEngineView *view = webEngineView();
 
     view->loadHtml("<html><body>"
@@ -134,8 +147,11 @@ void tst_UIDelegates::fileDialog()
 
 void tst_UIDelegates::contextMenu()
 {
+    SKIP_IF_NO_WINDOW_ACTIVATION();
+
     m_window->show();
-    QTRY_VERIFY(qApp->focusObject());
+    m_window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(m_window.get()));
     QQuickWebEngineView *view = webEngineView();
 
     view->loadHtml("<html><body>"
@@ -148,8 +164,11 @@ void tst_UIDelegates::contextMenu()
 
 void tst_UIDelegates::tooltip()
 {
+    SKIP_IF_NO_WINDOW_ACTIVATION();
+
     m_window->show();
-    QTRY_VERIFY(qApp->focusObject());
+    m_window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(m_window.get()));
     QQuickWebEngineView *view = webEngineView();
 
     view->loadHtml("<html><body>"
@@ -171,8 +190,11 @@ void tst_UIDelegates::tooltip()
 
 void tst_UIDelegates::colorDialog()
 {
+    SKIP_IF_NO_WINDOW_ACTIVATION();
+
     m_window->show();
-    QTRY_VERIFY(qApp->focusObject());
+    m_window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(m_window.get()));
     QQuickWebEngineView *view = webEngineView();
 
     view->loadHtml("<html><body>"
@@ -203,6 +225,8 @@ void tst_UIDelegates::authenticationDialog_data()
 
 void tst_UIDelegates::authenticationDialog()
 {
+    SKIP_IF_NO_WINDOW_ACTIVATION();
+
     QFETCH(QUrl, url);
     QFETCH(QByteArray, response);
 
@@ -212,7 +236,8 @@ void tst_UIDelegates::authenticationDialog()
     QVERIFY(server.start());
 
     m_window->show();
-    QTRY_VERIFY(qApp->focusObject());
+    m_window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(m_window.get()));
     QQuickWebEngineView *view = webEngineView();
     view->loadHtml("<html><body>"
                    "</body></html>");

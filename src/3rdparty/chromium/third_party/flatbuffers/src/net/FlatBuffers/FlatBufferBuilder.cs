@@ -23,7 +23,7 @@ using System.Text;
 /// @addtogroup flatbuffers_csharp_api
 /// @{
 
-namespace FlatBuffers
+namespace Google.FlatBuffers
 {
     /// <summary>
     /// Responsible for building up and accessing a FlatBuffer formatted byte
@@ -438,7 +438,8 @@ namespace FlatBuffers
             if (off > Offset)
                 throw new ArgumentException();
 
-            off = Offset - off + sizeof(int);
+            if (off != 0)
+                off = Offset - off + sizeof(int);
             PutInt(off);
         }
 

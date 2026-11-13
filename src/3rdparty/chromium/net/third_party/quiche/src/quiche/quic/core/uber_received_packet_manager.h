@@ -13,7 +13,7 @@ namespace quic {
 // This class comprises multiple received packet managers, one per packet number
 // space. Please note, if multiple packet number spaces is not supported, only
 // one received packet manager will be used.
-class QUIC_EXPORT_PRIVATE UberReceivedPacketManager {
+class QUICHE_EXPORT UberReceivedPacketManager {
  public:
   explicit UberReceivedPacketManager(QuicConnectionStats* stats);
   UberReceivedPacketManager(const UberReceivedPacketManager&) = delete;
@@ -31,7 +31,8 @@ class QUIC_EXPORT_PRIVATE UberReceivedPacketManager {
   // been parsed.
   void RecordPacketReceived(EncryptionLevel decrypted_packet_level,
                             const QuicPacketHeader& header,
-                            QuicTime receipt_time);
+                            QuicTime receipt_time,
+                            QuicEcnCodepoint ecn_codepoint);
 
   // Retrieves a frame containing a QuicAckFrame. The ack frame must be
   // serialized before another packet is received, or it will change.
@@ -72,8 +73,6 @@ class QUIC_EXPORT_PRIVATE UberReceivedPacketManager {
 
   // Return true if ack frame of |packet_number_space| is empty.
   bool IsAckFrameEmpty(PacketNumberSpace packet_number_space) const;
-
-  QuicPacketNumber peer_least_packet_awaiting_ack() const;
 
   size_t min_received_before_ack_decimation() const;
   void set_min_received_before_ack_decimation(size_t new_value);

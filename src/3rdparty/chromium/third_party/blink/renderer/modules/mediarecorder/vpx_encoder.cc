@@ -8,16 +8,13 @@
 #include <utility>
 
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/strcat.h"
 #include "base/system/sys_info.h"
+#include "media/base/encoder_status.h"
+#include "media/base/video_encoder_metrics_provider.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
-#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
-#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
-#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
-#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace blink {
@@ -37,42 +34,34 @@ static int GetNumberOfThreadsForEncoding() {
   return std::min(8, (base::SysInfo::NumberOfProcessors() + 1) / 2);
 }
 
-// static
-void VpxEncoder::ShutdownEncoder(std::unique_ptr<NonMainThread> encoding_thread,
-                                 ScopedVpxCodecCtxPtr encoder) {
-  DCHECK(encoding_thread);
-  // Both |encoding_thread| and |encoder| will be destroyed at end-of-scope.
-}
-
 VpxEncoder::VpxEncoder(
+    scoped_refptr<base::SequencedTaskRunner> encoding_task_runner,
     bool use_vp9,
     const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_cb,
     uint32_t bits_per_second,
-    scoped_refptr<base::SequencedTaskRunner> main_task_runner)
-    : VideoTrackRecorder::Encoder(on_encoded_video_cb,
-                                  bits_per_second,
-                                  std::move(main_task_runner)),
-      use_vp9_(use_vp9) {
+    bool is_screencast,
+    const VideoTrackRecorder::OnErrorCB on_error_cb)
+    : Encoder(std::move(encoding_task_runner),
+              on_encoded_video_cb,
+              bits_per_second),
+      use_vp9_(use_vp9),
+      is_screencast_(is_screencast),
+      on_error_cb_(on_error_cb) {
+  std::memset(&codec_config_, 0, sizeof(codec_config_));
+  std::memset(&alpha_codec_config_, 0, sizeof(alpha_codec_config_));
   codec_config_.g_timebase.den = 0;        // Not initialized.
   alpha_codec_config_.g_timebase.den = 0;  // Not initialized.
-  DCHECK(encoding_thread_);
 }
 
-VpxEncoder::~VpxEncoder() {
-  PostCrossThreadTask(
-      *main_task_runner_.get(), FROM_HERE,
-      CrossThreadBindOnce(&VpxEncoder::ShutdownEncoder,
-                          std::move(encoding_thread_), std::move(encoder_)));
-}
-
-bool VpxEncoder::CanEncodeAlphaChannel() {
+bool VpxEncoder::CanEncodeAlphaChannel() const {
   return true;
 }
 
-void VpxEncoder::EncodeOnEncodingTaskRunner(scoped_refptr<media::VideoFrame> frame,
-                                            base::TimeTicks capture_timestamp) {
-  TRACE_EVENT0("media", "VpxEncoder::EncodeOnEncodingTaskRunner");
-  DCHECK_CALLED_ON_VALID_SEQUENCE(encoding_sequence_checker_);
+void VpxEncoder::EncodeFrame(scoped_refptr<media::VideoFrame> frame,
+                             base::TimeTicks capture_timestamp,
+                             bool request_keyframe) {
+  using media::VideoFrame;
+  TRACE_EVENT0("media", "VpxEncoder::EncodeFrame");
 
   if (frame->format() == media::PIXEL_FORMAT_NV12 &&
       frame->storage_type() == media::VideoFrame::STORAGE_GPU_MEMORY_BUFFER)
@@ -84,18 +73,17 @@ void VpxEncoder::EncodeOnEncodingTaskRunner(scoped_refptr<media::VideoFrame> fra
 
   const gfx::Size frame_size = frame->visible_rect().size();
   base::TimeDelta duration = EstimateFrameDuration(*frame);
-  const media::WebmMuxer::VideoParameters video_params(frame);
+  const media::Muxer::VideoParameters video_params(*frame);
 
   if (!IsInitialized(codec_config_) ||
       gfx::Size(codec_config_.g_w, codec_config_.g_h) != frame_size) {
-    if (!ConfigureEncoderOnEncodingTaskRunner(frame_size, &codec_config_,
-                                              &encoder_)) {
+    if (!ConfigureEncoder(frame_size, &codec_config_, &encoder_)) {
       return;
     }
   }
 
   bool keyframe = false;
-  bool force_keyframe = false;
+  bool force_keyframe = request_keyframe;
   bool alpha_keyframe = false;
   std::string data;
   std::string alpha_data;
@@ -130,8 +118,8 @@ void VpxEncoder::EncodeOnEncodingTaskRunner(scoped_refptr<media::VideoFrame> fra
       if ((!IsInitialized(alpha_codec_config_) ||
            gfx::Size(alpha_codec_config_.g_w, alpha_codec_config_.g_h) !=
                frame_size)) {
-        if (!ConfigureEncoderOnEncodingTaskRunner(
-                frame_size, &alpha_codec_config_, &alpha_encoder_)) {
+        if (!ConfigureEncoder(frame_size, &alpha_codec_config_,
+                              &alpha_encoder_)) {
           return;
         }
         u_plane_stride_ = media::VideoFrame::RowBytes(
@@ -150,7 +138,7 @@ void VpxEncoder::EncodeOnEncodingTaskRunner(scoped_refptr<media::VideoFrame> fra
         std::fill(alpha_dummy_planes_.begin(), alpha_dummy_planes_.end(), 0x80);
       }
       // If we introduced a new alpha frame, force keyframe.
-      force_keyframe = !last_frame_had_alpha_;
+      force_keyframe = force_keyframe || !last_frame_had_alpha_;
       last_frame_had_alpha_ = true;
 
       DoEncode(encoder_.get(), frame_size, frame->data(media::VideoFrame::kYPlane),
@@ -178,12 +166,9 @@ void VpxEncoder::EncodeOnEncodingTaskRunner(scoped_refptr<media::VideoFrame> fra
   }
   frame = nullptr;
 
-  PostCrossThreadTask(
-      *origin_task_runner_.get(), FROM_HERE,
-      CrossThreadBindOnce(OnFrameEncodeCompleted,
-                          CrossThreadBindRepeating(on_encoded_video_cb_),
-                          video_params, std::move(data), std::move(alpha_data),
-                          capture_timestamp, keyframe));
+  metrics_provider_->IncrementEncodedFrameCount();
+  on_encoded_video_cb_.Run(video_params, std::move(data), std::move(alpha_data),
+                           absl::nullopt, capture_timestamp, keyframe);
 }
 
 void VpxEncoder::DoEncode(vpx_codec_ctx_t* const encoder,
@@ -200,7 +185,6 @@ void VpxEncoder::DoEncode(vpx_codec_ctx_t* const encoder,
                           std::string& output_data,
                           bool* const keyframe,
                           vpx_img_fmt_t img_fmt) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(encoding_sequence_checker_);
   DCHECK(img_fmt == VPX_IMG_FMT_I420 || img_fmt == VPX_IMG_FMT_NV12);
 
   vpx_image_t vpx_image;
@@ -223,10 +207,15 @@ void VpxEncoder::DoEncode(vpx_codec_ctx_t* const encoder,
       vpx_codec_encode(encoder, &vpx_image, 0 /* pts */,
                        static_cast<unsigned long>(duration.InMicroseconds()),
                        flags, VPX_DL_REALTIME);
-  DCHECK_EQ(ret, VPX_CODEC_OK)
-      << vpx_codec_err_to_string(ret) << ", #" << vpx_codec_error(encoder)
-      << " -" << vpx_codec_error_detail(encoder);
-
+  if (ret != VPX_CODEC_OK) {
+    metrics_provider_->SetError(
+        {media::EncoderStatus::Codes::kEncoderFailedEncode,
+         base::StrCat(
+             {"libvpx failed to encode: ", vpx_codec_err_to_string(ret), " - ",
+              vpx_codec_error_detail(encoder)})});
+    on_error_cb_.Run();
+    return;
+  }
   *keyframe = false;
   vpx_codec_iter_t iter = nullptr;
   const vpx_codec_cx_pkt_t* pkt = nullptr;
@@ -240,11 +229,9 @@ void VpxEncoder::DoEncode(vpx_codec_ctx_t* const encoder,
   }
 }
 
-bool VpxEncoder::ConfigureEncoderOnEncodingTaskRunner(
-    const gfx::Size& size,
-    vpx_codec_enc_cfg_t* codec_config,
-    ScopedVpxCodecCtxPtr* encoder) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(encoding_sequence_checker_);
+bool VpxEncoder::ConfigureEncoder(const gfx::Size& size,
+                                  vpx_codec_enc_cfg_t* codec_config,
+                                  ScopedVpxCodecCtxPtr* encoder) {
   if (IsInitialized(*codec_config)) {
     // TODO(mcasas) VP8 quirk/optimisation: If the new |size| is strictly less-
     // than-or-equal than the old size, in terms of area, the existing encoder
@@ -273,6 +260,8 @@ bool VpxEncoder::ConfigureEncoderOnEncodingTaskRunner(
                                       codec_config->rc_target_bitrate /
                                       codec_config->g_w / codec_config->g_h;
   }
+  // Don't drop a frame.
+  DCHECK_EQ(codec_config->rc_dropframe_thresh, 0u);
   // Both VP8/VP9 configuration should be Variable BitRate by default.
   DCHECK_EQ(VPX_VBR, codec_config->rc_end_usage);
   if (use_vp9_) {
@@ -297,32 +286,37 @@ bool VpxEncoder::ConfigureEncoderOnEncodingTaskRunner(
   codec_config->g_timebase.num = 1;
   codec_config->g_timebase.den = base::Time::kMicrosecondsPerSecond;
 
-  // Let the encoder decide where to place the Keyframes, between min and max.
-  // In VPX_KF_AUTO mode libvpx will sometimes emit keyframes regardless of min/
-  // max distance out of necessity.
+  // The periodical keyframe interval is configured by KeyFrameRequestProcessor.
+  // Aside from the periodical keyframe, let the encoder decide where to place
+  // the Keyframes In VPX_KF_AUTO mode libvpx will sometimes emit keyframes out
+  // of necessity.
   // Note that due to http://crbug.com/440223, it might be necessary to force a
   // key frame after 10,000frames since decoding fails after 30,000 non-key
   // frames.
-  // Forcing a keyframe in regular intervals also allows seeking in the
-  // resulting recording with decent performance.
   codec_config->kf_mode = VPX_KF_AUTO;
-  codec_config->kf_min_dist = 0;
-  codec_config->kf_max_dist = 100;
 
   codec_config->g_threads = GetNumberOfThreadsForEncoding();
 
   // Number of frames to consume before producing output.
   codec_config->g_lag_in_frames = 0;
 
+  metrics_provider_->Initialize(
+      use_vp9_ ? media::VP9PROFILE_MIN : media::VP8PROFILE_ANY, size,
+      /*is_hardware_encoder=*/false);
   // Can't use ScopedVpxCodecCtxPtr until after vpx_codec_enc_init, since it's
   // not valid to call vpx_codec_destroy when vpx_codec_enc_init fails.
   auto tmp_encoder = std::make_unique<vpx_codec_ctx_t>();
   const vpx_codec_err_t ret = vpx_codec_enc_init(
       tmp_encoder.get(), codec_interface, codec_config, 0 /* flags */);
   if (ret != VPX_CODEC_OK) {
+    metrics_provider_->SetError(
+        {media::EncoderStatus::Codes::kEncoderInitializationError,
+         base::StrCat(
+             {"libvpx failed to initialize: ", vpx_codec_err_to_string(ret)})});
     DLOG(WARNING) << "vpx_codec_enc_init failed: " << ret;
     // Require the encoder to be reinitialized next frame.
     codec_config->g_timebase.den = 0;
+    on_error_cb_.Run();
     return false;
   }
   encoder->reset(tmp_encoder.release());
@@ -337,17 +331,31 @@ bool VpxEncoder::ConfigureEncoderOnEncodingTaskRunner(
     result = vpx_codec_control(encoder->get(), VP8E_SET_CPUUSED, kCpuUsed);
     DLOG_IF(WARNING, VPX_CODEC_OK != result) << "VP8E_SET_CPUUSED failed";
   }
+
+  // Tune configs for screen sharing. The values are the same as WebRTC
+  // https://source.chromium.org/chromium/chromium/src/+/main:third_party/webrtc/modules/video_coding/codecs/vp8/libvpx_vp8_encoder.cc
+  // https://source.chromium.org/chromium/chromium/src/+/main:third_party/webrtc/modules/video_coding/codecs/vp9/libvpx_vp9_encoder.cc
+  vpx_codec_control(encoder->get(), VP8E_SET_STATIC_THRESHOLD,
+                    (is_screencast_ && !use_vp9_) ? 100 : 1);
+  if (is_screencast_) {
+    if (use_vp9_) {
+      vpx_codec_control(encoder->get(), VP9E_SET_TUNE_CONTENT,
+                        VP9E_CONTENT_SCREEN);
+    } else {
+      // Setting 1, not 2, so the libvpx encoder doesn't drop a frame.
+      vpx_codec_control(encoder->get(), VP8E_SET_SCREEN_CONTENT_MODE, 1 /*On*/);
+    }
+  }
+
   return true;
 }
 
 bool VpxEncoder::IsInitialized(const vpx_codec_enc_cfg_t& codec_config) const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(encoding_sequence_checker_);
   return codec_config.g_timebase.den != 0;
 }
 
-base::TimeDelta VpxEncoder::EstimateFrameDuration(const media::VideoFrame& frame) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(encoding_sequence_checker_);
-
+base::TimeDelta VpxEncoder::EstimateFrameDuration(
+    const media::VideoFrame& frame) {
   // If the source of the video frame did not provide the frame duration, use
   // the actual amount of time between the current and previous frame as a
   // prediction for the next frame's duration.

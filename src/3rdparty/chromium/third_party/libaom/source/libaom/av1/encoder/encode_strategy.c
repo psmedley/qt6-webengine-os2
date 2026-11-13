@@ -194,7 +194,8 @@ static int choose_primary_ref_frame(
   // frame bit allocation.
   if (cm->tiles.large_scale) return (LAST_FRAME - LAST_FRAME);
 
-  if (cpi->ppi->use_svc) return av1_svc_primary_ref_frame(cpi);
+  if (cpi->ppi->use_svc || cpi->ppi->rtc_ref.set_ref_frame_config)
+    return av1_svc_primary_ref_frame(cpi);
 
   // Find the most recent reference frame with the same reference type as the
   // current frame
@@ -236,10 +237,24 @@ static void adjust_frame_rate(AV1_COMP *cpi, int64_t ts_start, int64_t ts_end) {
 
   // Clear down mmx registers
 
-  if (cpi->ppi->use_svc && cpi->svc.spatial_layer_id > 0) {
-    cpi->framerate = cpi->svc.base_framerate;
-    av1_rc_update_framerate(cpi, cpi->common.width, cpi->common.height);
-    return;
+  if (cpi->ppi->use_svc && cpi->ppi->rtc_ref.set_ref_frame_config &&
+      cpi->svc.number_spatial_layers > 1) {
+    // ts_start is the timestamp for the current frame and ts_end is the
+    // expected next timestamp given the duration passed into codec_encode().
+    // See the setting in encoder_encode() in av1_cx_iface.c:
+    // ts_start = timebase_units_to_ticks(cpi_data.timestamp_ratio, ptsvol),
+    // ts_end = timebase_units_to_ticks(cpi_data.timestamp_ratio, ptsvol +
+    // duration). So the difference ts_end - ts_start is the duration passed
+    // in by the user. For spatial layers SVC set the framerate based directly
+    // on the duration, and bypass the adjustments below.
+    this_duration = ts_end - ts_start;
+    if (this_duration > 0) {
+      cpi->new_framerate = 10000000.0 / this_duration;
+      av1_new_framerate(cpi, cpi->new_framerate);
+      time_stamps->prev_ts_start = ts_start;
+      time_stamps->prev_ts_end = ts_end;
+      return;
+    }
   }
 
   if (ts_start == time_stamps->first_ts_start) {
@@ -615,7 +630,7 @@ int av1_get_refresh_frame_flags(
   // flags to 0 to keep things consistent.
   if (frame_params->show_existing_frame) return 0;
 
-  const RTC_REF *const rtc_ref = &cpi->rtc_ref;
+  const RTC_REF *const rtc_ref = &cpi->ppi->rtc_ref;
   if (is_frame_droppable(rtc_ref, ext_refresh_frame_flags)) return 0;
 
 #if !CONFIG_REALTIME_ONLY
@@ -716,13 +731,14 @@ void setup_mi(AV1_COMP *const cpi, YV12_BUFFER_CONFIG *src) {
 // to av1_encode() except that tpl is not performed.
 static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
                               EncodeFrameInput *const frame_input,
-                              EncodeFrameParams *const frame_params,
+                              const EncodeFrameParams *const frame_params,
                               EncodeFrameResults *const frame_results) {
 #if CONFIG_COLLECT_COMPONENT_TIMING
   if (cpi->oxcf.pass == 2) start_timing(cpi, denoise_and_encode_time);
 #endif
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
   AV1_COMMON *const cm = &cpi->common;
+
   GF_GROUP *const gf_group = &cpi->ppi->gf_group;
   FRAME_UPDATE_TYPE update_type =
       get_frame_update_type(&cpi->ppi->gf_group, cpi->gf_frame_index);
@@ -743,9 +759,10 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
                                !frame_params->show_existing_frame &&
                                !is_lossless_requested(&oxcf->rc_cfg);
       if (allow_kf_filtering) {
-        const double y_noise_level = av1_estimate_noise_from_single_plane(
-            frame_input->source, 0, cm->seq_params->bit_depth,
-            NOISE_ESTIMATION_EDGE_THRESHOLD);
+        double y_noise_level = 0.0;
+        av1_estimate_noise_level(
+            frame_input->source, &y_noise_level, AOM_PLANE_Y, AOM_PLANE_Y,
+            cm->seq_params->bit_depth, NOISE_ESTIMATION_EDGE_THRESHOLD);
         apply_filtering = y_noise_level > 0;
       } else {
         apply_filtering = 0;
@@ -785,6 +802,8 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
             tf_buf, &frame_diff, q_index, cm->seq_params->bit_depth);
         if (show_existing_alt_ref) {
           cpi->common.showable_frame |= 1;
+        } else {
+          cpi->common.showable_frame = 0;
         }
       }
       if (gf_group->frame_type[cpi->gf_frame_index] != KEY_FRAME) {
@@ -800,7 +819,7 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
           oxcf->frm_dim_cfg.height, cm->seq_params->subsampling_x,
           cm->seq_params->subsampling_y, cm->seq_params->use_highbitdepth,
           cpi->oxcf.border_in_pixels, cm->features.byte_alignment, NULL, NULL,
-          NULL, cpi->oxcf.tool_cfg.enable_global_motion, 0);
+          NULL, cpi->image_pyramid_levels, 0);
       if (ret)
         aom_internal_error(cm->error, AOM_CODEC_MEM_ERROR,
                            "Failed to allocate tf_buf_second_arf");
@@ -859,10 +878,7 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
     if (gf_group->size > MAX_LENGTH_TPL_FRAME_STATS) {
       allow_tpl = 0;
     }
-    if (frame_params->frame_type == KEY_FRAME) {
-      // TODO(angiebird): handle disable_filtered_key_tpl properly
-      allow_tpl = allow_tpl && !cpi->sf.tpl_sf.disable_filtered_key_tpl;
-    } else {
+    if (frame_params->frame_type != KEY_FRAME) {
       // In rare case, it's possible to have non ARF/GF update_type here.
       // We should set allow_tpl to zero in the situation
       allow_tpl =
@@ -907,8 +923,7 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
   if (apply_filtering && is_psnr_calc_enabled(cpi)) {
     cpi->source = av1_realloc_and_scale_if_required(
         cm, source_buffer, &cpi->scaled_source, cm->features.interp_filter, 0,
-        false, true, cpi->oxcf.border_in_pixels,
-        cpi->oxcf.tool_cfg.enable_global_motion);
+        false, true, cpi->oxcf.border_in_pixels, cpi->image_pyramid_levels);
     cpi->unscaled_source = source_buffer;
   }
 #if CONFIG_COLLECT_COMPONENT_TIMING
@@ -995,18 +1010,30 @@ void av1_get_ref_frames(RefFrameMapPair ref_frame_map_pairs[REF_FRAMES],
 #if !CONFIG_REALTIME_ONLY
   if (cpi->use_ducky_encode &&
       cpi->ducky_encode_info.frame_info.gop_mode == DUCKY_ENCODE_GOP_MODE_RCL) {
-    int valid_rf_idx = 0;
     for (int rf = LAST_FRAME; rf < REF_FRAMES; ++rf) {
       if (cpi->ppi->gf_group.ref_frame_list[gf_index][rf] != INVALID_IDX) {
         remapped_ref_idx[rf - LAST_FRAME] =
             cpi->ppi->gf_group.ref_frame_list[gf_index][rf];
+      }
+    }
+
+    int valid_rf_idx = 0;
+    static const int ref_frame_type_order[REF_FRAMES - LAST_FRAME] = {
+      GOLDEN_FRAME,  ALTREF_FRAME, LAST_FRAME, BWDREF_FRAME,
+      ALTREF2_FRAME, LAST2_FRAME,  LAST3_FRAME
+    };
+    for (int i = 0; i < REF_FRAMES - LAST_FRAME; i++) {
+      int rf = ref_frame_type_order[i];
+      if (remapped_ref_idx[rf - LAST_FRAME] != INVALID_IDX) {
         valid_rf_idx = remapped_ref_idx[rf - LAST_FRAME];
+        break;
       }
     }
 
     for (int i = 0; i < REF_FRAMES; ++i) {
-      if (remapped_ref_idx[i] == INVALID_IDX)
+      if (remapped_ref_idx[i] == INVALID_IDX) {
         remapped_ref_idx[i] = valid_rf_idx;
+      }
     }
 
     return;
@@ -1350,6 +1377,35 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
     }
     frame_params.show_existing_frame &= allow_show_existing(cpi, *frame_flags);
 
+    // Special handling to reset 'show_existing_frame' in case of dropped
+    // frames.
+    if (oxcf->rc_cfg.drop_frames_water_mark &&
+        (gf_group->update_type[cpi->gf_frame_index] == OVERLAY_UPDATE ||
+         gf_group->update_type[cpi->gf_frame_index] == INTNL_OVERLAY_UPDATE)) {
+      // During the encode of an OVERLAY_UPDATE/INTNL_OVERLAY_UPDATE frame, loop
+      // over the gf group to check if the corresponding
+      // ARF_UPDATE/INTNL_ARF_UPDATE frame was dropped.
+      int cur_disp_idx = gf_group->display_idx[cpi->gf_frame_index];
+      for (int idx = 0; idx < cpi->gf_frame_index; idx++) {
+        if (cur_disp_idx == gf_group->display_idx[idx]) {
+          assert(IMPLIES(
+              gf_group->update_type[cpi->gf_frame_index] == OVERLAY_UPDATE,
+              gf_group->update_type[idx] == ARF_UPDATE));
+          assert(IMPLIES(gf_group->update_type[cpi->gf_frame_index] ==
+                             INTNL_OVERLAY_UPDATE,
+                         gf_group->update_type[idx] == INTNL_ARF_UPDATE));
+          // Reset show_existing_frame and set cpi->is_dropped_frame to true if
+          // the frame was dropped during its first encode.
+          if (gf_group->is_frame_dropped[idx]) {
+            frame_params.show_existing_frame = 0;
+            assert(!cpi->is_dropped_frame);
+            cpi->is_dropped_frame = true;
+          }
+          break;
+        }
+      }
+    }
+
     // Reset show_existing_alt_ref decision to 0 after it is used.
     if (gf_group->update_type[cpi->gf_frame_index] == OVERLAY_UPDATE) {
       cpi->ppi->show_existing_alt_ref = 0;
@@ -1386,7 +1442,11 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
 
   // Source may be changed if temporal filtered later.
   frame_input.source = &source->img;
-  frame_input.last_source = last_source != NULL ? &last_source->img : NULL;
+  if ((cpi->ppi->use_svc || cpi->rc.prev_frame_is_dropped) &&
+      last_source != NULL)
+    av1_svc_set_last_source(cpi, &frame_input, &last_source->img);
+  else
+    frame_input.last_source = last_source != NULL ? &last_source->img : NULL;
   frame_input.ts_duration = source->ts_end - source->ts_start;
   // Save unfiltered source. It is used in av1_get_second_pass_params().
   cpi->unfiltered_source = frame_input.source;
@@ -1534,10 +1594,10 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
       if (!ext_flags->refresh_frame.update_pending) {
         av1_get_ref_frames(ref_frame_map_pairs, cur_frame_disp, cpi,
                            cpi->gf_frame_index, 1, cm->remapped_ref_idx);
-      } else if (cpi->rtc_ref.set_ref_frame_config ||
+      } else if (cpi->ppi->rtc_ref.set_ref_frame_config ||
                  use_rtc_reference_structure_one_layer(cpi)) {
         for (unsigned int i = 0; i < INTER_REFS_PER_FRAME; i++)
-          cm->remapped_ref_idx[i] = cpi->rtc_ref.ref_idx[i];
+          cm->remapped_ref_idx[i] = cpi->ppi->rtc_ref.ref_idx[i];
       }
     }
 
@@ -1607,10 +1667,19 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
   memcpy(frame_params.remapped_ref_idx, cm->remapped_ref_idx,
          REF_FRAMES * sizeof(*cm->remapped_ref_idx));
 
-  cpi->td.mb.delta_qindex = 0;
+  cpi->td.mb.rdmult_delta_qindex = cpi->td.mb.delta_qindex = 0;
 
   if (!frame_params.show_existing_frame) {
     cm->quant_params.using_qmatrix = oxcf->q_cfg.using_qm;
+  }
+
+  const int is_intra_frame = frame_params.frame_type == KEY_FRAME ||
+                             frame_params.frame_type == INTRA_ONLY_FRAME;
+  FeatureFlags *const features = &cm->features;
+  if (!is_stat_generation_stage(cpi) &&
+      (oxcf->pass == AOM_RC_ONE_PASS || oxcf->pass >= AOM_RC_SECOND_PASS) &&
+      is_intra_frame) {
+    av1_set_screen_content_options(cpi, features);
   }
 
 #if CONFIG_REALTIME_ONLY
@@ -1673,7 +1742,25 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
   // Leave a signal for a higher level caller about if this frame is droppable
   if (*size > 0) {
     cpi->droppable =
-        is_frame_droppable(&cpi->rtc_ref, &ext_flags->refresh_frame);
+        is_frame_droppable(&cpi->ppi->rtc_ref, &ext_flags->refresh_frame);
+  }
+
+  // For SVC, or when frame-dropper is enabled:
+  // keep track of the (unscaled) source corresponding to the refresh of LAST
+  // reference (base temporal layer - TL0). Copy only for the
+  // top spatial enhancement layer so all spatial layers of the next
+  // superframe have last_source to be aligned with previous TL0 superframe.
+  // Avoid cases where resolution changes for unscaled source (top spatial
+  // layer). Only needs to be done for frame that are encoded (size > 0).
+  if (*size > 0 &&
+      (cpi->ppi->use_svc || cpi->oxcf.rc_cfg.drop_frames_water_mark > 0) &&
+      cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1 &&
+      cpi->svc.temporal_layer_id == 0 &&
+      cpi->unscaled_source->y_width == cpi->svc.source_last_TL0.y_width &&
+      cpi->unscaled_source->y_height == cpi->svc.source_last_TL0.y_height) {
+    aom_yv12_copy_y(cpi->unscaled_source, &cpi->svc.source_last_TL0);
+    aom_yv12_copy_u(cpi->unscaled_source, &cpi->svc.source_last_TL0);
+    aom_yv12_copy_v(cpi->unscaled_source, &cpi->svc.source_last_TL0);
   }
 
   return AOM_CODEC_OK;

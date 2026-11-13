@@ -4,8 +4,8 @@
 
 #include "extensions/browser/updater/extension_cache_fake.h"
 
-#include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -56,6 +56,12 @@ void ExtensionCacheFake::PutExtension(const std::string& id,
   } else {
     std::move(callback).Run(file_path, true);
   }
+}
+
+bool ExtensionCacheFake::OnInstallFailed(const std::string& id,
+                                         const std::string& hash,
+                                         const CrxInstallError& error) {
+  return false;
 }
 
 }  // namespace extensions

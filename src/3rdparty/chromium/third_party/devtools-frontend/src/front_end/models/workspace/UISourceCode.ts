@@ -39,12 +39,12 @@ import {Events as WorkspaceImplEvents, type Project} from './WorkspaceImpl.js';
 
 const UIStrings = {
   /**
-  *@description Text for the index of something
-  */
+   *@description Text for the index of something
+   */
   index: '(index)',
   /**
-  *@description Text in UISource Code of the DevTools local workspace
-  */
+   *@description Text in UISource Code of the DevTools local workspace
+   */
   thisFileWasChangedExternally: 'This file was changed externally. Would you like to reload it?',
 };
 const str_ = i18n.i18n.registerUIStrings('models/workspace/UISourceCode.ts', UIStrings);
@@ -72,6 +72,7 @@ export class UISourceCode extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
   private disableEditInternal: boolean;
   private contentEncodedInternal?: boolean;
   private isKnownThirdPartyInternal: boolean;
+  private isUnconditionallyIgnoreListedInternal: boolean;
 
   constructor(project: Project, url: Platform.DevToolsPath.UrlString, contentType: Common.ResourceType.ResourceType) {
     super();
@@ -83,9 +84,9 @@ export class UISourceCode extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
       this.originInternal = parsedURL.securityOrigin();
       this.parentURLInternal =
           Common.ParsedURL.ParsedURL.concatenate(this.originInternal, parsedURL.folderPathComponents);
-      if (parsedURL.queryParams) {
-        // in case file name contains query params, it doesn't look like a normal file name anymore
-        // so it can as well remain encoded
+      if (parsedURL.queryParams && !(parsedURL.lastPathComponent && contentType.isFromSourceMap())) {
+        // If there is a query param, display it like a URL. Unless it is from a source map,
+        // in which case the query param is probably a hash that is best left hidden.
         this.nameInternal = parsedURL.lastPathComponent + '?' + parsedURL.queryParams;
       } else {
         // file name looks best decoded
@@ -110,6 +111,7 @@ export class UISourceCode extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
     this.workingCopyGetter = null;
     this.disableEditInternal = false;
     this.isKnownThirdPartyInternal = false;
+    this.isUnconditionallyIgnoreListedInternal = false;
   }
 
   requestMetadata(): Promise<UISourceCodeMetadata|null> {
@@ -213,13 +215,19 @@ export class UISourceCode extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
     return this.projectInternal;
   }
 
-  requestContent(): Promise<TextUtils.ContentProvider.DeferredContent> {
+  requestContent({cachedWasmOnly}: {cachedWasmOnly?: boolean} = {}):
+      Promise<TextUtils.ContentProvider.DeferredContent> {
     if (this.requestContentPromise) {
       return this.requestContentPromise;
     }
 
     if (this.contentLoadedInternal) {
       return Promise.resolve(this.contentInternal as TextUtils.ContentProvider.DeferredContent);
+    }
+
+    if (cachedWasmOnly && this.mimeType() === 'application/wasm') {
+      return Promise.resolve(
+          {content: '', isEncoded: false, wasmDisassemblyInfo: new Common.WasmDisassembly.WasmDisassembly([], [], [])});
     }
 
     this.requestContentPromise = this.requestContentImpl();
@@ -334,14 +342,21 @@ export class UISourceCode extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
   }
 
   workingCopy(): string {
+    return this.workingCopyContent().content || '';
+  }
+
+  workingCopyContent(): TextUtils.ContentProvider.DeferredContent {
     if (this.workingCopyGetter) {
       this.workingCopyInternal = this.workingCopyGetter();
       this.workingCopyGetter = null;
     }
     if (this.isDirty()) {
-      return this.workingCopyInternal as string;
+      return {content: this.workingCopyInternal as string, isEncoded: false};
     }
-    return this.contentInternal?.content || '';
+    if (this.contentInternal) {
+      return this.contentInternal;
+    }
+    return {content: '', isEncoded: false};
   }
 
   resetWorkingCopy(): void {
@@ -404,6 +419,26 @@ export class UISourceCode extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
 
   markKnownThirdParty(): void {
     this.isKnownThirdPartyInternal = true;
+  }
+
+  /**
+   * {@link markAsUnconditionallyIgnoreListed}
+   */
+  isUnconditionallyIgnoreListed(): boolean {
+    return this.isUnconditionallyIgnoreListedInternal;
+  }
+
+  isFetchXHR(): boolean {
+    return [Common.ResourceType.resourceTypes.XHR, Common.ResourceType.resourceTypes.Fetch].includes(
+        this.contentType());
+  }
+
+  /**
+   * Unconditionally ignore list this UISourcecode, ignoring any user
+   * setting. We use this to mark breakpoint/logpoint condition scripts for now.
+   */
+  markAsUnconditionallyIgnoreListed(): void {
+    this.isUnconditionallyIgnoreListedInternal = true;
   }
 
   extension(): string {
@@ -492,8 +527,6 @@ export class UISourceCode extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
 export enum Events {
   WorkingCopyChanged = 'WorkingCopyChanged',
   WorkingCopyCommitted = 'WorkingCopyCommitted',
@@ -594,6 +627,21 @@ export class UILocation {
 }
 
 /**
+ * A text range inside a specific {@link UISourceCode}.
+ *
+ * We use a class instead of an interface so we can implement a revealer for it.
+ */
+export class UILocationRange {
+  readonly uiSourceCode: UISourceCode;
+  readonly range: TextUtils.TextRange.TextRange;
+
+  constructor(uiSourceCode: UISourceCode, range: TextUtils.TextRange.TextRange) {
+    this.uiSourceCode = uiSourceCode;
+    this.range = range;
+  }
+}
+
+/**
  * A message associated with a range in a `UISourceCode`. The range will be
  * underlined starting at the range's start and ending at the line end (the
  * end of the range is currently disregarded).
@@ -640,9 +688,7 @@ export class Message {
 }
 
 export namespace Message {
-  // TODO(crbug.com/1167717): Make this a const enum again
-  // eslint-disable-next-line rulesdir/const_enum
-  export enum Level {
+  export const enum Level {
     Error = 'Error',
     Issue = 'Issue',
     Warning = 'Warning',

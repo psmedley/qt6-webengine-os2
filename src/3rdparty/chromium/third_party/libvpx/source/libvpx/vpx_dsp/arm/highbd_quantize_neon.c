@@ -13,6 +13,8 @@
 #include "./vpx_config.h"
 #include "./vpx_dsp_rtcd.h"
 #include "vpx_dsp/arm/mem_neon.h"
+#include "vp9/common/vp9_scan.h"
+#include "vp9/encoder/vp9_block.h"
 
 static VPX_FORCE_INLINE void highbd_calculate_dqcoeff_and_store(
     const int32x4_t dqcoeff_0, const int32x4_t dqcoeff_1,
@@ -94,34 +96,30 @@ highbd_quantize_b_neon(const tran_low_t *coeff_ptr, tran_low_t *qcoeff_ptr,
 }
 
 void vpx_highbd_quantize_b_neon(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
-                                const int16_t *zbin_ptr,
-                                const int16_t *round_ptr,
-                                const int16_t *quant_ptr,
-                                const int16_t *quant_shift_ptr,
+                                const struct macroblock_plane *const mb_plane,
                                 tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr,
                                 const int16_t *dequant_ptr, uint16_t *eob_ptr,
-                                const int16_t *scan, const int16_t *iscan) {
-  const int16x8_t one = vdupq_n_s16(1);
+                                const struct ScanOrder *const scan_order) {
   const int16x8_t neg_one = vdupq_n_s16(-1);
   uint16x8_t eob_max;
+  const int16_t *iscan = scan_order->iscan;
 
   // Only the first element of each vector is DC.
   // High half has identical elements, but we can reconstruct it from the low
   // half by duplicating the 2nd element. So we only need to pass a 4x32-bit
   // vector
-  int32x4_t zbin = vmovl_s16(vld1_s16(zbin_ptr));
-  int32x4_t round = vmovl_s16(vld1_s16(round_ptr));
+  int32x4_t zbin = vmovl_s16(vld1_s16(mb_plane->zbin));
+  int32x4_t round = vmovl_s16(vld1_s16(mb_plane->round));
   // Extend the quant, quant_shift vectors to ones of 32-bit elements
   // scale to high-half, so we can use vqdmulhq_s32
-  int32x4_t quant = vshlq_n_s32(vmovl_s16(vld1_s16(quant_ptr)), 15);
-  int32x4_t quant_shift = vshlq_n_s32(vmovl_s16(vld1_s16(quant_shift_ptr)), 15);
+  int32x4_t quant = vshlq_n_s32(vmovl_s16(vld1_s16(mb_plane->quant)), 15);
+  int32x4_t quant_shift =
+      vshlq_n_s32(vmovl_s16(vld1_s16(mb_plane->quant_shift)), 15);
   int32x4_t dequant = vmovl_s16(vld1_s16(dequant_ptr));
 
   // Process first 8 values which include a dc component.
   {
-    // Add one because the eob does not index from 0.
-    const uint16x8_t v_iscan =
-        vreinterpretq_u16_s16(vaddq_s16(vld1q_s16(iscan), one));
+    const uint16x8_t v_iscan = vreinterpretq_u16_s16(vld1q_s16(iscan));
 
     const int16x8_t qcoeff =
         highbd_quantize_b_neon(coeff_ptr, qcoeff_ptr, dqcoeff_ptr, zbin, round,
@@ -148,9 +146,7 @@ void vpx_highbd_quantize_b_neon(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
     dequant = vdupq_lane_s32(vget_low_s32(dequant), 1);
 
     do {
-      // Add one because the eob is not its index.
-      const uint16x8_t v_iscan =
-          vreinterpretq_u16_s16(vaddq_s16(vld1q_s16(iscan), one));
+      const uint16x8_t v_iscan = vreinterpretq_u16_s16(vld1q_s16(iscan));
 
       const int16x8_t qcoeff =
           highbd_quantize_b_neon(coeff_ptr, qcoeff_ptr, dqcoeff_ptr, zbin,
@@ -169,7 +165,7 @@ void vpx_highbd_quantize_b_neon(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
     } while (n_coeffs > 0);
   }
 
-#ifdef __aarch64__
+#if VPX_ARCH_AARCH64
   *eob_ptr = vmaxvq_u16(eob_max);
 #else
   {
@@ -179,11 +175,7 @@ void vpx_highbd_quantize_b_neon(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
     const uint16x4_t eob_max_2 = vpmax_u16(eob_max_1, eob_max_1);
     vst1_lane_u16(eob_ptr, eob_max_2, 0);
   }
-#endif  // __aarch64__
-  // Need these here, else the compiler complains about mixing declarations and
-  // code in C90
-  (void)n_coeffs;
-  (void)scan;
+#endif  // VPX_ARCH_AARCH64
 }
 
 static VPX_FORCE_INLINE int32x4_t extract_sign_bit(int32x4_t a) {
@@ -229,33 +221,30 @@ static VPX_FORCE_INLINE int16x8_t highbd_quantize_b_32x32_neon(
 }
 
 void vpx_highbd_quantize_b_32x32_neon(
-    const tran_low_t *coeff_ptr, intptr_t n_coeffs, const int16_t *zbin_ptr,
-    const int16_t *round_ptr, const int16_t *quant_ptr,
-    const int16_t *quant_shift_ptr, tran_low_t *qcoeff_ptr,
-    tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, uint16_t *eob_ptr,
-    const int16_t *scan, const int16_t *iscan) {
-  const int16x8_t one = vdupq_n_s16(1);
+    const tran_low_t *coeff_ptr, const struct macroblock_plane *const mb_plane,
+    tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr,
+    uint16_t *eob_ptr, const struct ScanOrder *const scan_order) {
   const int16x8_t neg_one = vdupq_n_s16(-1);
   uint16x8_t eob_max;
   int i;
+  const int16_t *iscan = scan_order->iscan;
 
   // Only the first element of each vector is DC.
   // High half has identical elements, but we can reconstruct it from the low
   // half by duplicating the 2nd element. So we only need to pass a 4x32-bit
   // vector
-  int32x4_t zbin = vrshrq_n_s32(vmovl_s16(vld1_s16(zbin_ptr)), 1);
-  int32x4_t round = vrshrq_n_s32(vmovl_s16(vld1_s16(round_ptr)), 1);
+  int32x4_t zbin = vrshrq_n_s32(vmovl_s16(vld1_s16(mb_plane->zbin)), 1);
+  int32x4_t round = vrshrq_n_s32(vmovl_s16(vld1_s16(mb_plane->round)), 1);
   // Extend the quant, quant_shift vectors to ones of 32-bit elements
   // scale to high-half, so we can use vqdmulhq_s32
-  int32x4_t quant = vshlq_n_s32(vmovl_s16(vld1_s16(quant_ptr)), 15);
-  int32x4_t quant_shift = vshlq_n_s32(vmovl_s16(vld1_s16(quant_shift_ptr)), 16);
+  int32x4_t quant = vshlq_n_s32(vmovl_s16(vld1_s16(mb_plane->quant)), 15);
+  int32x4_t quant_shift =
+      vshlq_n_s32(vmovl_s16(vld1_s16(mb_plane->quant_shift)), 16);
   int32x4_t dequant = vmovl_s16(vld1_s16(dequant_ptr));
 
   // Process first 8 values which include a dc component.
   {
-    // Add one because the eob does not index from 0.
-    const uint16x8_t v_iscan =
-        vreinterpretq_u16_s16(vaddq_s16(vld1q_s16(iscan), one));
+    const uint16x8_t v_iscan = vreinterpretq_u16_s16(vld1q_s16(iscan));
 
     const int16x8_t qcoeff =
         highbd_quantize_b_32x32_neon(coeff_ptr, qcoeff_ptr, dqcoeff_ptr, zbin,
@@ -279,9 +268,7 @@ void vpx_highbd_quantize_b_32x32_neon(
     dequant = vdupq_lane_s32(vget_low_s32(dequant), 1);
 
     for (i = 1; i < 32 * 32 / 8; ++i) {
-      // Add one because the eob is not its index.
-      const uint16x8_t v_iscan =
-          vreinterpretq_u16_s16(vaddq_s16(vld1q_s16(iscan), one));
+      const uint16x8_t v_iscan = vreinterpretq_u16_s16(vld1q_s16(iscan));
 
       const int16x8_t qcoeff =
           highbd_quantize_b_32x32_neon(coeff_ptr, qcoeff_ptr, dqcoeff_ptr, zbin,
@@ -299,7 +286,7 @@ void vpx_highbd_quantize_b_32x32_neon(
     }
   }
 
-#ifdef __aarch64__
+#if VPX_ARCH_AARCH64
   *eob_ptr = vmaxvq_u16(eob_max);
 #else
   {
@@ -309,9 +296,5 @@ void vpx_highbd_quantize_b_32x32_neon(
     const uint16x4_t eob_max_2 = vpmax_u16(eob_max_1, eob_max_1);
     vst1_lane_u16(eob_ptr, eob_max_2, 0);
   }
-#endif  // __aarch64__
-  // Need these here, else the compiler complains about mixing declarations and
-  // code in C90
-  (void)n_coeffs;
-  (void)scan;
+#endif  // VPX_ARCH_AARCH64
 }

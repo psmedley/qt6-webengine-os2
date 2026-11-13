@@ -5,9 +5,11 @@
 #ifndef QUICHE_BALSA_SIMPLE_BUFFER_H_
 #define QUICHE_BALSA_SIMPLE_BUFFER_H_
 
+#include <cstddef>
+#include <memory>
+
 #include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_export.h"
-#include "quiche/common/platform/api/quiche_mem_slice.h"
 
 namespace quiche {
 
@@ -18,8 +20,13 @@ class SimpleBufferTest;
 // SimpleBuffer stores data in a contiguous region.  It can grow on demand,
 // which involves moving its data.  It keeps track of a read and a write
 // position.  Reading consumes data.
-class QUICHE_EXPORT_PRIVATE SimpleBuffer {
+class QUICHE_EXPORT SimpleBuffer {
  public:
+  struct ReleasedBuffer {
+    std::unique_ptr<char[]> buffer;
+    size_t size;
+  };
+
   SimpleBuffer() = default;
   // Create SimpleBuffer with at least `size` reserved capacity.
   explicit SimpleBuffer(int size);
@@ -93,8 +100,8 @@ class QUICHE_EXPORT_PRIVATE SimpleBuffer {
   void AdvanceWritablePtr(int amount_to_advance);
 
   // Releases the current contents of the SimpleBuffer and returns them as a
-  // MemSlice. Logically, has the same effect as calling Clear().
-  QuicheMemSlice ReleaseAsSlice();
+  // unique_ptr<char[]>. Logically, has the same effect as calling Clear().
+  ReleasedBuffer Release();
 
  private:
   friend class test::SimpleBufferTest;

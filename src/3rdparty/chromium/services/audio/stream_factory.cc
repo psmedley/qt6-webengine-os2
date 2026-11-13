@@ -6,9 +6,10 @@
 
 #include <utility>
 
-#include "base/bind.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
 #include "base/ranges/algorithm.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "base/unguessable_token.h"
 #include "build/chromecast_buildflags.h"
@@ -30,8 +31,9 @@ namespace {
 #if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
 std::unique_ptr<OutputDeviceMixerManager> MaybeCreateOutputDeviceMixerManager(
     media::AudioManager* audio_manager) {
-  if (!media::IsChromeWideEchoCancellationEnabled())
+  if (!media::IsChromeWideEchoCancellationEnabled()) {
     return nullptr;
+  }
 
   return std::make_unique<OutputDeviceMixerManager>(
       audio_manager, base::BindRepeating(&OutputDeviceMixer::Create));
@@ -218,7 +220,6 @@ void StreamFactory::CreateLoopbackStream(
   } else {
     TRACE_EVENT_BEGIN0("audio", "Start Loopback Worker");
     base::Thread::Options options;
-    options.timer_slack = base::TIMER_SLACK_NONE;
     options.thread_type = base::ThreadType::kRealtimeAudio;
     if (loopback_worker_thread_.StartWithOptions(std::move(options))) {
       task_runner = loopback_worker_thread_.task_runner();
@@ -280,7 +281,7 @@ void StreamFactory::DestroyMuter(base::WeakPtr<LocalMuter> muter) {
     }
   };
 
-  base::SequencedTaskRunnerHandle::Get()->PostTask(
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(do_destroy, weak_ptr_factory_.GetWeakPtr(), muter));
 }

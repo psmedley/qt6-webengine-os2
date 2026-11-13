@@ -14,8 +14,11 @@
  * limitations under the License.
  */
 
-#include "src/trace_processor/importers/common/args_translation_table.h"
+#include <optional>
+
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/ext/base/string_view.h"
+#include "src/trace_processor/importers/common/args_translation_table.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -49,23 +52,6 @@ std::string ExtractMojoInterfaceTag(const std::string& method_symbol) {
 
 }  // namespace
 
-constexpr char ArgsTranslationTable::kChromeHistogramHashKey[];
-constexpr char ArgsTranslationTable::kChromeHistogramNameKey[];
-
-constexpr char ArgsTranslationTable::kChromeUserEventHashKey[];
-constexpr char ArgsTranslationTable::kChromeUserEventActionKey[];
-
-constexpr char ArgsTranslationTable::kChromePerformanceMarkSiteHashKey[];
-constexpr char ArgsTranslationTable::kChromePerformanceMarkSiteKey[];
-
-constexpr char ArgsTranslationTable::kChromePerformanceMarkMarkHashKey[];
-constexpr char ArgsTranslationTable::kChromePerformanceMarkMarkKey[];
-
-constexpr char ArgsTranslationTable::kMojoMethodMappingIdKey[];
-constexpr char ArgsTranslationTable::kMojoMethodRelPcKey[];
-constexpr char ArgsTranslationTable::kMojoMethodNameKey[];
-constexpr char ArgsTranslationTable::kMojoIntefaceTagKey[];
-
 ArgsTranslationTable::ArgsTranslationTable(TraceStorage* storage)
     : storage_(storage),
       interned_chrome_histogram_hash_key_(
@@ -88,31 +74,34 @@ ArgsTranslationTable::ArgsTranslationTable(TraceStorage* storage)
           storage->InternString(kMojoMethodMappingIdKey)),
       interned_mojo_method_rel_pc_(storage->InternString(kMojoMethodRelPcKey)),
       interned_mojo_method_name_(storage->InternString(kMojoMethodNameKey)),
-      interned_mojo_interface_tag_(storage->InternString(kMojoIntefaceTagKey)) {
-}
+      interned_mojo_interface_tag_(storage->InternString(kMojoIntefaceTagKey)),
+      interned_obfuscated_view_dump_class_name_flat_key_(
+          storage->InternString(kObfuscatedViewDumpClassNameFlatKey)) {}
 
-bool ArgsTranslationTable::NeedsTranslation(StringId key_id,
+bool ArgsTranslationTable::NeedsTranslation(StringId flat_key_id,
+                                            StringId key_id,
                                             Variadic::Type type) const {
-  return KeyIdAndTypeToEnum(key_id, type).has_value();
+  return KeyIdAndTypeToEnum(flat_key_id, key_id, type).has_value();
 }
 
 void ArgsTranslationTable::TranslateArgs(
     const ArgsTracker::CompactArgSet& arg_set,
     ArgsTracker::BoundInserter& inserter) const {
-  base::Optional<uint64_t> mapping_id;
-  base::Optional<uint64_t> rel_pc;
+  std::optional<uint64_t> mapping_id;
+  std::optional<uint64_t> rel_pc;
 
   for (const auto& arg : arg_set) {
-    const auto key_type = KeyIdAndTypeToEnum(arg.key, arg.value.type);
+    const auto key_type =
+        KeyIdAndTypeToEnum(arg.flat_key, arg.key, arg.value.type);
     if (!key_type.has_value()) {
-      inserter.AddArg(arg.key, arg.value, arg.update_policy);
+      inserter.AddArg(arg.flat_key, arg.key, arg.value, arg.update_policy);
       continue;
     }
 
     switch (*key_type) {
       case KeyType::kChromeHistogramHash: {
         inserter.AddArg(interned_chrome_histogram_hash_key_, arg.value);
-        const base::Optional<base::StringView> translated_value =
+        const std::optional<base::StringView> translated_value =
             TranslateChromeHistogramHash(arg.value.uint_value);
         if (translated_value) {
           inserter.AddArg(
@@ -123,7 +112,7 @@ void ArgsTranslationTable::TranslateArgs(
       }
       case KeyType::kChromeUserEventHash: {
         inserter.AddArg(interned_chrome_user_event_hash_key_, arg.value);
-        const base::Optional<base::StringView> translated_value =
+        const std::optional<base::StringView> translated_value =
             TranslateChromeUserEventHash(arg.value.uint_value);
         if (translated_value) {
           inserter.AddArg(
@@ -135,7 +124,7 @@ void ArgsTranslationTable::TranslateArgs(
       case KeyType::kChromePerformanceMarkMarkHash: {
         inserter.AddArg(interned_chrome_performance_mark_mark_hash_key_,
                         arg.value);
-        const base::Optional<base::StringView> translated_value =
+        const std::optional<base::StringView> translated_value =
             TranslateChromePerformanceMarkMarkHash(arg.value.uint_value);
         if (translated_value) {
           inserter.AddArg(
@@ -147,12 +136,23 @@ void ArgsTranslationTable::TranslateArgs(
       case KeyType::kChromePerformanceMarkSiteHash: {
         inserter.AddArg(interned_chrome_performance_mark_site_hash_key_,
                         arg.value);
-        const base::Optional<base::StringView> translated_value =
+        const std::optional<base::StringView> translated_value =
             TranslateChromePerformanceMarkSiteHash(arg.value.uint_value);
         if (translated_value) {
           inserter.AddArg(
               interned_chrome_performance_mark_site_key_,
               Variadic::String(storage_->InternString(*translated_value)));
+        }
+        break;
+      }
+      case KeyType::kClassName: {
+        const std::optional<StringId> translated_class_name =
+            TranslateClassName(arg.value.string_value);
+        if (translated_class_name) {
+          inserter.AddArg(arg.flat_key, arg.key,
+                          Variadic::String(*translated_class_name));
+        } else {
+          inserter.AddArg(arg.flat_key, arg.key, arg.value);
         }
         break;
       }
@@ -169,85 +169,94 @@ void ArgsTranslationTable::TranslateArgs(
   EmitMojoMethodLocation(mapping_id, rel_pc, inserter);
 }
 
-base::Optional<ArgsTranslationTable::KeyType>
-ArgsTranslationTable::KeyIdAndTypeToEnum(StringId key_id,
+std::optional<ArgsTranslationTable::KeyType>
+ArgsTranslationTable::KeyIdAndTypeToEnum(StringId flat_key_id,
+                                         StringId key_id,
                                          Variadic::Type type) const {
-  if (type != Variadic::Type::kUint) {
-    return base::nullopt;
+  if (type == Variadic::Type::kUint) {
+    if (key_id == interned_chrome_histogram_hash_key_) {
+      return KeyType::kChromeHistogramHash;
+    }
+    if (key_id == interned_chrome_user_event_hash_key_) {
+      return KeyType::kChromeUserEventHash;
+    }
+    if (key_id == interned_chrome_performance_mark_mark_hash_key_) {
+      return KeyType::kChromePerformanceMarkMarkHash;
+    }
+    if (key_id == interned_chrome_performance_mark_site_hash_key_) {
+      return KeyType::kChromePerformanceMarkSiteHash;
+    }
+    if (key_id == interned_mojo_method_mapping_id_) {
+      return KeyType::kMojoMethodMappingId;
+    }
+    if (key_id == interned_mojo_method_rel_pc_) {
+      return KeyType::kMojoMethodRelPc;
+    }
+  } else if (type == Variadic::Type::kString) {
+    if (flat_key_id == interned_obfuscated_view_dump_class_name_flat_key_) {
+      return KeyType::kClassName;
+    }
   }
-  if (key_id == interned_chrome_histogram_hash_key_) {
-    return KeyType::kChromeHistogramHash;
-  }
-  if (key_id == interned_chrome_user_event_hash_key_) {
-    return KeyType::kChromeUserEventHash;
-  }
-  if (key_id == interned_chrome_performance_mark_mark_hash_key_) {
-    return KeyType::kChromePerformanceMarkMarkHash;
-  }
-  if (key_id == interned_chrome_performance_mark_site_hash_key_) {
-    return KeyType::kChromePerformanceMarkSiteHash;
-  }
-  if (key_id == interned_mojo_method_mapping_id_) {
-    return KeyType::kMojoMethodMappingId;
-  }
-  if (key_id == interned_mojo_method_rel_pc_) {
-    return KeyType::kMojoMethodRelPc;
-  }
-  return base::nullopt;
+  return std::nullopt;
 }
 
-base::Optional<base::StringView>
+std::optional<base::StringView>
 ArgsTranslationTable::TranslateChromeHistogramHash(uint64_t hash) const {
   auto* value = chrome_histogram_hash_to_name_.Find(hash);
   if (!value) {
-    return base::nullopt;
+    return std::nullopt;
   }
   return base::StringView(*value);
 }
 
-base::Optional<base::StringView>
+std::optional<base::StringView>
 ArgsTranslationTable::TranslateChromeUserEventHash(uint64_t hash) const {
   auto* value = chrome_user_event_hash_to_action_.Find(hash);
   if (!value) {
-    return base::nullopt;
+    return std::nullopt;
   }
   return base::StringView(*value);
 }
 
-base::Optional<base::StringView>
+std::optional<base::StringView>
 ArgsTranslationTable::TranslateChromePerformanceMarkSiteHash(
     uint64_t hash) const {
   auto* value = chrome_performance_mark_site_hash_to_name_.Find(hash);
   if (!value) {
-    return base::nullopt;
+    return std::nullopt;
   }
   return base::StringView(*value);
 }
 
-base::Optional<base::StringView>
+std::optional<base::StringView>
 ArgsTranslationTable::TranslateChromePerformanceMarkMarkHash(
     uint64_t hash) const {
   auto* value = chrome_performance_mark_mark_hash_to_name_.Find(hash);
   if (!value) {
-    return base::nullopt;
+    return std::nullopt;
   }
   return base::StringView(*value);
 }
 
-base::Optional<ArgsTranslationTable::SourceLocation>
+std::optional<ArgsTranslationTable::SourceLocation>
 ArgsTranslationTable::TranslateNativeSymbol(MappingId mapping_id,
                                             uint64_t rel_pc) const {
   auto loc =
       native_symbol_to_location_.Find(std::make_pair(mapping_id, rel_pc));
   if (!loc) {
-    return base::nullopt;
+    return std::nullopt;
   }
   return *loc;
 }
 
+std::optional<StringId> ArgsTranslationTable::TranslateClassName(
+    StringId obfuscated_class_name_id) const {
+  return deobfuscation_mapping_table_.TranslateClass(obfuscated_class_name_id);
+}
+
 void ArgsTranslationTable::EmitMojoMethodLocation(
-    base::Optional<uint64_t> mapping_id,
-    base::Optional<uint64_t> rel_pc,
+    std::optional<uint64_t> mapping_id,
+    std::optional<uint64_t> rel_pc,
     ArgsTracker::BoundInserter& inserter) const {
   if (!mapping_id || !rel_pc) {
     return;

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
+#include <set>
 #include <sstream>
 
 #include "src/base/functional.h"
@@ -44,6 +45,7 @@ static_assert(sizeof(FlagValues) % kMinimumOSPageSize == 0);
 // Define all of our flags default values.
 #define FLAG_MODE_DEFINE_DEFAULTS
 #include "src/flags/flag-definitions.h"  // NOLINT(build/include)
+#undef FLAG_MODE_DEFINE_DEFAULTS
 
 namespace {
 
@@ -91,6 +93,10 @@ struct Flag {
 
   enum class SetBy { kDefault, kWeakImplication, kImplication, kCommandLine };
 
+  constexpr bool IsAnyImplication(Flag::SetBy set_by) {
+    return set_by == SetBy::kWeakImplication || set_by == SetBy::kImplication;
+  }
+
   FlagType type_;       // What type of flag, bool, int, or string.
   const char* name_;    // Name of the flag, ex "my_flag".
   void* valptr_;        // Pointer to the global flag variable.
@@ -98,7 +104,12 @@ struct Flag {
   const char* cmt_;     // A comment about the flags purpose.
   bool owns_ptr_;       // Does the flag own its string value?
   SetBy set_by_ = SetBy::kDefault;
+  // Name of the flag implying this flag, if any.
   const char* implied_by_ = nullptr;
+#ifdef DEBUG
+  // Pointer to the flag implying this flag, if any.
+  const Flag* implied_by_ptr_ = nullptr;
+#endif
 
   FlagType type() const { return type_; }
 
@@ -107,6 +118,17 @@ struct Flag {
   const char* comment() const { return cmt_; }
 
   bool PointsTo(const void* ptr) const { return valptr_ == ptr; }
+
+#ifdef DEBUG
+  bool ImpliedBy(const void* ptr) const {
+    const Flag* current = this->implied_by_ptr_;
+    while (current != nullptr) {
+      if (current->PointsTo(ptr)) return true;
+      current = current->implied_by_ptr_;
+    }
+    return false;
+  }
+#endif
 
   bool bool_variable() const { return GetValue<TYPE_BOOL, bool>(); }
 
@@ -178,39 +200,44 @@ struct Flag {
     }
   }
 
+  template <typename T>
+  T GetDefaultValue() const {
+    return *reinterpret_cast<const T*>(defptr_);
+  }
+
   bool bool_default() const {
     DCHECK_EQ(TYPE_BOOL, type_);
-    return *reinterpret_cast<const bool*>(defptr_);
+    return GetDefaultValue<bool>();
   }
 
   int int_default() const {
     DCHECK_EQ(TYPE_INT, type_);
-    return *reinterpret_cast<const int*>(defptr_);
+    return GetDefaultValue<int>();
   }
 
   unsigned int uint_default() const {
     DCHECK_EQ(TYPE_UINT, type_);
-    return *reinterpret_cast<const unsigned int*>(defptr_);
+    return GetDefaultValue<unsigned int>();
   }
 
   uint64_t uint64_default() const {
     DCHECK_EQ(TYPE_UINT64, type_);
-    return *reinterpret_cast<const uint64_t*>(defptr_);
+    return GetDefaultValue<uint64_t>();
   }
 
   double float_default() const {
     DCHECK_EQ(TYPE_FLOAT, type_);
-    return *reinterpret_cast<const double*>(defptr_);
+    return GetDefaultValue<double>();
   }
 
   size_t size_t_default() const {
     DCHECK_EQ(TYPE_SIZE_T, type_);
-    return *reinterpret_cast<const size_t*>(defptr_);
+    return GetDefaultValue<size_t>();
   }
 
   const char* string_default() const {
     DCHECK_EQ(TYPE_STRING, type_);
-    return *reinterpret_cast<const char* const*>(defptr_);
+    return GetDefaultValue<const char*>();
   }
 
   static bool ShouldCheckFlagContradictions() {
@@ -244,6 +271,19 @@ struct Flag {
         MSVC_SUPPRESS_WARNING(4722)
         ~FatalError() { FATAL("%s.\n%s", str().c_str(), kHint); }
       };
+      // Readonly flags cannot change value.
+      if (change_flag && IsReadOnly()) {
+        // Exit instead of abort for certain testing situations.
+        if (v8_flags.exit_on_contradictory_flags) base::OS::ExitProcess(0);
+        if (implied_by == nullptr) {
+          FatalError{} << "Contradictory value for readonly flag "
+                       << FlagName{name()};
+        } else {
+          DCHECK(IsAnyImplication(new_set_by));
+          FatalError{} << "Contradictory value for readonly flag "
+                       << FlagName{name()} << " implied by " << implied_by;
+        }
+      }
       // For bool flags, we only check for a conflict if the value actually
       // changes. So specifying the same flag with the same value multiple times
       // is allowed.
@@ -302,28 +342,48 @@ struct Flag {
           break;
       }
     }
+    if (change_flag && IsReadOnly()) {
+      // Readonly flags must never change value.
+      return false;
+    }
     set_by_ = new_set_by;
-    if (new_set_by == SetBy::kImplication ||
-        new_set_by == SetBy::kWeakImplication) {
+    if (IsAnyImplication(new_set_by)) {
       DCHECK_NOT_NULL(implied_by);
       implied_by_ = implied_by;
+#ifdef DEBUG
+      // This only works when implied_by is a flag_name or !flag_name, but it
+      // can also be a condition e.g. flag_name > 3. Since this is only used for
+      // checks in DEBUG mode, we will just ignore the more complex conditions
+      // for now - that will just lead to a nullptr which won't be followed.
+      implied_by_ptr_ = static_cast<Flag*>(
+          FindFlagByName(implied_by[0] == '!' ? implied_by + 1 : implied_by));
+      DCHECK_NE(implied_by_ptr_, this);
+#endif
     }
     return change_flag;
+  }
+
+  bool IsReadOnly() const {
+    // See the FLAG_READONLY definition for FLAG_MODE_META.
+    return valptr_ == nullptr;
   }
 
   template <FlagType flag_type, typename T>
   T GetValue() const {
     DCHECK_EQ(flag_type, type_);
+    if (IsReadOnly()) return GetDefaultValue<T>();
     return *reinterpret_cast<const FlagValue<T>*>(valptr_);
   }
 
   template <FlagType flag_type, typename T>
   void SetValue(T new_value, SetBy set_by) {
     DCHECK_EQ(flag_type, type_);
-    auto* flag_value = reinterpret_cast<FlagValue<T>*>(valptr_);
-    bool change_flag = flag_value->value() != new_value;
+    bool change_flag = GetValue<flag_type, T>() != new_value;
     change_flag = CheckFlagChange(set_by, change_flag);
-    if (change_flag) *flag_value = new_value;
+    if (change_flag) {
+      DCHECK(!IsReadOnly());
+      *reinterpret_cast<FlagValue<T>*>(valptr_) = new_value;
+    }
   }
 
   // Compare this flag's current value against the default.
@@ -395,6 +455,7 @@ struct Flag {
 Flag flags[] = {
 #define FLAG_MODE_META
 #include "src/flags/flag-definitions.h"  // NOLINT(build/include)
+#undef FLAG_MODE_META
 };
 
 constexpr size_t kNumFlags = arraysize(flags);
@@ -499,15 +560,79 @@ uint32_t ComputeFlagListHash() {
   std::ostringstream modified_args_as_string;
   if (COMPRESS_POINTERS_BOOL) modified_args_as_string << "ptr-compr";
   if (DEBUG_BOOL) modified_args_as_string << "debug";
+
+#ifdef DEBUG
+  // These two sets are used to check that we don't leave out any flags
+  // implied by --predictable in the list below.
+  std::set<const char*> flags_implied_by_predictable;
+  std::set<const char*> flags_ignored_because_of_predictable;
+#endif
+
   for (const Flag& flag : flags) {
     if (flag.IsDefault()) continue;
+#ifdef DEBUG
+    if (flag.ImpliedBy(&v8_flags.predictable)) {
+      flags_implied_by_predictable.insert(flag.name());
+    }
+#endif
     // We want to be able to flip --profile-deserialization without
     // causing the code cache to get invalidated by this hash.
     if (flag.PointsTo(&v8_flags.profile_deserialization)) continue;
-    // Skip v8_flags.random_seed to allow predictable code caching.
+    // Skip v8_flags.random_seed and v8_flags.predictable to allow predictable
+    // code caching.
     if (flag.PointsTo(&v8_flags.random_seed)) continue;
+    if (flag.PointsTo(&v8_flags.predictable)) continue;
+
+    // The following flags are implied by --predictable (some negated).
+    if (flag.PointsTo(&v8_flags.concurrent_sparkplug) ||
+        flag.PointsTo(&v8_flags.concurrent_recompilation) ||
+        flag.PointsTo(&v8_flags.lazy_feedback_allocation) ||
+#ifdef V8_ENABLE_MAGLEV
+        flag.PointsTo(&v8_flags.maglev_deopt_data_on_background) ||
+        flag.PointsTo(&v8_flags.maglev_build_code_on_background) ||
+#endif
+        flag.PointsTo(&v8_flags.parallel_scavenge) ||
+        flag.PointsTo(&v8_flags.concurrent_marking) ||
+        flag.PointsTo(&v8_flags.concurrent_minor_ms_marking) ||
+        flag.PointsTo(&v8_flags.concurrent_array_buffer_sweeping) ||
+        flag.PointsTo(&v8_flags.parallel_marking) ||
+        flag.PointsTo(&v8_flags.concurrent_sweeping) ||
+        flag.PointsTo(&v8_flags.parallel_compaction) ||
+        flag.PointsTo(&v8_flags.parallel_pointer_update) ||
+        flag.PointsTo(&v8_flags.parallel_weak_ref_clearing) ||
+        flag.PointsTo(&v8_flags.memory_reducer) ||
+        flag.PointsTo(&v8_flags.cppheap_concurrent_marking) ||
+        flag.PointsTo(&v8_flags.cppheap_incremental_marking) ||
+        flag.PointsTo(&v8_flags.single_threaded_gc)) {
+#ifdef DEBUG
+      if (flag.ImpliedBy(&v8_flags.predictable)) {
+        flags_ignored_because_of_predictable.insert(flag.name());
+      }
+#endif
+      continue;
+    }
     modified_args_as_string << flag;
   }
+
+#ifdef DEBUG
+  // Disable the check for fuzzing. This check is only here
+  // to ensure that we can generate reproducible code cache
+  // for production builds, we don't care as much about the
+  // reproducibility in the case of fuzzing.
+  if (!v8_flags.fuzzing) {
+    for (const char* name : flags_implied_by_predictable) {
+      if (flags_ignored_because_of_predictable.find(name) ==
+          flags_ignored_because_of_predictable.end()) {
+        PrintF(
+            "%s should be added to the list of "
+            "flags_ignored_because_of_predictable\n",
+            name);
+        UNREACHABLE();
+      }
+    }
+  }
+#endif
+
   std::string args(modified_args_as_string.str());
   // Generate a hash that is not 0.
   uint32_t hash = static_cast<uint32_t>(base::hash_range(
@@ -851,10 +976,11 @@ class ImplicationProcessor {
   // Called from {DEFINE_*_IMPLICATION} in flag-definitions.h.
   template <class T>
   bool TriggerImplication(bool premise, const char* premise_name,
-                          FlagValue<T>* conclusion_value, T value,
+                          FlagValue<T>* conclusion_value,
+                          const char* conclusion_name, T value,
                           bool weak_implication) {
     if (!premise) return false;
-    Flag* conclusion_flag = FindFlagByPointer(conclusion_value);
+    Flag* conclusion_flag = FindFlagByName(conclusion_name);
     if (!conclusion_flag->CheckFlagChange(
             weak_implication ? Flag::SetBy::kWeakImplication
                              : Flag::SetBy::kImplication,
@@ -870,6 +996,30 @@ class ImplicationProcessor {
       }
     }
     *conclusion_value = value;
+    return true;
+  }
+
+  // Called from {DEFINE_*_IMPLICATION} in flag-definitions.h, when the
+  // conclusion flag is read-only (note this is the const overload of the
+  // function just above).
+  template <class T>
+  bool TriggerImplication(bool premise, const char* premise_name,
+                          const FlagValue<T>* conclusion_value,
+                          const char* conclusion_name, T value,
+                          bool weak_implication) {
+    if (!premise) return false;
+    Flag* conclusion_flag = FindFlagByName(conclusion_name);
+    // Because this is the `const FlagValue*` overload:
+    DCHECK(conclusion_flag->IsReadOnly());
+    if (!conclusion_flag->CheckFlagChange(
+            weak_implication ? Flag::SetBy::kWeakImplication
+                             : Flag::SetBy::kImplication,
+            conclusion_value->value() != value, premise_name)) {
+      return false;
+    }
+    // Must equal the default value, otherwise CheckFlagChange should've
+    // returned false.
+    DCHECK_EQ(value, conclusion_flag->GetDefaultValue<T>());
     return true;
   }
 

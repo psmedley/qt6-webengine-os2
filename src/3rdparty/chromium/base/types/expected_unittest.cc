@@ -4,9 +4,13 @@
 
 #include "base/types/expected.h"
 
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "base/containers/contains.h"
+#include "base/strings/to_string.h"
+#include "base/test/gmock_expected_support.h"
 #include "base/test/gtest_util.h"
 #include "base/types/strong_alias.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -59,6 +63,26 @@ struct WeakMoveOnly {
 
 enum class Error {
   kFail,
+};
+
+enum class CvRef {
+  kNone,
+  kRef,
+  kConstRef,
+  kRRef,
+  kConstRRef,
+};
+
+struct SaveCvRef {
+  constexpr SaveCvRef() = default;
+  constexpr SaveCvRef(SaveCvRef&) : cvref(CvRef::kRef) {}
+  constexpr SaveCvRef(const SaveCvRef&) : cvref(CvRef::kConstRef) {}
+  constexpr SaveCvRef(SaveCvRef&&) : cvref(CvRef::kRRef) {}
+  constexpr SaveCvRef(const SaveCvRef&&) : cvref(CvRef::kConstRRef) {}
+
+  constexpr explicit SaveCvRef(CvRef cvref) : cvref(cvref) {}
+
+  CvRef cvref = CvRef::kNone;
 };
 
 TEST(Ok, ValueConstructor) {
@@ -394,8 +418,7 @@ TEST(Expected, InPlaceConstructor) {
 
 TEST(Expected, InPlaceListConstructor) {
   expected<std::vector<int>, int> ex(absl::in_place, {1, 2, 3});
-  ASSERT_TRUE(ex.has_value());
-  EXPECT_EQ(ex.value(), std::vector({1, 2, 3}));
+  EXPECT_THAT(ex, test::ValueIs(std::vector({1, 2, 3})));
 }
 
 TEST(Expected, UnexpectConstructor) {
@@ -406,8 +429,7 @@ TEST(Expected, UnexpectConstructor) {
 
 TEST(Expected, UnexpectListConstructor) {
   expected<int, std::vector<int>> ex(unexpect, {1, 2, 3});
-  ASSERT_FALSE(ex.has_value());
-  EXPECT_EQ(ex.error(), std::vector({1, 2, 3}));
+  EXPECT_THAT(ex, test::ErrorIs(std::vector({1, 2, 3})));
 }
 
 TEST(Expected, AssignValue) {
@@ -415,12 +437,10 @@ TEST(Expected, AssignValue) {
   EXPECT_FALSE(ex.has_value());
 
   ex = 42;
-  ASSERT_TRUE(ex.has_value());
-  EXPECT_EQ(ex.value(), 42);
+  EXPECT_THAT(ex, test::ValueIs(42));
 
   ex = 123;
-  ASSERT_TRUE(ex.has_value());
-  EXPECT_EQ(ex.value(), 123);
+  EXPECT_THAT(ex, test::ValueIs(123));
 }
 
 TEST(Expected, CopyAssignOk) {
@@ -428,12 +448,10 @@ TEST(Expected, CopyAssignOk) {
   EXPECT_FALSE(ex.has_value());
 
   ex = ok(42);
-  ASSERT_TRUE(ex.has_value());
-  EXPECT_EQ(ex.value(), 42);
+  EXPECT_THAT(ex, test::ValueIs(42));
 
   ex = ok(123);
-  ASSERT_TRUE(ex.has_value());
-  EXPECT_EQ(ex.value(), 123);
+  EXPECT_THAT(ex, test::ValueIs(123));
 }
 
 TEST(Expected, MoveAssignOk) {
@@ -454,12 +472,10 @@ TEST(Expected, CopyAssignUnexpected) {
   EXPECT_TRUE(ex.has_value());
 
   ex = unexpected(42);
-  ASSERT_FALSE(ex.has_value());
-  EXPECT_EQ(ex.error(), 42);
+  EXPECT_THAT(ex, test::ErrorIs(42));
 
   ex = unexpected(123);
-  ASSERT_FALSE(ex.has_value());
-  EXPECT_EQ(ex.error(), 123);
+  EXPECT_THAT(ex, test::ErrorIs(123));
 }
 
 TEST(Expected, MoveAssignUnexpected) {
@@ -489,8 +505,7 @@ TEST(Expected, EmplaceList) {
   EXPECT_FALSE(ex.has_value());
 
   ex.emplace({1, 2, 3});
-  ASSERT_TRUE(ex.has_value());
-  EXPECT_EQ(ex.value(), std::vector({1, 2, 3}));
+  EXPECT_THAT(ex, test::ValueIs(std::vector({1, 2, 3})));
 }
 
 TEST(Expected, MemberSwap) {
@@ -498,11 +513,8 @@ TEST(Expected, MemberSwap) {
   expected<int, int> ex2 = unexpected(123);
 
   ex1.swap(ex2);
-  ASSERT_FALSE(ex1.has_value());
-  EXPECT_EQ(ex1.error(), 123);
-
-  ASSERT_TRUE(ex2.has_value());
-  EXPECT_EQ(ex2.value(), 42);
+  EXPECT_THAT(ex1, test::ErrorIs(123));
+  EXPECT_THAT(ex2, test::ValueIs(42));
 }
 
 TEST(Expected, FreeSwap) {
@@ -510,11 +522,8 @@ TEST(Expected, FreeSwap) {
   expected<int, int> ex2 = unexpected(123);
 
   swap(ex1, ex2);
-  ASSERT_FALSE(ex1.has_value());
-  EXPECT_EQ(ex1.error(), 123);
-
-  ASSERT_TRUE(ex2.has_value());
-  EXPECT_EQ(ex2.value(), 42);
+  EXPECT_THAT(ex1, test::ErrorIs(123));
+  EXPECT_THAT(ex2, test::ValueIs(42));
 }
 
 TEST(Expected, OperatorArrow) {
@@ -585,6 +594,18 @@ TEST(Expected, Error) {
                                const int&&>);
 }
 
+TEST(Expected, ToString) {
+  // `expected` should have a custom string representation that prints the
+  // contained value/error.
+  const std::string value_str = ToString(expected<int, int>(123456));
+  EXPECT_FALSE(base::Contains(value_str, "-byte object at "));
+  EXPECT_TRUE(base::Contains(value_str, "123456"));
+  const std::string error_str =
+      ToString(expected<int, int>(unexpected(123456)));
+  EXPECT_FALSE(base::Contains(error_str, "-byte object at "));
+  EXPECT_TRUE(base::Contains(error_str, "123456"));
+}
+
 TEST(Expected, ValueOr) {
   {
     expected<int, int> ex;
@@ -598,9 +619,231 @@ TEST(Expected, ValueOr) {
     expected<WeakMoveOnly<int>, int> ex(0);
     EXPECT_EQ(std::move(ex).value_or(123).value, 0);
 
-    expected<int, WeakMoveOnly<int>> unex = unexpected(WeakMoveOnly(0));
-    EXPECT_EQ(std::move(unex).value_or(123), 123);
+    expected<WeakMoveOnly<int>, int> unex = unexpected(0);
+    EXPECT_EQ(std::move(unex).value_or(123).value, 123);
   }
+}
+
+TEST(Expected, ErrorOr) {
+  {
+    expected<int, int> ex;
+    EXPECT_EQ(ex.error_or(123), 123);
+
+    expected<int, int> unex = unexpected(0);
+    EXPECT_EQ(unex.error_or(123), 0);
+  }
+
+  {
+    expected<int, WeakMoveOnly<int>> ex(0);
+    EXPECT_EQ(std::move(ex).error_or(123).value, 123);
+
+    expected<int, WeakMoveOnly<int>> unex = unexpected(0);
+    EXPECT_EQ(std::move(unex).error_or(123).value, 0);
+  }
+}
+
+TEST(Expected, AndThen) {
+  using ExIn = expected<SaveCvRef, SaveCvRef>;
+  using ExOut = expected<CvRef, SaveCvRef>;
+
+  auto get_ex_cvref = [](auto&& x) -> ExOut {
+    return SaveCvRef(std::forward<decltype(x)>(x)).cvref;
+  };
+
+  ExIn ex;
+  EXPECT_EQ(ex.and_then(get_ex_cvref), CvRef::kRef);
+  EXPECT_EQ(std::as_const(ex).and_then(get_ex_cvref), CvRef::kConstRef);
+  EXPECT_EQ(std::move(ex).and_then(get_ex_cvref), CvRef::kRRef);
+  EXPECT_EQ(std::move(std::as_const(ex)).and_then(get_ex_cvref),
+            CvRef::kConstRRef);
+
+  ExIn unex(unexpect);
+  EXPECT_EQ(unex.and_then(get_ex_cvref).error().cvref, CvRef::kRef);
+  EXPECT_EQ(std::as_const(unex).and_then(get_ex_cvref).error().cvref,
+            CvRef::kConstRef);
+  EXPECT_EQ(std::move(unex).and_then(get_ex_cvref).error().cvref, CvRef::kRRef);
+  EXPECT_EQ(std::move(std::as_const(unex)).and_then(get_ex_cvref).error().cvref,
+            CvRef::kConstRRef);
+
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&>().and_then(get_ex_cvref)),
+                     ExOut>);
+  static_assert(
+      std::is_same_v<
+          decltype(std::declval<const ExIn&>().and_then(get_ex_cvref)), ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&&>().and_then(get_ex_cvref)),
+                     ExOut>);
+  static_assert(std::is_same_v<decltype(std::declval<const ExIn&&>().and_then(
+                                   get_ex_cvref)),
+                               ExOut>);
+}
+
+TEST(Expected, OrElse) {
+  using ExIn = expected<SaveCvRef, SaveCvRef>;
+  using ExOut = expected<SaveCvRef, CvRef>;
+
+  auto get_unex_cvref = [](auto&& x) -> ExOut {
+    return unexpected(SaveCvRef(std::forward<decltype(x)>(x)).cvref);
+  };
+
+  ExIn ex;
+  EXPECT_EQ(ex.or_else(get_unex_cvref).value().cvref, CvRef::kRef);
+  EXPECT_EQ(std::as_const(ex).or_else(get_unex_cvref).value().cvref,
+            CvRef::kConstRef);
+  EXPECT_EQ(std::move(ex).or_else(get_unex_cvref).value().cvref, CvRef::kRRef);
+  EXPECT_EQ(std::move(std::as_const(ex)).or_else(get_unex_cvref).value().cvref,
+            CvRef::kConstRRef);
+
+  ExIn unex(unexpect);
+  EXPECT_EQ(unex.or_else(get_unex_cvref).error(), CvRef::kRef);
+  EXPECT_EQ(std::as_const(unex).or_else(get_unex_cvref).error(),
+            CvRef::kConstRef);
+  EXPECT_EQ(std::move(unex).or_else(get_unex_cvref).error(), CvRef::kRRef);
+  EXPECT_EQ(std::move(std::as_const(unex)).or_else(get_unex_cvref).error(),
+            CvRef::kConstRRef);
+
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&>().or_else(get_unex_cvref)),
+                     ExOut>);
+  static_assert(std::is_same_v<decltype(std::declval<const ExIn&>().or_else(
+                                   get_unex_cvref)),
+                               ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&&>().or_else(get_unex_cvref)),
+                     ExOut>);
+  static_assert(std::is_same_v<decltype(std::declval<const ExIn&&>().or_else(
+                                   get_unex_cvref)),
+                               ExOut>);
+}
+
+TEST(Expected, Transform) {
+  using ExIn = expected<SaveCvRef, SaveCvRef>;
+  using ExOut = expected<CvRef, SaveCvRef>;
+
+  auto get_cvref = [](auto&& x) {
+    return SaveCvRef(std::forward<decltype(x)>(x)).cvref;
+  };
+
+  {
+    ExIn ex;
+    EXPECT_EQ(ex.transform(get_cvref), CvRef::kRef);
+    EXPECT_EQ(std::as_const(ex).transform(get_cvref), CvRef::kConstRef);
+    EXPECT_EQ(std::move(ex).transform(get_cvref), CvRef::kRRef);
+    EXPECT_EQ(std::move(std::as_const(ex)).transform(get_cvref),
+              CvRef::kConstRRef);
+
+    ExIn unex(unexpect);
+    EXPECT_EQ(unex.transform(get_cvref).error().cvref, CvRef::kRef);
+    EXPECT_EQ(std::as_const(unex).transform(get_cvref).error().cvref,
+              CvRef::kConstRef);
+    EXPECT_EQ(std::move(unex).transform(get_cvref).error().cvref, CvRef::kRRef);
+    EXPECT_EQ(std::move(std::as_const(unex)).transform(get_cvref).error().cvref,
+              CvRef::kConstRRef);
+
+    static_assert(
+        std::is_same_v<decltype(std::declval<ExIn&>().transform(get_cvref)),
+                       ExOut>);
+    static_assert(
+        std::is_same_v<
+            decltype(std::declval<const ExIn&>().transform(get_cvref)), ExOut>);
+    static_assert(
+        std::is_same_v<decltype(std::declval<ExIn&&>().transform(get_cvref)),
+                       ExOut>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const ExIn&&>().transform(get_cvref)),
+                  ExOut>);
+  }
+
+  // Test void transform.
+  {
+    using ExOutVoid = expected<void, SaveCvRef>;
+    CvRef cvref = CvRef::kNone;
+    auto write_cvref = [&cvref](auto&& x) {
+      cvref = SaveCvRef(std::forward<decltype(x)>(x)).cvref;
+    };
+
+    ExIn ex;
+    EXPECT_TRUE(ex.transform(write_cvref).has_value());
+    EXPECT_EQ(cvref, CvRef::kRef);
+    EXPECT_TRUE(std::as_const(ex).transform(write_cvref).has_value());
+    EXPECT_EQ(cvref, CvRef::kConstRef);
+    EXPECT_TRUE(std::move(ex).transform(write_cvref).has_value());
+    EXPECT_EQ(cvref, CvRef::kRRef);
+    EXPECT_TRUE(
+        std::move(std::as_const(ex)).transform(write_cvref).has_value());
+    EXPECT_EQ(cvref, CvRef::kConstRRef);
+
+    cvref = CvRef::kNone;
+    ExIn unex(unexpect);
+    EXPECT_EQ(unex.transform(write_cvref).error().cvref, CvRef::kRef);
+    EXPECT_EQ(cvref, CvRef::kNone);
+    EXPECT_EQ(std::as_const(unex).transform(write_cvref).error().cvref,
+              CvRef::kConstRef);
+    EXPECT_EQ(cvref, CvRef::kNone);
+    EXPECT_EQ(std::move(unex).transform(write_cvref).error().cvref,
+              CvRef::kRRef);
+    EXPECT_EQ(cvref, CvRef::kNone);
+    EXPECT_EQ(
+        std::move(std::as_const(unex)).transform(write_cvref).error().cvref,
+        CvRef::kConstRRef);
+    EXPECT_EQ(cvref, CvRef::kNone);
+
+    static_assert(
+        std::is_same_v<decltype(std::declval<ExIn&>().transform(write_cvref)),
+                       ExOutVoid>);
+    static_assert(std::is_same_v<decltype(std::declval<const ExIn&>().transform(
+                                     write_cvref)),
+                                 ExOutVoid>);
+    static_assert(
+        std::is_same_v<decltype(std::declval<ExIn&&>().transform(write_cvref)),
+                       ExOutVoid>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const ExIn&&>().transform(write_cvref)),
+                  ExOutVoid>);
+  }
+}
+
+TEST(Expected, TransformError) {
+  using ExIn = expected<SaveCvRef, SaveCvRef>;
+  using ExOut = expected<SaveCvRef, CvRef>;
+
+  auto get_cvref = [](auto&& x) {
+    return SaveCvRef(std::forward<decltype(x)>(x)).cvref;
+  };
+
+  ExIn ex;
+  EXPECT_EQ(ex.transform_error(get_cvref).value().cvref, CvRef::kRef);
+  EXPECT_EQ(std::as_const(ex).transform_error(get_cvref).value().cvref,
+            CvRef::kConstRef);
+  EXPECT_EQ(std::move(ex).transform_error(get_cvref).value().cvref,
+            CvRef::kRRef);
+  EXPECT_EQ(
+      std::move(std::as_const(ex)).transform_error(get_cvref).value().cvref,
+      CvRef::kConstRRef);
+
+  ExIn unex(unexpect);
+  EXPECT_EQ(unex.transform_error(get_cvref).error(), CvRef::kRef);
+  EXPECT_EQ(std::as_const(unex).transform_error(get_cvref).error(),
+            CvRef::kConstRef);
+  EXPECT_EQ(std::move(unex).transform_error(get_cvref).error(), CvRef::kRRef);
+  EXPECT_EQ(std::move(std::as_const(unex)).transform_error(get_cvref).error(),
+            CvRef::kConstRRef);
+
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&>().transform_error(get_cvref)),
+                     ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<const ExIn&>().transform_error(
+                         get_cvref)),
+                     ExOut>);
+  static_assert(
+      std::is_same_v<
+          decltype(std::declval<ExIn&&>().transform_error(get_cvref)), ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<const ExIn&&>().transform_error(
+                         get_cvref)),
+                     ExOut>);
 }
 
 TEST(Expected, EqualityOperators) {
@@ -628,7 +871,7 @@ TEST(Expected, EqualityOperators) {
   EXPECT_NE(unexpected(123), ExInt(123));
 }
 
-TEST(ExpectedTest, DeathTests) {
+TEST(ExpectedDeathTest, UseAfterMove) {
   using ExpectedInt = expected<int, int>;
   using ExpectedDouble = expected<double, double>;
 
@@ -637,10 +880,10 @@ TEST(ExpectedTest, DeathTests) {
 
   // Accessing moved from objects crashes.
   // NOLINTBEGIN(bugprone-use-after-move)
-  EXPECT_DEATH_IF_SUPPORTED(ExpectedInt{moved_from}, "");
-  EXPECT_DEATH_IF_SUPPORTED(ExpectedInt{std::move(moved_from)}, "");
-  EXPECT_DEATH_IF_SUPPORTED(ExpectedDouble{moved_from}, "");
-  EXPECT_DEATH_IF_SUPPORTED(ExpectedDouble{std::move(moved_from)}, "");
+  EXPECT_DEATH_IF_SUPPORTED((void)ExpectedInt{moved_from}, "");
+  EXPECT_DEATH_IF_SUPPORTED((void)ExpectedInt{std::move(moved_from)}, "");
+  EXPECT_DEATH_IF_SUPPORTED((void)ExpectedDouble{moved_from}, "");
+  EXPECT_DEATH_IF_SUPPORTED((void)ExpectedDouble{std::move(moved_from)}, "");
   EXPECT_DEATH_IF_SUPPORTED(ex = moved_from, "");
   EXPECT_DEATH_IF_SUPPORTED(ex = std::move(moved_from), "");
   EXPECT_DEATH_IF_SUPPORTED(ex.swap(moved_from), "");
@@ -724,6 +967,11 @@ TEST(ExpectedVoid, ImplicitConvertingMoveConstructor) {
   EXPECT_EQ(ex2.error().value, 42);
 }
 
+TEST(ExpectedVoid, OkConstructor) {
+  constexpr expected<void, int> ex = ok();
+  static_assert(ex.has_value());
+}
+
 TEST(ExpectedVoid, ExplicitErrorConstructor) {
   {
     constexpr expected<void, Strong<int>> ex(unexpected(42));
@@ -764,8 +1012,7 @@ TEST(ExpectedVoid, UnexpectConstructor) {
 
 TEST(ExpectedVoid, UnexpectListConstructor) {
   expected<void, std::vector<int>> ex(unexpect, {1, 2, 3});
-  ASSERT_FALSE(ex.has_value());
-  EXPECT_EQ(ex.error(), std::vector({1, 2, 3}));
+  EXPECT_THAT(ex, test::ErrorIs(std::vector({1, 2, 3})));
 }
 
 TEST(ExpectedVoid, CopyAssignUnexpected) {
@@ -773,12 +1020,10 @@ TEST(ExpectedVoid, CopyAssignUnexpected) {
   EXPECT_TRUE(ex.has_value());
 
   ex = unexpected(42);
-  ASSERT_FALSE(ex.has_value());
-  EXPECT_EQ(ex.error(), 42);
+  EXPECT_THAT(ex, test::ErrorIs(42));
 
   ex = unexpected(123);
-  ASSERT_FALSE(ex.has_value());
-  EXPECT_EQ(ex.error(), 123);
+  EXPECT_THAT(ex, test::ErrorIs(123));
 }
 
 TEST(ExpectedVoid, MoveAssignUnexpected) {
@@ -807,9 +1052,7 @@ TEST(ExpectedVoid, MemberSwap) {
   expected<void, int> ex2 = unexpected(123);
 
   ex1.swap(ex2);
-  ASSERT_FALSE(ex1.has_value());
-  EXPECT_EQ(ex1.error(), 123);
-
+  EXPECT_THAT(ex1, test::ErrorIs(123));
   ASSERT_TRUE(ex2.has_value());
 }
 
@@ -818,9 +1061,7 @@ TEST(ExpectedVoid, FreeSwap) {
   expected<void, int> ex2 = unexpected(123);
 
   swap(ex1, ex2);
-  ASSERT_FALSE(ex1.has_value());
-  EXPECT_EQ(ex1.error(), 123);
-
+  EXPECT_THAT(ex1, test::ErrorIs(123));
   ASSERT_TRUE(ex2.has_value());
 }
 
@@ -860,6 +1101,213 @@ TEST(ExpectedVoid, Error) {
                                const int&&>);
 }
 
+TEST(ExpectedVoid, ToString) {
+  // `expected<void, ...>` should have a custom string representation (that
+  // prints the contained error, if applicable).
+  const std::string value_str = ToString(expected<void, int>());
+  EXPECT_FALSE(base::Contains(value_str, "-byte object at "));
+  const std::string error_str =
+      ToString(expected<void, int>(unexpected(123456)));
+  EXPECT_FALSE(base::Contains(error_str, "-byte object at "));
+  EXPECT_TRUE(base::Contains(error_str, "123456"));
+}
+
+TEST(ExpectedVoid, ErrorOr) {
+  {
+    expected<void, int> ex;
+    EXPECT_EQ(ex.error_or(123), 123);
+
+    expected<void, int> unex = unexpected(0);
+    EXPECT_EQ(unex.error_or(123), 0);
+  }
+
+  {
+    expected<void, WeakMoveOnly<int>> ex;
+    EXPECT_EQ(std::move(ex).error_or(123).value, 123);
+
+    expected<void, WeakMoveOnly<int>> unex = unexpected(0);
+    EXPECT_EQ(std::move(unex).error_or(123).value, 0);
+  }
+}
+
+TEST(ExpectedVoid, AndThen) {
+  using ExIn = expected<void, SaveCvRef>;
+  using ExOut = expected<bool, SaveCvRef>;
+
+  auto get_true = []() -> ExOut { return ok(true); };
+
+  ExIn ex;
+  EXPECT_TRUE(ex.and_then(get_true).value());
+  EXPECT_TRUE(std::as_const(ex).and_then(get_true).value());
+  EXPECT_TRUE(std::move(ex).and_then(get_true).value());
+  EXPECT_TRUE(std::move(std::as_const(ex)).and_then(get_true).value());
+
+  ExIn unex = unexpected(SaveCvRef());
+  EXPECT_EQ(unex.and_then(get_true).error().cvref, CvRef::kRef);
+  EXPECT_EQ(std::as_const(unex).and_then(get_true).error().cvref,
+            CvRef::kConstRef);
+  EXPECT_EQ(std::move(unex).and_then(get_true).error().cvref, CvRef::kRRef);
+  EXPECT_EQ(std::move(std::as_const(unex)).and_then(get_true).error().cvref,
+            CvRef::kConstRRef);
+
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&>().and_then(get_true)),
+                     ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<const ExIn&>().and_then(get_true)),
+                     ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&&>().and_then(get_true)),
+                     ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<const ExIn&&>().and_then(get_true)),
+                     ExOut>);
+}
+
+TEST(ExpectedVoid, OrElse) {
+  using ExIn = expected<void, SaveCvRef>;
+  using ExOut = expected<void, CvRef>;
+
+  auto get_unex_cvref = [](auto&& x) -> ExOut {
+    return unexpected(SaveCvRef(std::forward<decltype(x)>(x)).cvref);
+  };
+
+  ExIn ex;
+  EXPECT_TRUE(ex.or_else(get_unex_cvref).has_value());
+  EXPECT_TRUE(std::as_const(ex).or_else(get_unex_cvref).has_value());
+  EXPECT_TRUE(std::move(ex).or_else(get_unex_cvref).has_value());
+  EXPECT_TRUE(std::move(std::as_const(ex)).or_else(get_unex_cvref).has_value());
+
+  ExIn unex(unexpect);
+  EXPECT_EQ(unex.or_else(get_unex_cvref).error(), CvRef::kRef);
+  EXPECT_EQ(std::as_const(unex).or_else(get_unex_cvref).error(),
+            CvRef::kConstRef);
+  EXPECT_EQ(std::move(unex).or_else(get_unex_cvref).error(), CvRef::kRRef);
+  EXPECT_EQ(std::move(std::as_const(unex)).or_else(get_unex_cvref).error(),
+            CvRef::kConstRRef);
+
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&>().or_else(get_unex_cvref)),
+                     ExOut>);
+  static_assert(std::is_same_v<decltype(std::declval<const ExIn&>().or_else(
+                                   get_unex_cvref)),
+                               ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&&>().or_else(get_unex_cvref)),
+                     ExOut>);
+  static_assert(std::is_same_v<decltype(std::declval<const ExIn&&>().or_else(
+                                   get_unex_cvref)),
+                               ExOut>);
+}
+
+TEST(ExpectedVoid, Transform) {
+  using ExIn = expected<void, SaveCvRef>;
+  using ExOut = expected<bool, SaveCvRef>;
+  auto get_true = [] { return true; };
+
+  {
+    ExIn ex;
+    EXPECT_TRUE(ex.transform(get_true).value());
+    EXPECT_TRUE(std::as_const(ex).transform(get_true).value());
+    EXPECT_TRUE(std::move(ex).transform(get_true).value());
+    EXPECT_TRUE(std::move(std::as_const(ex)).transform(get_true).value());
+
+    ExIn unex(unexpect);
+    EXPECT_EQ(unex.transform(get_true).error().cvref, CvRef::kRef);
+    EXPECT_EQ(std::as_const(unex).transform(get_true).error().cvref,
+              CvRef::kConstRef);
+    EXPECT_EQ(std::move(unex).transform(get_true).error().cvref, CvRef::kRRef);
+    EXPECT_EQ(std::move(std::as_const(unex)).transform(get_true).error().cvref,
+              CvRef::kConstRRef);
+
+    static_assert(
+        std::is_same_v<decltype(std::declval<ExIn&>().transform(get_true)),
+                       ExOut>);
+    static_assert(
+        std::is_same_v<
+            decltype(std::declval<const ExIn&>().transform(get_true)), ExOut>);
+    static_assert(
+        std::is_same_v<decltype(std::declval<ExIn&&>().transform(get_true)),
+                       ExOut>);
+    static_assert(
+        std::is_same_v<
+            decltype(std::declval<const ExIn&&>().transform(get_true)), ExOut>);
+  }
+
+  // Test void transform.
+  {
+    auto do_nothing = [] {};
+
+    ExIn ex;
+    EXPECT_TRUE(ex.transform(do_nothing).has_value());
+    EXPECT_TRUE(std::as_const(ex).transform(do_nothing).has_value());
+    EXPECT_TRUE(std::move(ex).transform(do_nothing).has_value());
+    EXPECT_TRUE(std::move(std::as_const(ex)).transform(do_nothing).has_value());
+
+    ExIn unex(unexpect);
+    EXPECT_EQ(unex.transform(do_nothing).error().cvref, CvRef::kRef);
+    EXPECT_EQ(std::as_const(unex).transform(do_nothing).error().cvref,
+              CvRef::kConstRef);
+    EXPECT_EQ(std::move(unex).transform(do_nothing).error().cvref,
+              CvRef::kRRef);
+    EXPECT_EQ(
+        std::move(std::as_const(unex)).transform(do_nothing).error().cvref,
+        CvRef::kConstRRef);
+
+    static_assert(
+        std::is_same_v<decltype(std::declval<ExIn&>().transform(do_nothing)),
+                       ExIn>);
+    static_assert(
+        std::is_same_v<
+            decltype(std::declval<const ExIn&>().transform(do_nothing)), ExIn>);
+    static_assert(
+        std::is_same_v<decltype(std::declval<ExIn&&>().transform(do_nothing)),
+                       ExIn>);
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const ExIn&&>().transform(do_nothing)),
+                  ExIn>);
+  }
+}
+
+TEST(ExpectedVoid, TransformError) {
+  using ExIn = expected<void, SaveCvRef>;
+  using ExOut = expected<void, CvRef>;
+
+  auto get_cvref = [](auto&& x) {
+    return SaveCvRef(std::forward<decltype(x)>(x)).cvref;
+  };
+
+  ExIn ex;
+  EXPECT_TRUE(ex.transform_error(get_cvref).has_value());
+  EXPECT_TRUE(std::as_const(ex).transform_error(get_cvref).has_value());
+  EXPECT_TRUE(std::move(ex).transform_error(get_cvref).has_value());
+  EXPECT_TRUE(
+      std::move(std::as_const(ex)).transform_error(get_cvref).has_value());
+
+  ExIn unex(unexpect);
+  EXPECT_EQ(unex.transform_error(get_cvref).error(), CvRef::kRef);
+  EXPECT_EQ(std::as_const(unex).transform_error(get_cvref).error(),
+            CvRef::kConstRef);
+  EXPECT_EQ(std::move(unex).transform_error(get_cvref).error(), CvRef::kRRef);
+  EXPECT_EQ(std::move(std::as_const(unex)).transform_error(get_cvref).error(),
+            CvRef::kConstRRef);
+
+  static_assert(
+      std::is_same_v<decltype(std::declval<ExIn&>().transform_error(get_cvref)),
+                     ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<const ExIn&>().transform_error(
+                         get_cvref)),
+                     ExOut>);
+  static_assert(
+      std::is_same_v<
+          decltype(std::declval<ExIn&&>().transform_error(get_cvref)), ExOut>);
+  static_assert(
+      std::is_same_v<decltype(std::declval<const ExIn&&>().transform_error(
+                         get_cvref)),
+                     ExOut>);
+}
+
 TEST(ExpectedVoid, EqualityOperators) {
   using Ex = expected<void, int>;
   using ConstEx = expected<const void, const int>;
@@ -884,10 +1332,10 @@ TEST(ExpectedVoidTest, DeathTests) {
 
   // Accessing moved from objects crashes.
   // NOLINTBEGIN(bugprone-use-after-move)
-  EXPECT_DEATH_IF_SUPPORTED(ExpectedInt{moved_from}, "");
-  EXPECT_DEATH_IF_SUPPORTED(ExpectedInt{std::move(moved_from)}, "");
-  EXPECT_DEATH_IF_SUPPORTED(ExpectedDouble{moved_from}, "");
-  EXPECT_DEATH_IF_SUPPORTED(ExpectedDouble{std::move(moved_from)}, "");
+  EXPECT_DEATH_IF_SUPPORTED((void)ExpectedInt{moved_from}, "");
+  EXPECT_DEATH_IF_SUPPORTED((void)ExpectedInt{std::move(moved_from)}, "");
+  EXPECT_DEATH_IF_SUPPORTED((void)ExpectedDouble{moved_from}, "");
+  EXPECT_DEATH_IF_SUPPORTED((void)ExpectedDouble{std::move(moved_from)}, "");
   EXPECT_DEATH_IF_SUPPORTED(ex = moved_from, "");
   EXPECT_DEATH_IF_SUPPORTED(ex = std::move(moved_from), "");
   EXPECT_DEATH_IF_SUPPORTED(ex.swap(moved_from), "");

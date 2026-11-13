@@ -261,13 +261,17 @@ void Trace(LogSeverity severity, const char *message)
         }
         __android_log_print(android_priority, "ANGLE", "%s: %s\n", LogSeverityName(severity),
                             str.c_str());
-#elif defined(ANGLE_PLATFORM_APPLE)
+        // Note: we also log to stdout/stderr below.
+#endif
+
+#if defined(ANGLE_PLATFORM_APPLE)
         if (__builtin_available(macOS 10.12, iOS 10.0, *))
         {
             os_log_type_t apple_log_type = OS_LOG_TYPE_DEFAULT;
             switch (severity)
             {
                 case LOG_INFO:
+                case LOG_EVENT:
                     apple_log_type = OS_LOG_TYPE_INFO;
                     break;
                 case LOG_WARN:

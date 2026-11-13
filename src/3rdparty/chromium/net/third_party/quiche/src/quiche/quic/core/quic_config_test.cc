@@ -459,6 +459,7 @@ TEST_P(QuicConfigTest, FillTransportParams) {
     // TransportParameters are only used for QUIC+TLS.
     return;
   }
+  const std::string kFakeGoogleHandshakeMessage = "Fake handshake message";
   config_.SetInitialMaxStreamDataBytesIncomingBidirectionalToSend(
       2 * kMinimumFlowControlSendWindow);
   config_.SetInitialMaxStreamDataBytesOutgoingBidirectionalToSend(
@@ -473,6 +474,7 @@ TEST_P(QuicConfigTest, FillTransportParams) {
   config_.SetInitialSourceConnectionIdToSend(TestConnectionId(0x2222));
   config_.SetRetrySourceConnectionIdToSend(TestConnectionId(0x3333));
   config_.SetMinAckDelayMs(kDefaultMinAckDelayTimeMs);
+  config_.SetGoogleHandshakeMessageToSend(kFakeGoogleHandshakeMessage);
 
   QuicIpAddress host;
   host.FromString("127.0.3.1");
@@ -480,8 +482,17 @@ TEST_P(QuicConfigTest, FillTransportParams) {
   QuicConnectionId new_connection_id = TestConnectionId(5);
   StatelessResetToken new_stateless_reset_token =
       QuicUtils::GenerateStatelessResetToken(new_connection_id);
-  config_.SetIPv4AlternateServerAddressToSend(
-      kTestServerAddress, new_connection_id, new_stateless_reset_token);
+  config_.SetIPv4AlternateServerAddressToSend(kTestServerAddress);
+  QuicSocketAddress kTestServerAddressV6 =
+      QuicSocketAddress(QuicIpAddress::Any6(), 1234);
+  config_.SetIPv6AlternateServerAddressToSend(kTestServerAddressV6);
+  config_.SetPreferredAddressConnectionIdAndTokenToSend(
+      new_connection_id, new_stateless_reset_token);
+  config_.ClearAlternateServerAddressToSend(quiche::IpAddressFamily::IP_V6);
+  EXPECT_TRUE(config_.GetPreferredAddressToSend(quiche::IpAddressFamily::IP_V4)
+                  .has_value());
+  EXPECT_FALSE(config_.GetPreferredAddressToSend(quiche::IpAddressFamily::IP_V6)
+                   .has_value());
 
   TransportParameters params;
   config_.FillTransportParameters(&params);
@@ -517,9 +528,44 @@ TEST_P(QuicConfigTest, FillTransportParams) {
       params.min_ack_delay_us.value());
 
   EXPECT_EQ(params.preferred_address->ipv4_socket_address, kTestServerAddress);
+  EXPECT_EQ(params.preferred_address->ipv6_socket_address,
+            QuicSocketAddress(QuicIpAddress::Any6(), 0));
+
   EXPECT_EQ(*reinterpret_cast<StatelessResetToken*>(
                 &params.preferred_address->stateless_reset_token.front()),
             new_stateless_reset_token);
+  EXPECT_EQ(kFakeGoogleHandshakeMessage, params.google_handshake_message);
+}
+
+TEST_P(QuicConfigTest, FillTransportParamsNoV4PreferredAddress) {
+  if (!version_.UsesTls()) {
+    // TransportParameters are only used for QUIC+TLS.
+    return;
+  }
+
+  QuicIpAddress host;
+  host.FromString("127.0.3.1");
+  QuicSocketAddress kTestServerAddress = QuicSocketAddress(host, 1234);
+  QuicConnectionId new_connection_id = TestConnectionId(5);
+  StatelessResetToken new_stateless_reset_token =
+      QuicUtils::GenerateStatelessResetToken(new_connection_id);
+  config_.SetIPv4AlternateServerAddressToSend(kTestServerAddress);
+  QuicSocketAddress kTestServerAddressV6 =
+      QuicSocketAddress(QuicIpAddress::Any6(), 1234);
+  config_.SetIPv6AlternateServerAddressToSend(kTestServerAddressV6);
+  config_.SetPreferredAddressConnectionIdAndTokenToSend(
+      new_connection_id, new_stateless_reset_token);
+  config_.ClearAlternateServerAddressToSend(quiche::IpAddressFamily::IP_V4);
+  EXPECT_FALSE(config_.GetPreferredAddressToSend(quiche::IpAddressFamily::IP_V4)
+                   .has_value());
+  config_.ClearAlternateServerAddressToSend(quiche::IpAddressFamily::IP_V4);
+
+  TransportParameters params;
+  config_.FillTransportParameters(&params);
+  EXPECT_EQ(params.preferred_address->ipv4_socket_address,
+            QuicSocketAddress(QuicIpAddress::Any4(), 0));
+  EXPECT_EQ(params.preferred_address->ipv6_socket_address,
+            kTestServerAddressV6);
 }
 
 TEST_P(QuicConfigTest, ProcessTransportParametersServer) {
@@ -527,6 +573,7 @@ TEST_P(QuicConfigTest, ProcessTransportParametersServer) {
     // TransportParameters are only used for QUIC+TLS.
     return;
   }
+  const std::string kFakeGoogleHandshakeMessage = "Fake handshake message";
   TransportParameters params;
 
   params.initial_max_stream_data_bidi_local.set_value(
@@ -546,6 +593,7 @@ TEST_P(QuicConfigTest, ProcessTransportParametersServer) {
   params.original_destination_connection_id = TestConnectionId(0x1111);
   params.initial_source_connection_id = TestConnectionId(0x2222);
   params.retry_source_connection_id = TestConnectionId(0x3333);
+  params.google_handshake_message = kFakeGoogleHandshakeMessage;
 
   std::string error_details;
   EXPECT_THAT(config_.ProcessTransportParameters(
@@ -664,6 +712,8 @@ TEST_P(QuicConfigTest, ProcessTransportParametersServer) {
   ASSERT_TRUE(config_.HasReceivedRetrySourceConnectionId());
   EXPECT_EQ(config_.ReceivedRetrySourceConnectionId(),
             TestConnectionId(0x3333));
+  EXPECT_EQ(kFakeGoogleHandshakeMessage,
+            config_.GetReceivedGoogleHandshakeMessage());
 }
 
 TEST_P(QuicConfigTest, DisableMigrationTransportParameter) {

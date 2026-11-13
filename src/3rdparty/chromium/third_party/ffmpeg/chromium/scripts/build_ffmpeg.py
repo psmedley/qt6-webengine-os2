@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -20,12 +20,15 @@ import signal
 import subprocess
 import sys
 import tempfile
+from robo_lib import config
 
-SCRIPTS_DIR = os.path.abspath(os.path.dirname(__file__))
-FFMPEG_DIR = os.path.abspath(os.path.join(SCRIPTS_DIR, '..', '..'))
-CHROMIUM_ROOT_DIR = os.path.abspath(os.path.join(FFMPEG_DIR, '..', '..'))
+ROBO_CONFIGURATION = config.RoboConfiguration()
+FFMPEG_DIR = ROBO_CONFIGURATION.ffmpeg_home()
+CHROMIUM_ROOT_DIR = ROBO_CONFIGURATION.chrome_src()
 NDK_ROOT_DIR = os.path.abspath(
-    os.path.join(CHROMIUM_ROOT_DIR, 'third_party', 'android_ndk'))
+    os.path.join(CHROMIUM_ROOT_DIR, 'third_party', 'android_toolchain', 'ndk'))
+# Token to indicate that a build has completed successfully, so that we can
+# skip it with `--fast`.
 SUCCESS_TOKEN = 'THIS_BUILD_WORKED'
 
 sys.path.append(os.path.join(CHROMIUM_ROOT_DIR, 'build'))
@@ -283,9 +286,9 @@ def SetupAndroidToolchain(target_arch):
 
   return [
       '--enable-pic',
-      '--cc=' + clang_toolchain_dir + 'bin/clang',
-      '--cxx=' + clang_toolchain_dir + 'bin/clang++',
-      '--ld=' + clang_toolchain_dir + 'bin/clang',
+      '--cc=clang',
+      '--cxx=clang++',
+      '--ld=clang',
       '--enable-cross-compile',
       '--sysroot=' + clang_toolchain_dir + 'sysroot',
       '--extra-cflags=-I' + clang_toolchain_dir + 'sysroot/usr/include',
@@ -339,7 +342,7 @@ def SetupWindowsCrossCompileToolchain(target_arch):
   # Use those paths with a second script which will tell us the proper lib paths
   # to specify for ldflags.
   output = subprocess.check_output([
-      'python',
+      'python3',
       os.path.join(CHROMIUM_ROOT_DIR, 'build', 'toolchain', 'win',
                    'setup_toolchain.py'), win_dirs['vs_path'],
       win_dirs['sdk_path'], win_dirs['runtime_dirs'], 'win', target_arch, 'none'
@@ -491,10 +494,13 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
   # isn't actually used, so it's safe to set HAVE_SYSCTL to 0. Linux is also
   # removing <sys/sysctl.h> soon, so this is needed to silence a deprecation
   # #warning which will be converted to an error via -Werror.
+  # There is also no prctl.h
   if target_os in ['linux', 'linux-noasm']:
     pre_make_rewrites += [
         (r'(#define HAVE_SYSCTL [01])',
-         r'#define HAVE_SYSCTL 0 /* \1 -- forced to 0 for Fuchsia */')
+         r'#define HAVE_SYSCTL 0 /* \1 -- forced to 0 for Fuchsia */'),
+        (r'(#define HAVE_PRCTL [01])',
+         r'#define HAVE_PRCTL 0 /* \1 -- forced to 0 for Fuchsia */')
     ]
 
   # Turn off bcrypt, since we don't have it on Windows builders, but it does
@@ -534,7 +540,7 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
   if target_os == 'mac' and host_os == 'linux':
     RewriteFile(
         os.path.join(config_dir, 'ffbuild/config.mak'), [(r'LD=ld64.lld',
-        r'LD=' + os.path.join(SCRIPTS_DIR, 'fake_linker.py'))])
+        r'LD=' + ROBO_CONFIGURATION.get_script_path('fake_linker.py'))])
 
   # The FFMPEG roll build hits a bug in lld-link that does not impact the
   # overall Chromium build.
@@ -542,7 +548,7 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
   if target_os == 'win' and target_arch == 'arm64' and host_os == 'linux':
     RewriteFile(
         os.path.join(config_dir, 'ffbuild/config.mak'), [(r'LD=lld-link',
-        r'LD=' + os.path.join(SCRIPTS_DIR, 'fake_linker.py'))])
+        r'LD=' + ROBO_CONFIGURATION.get_script_path('fake_linker.py'))])
 
   if target_os in (host_os, host_os + '-noasm', 'android',
                    'win', 'mac') and not config_only:
@@ -568,7 +574,13 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
   if target_arch in ('arm', 'arm-neon', 'arm64'):
     post_make_rewrites += [
         (r'(#define HAVE_VFP_ARGS [01])',
-         r'/* \1 -- softfp/hardfp selection is done by the chrome build */')
+         r'/* \1 -- softfp/hardfp selection is done by the chrome build */'),
+        (r'(#define HAVE_VFP_INLINE [01])',
+         r'#define HAVE_VFP_INLINE 1'),
+        (r'(#define HAVE_VFP_EXTERNAL [01])',
+         r'#define HAVE_VFP_EXTERNAL 1'),
+        (r'(#define HAVE_VFP [01])',
+         r'#define HAVE_VFP 1')
     ]
 
   RewriteFile(os.path.join(config_dir, 'config.h'), post_make_rewrites)
@@ -671,8 +683,6 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
       '--enable-avcodec',
       '--enable-avformat',
       '--enable-avutil',
-      '--enable-fft',
-      '--enable-rdft',
       '--enable-static',
       '--enable-libopus',
 
@@ -738,9 +748,20 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
         configure_flags['Common'].extend([
             '--arch=x86_64',
         ])
-      if target_os != 'android':
-        configure_flags['Common'].extend(['--enable-lto'])
-      pass
+      else:
+        configure_flags['Common'].extend([
+          '--enable-lto',
+          '--arch=x86_64',
+          '--target-os=linux',
+        ])
+
+        if host_arch != 'x64':
+          configure_flags['Common'].extend([
+            '--enable-cross-compile',
+            '--cross-prefix=/usr/bin/x86_64-linux-gnu-',
+            '--extra-cflags=--target=x86_64-linux-gnu',
+            '--extra-ldflags=--target=x86_64-linux-gnu',
+          ])
     elif target_arch == 'ia32':
       configure_flags['Common'].extend([
           '--arch=i686',
@@ -803,7 +824,7 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
               '--extra-cflags=--target=arm-linux-gnueabihf',
               '--extra-ldflags=--target=arm-linux-gnueabihf',
               '--sysroot=' + os.path.join(CHROMIUM_ROOT_DIR,
-                                          'build/linux/debian_bullseye_arm-sysroot'),
+                                          'build/linux/debian_bullseye_armhf-sysroot'),
               '--extra-cflags=-mtune=cortex-a8',
               # NOTE: we don't need softfp for this hardware.
               '--extra-cflags=-mfloat-abi=hard',
@@ -823,14 +844,21 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
           ])
     elif target_arch == 'arm64':
       if target_os != 'android':
-        configure_flags['Common'].extend([
+        if host_arch != 'arm64':
+          configure_flags['Common'].extend([
             '--enable-cross-compile',
             '--cross-prefix=/usr/bin/aarch64-linux-gnu-',
-            '--target-os=linux',
             '--extra-cflags=--target=aarch64-linux-gnu',
             '--extra-ldflags=--target=aarch64-linux-gnu',
+          ])
+
+        configure_flags['Common'].extend([
+            '--target-os=linux',
             '--sysroot=' + os.path.join(CHROMIUM_ROOT_DIR,
                                         'build/linux/debian_bullseye_arm64-sysroot'),
+            # See crbug.com/1467681. These could be removed eventually
+            '--disable-dotprod',
+            '--disable-i8mm',
         ])
       configure_flags['Common'].extend([
           '--arch=aarch64',
@@ -998,12 +1026,6 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
       '--enable-decoder=mpeg4',
       '--enable-parser=h263,mpeg4video',
       '--enable-demuxer=avi',
-      # Enable playing Android 3gp files.
-      '--enable-demuxer=amr',
-      '--enable-decoder=amrnb,amrwb',
-      # Wav files for playing phone messages.
-      '--enable-decoder=gsm_ms',
-      '--enable-parser=gsm',
   ])
 
   configure_flags['ChromeAndroid'].extend([

@@ -208,45 +208,72 @@ enum AVPixelFormat ff_qsv_map_fourcc(uint32_t fourcc)
     case MFX_FOURCC_P8:   return AV_PIX_FMT_PAL8;
     case MFX_FOURCC_A2RGB10: return AV_PIX_FMT_X2RGB10;
     case MFX_FOURCC_RGB4: return AV_PIX_FMT_BGRA;
-#if CONFIG_VAAPI
     case MFX_FOURCC_YUY2: return AV_PIX_FMT_YUYV422;
     case MFX_FOURCC_Y210: return AV_PIX_FMT_Y210;
     case MFX_FOURCC_AYUV: return AV_PIX_FMT_VUYX;
+    case MFX_FOURCC_Y410: return AV_PIX_FMT_XV30;
+#if QSV_VERSION_ATLEAST(1, 31)
+    case MFX_FOURCC_P016: return AV_PIX_FMT_P012;
+    case MFX_FOURCC_Y216: return AV_PIX_FMT_Y212;
+    case MFX_FOURCC_Y416: return AV_PIX_FMT_XV36;
 #endif
     }
     return AV_PIX_FMT_NONE;
 }
 
-int ff_qsv_map_pixfmt(enum AVPixelFormat format, uint32_t *fourcc)
+int ff_qsv_map_pixfmt(enum AVPixelFormat format, uint32_t *fourcc, uint16_t *shift)
 {
     switch (format) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
     case AV_PIX_FMT_NV12:
         *fourcc = MFX_FOURCC_NV12;
+        *shift = 0;
         return AV_PIX_FMT_NV12;
     case AV_PIX_FMT_YUV420P10:
     case AV_PIX_FMT_P010:
         *fourcc = MFX_FOURCC_P010;
+        *shift = 1;
         return AV_PIX_FMT_P010;
     case AV_PIX_FMT_X2RGB10:
         *fourcc = MFX_FOURCC_A2RGB10;
+        *shift = 1;
         return AV_PIX_FMT_X2RGB10;
     case AV_PIX_FMT_BGRA:
         *fourcc = MFX_FOURCC_RGB4;
+        *shift = 0;
         return AV_PIX_FMT_BGRA;
-#if CONFIG_VAAPI
     case AV_PIX_FMT_YUV422P:
     case AV_PIX_FMT_YUYV422:
         *fourcc = MFX_FOURCC_YUY2;
+        *shift = 0;
         return AV_PIX_FMT_YUYV422;
     case AV_PIX_FMT_YUV422P10:
     case AV_PIX_FMT_Y210:
         *fourcc = MFX_FOURCC_Y210;
+        *shift = 1;
         return AV_PIX_FMT_Y210;
     case AV_PIX_FMT_VUYX:
         *fourcc = MFX_FOURCC_AYUV;
+        *shift = 0;
         return AV_PIX_FMT_VUYX;
+    case AV_PIX_FMT_XV30:
+        *fourcc = MFX_FOURCC_Y410;
+        *shift = 0;
+        return AV_PIX_FMT_XV30;
+#if QSV_VERSION_ATLEAST(1, 31)
+    case AV_PIX_FMT_P012:
+        *fourcc = MFX_FOURCC_P016;
+        *shift = 1;
+        return AV_PIX_FMT_P012;
+    case AV_PIX_FMT_Y212:
+        *fourcc = MFX_FOURCC_Y216;
+        *shift = 1;
+        return AV_PIX_FMT_Y212;
+    case AV_PIX_FMT_XV36:
+        *fourcc = MFX_FOURCC_Y416;
+        *shift = 1;
+        return AV_PIX_FMT_XV36;
 #endif
     default:
         return AVERROR(ENOSYS);
@@ -258,6 +285,7 @@ int ff_qsv_map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
     switch (frame->format) {
     case AV_PIX_FMT_NV12:
     case AV_PIX_FMT_P010:
+    case AV_PIX_FMT_P012:
         surface->Data.Y  = frame->data[0];
         surface->Data.UV = frame->data[1];
         /* The SDK checks Data.V when using system memory for VP9 encoding */
@@ -277,6 +305,7 @@ int ff_qsv_map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
         break;
 
     case AV_PIX_FMT_Y210:
+    case AV_PIX_FMT_Y212:
         surface->Data.Y16 = (mfxU16 *)frame->data[0];
         surface->Data.U16 = (mfxU16 *)frame->data[0] + 1;
         surface->Data.V16 = (mfxU16 *)frame->data[0] + 3;
@@ -289,6 +318,19 @@ int ff_qsv_map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
         // Only set Data.A to a valid address, the SDK doesn't
         // use the value from the frame.
         surface->Data.A = frame->data[0] + 3;
+        break;
+
+    case AV_PIX_FMT_XV30:
+        surface->Data.U = frame->data[0];
+        break;
+
+    case AV_PIX_FMT_XV36:
+        surface->Data.U = frame->data[0];
+        surface->Data.Y = frame->data[0] + 2;
+        surface->Data.V = frame->data[0] + 4;
+        // Only set Data.A to a valid address, the SDK doesn't
+        // use the value from the frame.
+        surface->Data.A = frame->data[0] + 6;
         break;
 
     default:
@@ -635,18 +677,31 @@ static int qsv_create_mfx_session(AVCodecContext *avctx,
 int ff_qsv_init_internal_session(AVCodecContext *avctx, QSVSession *qs,
                                  const char *load_plugins, int gpu_copy)
 {
+    mfxIMPL impls[] = {
 #if CONFIG_D3D11VA
-    mfxIMPL          impl = MFX_IMPL_AUTO_ANY | MFX_IMPL_VIA_D3D11;
-#else
-    mfxIMPL          impl = MFX_IMPL_AUTO_ANY;
+        MFX_IMPL_AUTO_ANY | MFX_IMPL_VIA_D3D11,
 #endif
+        MFX_IMPL_AUTO_ANY
+    };
+    mfxIMPL impl;
     mfxVersion        ver = { { QSV_VERSION_MINOR, QSV_VERSION_MAJOR } };
 
     const char *desc;
-    int ret = qsv_create_mfx_session(avctx, impl, &ver, gpu_copy, &qs->session,
+    int ret;
+
+    for (int i = 0; i < FF_ARRAY_ELEMS(impls); i++) {
+        ret = qsv_create_mfx_session(avctx, impls[i], &ver, gpu_copy, &qs->session,
                                      &qs->loader);
-    if (ret)
-        return ret;
+
+        if (ret == 0)
+            break;
+
+        if (i == FF_ARRAY_ELEMS(impls) - 1)
+            return ret;
+        else
+            av_log(avctx, AV_LOG_ERROR, "The current mfx implementation is not "
+                   "supported, try next mfx implementation.\n");
+    }
 
 #ifdef AVCODEC_QSV_LINUX_SESSION_HANDLE
     ret = ff_qsv_set_display_handle(avctx, qs);

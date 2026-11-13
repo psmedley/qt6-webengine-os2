@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,13 @@
 #include "util/osp_logging.h"
 #include "util/saturate_cast.h"
 
-namespace openscreen {
-namespace cast {
-
+namespace openscreen::cast {
 namespace {
+
 constexpr Clock::time_point kNullTime = Clock::time_point::min();
 }
+
+using clock_operators::operator<<;
 
 ClockDriftSmoother::ClockDriftSmoother(Clock::duration time_constant)
     : time_constant_(time_constant),
@@ -68,13 +69,12 @@ void ClockDriftSmoother::Update(Clock::time_point now,
     }
 
     OSP_VLOG << "Local clock is ahead of the remote clock by: measured = "
-             << to_microseconds(measured_offset).count() << "μs, "
-             << "filtered = " << to_microseconds(Current()).count() << "μs.";
+             << measured_offset << ", "
+             << "filtered = " << Current() << ".";
   }
 }
 
 // static
 constexpr std::chrono::seconds ClockDriftSmoother::kDefaultTimeConstant;
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

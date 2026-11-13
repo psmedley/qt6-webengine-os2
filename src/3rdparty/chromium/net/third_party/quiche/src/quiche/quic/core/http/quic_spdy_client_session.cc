@@ -24,9 +24,15 @@ namespace quic {
 QuicSpdyClientSession::QuicSpdyClientSession(
     const QuicConfig& config, const ParsedQuicVersionVector& supported_versions,
     QuicConnection* connection, const QuicServerId& server_id,
-    QuicCryptoClientConfig* crypto_config,
-    QuicClientPushPromiseIndex* push_promise_index)
-    : QuicSpdyClientSessionBase(connection, push_promise_index, config,
+    QuicCryptoClientConfig* crypto_config)
+    : QuicSpdyClientSession(config, supported_versions, connection, nullptr,
+                            server_id, crypto_config) {}
+
+QuicSpdyClientSession::QuicSpdyClientSession(
+    const QuicConfig& config, const ParsedQuicVersionVector& supported_versions,
+    QuicConnection* connection, QuicSession::Visitor* visitor,
+    const QuicServerId& server_id, QuicCryptoClientConfig* crypto_config)
+    : QuicSpdyClientSessionBase(connection, visitor, config,
                                 supported_versions),
       server_id_(server_id),
       crypto_config_(crypto_config),
@@ -36,14 +42,6 @@ QuicSpdyClientSession::~QuicSpdyClientSession() = default;
 
 void QuicSpdyClientSession::Initialize() {
   crypto_stream_ = CreateQuicCryptoStream();
-  if (config()->HasClientRequestedIndependentOption(kQLVE,
-                                                    Perspective::IS_CLIENT)) {
-    if (GetQuicRestartFlag(quic_disable_legacy_version_encapsulation)) {
-      QUIC_CODE_COUNT(quic_disable_legacy_version_encapsulation_client_init);
-    } else {
-      connection()->EnableLegacyVersionEncapsulation(server_id_.host());
-    }
-  }
   QuicSpdyClientSessionBase::Initialize();
 }
 
@@ -56,11 +54,14 @@ void QuicSpdyClientSession::OnProofVerifyDetailsAvailable(
 bool QuicSpdyClientSession::ShouldCreateOutgoingBidirectionalStream() {
   if (!crypto_stream_->encryption_established()) {
     QUIC_DLOG(INFO) << "Encryption not active so no outgoing stream created.";
+    QUIC_CODE_COUNT(
+        quic_client_fails_to_create_stream_encryption_not_established);
     return false;
   }
   if (goaway_received() && respect_goaway_) {
     QUIC_DLOG(INFO) << "Failed to create a new outgoing stream. "
                     << "Already received goaway.";
+    QUIC_CODE_COUNT(quic_client_fails_to_create_stream_goaway_received);
     return false;
   }
   return CanOpenNextOutgoingBidirectionalStream();
@@ -105,18 +106,6 @@ const QuicCryptoClientStreamBase* QuicSpdyClientSession::GetCryptoStream()
   return crypto_stream_.get();
 }
 
-bool QuicSpdyClientSession::IsKnownServerAddress(
-    const QuicSocketAddress& address) const {
-  return std::find(known_server_addresses_.cbegin(),
-                   known_server_addresses_.cend(),
-                   address) != known_server_addresses_.cend();
-}
-
-void QuicSpdyClientSession::AddKnownServerAddress(
-    const QuicSocketAddress& address) {
-  known_server_addresses_.push_back(address);
-}
-
 void QuicSpdyClientSession::CryptoConnect() {
   QUICHE_DCHECK(flow_controller());
   crypto_stream_->CryptoConnect();
@@ -124,6 +113,10 @@ void QuicSpdyClientSession::CryptoConnect() {
 
 int QuicSpdyClientSession::GetNumSentClientHellos() const {
   return crypto_stream_->num_sent_client_hellos();
+}
+
+bool QuicSpdyClientSession::ResumptionAttempted() const {
+  return crypto_stream_->ResumptionAttempted();
 }
 
 bool QuicSpdyClientSession::IsResumption() const {
@@ -214,10 +207,6 @@ QuicSpdyClientSession::CreateQuicCryptoStream() {
       server_id_, this,
       crypto_config_->proof_verifier()->CreateDefaultContext(), crypto_config_,
       this, /*has_application_state = */ version().UsesHttp3());
-}
-
-bool QuicSpdyClientSession::IsAuthorized(const std::string& /*authority*/) {
-  return true;
 }
 
 }  // namespace quic

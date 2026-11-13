@@ -8,78 +8,79 @@ import * as i18n from '../../core/i18n/i18n.js';
 import type * as Platform from '../../core/platform/platform.js';
 import * as Protocol from '../../generated/protocol.js';
 import * as IssuesManager from '../../models/issues_manager/issues_manager.js';
+import * as NetworkForward from '../../panels/network/forward/forward.js';
+import * as Adorners from '../../ui/components/adorners/adorners.js';
 import * as IconButton from '../../ui/components/icon_button/icon_button.js';
 import * as IssueCounter from '../../ui/components/issue_counter/issue_counter.js';
 import * as MarkdownView from '../../ui/components/markdown_view/markdown_view.js';
 import * as UI from '../../ui/legacy/legacy.js';
-import * as Adorners from '../../ui/components/adorners/adorners.js';
-import * as NetworkForward from '../../panels/network/forward/forward.js';
-import * as Components from './components/components.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
-import {AffectedDirectivesView} from './AffectedDirectivesView.js';
 import {AffectedBlockedByResponseView} from './AffectedBlockedByResponseView.js';
 import {AffectedCookiesView, AffectedRawCookieLinesView} from './AffectedCookiesView.js';
+import {AffectedDirectivesView} from './AffectedDirectivesView.js';
 import {AffectedDocumentsInQuirksModeView} from './AffectedDocumentsInQuirksModeView.js';
 import {AffectedElementsView} from './AffectedElementsView.js';
 import {AffectedElementsWithLowContrastView} from './AffectedElementsWithLowContrastView.js';
 import {AffectedHeavyAdView} from './AffectedHeavyAdView.js';
+import {AffectedMetadataAllowedSitesView} from './AffectedMetadataAllowedSitesView.js';
 import {AffectedItem, AffectedResourcesView, extractShortPath} from './AffectedResourcesView.js';
 import {AffectedSharedArrayBufferIssueDetailsView} from './AffectedSharedArrayBufferIssueDetailsView.js';
 import {AffectedSourcesView} from './AffectedSourcesView.js';
-import {AffectedTrustedWebActivityIssueDetailsView} from './AffectedTrustedWebActivityIssueDetailsView.js';
+import {AffectedTrackingSitesView} from './AffectedTrackingSitesView.js';
+import {AttributionReportingIssueDetailsView} from './AttributionReportingIssueDetailsView.js';
+import * as Components from './components/components.js';
+import {type HiddenIssuesMenuData} from './components/HideIssuesMenu.js';
 import {CorsIssueDetailsView} from './CorsIssueDetailsView.js';
 import {GenericIssueDetailsView} from './GenericIssueDetailsView.js';
-import {AttributionReportingIssueDetailsView} from './AttributionReportingIssueDetailsView.js';
-
 import {type AggregatedIssue} from './IssueAggregator.js';
-import {type HiddenIssuesMenuData} from './components/HideIssuesMenu.js';
 
 const UIStrings = {
   /**
-  *@description Noun, singular. Label for a column or field containing the name of an entity.
-  */
+   *@description Noun, singular. Label for a column or field containing the name of an entity.
+   */
   name: 'Name',
   /**
-  *@description The kind of resolution for a mixed content issue
-  */
+   *@description The kind of resolution for a mixed content issue
+   */
   blocked: 'blocked',
   /**
-  *@description Label for a type of issue that can appear in the Issues view. Noun for singular or plural number of network requests.
-  */
+   *@description Label for a type of issue that can appear in the Issues view. Noun for singular or plural number of network requests.
+   */
   nRequests: '{n, plural, =1 {# request} other {# requests}}',
   /**
-  *@description Label for singular or plural number of affected resources in issue view
-  */
+   *@description Label for singular or plural number of affected resources in issue view
+   */
   nResources: '{n, plural, =1 {# resource} other {# resources}}',
   /**
-  *@description Label for mixed content issue's restriction status
-  */
+   *@description Label for mixed content issue's restriction status
+   */
   restrictionStatus: 'Restriction Status',
   /**
-  * @description When there is a Heavy Ad, the browser can choose to deal with it in different ways.
-  * This string indicates that the ad was only warned, and not removed.
-  */
+   * @description When there is a Heavy Ad, the browser can choose to deal with it in different ways.
+   * This string indicates that the ad was only warned, and not removed.
+   */
   warned: 'Warned',
   /**
-  *@description Header for the section listing affected resources
-  */
+   *@description Header for the section listing affected resources
+   */
   affectedResources: 'Affected Resources',
   /**
-  *@description Title for a link to further information in issue view
-  *@example {SameSite Cookies Explained} PH1
-  */
+   *@description Title for a link to further information in issue view
+   *@example {SameSite Cookies Explained} PH1
+   */
   learnMoreS: 'Learn more: {PH1}',
   /**
-  *@description The kind of resolution for a mixed content issue
-  */
+   *@description The kind of resolution for a mixed content issue
+   */
   automaticallyUpgraded: 'automatically upgraded',
   /**
-  *@description Menu entry for hiding a particular issue, in the Hide Issues context menu.
-  */
+   *@description Menu entry for hiding a particular issue, in the Hide Issues context menu.
+   */
   hideIssuesLikeThis: 'Hide issues like this',
   /**
-  *@description Menu entry for unhiding a particular issue, in the Hide Issues context menu.
-  */
+   *@description Menu entry for unhiding a particular issue, in the Hide Issues context menu.
+   */
   unhideIssuesLikeThis: 'Unhide issues like this',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/issues/IssueView.ts', UIStrings);
@@ -92,7 +93,8 @@ class AffectedRequestsView extends AffectedResourcesView {
       const element = document.createElement('tr');
       element.classList.add('affected-resource-request');
       const category = this.issue.getCategory();
-      const tab = issueTypeToNetworkHeaderMap.get(category) || NetworkForward.UIRequestLocation.UIRequestTabs.Headers;
+      const tab =
+          issueTypeToNetworkHeaderMap.get(category) || NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent;
       element.appendChild(this.createRequestCell(affectedRequest, {
         networkTab: tab,
         additionalOnClickAction() {
@@ -135,11 +137,11 @@ const issueTypeToNetworkHeaderMap =
       ],
       [
         IssuesManager.Issue.IssueCategory.CrossOriginEmbedderPolicy,
-        NetworkForward.UIRequestLocation.UIRequestTabs.Headers,
+        NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent,
       ],
       [
         IssuesManager.Issue.IssueCategory.MixedContent,
-        NetworkForward.UIRequestLocation.UIRequestTabs.Headers,
+        NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent,
       ],
     ]);
 
@@ -171,7 +173,7 @@ class AffectedMixedContentView extends AffectedResourcesView {
 
     if (mixedContent.request) {
       const networkTab = issueTypeToNetworkHeaderMap.get(this.issue.getCategory()) ||
-          NetworkForward.UIRequestLocation.UIRequestTabs.Headers;
+          NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent;
       element.appendChild(this.createRequestCell(mixedContent.request, {
         networkTab,
         additionalOnClickAction() {
@@ -212,7 +214,7 @@ class AffectedMixedContentView extends AffectedResourcesView {
 export class IssueView extends UI.TreeOutline.TreeElement {
   #issue: AggregatedIssue;
   #description: IssuesManager.MarkdownIssueDescription.IssueDescription;
-  toggleOnClick: boolean;
+  override toggleOnClick: boolean;
   affectedResources: UI.TreeOutline.TreeElement;
   readonly #affectedResourceViews: AffectedResourcesView[];
   #aggregatedIssuesCount: HTMLElement|null;
@@ -246,12 +248,13 @@ export class IssueView extends UI.TreeOutline.TreeElement {
       new AffectedBlockedByResponseView(this, this.#issue),
       new AffectedSharedArrayBufferIssueDetailsView(this, this.#issue),
       new AffectedElementsWithLowContrastView(this, this.#issue),
-      new AffectedTrustedWebActivityIssueDetailsView(this, this.#issue),
       new CorsIssueDetailsView(this, this.#issue),
       new GenericIssueDetailsView(this, this.#issue),
       new AffectedDocumentsInQuirksModeView(this, this.#issue),
       new AttributionReportingIssueDetailsView(this, this.#issue),
       new AffectedRawCookieLinesView(this, this.#issue),
+      new AffectedTrackingSitesView(this, this.#issue),
+      new AffectedMetadataAllowedSitesView(this, this.#issue),
     ];
     this.#hiddenIssuesMenu = new Components.HideIssuesMenu.HideIssuesMenu();
     this.#aggregatedIssuesCount = null;
@@ -286,7 +289,7 @@ export class IssueView extends UI.TreeOutline.TreeElement {
     return this.#description.title;
   }
 
-  onattach(): void {
+  override onattach(): void {
     if (!this.#contentCreated) {
       this.createContent();
       return;
@@ -298,10 +301,15 @@ export class IssueView extends UI.TreeOutline.TreeElement {
     this.#appendHeader();
     this.#createBody();
     this.appendChild(this.affectedResources);
+    const visibleAffectedResource: AffectedResourcesView[] = [];
     for (const view of this.#affectedResourceViews) {
       this.appendAffectedResource(view);
       view.update();
+      if (!view.isEmpty()) {
+        visibleAffectedResource.push(view);
+      }
     }
+    this.#updateAffectedResourcesPositionAndSize(visibleAffectedResource);
 
     this.#createReadMoreLinks();
     this.updateAffectedResourceVisibility();
@@ -310,6 +318,14 @@ export class IssueView extends UI.TreeOutline.TreeElement {
 
   appendAffectedResource(resource: UI.TreeOutline.TreeElement): void {
     this.affectedResources.appendChild(resource);
+  }
+
+  #updateAffectedResourcesPositionAndSize(visibleAffectedResource: AffectedResourcesView[]): void {
+    for (let i = 0; i < visibleAffectedResource.length; i++) {
+      const element = visibleAffectedResource[i].listItemElement;
+      UI.ARIAUtils.setPositionInSet(element, i + 1);
+      UI.ARIAUtils.setSetSize(element, visibleAffectedResource.length);
+    }
   }
 
   #appendHeader(): void {
@@ -338,8 +354,16 @@ export class IssueView extends UI.TreeOutline.TreeElement {
     this.listItemElement.appendChild(header);
   }
 
-  onexpand(): void {
-    Host.userMetrics.issuesPanelIssueExpanded(this.#issue.getCategory());
+  override onexpand(): void {
+    const category = this.#issue.getCategory();
+
+    // Handle sub type for cookie issues.
+    if (category === IssuesManager.Issue.IssueCategory.Cookie) {
+      const cookieIssueSubCatagory = IssuesManager.CookieIssue.CookieIssue.getSubCategory(this.#issue.code());
+      Host.userMetrics.issuesPanelIssueExpanded(cookieIssueSubCatagory);
+    } else {
+      Host.userMetrics.issuesPanelIssueExpanded(category);
+    }
 
     if (this.#needsUpdateOnExpand) {
       this.#doUpdate();
@@ -393,6 +417,8 @@ export class IssueView extends UI.TreeOutline.TreeElement {
     wrapper.listItemElement.classList.add('affected-resources-label');
     wrapper.listItemElement.textContent = i18nString(UIStrings.affectedResources);
     wrapper.childrenListElement.classList.add('affected-resources');
+    UI.ARIAUtils.setPositionInSet(wrapper.listItemElement, 2);
+    UI.ARIAUtils.setSetSize(wrapper.listItemElement, this.#description.links.length === 0 ? 2 : 3);
     return wrapper;
   }
 
@@ -403,6 +429,8 @@ export class IssueView extends UI.TreeOutline.TreeElement {
     const markdownComponent = new MarkdownView.MarkdownView.MarkdownView();
     markdownComponent.data = {tokens: this.#description.markdown};
     messageElement.listItemElement.appendChild(markdownComponent);
+    UI.ARIAUtils.setPositionInSet(messageElement.listItemElement, 1);
+    UI.ARIAUtils.setSetSize(messageElement.listItemElement, this.#description.links.length === 0 ? 2 : 3);
     this.appendChild(messageElement);
   }
 
@@ -414,13 +442,16 @@ export class IssueView extends UI.TreeOutline.TreeElement {
     const linkWrapper = new UI.TreeOutline.TreeElement();
     linkWrapper.setCollapsible(false);
     linkWrapper.listItemElement.classList.add('link-wrapper');
+    UI.ARIAUtils.setPositionInSet(linkWrapper.listItemElement, 3);
+    UI.ARIAUtils.setSetSize(linkWrapper.listItemElement, 3);
 
     const linkList = linkWrapper.listItemElement.createChild('ul', 'link-list');
     for (const description of this.#description.links) {
       const link = UI.Fragment.html`<x-link class="link devtools-link" tabindex="0" href=${description.link}>${
                        i18nString(UIStrings.learnMoreS, {PH1: description.linkTitle})}</x-link>` as UI.XLink.XLink;
+      link.setAttribute('jslog', `${VisualLogging.link().track({click: true}).context('learn-more')}`);
       const linkIcon = new IconButton.Icon.Icon();
-      linkIcon.data = {iconName: 'link_icon', color: 'var(--color-link)', width: '16px', height: '16px'};
+      linkIcon.data = {iconName: 'open-externally', color: 'var(--icon-link)', width: '16px', height: '16px'};
       linkIcon.classList.add('link-icon');
       link.prepend(linkIcon);
       link.addEventListener('x-link-invoke', () => {
@@ -444,6 +475,10 @@ export class IssueView extends UI.TreeOutline.TreeElement {
 
   update(): void {
     void this.#throttle.schedule(async () => this.#doUpdate());
+  }
+
+  clear(): void {
+    this.#affectedResourceViews.forEach(view => view.clear());
   }
 
   getIssueKind(): IssuesManager.Issue.IssueKind {

@@ -49,18 +49,21 @@ bool SubstitutionList::Parse(const std::vector<std::string>& values,
 
 SubstitutionList SubstitutionList::MakeForTest(const char* a,
                                                const char* b,
-                                               const char* c) {
+                                               const char* c,
+                                               const char* d) {
   std::vector<std::string> input_strings;
   input_strings.push_back(a);
   if (b)
     input_strings.push_back(b);
   if (c)
     input_strings.push_back(c);
+  if (d)
+    input_strings.push_back(d);
 
   Err err;
   SubstitutionList result;
-  CHECK(result.Parse(input_strings, nullptr, &err))
-      << err.message() << "\n" << err.help_text();
+  CHECK(result.Parse(input_strings, nullptr, &err)) << err.message() << "\n"
+                                                    << err.help_text();
   return result;
 }
 

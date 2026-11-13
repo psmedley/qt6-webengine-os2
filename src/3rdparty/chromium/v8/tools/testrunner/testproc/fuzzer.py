@@ -11,16 +11,17 @@ from . import base
 EXTRA_FLAGS = [
     (0.1, '--always-turbofan'),
     (0.1, '--assert-types'),
-    (0.1, '--interrupt-budget-for-feedback-allocation=0'),
     (0.1, '--cache=code'),
-    (0.25, '--compact-maps'),
     (0.1, '--force-slow-path'),
     (0.2, '--future'),
-    (0.1, '--interrupt-budget=100'),
-    (0.1, '--interrupt-budget-for-maglev=100'),
+    # TODO(v8:13524): Enable when issue is fixed
+    # TODO(v8:13528): Enable when issue is fixed
+    # (0.1, '--harmony-struct'),
+    (0.1, '--jit-fuzzing'),
     (0.1, '--liftoff'),
     (0.1, '--maglev'),
-    (0.1, '--minor-mc'),
+    (0.1, '--maglev-future'),
+    (0.25, '--minor-ms'),
     (0.2, '--no-analyze-environment-liveness'),
     # TODO(machenbach): Enable when it doesn't collide with crashing on missing
     # simd features.
@@ -39,22 +40,25 @@ EXTRA_FLAGS = [
     (0.1, '--no-liftoff'),
     (0.1, '--no-turbofan'),
     (0.2, '--no-regexp-tier-up'),
-    (0.25, '--no-use-map-space'),
     (0.1, '--no-wasm-tier-up'),
+    (0.1, '--optimize-on-next-call-optimizes-to-maglev'),
     (0.1, '--regexp-interpret-all'),
     (0.1, '--regexp-tier-up-ticks=10'),
     (0.1, '--regexp-tier-up-ticks=100'),
+    (0.1, '--shared-string-table'),
     (0.1, '--stress-background-compile'),
     (0.1, '--stress-flush-code'),
     (0.1, '--stress-lazy-source-positions'),
+    (0.1, '--stress-maglev'),
     (0.1, '--stress-wasm-code-gc'),
+    (0.2, '--turboshaft'),
     (0.1, '--turbo-instruction-scheduling'),
     (0.1, '--turbo-stress-instruction-scheduling'),
-    (0.1, '--turbo-force-mid-tier-regalloc'),
 ]
 
 MIN_DEOPT = 1
 MAX_DEOPT = 10**9
+ANALYSIS_SUFFIX = 'analysis'
 
 
 def random_extra_flags(rng):
@@ -169,6 +173,9 @@ class FuzzerProc(base.TestProcProducer):
     self._disable_analysis = disable_analysis
     self._gens = {}
 
+  def test_suffix(self, test):
+    return test.subtest_id
+
   def _next_test(self, test):
     if self.is_stopped:
       return False
@@ -191,12 +198,13 @@ class FuzzerProc(base.TestProcProducer):
 
     if analysis_flags:
       analysis_flags = list(set(analysis_flags))
-      return self._create_subtest(test, 'analysis', flags=analysis_flags,
-                                  keep_output=True)
+      return test.create_subtest(
+          self, ANALYSIS_SUFFIX, flags=analysis_flags, keep_output=True)
 
   def _result_for(self, test, subtest, result):
     if not self._disable_analysis:
-      if result is not None and subtest.procid.endswith('Fuzzer-analysis'):
+      if result is not None and subtest.procid.endswith(
+          f'{self.name}-{ANALYSIS_SUFFIX}'):
         # Analysis phase, for fuzzing we drop the result.
         if result.has_unexpected_output:
           self._send_result(test, None)
@@ -243,7 +251,7 @@ class FuzzerProc(base.TestProcProducer):
       flags.append('--fuzzer-random-seed=%s' % self._next_seed())
 
       flags = _drop_contradictory_flags(flags, test.get_flags())
-      yield self._create_subtest(test, str(i), flags=flags)
+      yield test.create_subtest(self, str(i), flags=flags)
 
       i += 1
 
@@ -329,14 +337,12 @@ class InterruptBudgetFuzzer(Fuzzer):
       # overwrites potential flag negations from the extra flags list.
       flag1 = rng.choice(
           ['--lazy-feedback-allocation', '--no-lazy-feedback-allocation'])
-      flag2 = '--interrupt-budget=%d' % rng.randint(0, 135168)
-      flag3 = '--interrupt-budget-for-maglev=%d' % rng.randint(0, 40960)
-      flag4 = '--interrupt-budget-for-feedback-allocation=%d' % rng.randint(
-          0, 940)
-      flag5 = '--interrupt-budget-factor-for-feedback-allocation=%d' % rng.randint(
-          1, 8)
+      flag2 = '--invocation-count-for-turbofan=%d' % rng.randint(0, 240)
+      flag3 = '--invocation-count-for-maglev=%d' % rng.randint(0, 120)
+      flag4 = '--invocation-count-for-feedback-allocation=%d' % rng.randint(
+          0, 8)
 
-      yield [flag1, flag2, flag3, flag4, flag5]
+      yield [flag1, flag2, flag3, flag4]
 
 
 class StackSizeFuzzer(Fuzzer):

@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,14 +17,16 @@
 
 #include "core/fxcodec/scanlinedecoder.h"
 #include "core/fxcrt/data_vector.h"
+#include "core/fxcrt/fixed_size_data_vector.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxcrt/fx_safe_types.h"
+#include "core/fxcrt/span_util.h"
 #include "core/fxge/calculate_pitch.h"
 #include "third_party/base/check.h"
+#include "third_party/base/containers/span.h"
 #include "third_party/base/notreached.h"
 #include "third_party/base/numerics/safe_conversions.h"
-#include "third_party/base/span.h"
 
 #if defined(USE_SYSTEM_ZLIB)
 #include <zlib.h>
@@ -135,22 +137,26 @@ class CLZWDecoder {
   uint32_t dest_buf_size_ = 0;  // Actual allocated size.
   uint32_t dest_byte_pos_ = 0;  // Size used.
   uint32_t stack_len_ = 0;
-  uint8_t decode_stack_[4000];
+  FixedSizeDataVector<uint8_t> decode_stack_;
   const uint8_t early_change_;
   uint8_t code_len_ = 9;
   uint32_t current_code_ = 0;
-  uint32_t codes_[5021];
+  FixedSizeDataVector<uint32_t> codes_;
 };
 
 CLZWDecoder::CLZWDecoder(pdfium::span<const uint8_t> src_span,
                          bool early_change)
-    : src_span_(src_span), early_change_(early_change ? 1 : 0) {}
+    : src_span_(src_span),
+      decode_stack_(FixedSizeDataVector<uint8_t>::Zeroed(4000)),
+      early_change_(early_change ? 1 : 0),
+      codes_(FixedSizeDataVector<uint32_t>::Zeroed(5021)) {}
 
 void CLZWDecoder::AddCode(uint32_t prefix_code, uint8_t append_char) {
   if (current_code_ + early_change_ == 4094)
     return;
 
-  codes_[current_code_++] = (prefix_code << 16) | append_char;
+  pdfium::span<uint32_t> codes_span = codes_.span();
+  codes_span[current_code_++] = (prefix_code << 16) | append_char;
   if (current_code_ + early_change_ == 512 - 258)
     code_len_ = 10;
   else if (current_code_ + early_change_ == 1024 - 258)
@@ -160,22 +166,24 @@ void CLZWDecoder::AddCode(uint32_t prefix_code, uint8_t append_char) {
 }
 
 void CLZWDecoder::DecodeString(uint32_t code) {
+  pdfium::span<uint8_t> decode_span = decode_stack_.span();
+  pdfium::span<const uint32_t> codes_span = codes_.span();
   while (true) {
     int index = code - 258;
     if (index < 0 || static_cast<uint32_t>(index) >= current_code_)
       break;
 
-    uint32_t data = codes_[index];
-    if (stack_len_ >= sizeof(decode_stack_))
+    uint32_t data = codes_span[index];
+    if (stack_len_ >= decode_span.size())
       return;
 
-    decode_stack_[stack_len_++] = static_cast<uint8_t>(data);
+    decode_span[stack_len_++] = static_cast<uint8_t>(data);
     code = data >> 16;
   }
-  if (stack_len_ >= sizeof(decode_stack_))
+  if (stack_len_ >= decode_span.size())
     return;
 
-  decode_stack_[stack_len_++] = static_cast<uint8_t>(code);
+  decode_span[stack_len_++] = static_cast<uint8_t>(code);
 }
 
 void CLZWDecoder::ExpandDestBuf(uint32_t additional_size) {
@@ -191,6 +199,7 @@ void CLZWDecoder::ExpandDestBuf(uint32_t additional_size) {
 }
 
 bool CLZWDecoder::Decode() {
+  pdfium::span<uint8_t> decode_span = decode_stack_.span();
   uint32_t old_code = 0xFFFFFFFF;
   uint8_t last_char = 0;
 
@@ -251,8 +260,8 @@ bool CLZWDecoder::Decode() {
     DCHECK(old_code < 256 || old_code >= 258);
     stack_len_ = 0;
     if (code - 258 >= current_code_) {
-      if (stack_len_ < sizeof(decode_stack_))
-        decode_stack_[stack_len_++] = last_char;
+      if (stack_len_ < decode_stack_.size())
+        decode_span[stack_len_++] = last_char;
       DecodeString(old_code);
     } else {
       DecodeString(code);
@@ -271,9 +280,9 @@ bool CLZWDecoder::Decode() {
     }
 
     for (uint32_t i = 0; i < stack_len_; i++)
-      dest_buf_.get()[dest_byte_pos_ + i] = decode_stack_[stack_len_ - i - 1];
+      dest_buf_.get()[dest_byte_pos_ + i] = decode_span[stack_len_ - i - 1];
     dest_byte_pos_ += stack_len_;
-    last_char = decode_stack_[stack_len_ - 1];
+    last_char = decode_span[stack_len_ - 1];
     if (old_code >= 258 && old_code - 258 >= current_code_)
       break;
 
@@ -370,35 +379,47 @@ bool PNG_Predictor(int Colors,
                    int Columns,
                    std::unique_ptr<uint8_t, FxFreeDeleter>* data_buf,
                    uint32_t* data_size) {
-  // TODO(thestig): Look into using CalculatePitch8() here.
-  const int BytesPerPixel = (Colors * BitsPerComponent + 7) / 8;
-  const int row_size = (Colors * BitsPerComponent * Columns + 7) / 8;
-  if (row_size <= 0)
+  const uint32_t row_size =
+      fxge::CalculatePitch8(BitsPerComponent, Colors, Columns).value_or(0);
+  if (row_size == 0) {
     return false;
-  const int row_count = (*data_size + row_size) / (row_size + 1);
-  if (row_count <= 0)
+  }
+
+  const uint32_t src_row_size = row_size + 1;
+  if (src_row_size == 0) {
+    // Avoid divide by 0.
     return false;
-  const int last_row_size = *data_size % (row_size + 1);
+  }
+  const uint32_t row_count = (*data_size + row_size) / src_row_size;
+  if (row_count == 0) {
+    return false;
+  }
+
+  const uint32_t last_row_size = *data_size % src_row_size;
   std::unique_ptr<uint8_t, FxFreeDeleter> dest_buf(
       FX_Alloc2D(uint8_t, row_size, row_count));
   uint32_t byte_cnt = 0;
-  uint8_t* pSrcData = data_buf->get();
+  const uint8_t* pSrcData = data_buf->get();
   uint8_t* pDestData = dest_buf.get();
-  for (int row = 0; row < row_count; row++) {
+  const uint8_t* pPrevDestData = nullptr;
+  for (uint32_t row = 0; row < row_count; row++) {
     uint8_t tag = pSrcData[0];
     byte_cnt++;
     if (tag == 0) {
-      int move_size = row_size;
-      if ((row + 1) * (move_size + 1) > static_cast<int>(*data_size)) {
+      uint32_t move_size = row_size;
+      if ((row + 1) * (move_size + 1) > *data_size) {
         move_size = last_row_size - 1;
       }
       memcpy(pDestData, pSrcData + 1, move_size);
       pSrcData += move_size + 1;
+      pPrevDestData = pDestData;
       pDestData += move_size;
       byte_cnt += move_size;
       continue;
     }
-    for (int byte = 0; byte < row_size && byte_cnt < *data_size;
+
+    const uint32_t BytesPerPixel = (Colors * BitsPerComponent + 7) / 8;
+    for (uint32_t byte = 0; byte < row_size && byte_cnt < *data_size;
          ++byte, ++byte_cnt) {
       uint8_t raw_byte = pSrcData[byte + 1];
       switch (tag) {
@@ -412,8 +433,8 @@ bool PNG_Predictor(int Colors,
         }
         case 2: {
           uint8_t up = 0;
-          if (row) {
-            up = pDestData[byte - row_size];
+          if (pPrevDestData) {
+            up = pPrevDestData[byte];
           }
           pDestData[byte] = raw_byte + up;
           break;
@@ -424,8 +445,8 @@ bool PNG_Predictor(int Colors,
             left = pDestData[byte - BytesPerPixel];
           }
           uint8_t up = 0;
-          if (row) {
-            up = pDestData[byte - row_size];
+          if (pPrevDestData) {
+            up = pPrevDestData[byte];
           }
           pDestData[byte] = raw_byte + (up + left) / 2;
           break;
@@ -436,12 +457,12 @@ bool PNG_Predictor(int Colors,
             left = pDestData[byte - BytesPerPixel];
           }
           uint8_t up = 0;
-          if (row) {
-            up = pDestData[byte - row_size];
+          if (pPrevDestData) {
+            up = pPrevDestData[byte];
           }
           uint8_t upper_left = 0;
-          if (byte >= BytesPerPixel && row) {
-            upper_left = pDestData[byte - row_size - BytesPerPixel];
+          if (pPrevDestData && byte >= BytesPerPixel) {
+            upper_left = pPrevDestData[byte - BytesPerPixel];
           }
           pDestData[byte] = raw_byte + PathPredictor(left, up, upper_left);
           break;
@@ -451,12 +472,13 @@ bool PNG_Predictor(int Colors,
           break;
       }
     }
-    pSrcData += row_size + 1;
+    pSrcData += src_row_size;
+    pPrevDestData = pDestData;
     pDestData += row_size;
   }
   *data_buf = std::move(dest_buf);
   *data_size = row_size * row_count -
-               (last_row_size > 0 ? (row_size + 1 - last_row_size) : 0);
+               (last_row_size > 0 ? (src_row_size - last_row_size) : 0);
   return true;
 }
 
@@ -505,14 +527,16 @@ bool TIFF_Predictor(int Colors,
                     int Columns,
                     std::unique_ptr<uint8_t, FxFreeDeleter>* data_buf,
                     uint32_t* data_size) {
-  int row_size = (Colors * BitsPerComponent * Columns + 7) / 8;
+  uint32_t row_size =
+      fxge::CalculatePitch8(BitsPerComponent, Colors, Columns).value_or(0);
   if (row_size == 0)
     return false;
-  const int row_count = (*data_size + row_size - 1) / row_size;
-  const int last_row_size = *data_size % row_size;
-  for (int row = 0; row < row_count; row++) {
+
+  const uint32_t row_count = (*data_size + row_size - 1) / row_size;
+  const uint32_t last_row_size = *data_size % row_size;
+  for (uint32_t row = 0; row < row_count; row++) {
     uint8_t* scan_line = data_buf->get() + row * row_size;
-    if ((row + 1) * row_size > static_cast<int>(*data_size)) {
+    if ((row + 1) * row_size > *data_size) {
       row_size = last_row_size;
     }
     TIFF_PredictLine(scan_line, row_size, BitsPerComponent, Colors, Columns);
@@ -581,9 +605,9 @@ void FlateUncompress(pdfium::span<const uint8_t> src_buf,
     std::unique_ptr<uint8_t, FxFreeDeleter> tmp_buf =
         std::move(result_tmp_bufs[i]);
     uint32_t tmp_buf_size = buf_size;
-    if (i == result_tmp_bufs.size() - 1)
+    if (i + 1 == result_tmp_bufs.size()) {
       tmp_buf_size = last_buf_size;
-
+    }
     uint32_t cp_size = std::min(tmp_buf_size, remaining);
     memcpy(result_buf.get() + result_pos, tmp_buf.get(), cp_size);
     result_pos += cp_size;
@@ -753,9 +777,8 @@ void FlatePredictorScanlineDecoder::GetNextLineWithPredictedPitch() {
       TIFF_PredictLine(m_Scanline.data(), m_PredictPitch, m_bpc, m_nComps,
                        m_OutputWidth);
       break;
-    default:
-      NOTREACHED();
-      break;
+    case PredictorType::kNone:
+      NOTREACHED_NORETURN();
   }
 }
 
@@ -781,14 +804,13 @@ void FlatePredictorScanlineDecoder::GetNextLineWithoutPredictedPitch() {
         TIFF_PredictLine(m_PredictBuffer.data(), m_PredictPitch,
                          m_BitsPerComponent, m_Colors, m_Columns);
         break;
-      default:
-        NOTREACHED();
-        break;
+      case PredictorType::kNone:
+        NOTREACHED_NORETURN();
     }
     size_t read_bytes =
         m_PredictPitch > bytes_to_go ? bytes_to_go : m_PredictPitch;
-    memcpy(m_Scanline.data() + m_Pitch - bytes_to_go, m_PredictBuffer.data(),
-           read_bytes);
+    fxcrt::spancpy(pdfium::make_span(m_Scanline).subspan(m_Pitch - bytes_to_go),
+                   pdfium::make_span(m_PredictBuffer).first(read_bytes));
     m_LeftOver += m_PredictPitch - read_bytes;
     bytes_to_go -= read_bytes;
   }
@@ -856,9 +878,6 @@ uint32_t FlateModule::FlateOrLZWDecode(
     case PredictorType::kFlate:
       ret = TIFF_Predictor(Colors, BitsPerComponent, Columns, dest_buf,
                            dest_size);
-      break;
-    default:
-      NOTREACHED();
       break;
   }
   return ret ? offset : FX_INVALID_OFFSET;

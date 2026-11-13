@@ -14,11 +14,11 @@
 #include "src/torque/declarable.h"
 #include "src/torque/utils.h"
 
+EXPORT_CONTEXTUAL_VARIABLE(v8::internal::torque::TorqueMessages)
+
 namespace v8 {
 namespace internal {
 namespace torque {
-
-DEFINE_CONTEXTUAL_VARIABLE(TorqueMessages)
 
 std::string StringLiteralUnquote(const std::string& s) {
   DCHECK(('"' == s.front() && '"' == s.back()) ||
@@ -177,8 +177,8 @@ bool ContainsUpperCase(const std::string& s) {
 // keywords, e.g.: 'True', 'Undefined', etc.
 // These do not need to follow the default naming convention for constants.
 bool IsKeywordLikeName(const std::string& s) {
-  static const char* const keyword_like_constants[]{"True", "False", "TheHole",
-                                                    "Null", "Undefined"};
+  static const char* const keyword_like_constants[]{
+      "True", "False", "TheHole", "PromiseHole", "Null", "Undefined"};
 
   return std::find(std::begin(keyword_like_constants),
                    std::end(keyword_like_constants),

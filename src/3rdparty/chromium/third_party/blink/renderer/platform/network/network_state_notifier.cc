@@ -27,9 +27,12 @@
 
 #include <memory>
 
+#include "base/containers/contains.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "net/nqe/effective_connection_type.h"
 #include "net/nqe/network_quality_estimator_params.h"
+#include "services/network/public/cpp/client_hints.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom-blink.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
@@ -277,7 +280,7 @@ void NetworkStateNotifier::NotifyObservers(ObserverListMap& map,
   DCHECK(IsMainThread());
   base::AutoLock locker(lock_);
   for (const auto& entry : map) {
-   entry.value->PostTask(
+    entry.value->PostTask(
         FROM_HERE,
         base::BindOnce(&NetworkStateNotifier::NotifyObserverOnTaskRunner,
                        base::Unretained(this), base::UnsafeDangling(entry.key),
@@ -286,7 +289,7 @@ void NetworkStateNotifier::NotifyObservers(ObserverListMap& map,
 }
 
 void NetworkStateNotifier::NotifyObserverOnTaskRunner(
-    NetworkStateObserver* observer,
+    MayBeDangling<NetworkStateObserver> observer,
     ObserverType type,
     const NetworkState& state) {
   {
@@ -350,15 +353,16 @@ void NetworkStateNotifier::RemoveObserver(
 
   base::AutoLock locker(lock_);
   ObserverListMap& map = GetObserverMapFor(type);
-  DCHECK_NE(map.end(), map.find(observer));
+  DCHECK(base::Contains(map, observer));
   map.erase(observer);
 }
 
 // static
 String NetworkStateNotifier::EffectiveConnectionTypeToString(
     WebEffectiveConnectionType type) {
-  DCHECK_GT(kWebEffectiveConnectionTypeMappingCount, static_cast<size_t>(type));
-  return kWebEffectiveConnectionTypeMapping[static_cast<int>(type)];
+  DCHECK_GT(network::kWebEffectiveConnectionTypeMappingCount,
+            static_cast<size_t>(type));
+  return network::kWebEffectiveConnectionTypeMapping[static_cast<int>(type)];
 }
 
 double NetworkStateNotifier::GetRandomMultiplier(const String& host) const {
@@ -369,7 +373,7 @@ double NetworkStateNotifier::GetRandomMultiplier(const String& host) const {
   if (!host)
     return 1.0;
 
-  unsigned hash = StringHash::GetHash(host) + RandomizationSalt();
+  unsigned hash = WTF::GetHash(host) + RandomizationSalt();
   double random_multiplier = 0.9 + static_cast<double>((hash % 21)) * 0.01;
   DCHECK_LE(0.90, random_multiplier);
   DCHECK_GE(1.10, random_multiplier);

@@ -30,8 +30,7 @@ class V8_EXPORT_PRIVATE StreamingProcessor {
   virtual ~StreamingProcessor() = default;
   // Process the first 8 bytes of a WebAssembly module. Returns true if the
   // processing finished successfully and the decoding should continue.
-  virtual bool ProcessModuleHeader(base::Vector<const uint8_t> bytes,
-                                   uint32_t offset) = 0;
+  virtual bool ProcessModuleHeader(base::Vector<const uint8_t> bytes) = 0;
 
   // Process all sections but the code section. Returns true if the processing
   // finished successfully and the decoding should continue.
@@ -46,18 +45,17 @@ class V8_EXPORT_PRIVATE StreamingProcessor {
                                         int code_section_start,
                                         int code_section_length) = 0;
 
-  // Process a function body.
-  virtual void ProcessFunctionBody(base::Vector<const uint8_t> bytes,
+  // Process a function body. Returns true if the processing finished
+  // successfully and the decoding should continue.
+  virtual bool ProcessFunctionBody(base::Vector<const uint8_t> bytes,
                                    uint32_t offset) = 0;
 
   // Report the end of a chunk.
   virtual void OnFinishedChunk() = 0;
-  // Report the end of the stream. If the stream was successful, all
-  // received bytes are passed by parameter. If there has been an error, an
-  // empty array is passed.
-  virtual void OnFinishedStream(base::OwnedVector<uint8_t> bytes) = 0;
-  // Report an error detected in the StreamingDecoder.
-  virtual void OnError(const WasmError&) = 0;
+  // Report the end of the stream. This will be called even after an error has
+  // been detected. In any case, the parameter is the total received bytes.
+  virtual void OnFinishedStream(base::OwnedVector<const uint8_t> bytes,
+                                bool after_error) = 0;
   // Report the abortion of the stream.
   virtual void OnAbort() = 0;
 
@@ -80,9 +78,9 @@ class V8_EXPORT_PRIVATE StreamingDecoder {
 
   virtual void Abort() = 0;
 
-  // Notify the StreamingDecoder that compilation ended and the
+  // Notify the StreamingDecoder that the job was discarded and the
   // StreamingProcessor should not be called anymore.
-  virtual void NotifyCompilationEnded() = 0;
+  virtual void NotifyCompilationDiscarded() = 0;
 
   // Caching support.
   // Sets the callback that is called after a new chunk of the module is tiered
@@ -115,7 +113,8 @@ class V8_EXPORT_PRIVATE StreamingDecoder {
       std::unique_ptr<StreamingProcessor> processor);
 
   static std::unique_ptr<StreamingDecoder> CreateSyncStreamingDecoder(
-      Isolate* isolate, const WasmFeatures& enabled, Handle<Context> context,
+      Isolate* isolate, WasmFeatures enabled,
+      CompileTimeImports compile_imports, Handle<Context> context,
       const char* api_method_name_for_errors,
       std::shared_ptr<CompilationResultResolver> resolver);
 

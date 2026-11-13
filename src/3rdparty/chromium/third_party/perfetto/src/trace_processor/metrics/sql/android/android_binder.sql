@@ -14,26 +14,15 @@
 -- limitations under the License.
 --
 
+INCLUDE PERFETTO MODULE android.binder;
+
 -- Count Binder transactions per process
 DROP VIEW IF EXISTS binder_metrics_by_process;
-CREATE VIEW binder_metrics_by_process AS
-SELECT
-  process.name as process_name,
-  process.pid as pid,
-  slice.name as slice_name,
-  COUNT(*) as event_count
-FROM slice
-  INNER JOIN thread_track ON slice.track_id=thread_track.id
-  INNER JOIN thread ON thread.utid=thread_track.utid
-  INNER JOIN process ON thread.upid=process.upid
-WHERE
-  slice.name glob 'binder*'
-GROUP BY
-  process_name,
-  slice_name;
+CREATE PERFETTO VIEW binder_metrics_by_process AS
+SELECT * FROM android_binder_metrics_by_process;
 
 DROP VIEW IF EXISTS android_binder_output;
-CREATE VIEW android_binder_output AS
+CREATE PERFETTO VIEW android_binder_output AS
 SELECT AndroidBinderMetric(
   'process_breakdown', (
     SELECT RepeatedField(
@@ -44,6 +33,52 @@ SELECT AndroidBinderMetric(
         'count', event_count
       )
     )
-    FROM binder_metrics_by_process
+    FROM android_binder_metrics_by_process
+  ),
+  'unaggregated_txn_breakdown', (
+    SELECT RepeatedField(
+      AndroidBinderMetric_UnaggregatedTxnBreakdown(
+        'aidl_name', aidl_name,
+        'aidl_ts', aidl_ts,
+        'aidl_dur', aidl_dur,
+        'client_process', client_process,
+        'client_thread', client_thread,
+        'is_main_thread', is_main_thread,
+        'client_ts', client_ts,
+        'client_dur', client_dur,
+        'client_tid', client_tid,
+        'client_pid', client_pid,
+        'client_oom_score', client_oom_score,
+        'server_process', server_process,
+        'server_thread', server_thread,
+        'server_ts', server_ts,
+        'server_dur', server_dur,
+        'server_tid', server_tid,
+        'server_pid', server_pid,
+        'server_oom_score', server_oom_score,
+        'is_sync', is_sync,
+        'thread_states', (
+          SELECT RepeatedField(
+            AndroidBinderMetric_ThreadStateBreakdown(
+              'thread_state_type', thread_state_type,
+              'thread_state', thread_state,
+              'thread_state_dur', thread_state_dur,
+              'thread_state_count', thread_state_count
+            )
+          ) FROM android_sync_binder_thread_state_by_txn t WHERE t.binder_txn_id = android_binder_txns.binder_txn_id
+        ),
+        'blocked_functions', (
+          SELECT RepeatedField(
+            AndroidBinderMetric_BlockedFunctionBreakdown(
+              'thread_state_type', thread_state_type,
+              'blocked_function', blocked_function,
+              'blocked_function_dur', blocked_function_dur,
+              'blocked_function_count', blocked_function_count
+            )
+          ) FROM android_sync_binder_blocked_functions_by_txn b WHERE b.binder_txn_id = android_binder_txns.binder_txn_id
+        )
+      )
+    )
+    FROM android_binder_txns
   )
 );

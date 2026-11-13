@@ -8,17 +8,52 @@
 
 #include <memory>
 
+#include "base/command_line.h"
 #include "base/threading/platform_thread.h"
+#include "components/country_codes/country_codes.h"
+#include "components/search_engines/search_engine_choice/search_engine_choice_service.h"
+#include "components/search_engines/search_engines_switches.h"
+#include "components/search_engines/template_url_prepopulate_data.h"
+#include "components/search_engines/template_url_service_client.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class TemplateURLServiceUnitTest : public testing::Test {
  public:
-  TemplateURLServiceUnitTest()
-      : template_url_service_(/*initializers=*/nullptr, /*count=*/0) {}
-  TemplateURLService& template_url_service() { return template_url_service_; }
+  void SetUp() override {
+    TemplateURLService::RegisterProfilePrefs(pref_service_.registry());
+    TemplateURLPrepopulateData::RegisterProfilePrefs(pref_service_.registry());
+    DefaultSearchManager::RegisterProfilePrefs(pref_service_.registry());
+
+    search_engine_choice_service_ =
+        std::make_unique<search_engines::SearchEngineChoiceService>(
+            pref_service_);
+    // Bypass the country checks.
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kSearchEngineChoiceCountry,
+        country_codes::kCountryCodeUnknown);
+
+    template_url_service_ = std::make_unique<TemplateURLService>(
+        &pref_service_, search_engine_choice_service_.get(),
+        std::make_unique<SearchTermsData>(),
+        nullptr /* KeywordWebDataService */,
+        nullptr /* TemplateURLServiceClient */, base::RepeatingClosure()
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+                                                    ,
+        false
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+    );
+  }
+
+  TemplateURLService& template_url_service() {
+    return *template_url_service_.get();
+  }
 
  private:
-  TemplateURLService template_url_service_;
+  sync_preferences::TestingPrefServiceSyncable pref_service_;
+  std::unique_ptr<search_engines::SearchEngineChoiceService>
+      search_engine_choice_service_;
+  std::unique_ptr<TemplateURLService> template_url_service_;
 };
 
 TEST_F(TemplateURLServiceUnitTest, SessionToken) {
@@ -75,4 +110,23 @@ TEST_F(TemplateURLServiceUnitTest, GenerateSearchURL) {
   EXPECT_EQ(
       "https://www.example.com/?q=",
       template_url_service().GenerateSearchURLForDefaultSearchProvider(u""));
+}
+
+TEST_F(TemplateURLServiceUnitTest, ExtractSearchMetadata) {
+  TemplateURLData template_url_data;
+  template_url_data.SetURL("https://www.example.com/?q={searchTerms}");
+  template_url_data.search_intent_params = {"gs_ssp", "si"};
+  template_url_service().SetUserSelectedDefaultSearchProvider(
+      template_url_service().Add(
+          std::make_unique<TemplateURL>(template_url_data)));
+
+  GURL input("https://www.example.com/?q=MyQuery&si=my_si&other_param=foobar");
+  auto result = template_url_service().ExtractSearchMetadata(input);
+  ASSERT_TRUE(result.has_value());
+
+  EXPECT_EQ(result->normalized_url,
+            "https://www.example.com/?si=my_si&q=myquery")
+      << "q parameter and si parameter should have been preserved. other_param "
+         "should be discarded.";
+  EXPECT_EQ(result->search_terms, u"myquery");
 }

@@ -12,10 +12,13 @@
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkPaint.h"
+#include "include/core/SkPath.h"
 #include "include/core/SkRRect.h"
 #include "include/effects/SkGradientShader.h"
 #include "include/gpu/GrRecordingContext.h"
 #include "src/core/SkColorFilterPriv.h"
+#include "tools/DecodeUtils.h"
+#include "tools/GpuToolUtils.h"
 #include "tools/Resources.h"
 #include "tools/ToolUtils.h"
 
@@ -58,10 +61,13 @@ sk_sp<SkShader> create_image_shader(SkCanvas* destCanvas, SkTileMode tmX, SkTile
         bitmap.setImmutable();
     }
 
-    sk_sp<SkImage> img = SkImage::MakeFromBitmap(bitmap);
+    sk_sp<SkImage> img = SkImages::RasterFromBitmap(bitmap);
     img = ToolUtils::MakeTextureImage(destCanvas, std::move(img));
-
-    return img->makeShader(tmX, tmY, SkSamplingOptions());
+    if (img) {
+        return img->makeShader(tmX, tmY, SkSamplingOptions());
+    } else {
+        return nullptr;
+    }
 }
 
 sk_sp<SkShader> create_blend_shader(SkCanvas* destCanvas, SkBlendMode bm) {
@@ -72,6 +78,15 @@ sk_sp<SkShader> create_blend_shader(SkCanvas* destCanvas, SkBlendMode bm) {
                             std::move(dst),
                             create_image_shader(destCanvas,
                                                 SkTileMode::kRepeat, SkTileMode::kRepeat));
+}
+
+sk_sp<SkColorFilter> create_grayscale_colorfilter() {
+    float matrix[20] = {};
+    matrix[0] = matrix[5] = matrix[10] = 0.2126f;
+    matrix[1] = matrix[6] = matrix[11] = 0.7152f;
+    matrix[2] = matrix[7] = matrix[12] = 0.0722f;
+    matrix[18] = 1.0f;
+    return SkColorFilters::Matrix(matrix);
 }
 
 void draw_image_shader_tile(SkCanvas* canvas, SkRect clipRect) {
@@ -168,6 +183,9 @@ void draw_colorfilter_swatches(SkCanvas* canvas, SkRect clipRect) {
     colorFilters[3] = SkColorFilters::Blend(SK_ColorGREEN, SkBlendMode::kMultiply);
     colorFilters[4] = SkColorFilterPriv::MakeGaussian();
 
+    colorFilters[5] = SkColorFilters::LinearToSRGBGamma();
+    colorFilters[6] = SkColorFilters::SRGBToLinearGamma();
+
     SkPaint p;
 
     canvas->save();
@@ -239,7 +257,7 @@ class GraphiteStartGM : public GM {
 public:
     GraphiteStartGM() {
         this->setBGColor(SK_ColorBLACK);
-        GetResourceAsBitmap("images/color_wheel.gif", &fBitmap);
+        ToolUtils::GetResourceAsBitmap("images/color_wheel.gif", &fBitmap);
     }
 
 protected:
@@ -247,15 +265,11 @@ protected:
     static constexpr int kTileHeight = 128;
     static constexpr int kWidth = 3 * kTileWidth;
     static constexpr int kHeight = 3 * kTileHeight;
-    static constexpr int kClipInset = 16;
+    static constexpr int kClipInset = 4;
 
-    SkString onShortName() override {
-        return SkString("graphitestart");
-    }
+    SkString getName() const override { return SkString("graphitestart"); }
 
-    SkISize onISize() override {
-        return SkISize::Make(kWidth, kHeight);
-    }
+    SkISize getISize() override { return SkISize::Make(kWidth, kHeight); }
 
     void onDraw(SkCanvas* canvas) override {
 
@@ -294,13 +308,25 @@ protected:
 
         // Middle-right tile
         {
-            // <add tile here>
+            sk_sp<SkImage> image(ToolUtils::GetResourceAsImage("images/mandrill_128.png"));
+            sk_sp<SkShader> shader;
+
+            if (image) {
+                shader = image->makeShader(SkTileMode::kRepeat, SkTileMode::kRepeat, {});
+                shader = shader->makeWithColorFilter(create_grayscale_colorfilter());
+            }
+
+            SkPaint p;
+            p.setShader(std::move(shader));
+
+            SkRect r = SkRect::MakeXYWH(2*kTileWidth, kTileHeight, kTileWidth, kTileHeight);
+            canvas->drawRect(r.makeInset(1.0f, 1.0f), p);
         }
 
         canvas->restore();
 
         // Bottom-left corner
-#ifdef SK_GRAPHITE_ENABLED
+#if defined(SK_GRAPHITE)
         // TODO: failing serialize test on Linux, not sure what's going on
         canvas->writePixels(fBitmap, 0, 2*kTileHeight);
 #endif

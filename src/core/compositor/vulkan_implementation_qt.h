@@ -1,5 +1,6 @@
 // Copyright (C) 2022 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef VULKAN_IMPLEMENTATION_QT_H
 #define VULKAN_IMPLEMENTATION_QT_H
@@ -28,10 +29,8 @@ public:
     VkFence CreateVkFenceForGpuFence(VkDevice vk_device) override;
     std::unique_ptr<gfx::GpuFence> ExportVkFenceToGpuFence(VkDevice vk_device,
                                                            VkFence vk_fence) override;
-    VkSemaphore CreateExternalSemaphore(VkDevice vk_device) override;
     VkSemaphore ImportSemaphoreHandle(VkDevice vk_device, SemaphoreHandle handle) override;
-    SemaphoreHandle GetSemaphoreHandle(VkDevice vk_device, VkSemaphore vk_semaphore) override;
-    VkExternalMemoryHandleTypeFlagBits GetExternalImageHandleType() override;
+    VkExternalSemaphoreHandleTypeFlagBits GetExternalSemaphoreHandleType() override;
     bool CanImportGpuMemoryBuffer(VulkanDeviceQueue* device_queue,
                                   gfx::GpuMemoryBufferType memory_buffer_type) override;
     std::unique_ptr<VulkanImage> CreateImageFromGpuMemoryHandle(VulkanDeviceQueue *device_queue,

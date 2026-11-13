@@ -9,7 +9,7 @@
 #include <memory>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/remote_cocoa/common/select_file_dialog.mojom.h"
@@ -81,7 +81,8 @@ class SHELL_DIALOGS_EXPORT SelectFileDialogImpl : public ui::SelectFileDialog {
                        bool is_multi,
                        bool was_cancelled,
                        const std::vector<base::FilePath>& files,
-                       int index);
+                       int index,
+                       const std::vector<std::string>& file_tags);
 
   bool HasMultipleFileTypeChoicesImpl() override;
 

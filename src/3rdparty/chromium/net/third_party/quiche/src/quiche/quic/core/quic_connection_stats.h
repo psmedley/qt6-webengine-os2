@@ -17,9 +17,9 @@
 namespace quic {
 
 // Structure to hold stats for a QuicConnection.
-struct QUIC_EXPORT_PRIVATE QuicConnectionStats {
-  QUIC_EXPORT_PRIVATE friend std::ostream& operator<<(
-      std::ostream& os, const QuicConnectionStats& s);
+struct QUICHE_EXPORT QuicConnectionStats {
+  QUICHE_EXPORT friend std::ostream& operator<<(std::ostream& os,
+                                                const QuicConnectionStats& s);
 
   QuicByteCount bytes_sent = 0;  // Includes retransmissions.
   QuicPacketCount packets_sent = 0;
@@ -170,10 +170,6 @@ struct QUIC_EXPORT_PRIVATE QuicConnectionStats {
   // Max consecutive retransmission timeout before making forward progress.
   size_t max_consecutive_rto_with_forward_progress = 0;
 
-  // Number of sent packets that were encapsulated using Legacy Version
-  // Encapsulation.
-  QuicPacketCount sent_legacy_version_encapsulated_packets = 0;
-
   // Number of times when the connection tries to send data but gets throttled
   // by amplification factor.
   size_t num_amplification_throttling = 0;
@@ -191,6 +187,14 @@ struct QUIC_EXPORT_PRIVATE QuicConnectionStats {
   // was discarded, only on server connections.
   QuicPacketCount
       num_tls_server_zero_rtt_packets_received_after_discarding_decrypter = 0;
+
+  // Counts the number of packets received with each Explicit Congestion
+  // Notification (ECN) codepoint, except Not-ECT. There is one counter across
+  // all packet number spaces.
+  QuicEcnCounts num_ecn_marks_received;
+
+  // Counts the number of ACK frames sent with ECN counts.
+  QuicPacketCount num_ack_frames_sent_with_ecn = 0;
 
   // True if address is validated via decrypting HANDSHAKE or 1-RTT packet.
   bool address_validated_via_decrypting_packet = false;
@@ -221,8 +225,18 @@ struct QUIC_EXPORT_PRIVATE QuicConnectionStats {
   size_t num_new_connection_id_sent = 0;
   // Number of RETIRE_CONNECTION_ID frames sent.
   size_t num_retire_connection_id_sent = 0;
+  // Number of path degrading.
+  size_t num_path_degrading = 0;
+  // Number of forward progress made after path degrading.
+  size_t num_forward_progress_after_path_degrading = 0;
 
-  struct QUIC_NO_EXPORT TlsServerOperationStats {
+  bool server_preferred_address_validated = false;
+  bool failed_to_validate_server_preferred_address = false;
+  // Number of duplicated packets that have been sent to server preferred
+  // address while the validation is pending.
+  size_t num_duplicated_packets_sent_to_server_preferred_address = 0;
+
+  struct QUICHE_EXPORT TlsServerOperationStats {
     bool success = false;
     // If the operation is performed asynchronously, how long did it take.
     // Zero() for synchronous operations.
@@ -233,9 +247,12 @@ struct QUIC_EXPORT_PRIVATE QuicConnectionStats {
   // is performed by TlsServerHandshaker. If an operation is done within
   // BoringSSL, e.g. ticket decrypted without using
   // TlsServerHandshaker::SessionTicketOpen, it will not be recorded here.
-  absl::optional<TlsServerOperationStats> tls_server_select_cert_stats;
-  absl::optional<TlsServerOperationStats> tls_server_compute_signature_stats;
-  absl::optional<TlsServerOperationStats> tls_server_decrypt_ticket_stats;
+  std::optional<TlsServerOperationStats> tls_server_select_cert_stats;
+  std::optional<TlsServerOperationStats> tls_server_compute_signature_stats;
+  std::optional<TlsServerOperationStats> tls_server_decrypt_ticket_stats;
+
+  // The total number of streams which were pending from some time.
+  size_t num_total_pending_streams = 0;
 };
 
 }  // namespace quic

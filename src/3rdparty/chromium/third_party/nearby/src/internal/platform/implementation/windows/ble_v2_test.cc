@@ -15,13 +15,13 @@
 #include "internal/platform/implementation/windows/ble_v2.h"
 
 #include <string>
+#include <utility>
 
 #include "gtest/gtest.h"
 #include "absl/synchronization/notification.h"
 #include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
 namespace {
@@ -68,7 +68,7 @@ TEST(BleV2Medium, DISABLED_StartScanning) {
       };
 
   EXPECT_TRUE(blev2_medium.StartScanning(
-      service_uuid, api::ble_v2::TxPowerLevel::kHigh, callback));
+      service_uuid, api::ble_v2::TxPowerLevel::kHigh, std::move(callback)));
 
   EXPECT_TRUE(scan_response_notification.WaitForNotificationWithTimeout(
       absl::Seconds(5)));
@@ -86,12 +86,34 @@ TEST(BleV2Medium, DISABLED_StopScanning) {
          const api::ble_v2::BleAdvertisementData& advertisement_data) {};
 
   EXPECT_TRUE(blev2_medium.StartScanning(
-      service_uuid, api::ble_v2::TxPowerLevel::kHigh, callback));
+      service_uuid, api::ble_v2::TxPowerLevel::kHigh, std::move(callback)));
 
   EXPECT_TRUE(blev2_medium.StopScanning());
+}
+
+TEST(BleV2Medium, DISABLED_StartThenStopScanning) {
+  bool scan_response_received = false;
+  absl::Notification scan_response_notification;
+
+  BluetoothAdapter bluetoothAdapter;
+  BleV2Medium blev2_medium(bluetoothAdapter);
+  Uuid service_uuid;
+
+  api::ble_v2::BleMedium::ScanningCallback callback;
+  callback.advertisement_found_cb =
+      [&scan_response_received, &scan_response_notification](
+          api::ble_v2::BlePeripheral& peripheral,
+          const api::ble_v2::BleAdvertisementData& advertisement_data) {
+        scan_response_received = true;
+        scan_response_notification.Notify();
+      };
+
+  auto scanning_session = blev2_medium.StartScanning(
+      service_uuid, api::ble_v2::TxPowerLevel::kHigh, std::move(callback));
+  EXPECT_NE(scanning_session, nullptr);
+  EXPECT_TRUE(scanning_session->stop_scanning().ok());
 }
 
 }  // namespace
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location

@@ -4,6 +4,7 @@
 
 #include "sandbox/win/src/signed_interception.h"
 
+#include <ntstatus.h>
 #include <stdint.h>
 
 #include "sandbox/win/src/crosscall_client.h"
@@ -13,6 +14,7 @@
 #include "sandbox/win/src/sandbox_factory.h"
 #include "sandbox/win/src/sandbox_nt_util.h"
 #include "sandbox/win/src/sharedmem_ipc_client.h"
+#include "sandbox/win/src/target_interceptions.h"
 #include "sandbox/win/src/target_services.h"
 
 namespace sandbox {
@@ -41,6 +43,12 @@ TargetNtCreateSection(NtCreateSectionFunction orig_CreateSection,
       break;
     if (allocation_attributes != SEC_IMAGE)
       break;
+    // We shouldn't need to broker section creations until after kernel32.dll is
+    // loaded, and delaying is necessary to avoid using the Windows heap for any
+    // sections created before the Windows heap is initialized.
+    if (GetSectionLoadState() != SectionLoadState::kAfterKernel32) {
+      break;
+    }
 
     // IPC must be fully started.
     void* memory = GetGlobalIPCMemory();

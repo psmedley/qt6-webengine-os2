@@ -15,15 +15,12 @@
 #ifndef PLATFORM_API_LISTENABLE_FUTURE_H_
 #define PLATFORM_API_LISTENABLE_FUTURE_H_
 
-#include <functional>
 #include <memory>
 
+#include "internal/platform/exception.h"
 #include "internal/platform/implementation/executor.h"
 #include "internal/platform/implementation/future.h"
-#include "internal/platform/exception.h"
-#include "internal/platform/runnable.h"
 
-namespace location {
 namespace nearby {
 namespace api {
 
@@ -33,13 +30,13 @@ namespace api {
 template <typename T>
 class ListenableFuture : public Future<T> {
  public:
+  using FutureCallback = absl::AnyInvocable<void(ExceptionOr<T>)>;
   ~ListenableFuture() override = default;
 
-  virtual void AddListener(Runnable runnable, Executor* executor) = 0;
+  virtual void AddListener(FutureCallback callback, Executor* executor) = 0;
 };
 
 }  // namespace api
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_API_LISTENABLE_FUTURE_H_

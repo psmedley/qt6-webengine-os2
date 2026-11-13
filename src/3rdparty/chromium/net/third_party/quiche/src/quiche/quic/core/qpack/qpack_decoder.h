@@ -27,7 +27,7 @@ namespace quic {
 // are stream errors.
 // The only input of QpackDecoder is the encoder stream.  Any error QpackDecoder
 // signals is an encoder stream error, which is fatal to the connection.
-class QUIC_EXPORT_PRIVATE QpackDecoder
+class QUICHE_EXPORT QpackDecoder
     : public QpackEncoderStreamReceiver::Delegate,
       public QpackProgressiveDecoder::BlockedStreamLimitEnforcer,
       public QpackProgressiveDecoder::DecodingCompletedVisitor {
@@ -35,7 +35,7 @@ class QUIC_EXPORT_PRIVATE QpackDecoder
   // Interface for receiving notification that an error has occurred on the
   // encoder stream.  This MUST be treated as a connection error of type
   // HTTP_QPACK_ENCODER_STREAM_ERROR.
-  class QUIC_EXPORT_PRIVATE EncoderStreamErrorDelegate {
+  class QUICHE_EXPORT EncoderStreamErrorDelegate {
    public:
     virtual ~EncoderStreamErrorDelegate() {}
 
@@ -106,6 +106,9 @@ class QUIC_EXPORT_PRIVATE QpackDecoder
     return header_table_.dynamic_table_entry_referenced();
   }
 
+  // Flush buffered data on the decoder stream.
+  void FlushDecoderStream();
+
  private:
   EncoderStreamErrorDelegate* const encoder_stream_error_delegate_;
   QpackEncoderStreamReceiver encoder_stream_receiver_;
@@ -123,7 +126,7 @@ class QUIC_EXPORT_PRIVATE QpackDecoder
 };
 
 // QpackDecoder::EncoderStreamErrorDelegate implementation that does nothing.
-class QUIC_EXPORT_PRIVATE NoopEncoderStreamErrorDelegate
+class QUICHE_EXPORT NoopEncoderStreamErrorDelegate
     : public QpackDecoder::EncoderStreamErrorDelegate {
  public:
   ~NoopEncoderStreamErrorDelegate() override = default;

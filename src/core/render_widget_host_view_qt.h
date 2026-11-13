@@ -77,12 +77,14 @@ public:
     blink::mojom::PointerLockResult LockMouse(bool) override;
     blink::mojom::PointerLockResult ChangeMouseLock(bool) override;
     void UnlockMouse() override;
-    void UpdateCursor(const content::WebCursor&) override;
-    void DisplayCursor(const content::WebCursor&) override;
+    void UpdateCursor(const ui::Cursor&) override;
+    void DisplayCursor(const ui::Cursor&) override;
     content::CursorManager *GetCursorManager() override;
     void SetIsLoading(bool) override;
     void ImeCancelComposition() override;
-    void ImeCompositionRangeChanged(const gfx::Range&, const std::vector<gfx::Rect>&) override;
+    void ImeCompositionRangeChanged(const gfx::Range &,
+                                    const absl::optional<std::vector<gfx::Rect>> &,
+                                    const absl::optional<std::vector<gfx::Rect>> &) override;
     void RenderProcessGone() override;
     bool TransformPointToCoordSpaceForView(const gfx::PointF &point,
                                            content::RenderWidgetHostViewBase *target_view,
@@ -93,8 +95,7 @@ public:
     void WheelEventAck(const blink::WebMouseWheelEvent &event,
                        blink::mojom::InputEventResultState ack_result) override;
     void GestureEventAck(const blink::WebGestureEvent &event,
-                         blink::mojom::InputEventResultState ack_result,
-                         blink::mojom::ScrollResultDataPtr scroll_result_data) override;
+                         blink::mojom::InputEventResultState ack_result) override;
     content::MouseWheelPhaseHandler *GetMouseWheelPhaseHandler() override;
     viz::ScopedSurfaceIdAllocator DidUpdateVisualProperties(const cc::RenderFrameMetadata &metadata) override;
     void OnDidUpdateVisualPropertiesComplete(const cc::RenderFrameMetadata &metadata);
@@ -132,9 +133,10 @@ public:
     void SetWindowFrameInScreen(const gfx::Rect&) override { QT_NOT_YET_IMPLEMENTED }
 #endif // BUILDFLAG(IS_MAC)
     void NotifyHostAndDelegateOnWasShown(blink::mojom::RecordContentToVisibleTimeRequestPtr) override { QT_NOT_YET_IMPLEMENTED }
-    void RequestPresentationTimeFromHostOrDelegate(blink::mojom::RecordContentToVisibleTimeRequestPtr) override { QT_NOT_YET_IMPLEMENTED }
-    void CancelPresentationTimeRequestForHostAndDelegate() override { QT_NOT_YET_IMPLEMENTED }
-
+    void RequestSuccessfulPresentationTimeFromHostOrDelegate(blink::mojom::RecordContentToVisibleTimeRequestPtr) override {}
+    void CancelSuccessfulPresentationTimeRequestForHostAndDelegate() override {}
+    void InvalidateLocalSurfaceIdAndAllocationGroup() override {}
+    void OnRendererWidgetCreated() override;
 
     // Overridden from ui::GestureProviderClient.
     void OnGestureEvent(const ui::GestureEventData& gesture) override;

@@ -5,6 +5,7 @@
 #include "components/subresource_filter/core/common/indexed_ruleset.h"
 
 #include "base/check.h"
+#include "base/hash/hash.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
 #include "components/subresource_filter/core/common/first_party_origin.h"
@@ -21,23 +22,21 @@ using EmbedderConditionsMatcher =
     url_pattern_index::UrlPatternIndexMatcher::EmbedderConditionsMatcher;
 
 // A helper function to get the checksum on a data buffer.
-int LocalGetChecksum(const uint8_t* data, size_t size) {
-  uint32_t hash = base::PersistentHash(data, size);
+int LocalGetChecksum(base::span<const uint8_t> data) {
+  uint32_t hash = base::PersistentHash(data);
 
   // Strip off the sign bit since this needs to be persisted in preferences
   // which don't support unsigned ints.
   return static_cast<int>(hash & 0x7fffffff);
 }
 
-VerifyStatus GetVerifyStatus(const uint8_t* buffer,
-                             size_t size,
+VerifyStatus GetVerifyStatus(base::span<const uint8_t> buffer,
                              int expected_checksum) {
   // TODO(ericrobinson): Remove the verifier once we've updated the ruleset at
   // least once.  The verifier detects a subset of the errors detected by the
   // checksum, and is unneeded once expected_checksum is consistently nonzero.
-  flatbuffers::Verifier verifier(buffer, size);
-  if (expected_checksum != 0 &&
-      expected_checksum != LocalGetChecksum(buffer, size)) {
+  flatbuffers::Verifier verifier(buffer.data(), buffer.size());
+  if (expected_checksum != 0 && expected_checksum != LocalGetChecksum(buffer)) {
     return flat::VerifyIndexedRulesetBuffer(verifier)
                ? VerifyStatus::kChecksumFailVerifierPass
                : VerifyStatus::kChecksumFailVerifierFail;
@@ -54,12 +53,12 @@ VerifyStatus GetVerifyStatus(const uint8_t* buffer,
 
 // RulesetIndexer --------------------------------------------------------------
 
-const int RulesetIndexer::kIndexedFormatVersion = 35;
+const int RulesetIndexer::kIndexedFormatVersion = 36;
 
 // This static assert is meant to catch cases where
 // url_pattern_index::kUrlPatternIndexFormatVersion is incremented without
 // updating RulesetIndexer::kIndexedFormatVersion.
-static_assert(url_pattern_index::kUrlPatternIndexFormatVersion == 14,
+static_assert(url_pattern_index::kUrlPatternIndexFormatVersion == 15,
               "kUrlPatternIndexFormatVersion has changed, make sure you've "
               "also updated RulesetIndexer::kIndexedFormatVersion above.");
 
@@ -101,20 +100,19 @@ void RulesetIndexer::Finish() {
 }
 
 int RulesetIndexer::GetChecksum() const {
-  return LocalGetChecksum(data(), size());
+  return LocalGetChecksum(data());
 }
 
 // IndexedRulesetMatcher -------------------------------------------------------
 
 // static
-bool IndexedRulesetMatcher::Verify(const uint8_t* buffer,
-                                   size_t size,
+bool IndexedRulesetMatcher::Verify(base::span<const uint8_t> buffer,
                                    int expected_checksum) {
   TRACE_EVENT_BEGIN1(TRACE_DISABLED_BY_DEFAULT("loading"),
-                     "IndexedRulesetMatcher::Verify", "size", size);
+                     "IndexedRulesetMatcher::Verify", "size", buffer.size());
   SCOPED_UMA_HISTOGRAM_TIMER(
       "SubresourceFilter.IndexRuleset.Verify2.WallDuration");
-  VerifyStatus status = GetVerifyStatus(buffer, size, expected_checksum);
+  VerifyStatus status = GetVerifyStatus(buffer, expected_checksum);
   UMA_HISTOGRAM_ENUMERATION("SubresourceFilter.IndexRuleset.Verify.Status",
                             status);
   TRACE_EVENT_END1(TRACE_DISABLED_BY_DEFAULT("loading"),
@@ -124,8 +122,8 @@ bool IndexedRulesetMatcher::Verify(const uint8_t* buffer,
          status == VerifyStatus::kPassChecksumZero;
 }
 
-IndexedRulesetMatcher::IndexedRulesetMatcher(const uint8_t* buffer, size_t size)
-    : root_(flat::GetIndexedRuleset(buffer)),
+IndexedRulesetMatcher::IndexedRulesetMatcher(base::span<const uint8_t> buffer)
+    : root_(flat::GetIndexedRuleset(buffer.data())),
       blocklist_(root_->blocklist_index()),
       allowlist_(root_->allowlist_index()),
       deactivation_(root_->deactivation_index()) {}
@@ -138,7 +136,8 @@ bool IndexedRulesetMatcher::ShouldDisableFilteringForDocument(
       document_url, parent_document_origin, proto::ELEMENT_TYPE_UNSPECIFIED,
       activation_type,
       FirstPartyOrigin::IsThirdParty(document_url, parent_document_origin),
-      false, EmbedderConditionsMatcher(), FindRuleStrategy::kAny);
+      false, EmbedderConditionsMatcher(), FindRuleStrategy::kAny,
+      {} /* disabled_rule_ids */);
 }
 
 LoadPolicy IndexedRulesetMatcher::GetLoadPolicyForResourceLoad(
@@ -167,11 +166,11 @@ const url_pattern_index::flat::UrlRule* IndexedRulesetMatcher::MatchedUrlRule(
 
   auto find_match =
       [&](const url_pattern_index::UrlPatternIndexMatcher& matcher) {
-        return matcher.FindMatch(url, first_party.origin(), element_type,
-                                 proto::ACTIVATION_TYPE_UNSPECIFIED,
-                                 is_third_party, disable_generic_rules,
-                                 embedder_conditions_matcher,
-                                 FindRuleStrategy::kAny);
+        return matcher.FindMatch(
+            url, first_party.origin(), element_type,
+            proto::ACTIVATION_TYPE_UNSPECIFIED, is_third_party,
+            disable_generic_rules, embedder_conditions_matcher,
+            FindRuleStrategy::kAny, {} /* disabled_rule_ids */);
       };
 
   // Always check the allowlist for subdocuments. For other forms of resources,

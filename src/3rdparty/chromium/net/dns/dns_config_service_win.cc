@@ -6,22 +6,24 @@
 
 #include <sysinfoapi.h>
 
-#include <algorithm>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/free_deleter.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/ranges/algorithm.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -300,8 +302,7 @@ void ConfigureSuffixSearch(const WinDnsSystemSettings& settings,
   // behavior (see also ParseSearchList). If a suffix is not valid, it will be
   // discarded when the fully-qualified name is converted to DNS format.
 
-  unsigned num_dots = std::count(primary_suffix.begin(),
-                                 primary_suffix.end(), '.');
+  unsigned num_dots = base::ranges::count(primary_suffix, '.');
 
   for (size_t offset = 0; num_dots >= devolution.level.value(); --num_dots) {
     offset = primary_suffix.find('.', offset + 1);
@@ -309,7 +310,7 @@ void ConfigureSuffixSearch(const WinDnsSystemSettings& settings,
   }
 }
 
-absl::optional<std::vector<IPEndPoint>> GetNameServers(
+std::optional<std::vector<IPEndPoint>> GetNameServers(
     const IP_ADAPTER_ADDRESSES* adapter) {
   std::vector<IPEndPoint> nameservers;
   for (const IP_ADAPTER_DNS_SERVER_ADDRESS* address =
@@ -325,7 +326,7 @@ absl::optional<std::vector<IPEndPoint>> GetNameServers(
         ipe = IPEndPoint(ipe.address(), dns_protocol::kDefaultPort);
       nameservers.push_back(ipe);
     } else {
-      return absl::nullopt;
+      return std::nullopt;
     }
   }
   return nameservers;
@@ -353,7 +354,7 @@ bool CheckAndRecordCompatibility(bool have_name_resolution_policy,
 
 }  // namespace
 
-std::string ParseDomainASCII(base::WStringPiece widestr) {
+std::string ParseDomainASCII(std::wstring_view widestr) {
   if (widestr.empty())
     return "";
 
@@ -365,8 +366,9 @@ std::string ParseDomainASCII(base::WStringPiece widestr) {
   // Otherwise try to convert it from IDN to punycode.
   const int kInitialBufferSize = 256;
   url::RawCanonOutputT<char16_t, kInitialBufferSize> punycode;
-  if (!url::IDNToASCII(base::as_u16cstr(widestr), widestr.length(), &punycode))
+  if (!url::IDNToASCII(base::AsStringPiece16(widestr), &punycode)) {
     return "";
+  }
 
   // |punycode_output| should now be ASCII; convert it to a std::string.
   // (We could use UTF16ToASCII() instead, but that requires an extra string
@@ -379,7 +381,7 @@ std::string ParseDomainASCII(base::WStringPiece widestr) {
   return converted;
 }
 
-std::vector<std::string> ParseSearchList(base::WStringPiece value) {
+std::vector<std::string> ParseSearchList(std::wstring_view value) {
   if (value.empty())
     return {};
 
@@ -389,7 +391,7 @@ std::vector<std::string> ParseSearchList(base::WStringPiece value) {
   // Although nslookup and network connection property tab ignore such
   // fragments ("a,b,,c" becomes ["a", "b", "c"]), our reference is getaddrinfo
   // (which sees ["a", "b"]). WMI queries also return a matching search list.
-  for (base::WStringPiece t : base::SplitStringPiece(
+  for (std::wstring_view t : base::SplitStringPiece(
            value, L",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
     // Convert non-ASCII to punycode, although getaddrinfo does not properly
     // handle such suffixes.
@@ -401,7 +403,7 @@ std::vector<std::string> ParseSearchList(base::WStringPiece value) {
   return output;
 }
 
-absl::optional<DnsConfig> ConvertSettingsToDnsConfig(
+std::optional<DnsConfig> ConvertSettingsToDnsConfig(
     const WinDnsSystemSettings& settings) {
   bool uses_vpn = false;
   bool has_adapter_specific_nameservers = false;
@@ -422,10 +424,10 @@ absl::optional<DnsConfig> ConvertSettingsToDnsConfig(
       uses_vpn = true;
     }
 
-    absl::optional<std::vector<IPEndPoint>> nameservers =
+    std::optional<std::vector<IPEndPoint>> nameservers =
         GetNameServers(adapter);
     if (!nameservers)
-      return absl::nullopt;
+      return std::nullopt;
 
     if (!nameservers->empty() && (adapter->OperStatus == IfOperStatusUp)) {
       // Check if the |adapter| has adapter specific nameservers.
@@ -458,7 +460,7 @@ absl::optional<DnsConfig> ConvertSettingsToDnsConfig(
   }
 
   if (dns_config.nameservers.empty())
-    return absl::nullopt;  // No point continuing.
+    return std::nullopt;  // No point continuing.
 
   // Windows always tries a multi-label name "as is" before using suffixes.
   dns_config.ndots = 1;
@@ -592,15 +594,14 @@ class DnsConfigServiceWin::ConfigReader : public SerialWorker {
     ~WorkItem() override = default;
 
     void DoWork() override {
-      absl::optional<WinDnsSystemSettings> settings =
-          ReadWinSystemDnsSettings();
+      std::optional<WinDnsSystemSettings> settings = ReadWinSystemDnsSettings();
       if (settings.has_value())
         dns_config_ = ConvertSettingsToDnsConfig(settings.value());
     }
 
    private:
     friend DnsConfigServiceWin::ConfigReader;
-    absl::optional<DnsConfig> dns_config_;
+    std::optional<DnsConfig> dns_config_;
   };
 
   raw_ptr<DnsConfigServiceWin> service_;
@@ -644,7 +645,7 @@ class DnsConfigServiceWin::HostsReader : public DnsConfigService::HostsReader {
 
 DnsConfigServiceWin::DnsConfigServiceWin()
     : DnsConfigService(GetHostsPath().value(),
-                       absl::nullopt /* config_change_delay */) {
+                       std::nullopt /* config_change_delay */) {
   // Allow constructing on one sequence and living on another.
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }

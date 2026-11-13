@@ -22,9 +22,8 @@ class Source {
 };
 
 // Represents a draw call.
-// This is currently only used for drawing rect. But this (or something like
-// this) could potentially be also used for drawing logs etc.
-//
+// This is currently only used for drawing rects and positional text.
+
 class DrawCall {
   constructor(json) {
     // e.g. {"drawindex":"44", option":{"alpha":"1.000000","color":"#ffffff"}
@@ -32,7 +31,9 @@ class DrawCall {
     // "thread_id":"123456"}
     this.sourceIndex_ = parseInt(json.source_index);
     this.drawIndex_ = parseInt(json.drawindex);
-    this.threadId_ = parseInt(json.thread_id);
+    this.threadId_ =
+        parseInt(json.thread_id) || DrawFrame.demo_thread.thread_id;
+    this.text = json.text;
     this.size_ = {
       width: json.size[0],
       height: json.size[1],
@@ -46,7 +47,7 @@ class DrawCall {
       this.color_ = json.option.color;
       this.alpha_ = DrawCall.alphaIntToHex(json.option.alpha)
     }
-    this.buffer_id = json.buff_id;
+    this.buffer_id = json.buff_id || -1;
     if (json.uv_size && json.uv_pos) {
       this.uv_size = {
         width: json.uv_size[0],
@@ -151,15 +152,13 @@ class DrawCall {
 class Filter {
   static instances = [];
 
-  constructor(selector, action, index) {
+  constructor(enabled, selector, action, index) {
     this.selector_ = {
       filename: selector.filename,
       func: selector.func,
       anno: selector.anno,
     };
 
-    console.log(selector);
-    console.log(action);
     // XXX: If there are multiple selectors that apply to the same draw, then
     // I guess the newest filter will take effect.
     this.action_ = {
@@ -168,8 +167,7 @@ class Filter {
       alpha: action.alpha,
     };
 
-    // Enabled by default.
-    this.enabled_ = true;
+    this.enabled_ = enabled;
 
     if (index === undefined) {
       Filter.instances.push(this);
@@ -281,4 +279,3 @@ class Filter {
     Connection.sendMessage(message);
   }
 };
-

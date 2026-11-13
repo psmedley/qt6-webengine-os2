@@ -14,6 +14,7 @@
 
 #include "presence/implementation/advertisement_decoder.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -25,9 +26,11 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "internal/platform/logging.h"
+#include "internal/proto/credential.pb.h"
 #include "presence/data_element.h"
 #include "presence/implementation/action_factory.h"
 #include "presence/implementation/base_broadcast_request.h"
+#include "presence/implementation/ldt.h"
 
 namespace nearby {
 namespace presence {
@@ -62,9 +65,10 @@ bool IsDataElementAllowed(uint8_t header) {
     case DataElement::kProvisionedIdentityFieldType:
     case DataElement::kTrustedIdentityFieldType:
       return length >= 2 && length <= 6;
+    case DataElement::kTxPowerFieldType:
+      return length == 1;
     case DataElement::kActionFieldType:
-      // In v0 OTA format, this is a combined TX and Action DE.
-      return length >= 1 && length <= 5;
+      return length >= 1 && length <= 3;
     case DataElement::kModelIdFieldType:
       return length == 3;
     case DataElement::kEddystoneIdFieldType:
@@ -84,6 +88,25 @@ bool IsEncryptedIdentity(int data_type) {
   return data_type == DataElement::kPrivateIdentityFieldType ||
          data_type == DataElement::kTrustedIdentityFieldType ||
          data_type == DataElement::kProvisionedIdentityFieldType;
+}
+
+bool IsIdentity(int data_type) {
+  return data_type == DataElement::kPublicIdentityFieldType ||
+         IsEncryptedIdentity(data_type);
+}
+
+internal::IdentityType GetIdentityType(int data_type) {
+  switch (data_type) {
+    case DataElement::kPrivateIdentityFieldType:
+      return internal::IDENTITY_TYPE_PRIVATE;
+    case DataElement::kTrustedIdentityFieldType:
+      return internal::IDENTITY_TYPE_TRUSTED;
+    case DataElement::kProvisionedIdentityFieldType:
+      return internal::IDENTITY_TYPE_PROVISIONED;
+    case DataElement::kPublicIdentityFieldType:
+      return internal::IDENTITY_TYPE_PUBLIC;
+  }
+  return internal::IDENTITY_TYPE_UNSPECIFIED;
 }
 
 // Returns the real length of a DE in v0 advertisement, which may be larger than
@@ -132,57 +155,99 @@ absl::StatusOr<DataElement> ParseDataElement(const absl::string_view input,
   return DataElement(data_type, input.substr(start, length));
 }
 
-void DecodeBaseTxAndAction(absl::string_view serialized_action,
-                           std::vector<DataElement>& output) {
-  if (serialized_action.size() < sizeof(uint8_t) ||
-      serialized_action.size() > sizeof(uint8_t) + sizeof(uint32_t)) {
-    NEARBY_LOGS(WARNING) << "Base NP action \'"
-                         << absl::BytesToHexString(serialized_action)
-                         << "\' has wrong length " << serialized_action.size()
-                         << " , expected size in range [1 - 5]";
-    return;
-  }
-  // TX power.
-  uint8_t tx_power = serialized_action[0];
-  output.emplace_back(DataElement::kTxPowerFieldType, tx_power);
+bool Contains(const std::vector<DataElement>& data_elements,
+              const DataElement& data_element) {
+  return std::find(data_elements.begin(), data_elements.end(), data_element) !=
+         data_elements.end();
+}
 
-  // Action, 0-4 bytes in Big Endian order.
-  Action action = {.action = 0};
-  constexpr int kActionOffset = sizeof(uint8_t);
-  for (int i = 0; i < serialized_action.size() - kActionOffset; ++i) {
-    int offset = (sizeof(uint32_t) - 1 - i) * 8;
-    action.action |= serialized_action[i + kActionOffset] << offset;
+bool ContainsAll(const std::vector<DataElement>& data_elements,
+                 const std::vector<DataElement>& extended_properties) {
+  for (const auto& filter_element : extended_properties) {
+    if (!Contains(data_elements, filter_element)) {
+      return false;
+    }
   }
+  return true;
+}
 
-  ActionFactory::DecodeAction(action, output);
+bool ContainsAny(const std::vector<DataElement>& data_elements,
+                 const std::vector<int>& actions) {
+  if (actions.empty()) {
+    return true;
+  }
+  for (int action : actions) {
+    if (Contains(data_elements, DataElement(ActionBit(action)))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace
 
+void AdvertisementDecoder::DecodeBaseAction(
+    absl::string_view serialized_action) {
+  if (serialized_action.empty() || serialized_action.size() > 3) {
+    NEARBY_LOGS(WARNING) << "Base NP action \'"
+                         << absl::BytesToHexString(serialized_action)
+                         << "\' has wrong length " << serialized_action.size()
+                         << " , expected size in range [1 - 3]";
+    return;
+  }
+  // Action, 0-2 bytes in Big Endian order.
+  Action action = {.action = 0};
+  for (int i = 0; i < serialized_action.size(); ++i) {
+    int offset = (sizeof(uint32_t) - 1 - i) * 8;
+    action.action |= serialized_action[i] << offset;
+  }
+
+  ActionFactory::DecodeAction(action, decoded_advertisement_.data_elements);
+}
+
+absl::StatusOr<std::string> AdvertisementDecoder::DecryptLdt(
+    const std::vector<internal::SharedCredential>& credentials,
+    absl::string_view salt, absl::string_view data_elements) {
+  if (credentials.empty()) {
+    return absl::UnavailableError("No credentials");
+  }
+  for (const auto& credential : credentials) {
+    absl::StatusOr<LdtEncryptor> encryptor = LdtEncryptor::Create(
+        credential.key_seed(),
+        credential.metadata_encryption_key_tag_v0());
+    if (encryptor.ok()) {
+      absl::StatusOr<std::string> result =
+          encryptor->DecryptAndVerify(data_elements, salt);
+      if (result.ok() && result->size() > kBaseMetadataSize) {
+        decoded_advertisement_.public_credential = credential;
+        decoded_advertisement_.metadata_key =
+            result->substr(0, kBaseMetadataSize);
+        return result->substr(kBaseMetadataSize);
+      }
+    }
+  }
+  return absl::UnavailableError(
+      "Couldn't decrypt the message with any credentials");
+}
+
 absl::Status AdvertisementDecoder::DecryptDataElements(
-    const DataElement& elem, std::vector<DataElement>& result) {
+    const DataElement& elem) {
   if (elem.GetValue().size() <= kEncryptedIdentityAdditionalLength) {
     return absl::OutOfRangeError(absl::StrFormat(
         "Encrypted identity data element is too short - %d bytes",
         elem.GetValue().size()));
   }
   absl::string_view salt = elem.GetValue().substr(0, kSaltSize);
-  result.emplace_back(DataElement::kSaltFieldType, salt);
+  decoded_advertisement_.data_elements.emplace_back(DataElement::kSaltFieldType,
+                                                    salt);
   absl::string_view encrypted = elem.GetValue().substr(kSaltSize);
-  absl::StatusOr<std::string> decrypted =
-      credential_manager_.DecryptDataElements(salt, encrypted);
+  absl::StatusOr<std::string> decrypted = Decrypt(salt, encrypted);
   if (!decrypted.ok()) {
     NEARBY_LOGS(WARNING) << "Failed to decrypt advertisement, status: "
                          << decrypted.status();
     return decrypted.status();
   }
-  if (decrypted->size() <= kBaseMetadataSize) {
-    return absl::OutOfRangeError(absl::StrFormat(
-        "Decrypted identity DE is too short - %d bytes. Expected more than %d",
-        decrypted->size(), kBaseMetadataSize));
-  }
-  result.emplace_back(elem.GetType(), decrypted->substr(0, kBaseMetadataSize));
-  size_t index = kBaseMetadataSize;
+  size_t index = 0;
   while (index < decrypted->size()) {
     absl::StatusOr<DataElement> internal_elem =
         ParseDataElement(*decrypted, index);
@@ -192,20 +257,77 @@ absl::Status AdvertisementDecoder::DecryptDataElements(
       return internal_elem.status();
     }
     if (internal_elem->GetType() == DataElement::kActionFieldType) {
-      // In v0 OTA format, this is a combined TX and Action DE.
-      DecodeBaseTxAndAction(internal_elem->GetValue(), result);
+      DecodeBaseAction(internal_elem->GetValue());
     } else {
-      result.push_back(*std::move(internal_elem));
+      decoded_advertisement_.data_elements.push_back(*std::move(internal_elem));
     }
   }
   return absl::OkStatus();
 }
 
-absl::StatusOr<std::vector<DataElement>>
-AdvertisementDecoder::DecodeAdvertisement(absl::string_view advertisement) {
+absl::StatusOr<std::string> AdvertisementDecoder::Decrypt(
+    absl::string_view salt, absl::string_view encrypted) {
+  for (const auto& scan_filter : scan_request_.scan_filters) {
+    if (!absl::holds_alternative<LegacyPresenceScanFilter>(scan_filter)) {
+      continue;
+    }
+    const std::vector<nearby::internal::SharedCredential>& credentials =
+        absl::get<LegacyPresenceScanFilter>(scan_filter)
+            .remote_public_credentials;
+    if (credentials.empty()) {
+      continue;
+    }
+    absl::StatusOr<std::string> decrypted =
+        DecryptLdt(credentials, salt, encrypted);
+    if (decrypted.ok()) {
+      return decrypted;
+    }
+  }
+  if (credentials_ == nullptr) {
+    return absl::FailedPreconditionError("Missing credentials");
+  }
+
+  return DecryptLdt((*credentials_)[decoded_advertisement_.identity_type], salt,
+                    encrypted);
+}
+
+void AdvertisementDecoder::AddBannedDataTypes() {
+  // The scan request has information what identity types the client is
+  // interested in. We'll ban all other idenitity data types.
+  banned_data_types_ = {DataElement::kPrivateIdentityFieldType,
+                        DataElement::kTrustedIdentityFieldType,
+                        DataElement::kPublicIdentityFieldType,
+                        DataElement::kProvisionedIdentityFieldType};
+  for (nearby::internal::IdentityType identity_type :
+       scan_request_.identity_types) {
+    switch (identity_type) {
+      case internal::IDENTITY_TYPE_PRIVATE:
+        banned_data_types_.erase(DataElement::kPrivateIdentityFieldType);
+        break;
+      case internal::IDENTITY_TYPE_TRUSTED:
+        banned_data_types_.erase(DataElement::kTrustedIdentityFieldType);
+        break;
+      case internal::IDENTITY_TYPE_PUBLIC:
+        banned_data_types_.erase(DataElement::kPublicIdentityFieldType);
+        break;
+      case internal::IDENTITY_TYPE_PROVISIONED:
+        banned_data_types_.erase(DataElement::kProvisionedIdentityFieldType);
+        break;
+      default:
+        // Nothing to do
+        break;
+    }
+  }
+}
+
+absl::StatusOr<Advertisement> AdvertisementDecoder::DecodeAdvertisement(
+    absl::string_view advertisement) {
+  // Let's keep the result advertisement in a member variable to avoid passing
+  // it around all the time.
+  decoded_advertisement_ = Advertisement{};
   std::vector<DataElement> result;
-  NEARBY_LOGS(VERBOSE) << "Advertisement: "
-                       << absl::BytesToHexString(advertisement);
+  NEARBY_LOGS(INFO) << "Advertisement: "
+                    << absl::BytesToHexString(advertisement);
   if (advertisement.empty()) {
     return absl::OutOfRangeError("Empty advertisement");
   }
@@ -215,6 +337,7 @@ AdvertisementDecoder::DecodeAdvertisement(absl::string_view advertisement) {
     return absl::UnimplementedError(absl::StrFormat(
         "Advertisement version (%d) is not supported", version));
   }
+  decoded_advertisement_.version = version;
   size_t index = 1;
   absl::StatusOr<std::string> decrypted;
   while (index < advertisement.size()) {
@@ -224,21 +347,89 @@ AdvertisementDecoder::DecodeAdvertisement(absl::string_view advertisement) {
                            << elem.status();
       return elem.status();
     }
+    // This checks allows us to bail before decryption when, for example, the
+    // client is scanning for advertisements with private identity but the
+    // advertisement uses trusted identity.
+    if (banned_data_types_.contains(elem->GetType())) {
+      return absl::FailedPreconditionError(
+          absl::StrFormat("Ignoring advertisement with data element type: %d",
+                          elem->GetType()));
+    }
+    if (IsIdentity(elem->GetType())) {
+      decoded_advertisement_.identity_type = GetIdentityType(elem->GetType());
+    }
     if (IsEncryptedIdentity(elem->GetType())) {
-      absl::Status status = DecryptDataElements(*elem, result);
+      absl::Status status = DecryptDataElements(*elem);
       if (!status.ok()) {
         return status;
       }
     } else {
       if (elem->GetType() == DataElement::kActionFieldType) {
-        // In v0 OTA format, this is a combined TX and Action DE.
-        DecodeBaseTxAndAction(elem->GetValue(), result);
+        DecodeBaseAction(elem->GetValue());
       } else {
-        result.push_back(*std::move(elem));
+        decoded_advertisement_.data_elements.push_back(*std::move(elem));
       }
     }
   }
-  return result;
+  return std::move(decoded_advertisement_);
+}
+
+bool AdvertisementDecoder::MatchesScanFilter(
+    const std::vector<DataElement>& data_elements) {
+  // The advertisement matches the scan request when it matches at least
+  // one of the filters in the request.
+  if (scan_request_.scan_filters.empty()) {
+    return true;
+  }
+  for (const auto& filter : scan_request_.scan_filters) {
+    if (absl::holds_alternative<PresenceScanFilter>(filter)) {
+      if (MatchesScanFilter(data_elements,
+                            absl::get<PresenceScanFilter>(filter))) {
+        return true;
+      }
+    } else if (absl::holds_alternative<LegacyPresenceScanFilter>(filter)) {
+      if (MatchesScanFilter(data_elements,
+                            absl::get<LegacyPresenceScanFilter>(filter))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool AdvertisementDecoder::MatchesScanFilter(
+    const std::vector<DataElement>& data_elements,
+    const PresenceScanFilter& filter) {
+  // The advertisement must contain all Data Elements in scan request.
+  return ContainsAll(data_elements, filter.extended_properties);
+}
+
+bool AdvertisementDecoder::MatchesScanFilter(
+    const std::vector<DataElement>& data_elements,
+    const LegacyPresenceScanFilter& filter) {
+  // The advertisement must:
+  // * contain any Action from scan request,
+  // * contain all Data Elements in scan request.
+  return ContainsAny(data_elements, filter.actions) &&
+         ContainsAll(data_elements, filter.extended_properties);
+}
+
+std::vector<CredentialSelector> AdvertisementDecoder::GetCredentialSelectors(
+    const ScanRequest& scan_request) {
+  std::vector<IdentityType> all_types = {
+      IdentityType::IDENTITY_TYPE_PRIVATE, IdentityType::IDENTITY_TYPE_TRUSTED,
+      IdentityType::IDENTITY_TYPE_PUBLIC,
+      IdentityType::IDENTITY_TYPE_PROVISIONED};
+  std::vector<CredentialSelector> selectors;
+  for (auto identity_type :
+       (scan_request.identity_types.empty() ? all_types
+                                            : scan_request.identity_types)) {
+    selectors.push_back(
+        CredentialSelector{.manager_app_id = scan_request.manager_app_id,
+                           .account_name = scan_request.account_name,
+                           .identity_type = identity_type});
+  }
+  return selectors;
 }
 
 }  // namespace presence

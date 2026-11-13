@@ -46,51 +46,51 @@ import {TargetManager} from './TargetManager.js';
 
 const UIStrings = {
   /**
-  *@description Service worker running status displayed in the Service Workers view in the Application panel
-  */
+   *@description Service worker running status displayed in the Service Workers view in the Application panel
+   */
   running: 'running',
   /**
-  *@description Service worker running status displayed in the Service Workers view in the Application panel
-  */
+   *@description Service worker running status displayed in the Service Workers view in the Application panel
+   */
   starting: 'starting',
   /**
-  *@description Service worker running status displayed in the Service Workers view in the Application panel
-  */
+   *@description Service worker running status displayed in the Service Workers view in the Application panel
+   */
   stopped: 'stopped',
   /**
-  *@description Service worker running status displayed in the Service Workers view in the Application panel
-  */
+   *@description Service worker running status displayed in the Service Workers view in the Application panel
+   */
   stopping: 'stopping',
   /**
-  *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
-  */
+   *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
+   */
   activated: 'activated',
   /**
-  *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
-  */
+   *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
+   */
   activating: 'activating',
   /**
-  *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
-  */
+   *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
+   */
   installed: 'installed',
   /**
-  *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
-  */
+   *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
+   */
   installing: 'installing',
   /**
-  *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
-  */
+   *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
+   */
   new: 'new',
   /**
-  *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
-  */
+   *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
+   */
   redundant: 'redundant',
   /**
-  *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
-  *@example {sw.js} PH1
-  *@example {117} PH2
-  *@example {activated} PH3
-  */
+   *@description Service worker version status displayed in the Threads view of the Debugging side pane in the Sources panel
+   *@example {sw.js} PH1
+   *@example {117} PH2
+   *@example {activated} PH3
+   */
   sSS: '{PH1} #{PH2} ({PH3})',
 };
 const str_ = i18n.i18n.registerUIStrings('core/sdk/ServiceWorkerManager.ts', UIStrings);
@@ -300,9 +300,7 @@ export class ServiceWorkerManager extends SDKModel<EventTypes> {
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   RegistrationUpdated = 'RegistrationUpdated',
   RegistrationErrorAdded = 'RegistrationErrorAdded',
   RegistrationDeleted = 'RegistrationDeleted',
@@ -362,6 +360,17 @@ export class ServiceWorkerVersionState {
   }
 }
 
+export class ServiceWorkerRouterRule {
+  condition: string;
+  source: string;
+  id: number;
+  constructor(condition: string, source: string, id: number) {
+    this.condition = condition;
+    this.source = source;
+    this.id = id;
+  }
+}
+
 export class ServiceWorkerVersion {
   id!: string;
   scriptURL!: Platform.DevToolsPath.UrlString;
@@ -371,6 +380,7 @@ export class ServiceWorkerVersion {
   scriptResponseTime!: number|undefined;
   controlledClients!: Protocol.Target.TargetID[];
   targetId!: string|null;
+  routerRules!: ServiceWorkerRouterRule[]|null;
   currentState!: ServiceWorkerVersionState;
   registration: ServiceWorkerRegistration;
   constructor(registration: ServiceWorkerRegistration, payload: Protocol.ServiceWorker.ServiceWorkerVersion) {
@@ -393,6 +403,10 @@ export class ServiceWorkerVersion {
       this.controlledClients = [];
     }
     this.targetId = payload.targetId || null;
+    this.routerRules = null;
+    if (payload.routerRules) {
+      this.routerRules = this.parseJSONRules(payload.routerRules);
+    }
   }
 
   isStartable(): boolean {
@@ -464,6 +478,29 @@ export class ServiceWorkerVersion {
     }
     return ServiceWorkerVersion.Modes.Redundant;
   }
+
+  private parseJSONRules(input: string): ServiceWorkerRouterRule[]|null {
+    try {
+      const parsedObject = JSON.parse(input);
+      if (!Array.isArray(parsedObject)) {
+        console.error('Parse error: `routerRules` in ServiceWorkerVersion should be an array');
+        return null;
+      }
+      const routerRules: ServiceWorkerRouterRule[] = [];
+      for (const parsedRule of parsedObject) {
+        const {condition, source, id} = parsedRule;
+        if (condition === undefined || source === undefined || id === undefined) {
+          console.error('Parse error: Missing some fields of `routerRules` in ServiceWorkerVersion');
+          return null;
+        }
+        routerRules.push(new ServiceWorkerRouterRule(JSON.stringify(condition), JSON.stringify(source), id));
+      }
+      return routerRules;
+    } catch (e) {
+      console.error('Parse error: Invalid `routerRules` in ServiceWorkerVersion');
+      return null;
+    }
+  }
 }
 
 export namespace ServiceWorkerVersion {
@@ -483,9 +520,7 @@ export namespace ServiceWorkerVersion {
     [Protocol.ServiceWorker.ServiceWorkerVersionStatus.Redundant]: i18nLazyString(UIStrings.redundant),
   };
 
-  // TODO(crbug.com/1167717): Make this a const enum again
-  // eslint-disable-next-line rulesdir/const_enum
-  export enum Modes {
+  export const enum Modes {
     Installing = 'installing',
     Waiting = 'waiting',
     Active = 'active',

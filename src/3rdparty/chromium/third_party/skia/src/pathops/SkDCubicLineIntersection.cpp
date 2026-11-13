@@ -7,6 +7,7 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkTypes.h"
+#include "include/private/base/SkDebug.h"
 #include "src/pathops/SkIntersections.h"
 #include "src/pathops/SkPathOpsCubic.h"
 #include "src/pathops/SkPathOpsCurve.h"
@@ -310,8 +311,8 @@ public:
             if (fIntersections->hasOppT(lineT)) {
                 continue;
             }
-            double cubicT = ((SkDCurve*) &fCubic)->nearPoint(SkPath::kCubic_Verb,
-                fLine[lIndex], fLine[!lIndex]);
+            double cubicT = ((const SkDCurve*)&fCubic)
+                                    ->nearPoint(SkPath::kCubic_Verb, fLine[lIndex], fLine[!lIndex]);
             if (cubicT < 0) {
                 continue;
             }

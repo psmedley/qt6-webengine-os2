@@ -1,6 +1,7 @@
 # ~~~
-# Copyright (c) 2014-2022 Valve Corporation
-# Copyright (c) 2014-2022 LunarG, Inc.
+# Copyright (c) 2014-2024 Valve Corporation
+# Copyright (c) 2014-2024 LunarG, Inc.
+# Copyright (c) 2023-2023 RasterGrid Kft.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,374 +16,415 @@
 # limitations under the License.
 # ~~~
 
-if(WIN32)
-    add_definitions(-DVK_USE_PLATFORM_WIN32_KHR -DVK_USE_PLATFORM_WIN32_KHX -DWIN32_LEAN_AND_MEAN)
-    add_custom_target(mk_layer_config_dir ALL
-                      COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>)
-    set_target_properties(mk_layer_config_dir PROPERTIES FOLDER ${LAYERS_HELPER_FOLDER})
-elseif(ANDROID)
-    add_definitions(-DVK_USE_PLATFORM_ANDROID_KHR -DVK_USE_PLATFORM_ANDROID_KHX)
-elseif(APPLE)
-    add_definitions(-DVK_USE_PLATFORM_MACOS_MVK -DVK_USE_PLATFORM_METAL_EXT)
-    if(CMAKE_GENERATOR MATCHES "^Xcode.*")
-        add_custom_target(mk_layer_config_dir ALL
-                          COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>)
-    endif()
-elseif(UNIX AND NOT APPLE) # i.e. Linux
-    if(BUILD_WSI_XCB_SUPPORT)
-        add_definitions(-DVK_USE_PLATFORM_XCB_KHR -DVK_USE_PLATFORM_XCB_KHX)
-    endif()
+# This variable enables downstream users to customize the CMake targets
+# based on the target API variant (e.g. Vulkan SC)
+set(LAYER_NAME "VkLayer_khronos_validation")
 
-    if(BUILD_WSI_XLIB_SUPPORT)
-        add_definitions(-DVK_USE_PLATFORM_XLIB_KHR -DVK_USE_PLATFORM_XLIB_KHX -DVK_USE_PLATFORM_XLIB_XRANDR_EXT)
-    endif()
+add_library(VkLayer_utils STATIC)
+target_sources(VkLayer_utils PRIVATE
+    containers/custom_containers.h
+    error_message/logging.h
+    error_message/logging.cpp
+    error_message/error_location.cpp
+    error_message/error_location.h
+    error_message/record_object.h
+    external/xxhash.h
+    ${API_TYPE}/generated/error_location_helper.cpp
+    ${API_TYPE}/generated/error_location_helper.h
+    ${API_TYPE}/generated/feature_requirements_helper.cpp
+    ${API_TYPE}/generated/feature_requirements_helper.h
+    ${API_TYPE}/generated/pnext_chain_extraction.cpp
+    ${API_TYPE}/generated/pnext_chain_extraction.h
+    ${API_TYPE}/generated/vk_function_pointers.cpp
+    ${API_TYPE}/generated/vk_function_pointers.h
+    ${API_TYPE}/generated/vk_validation_error_messages.h
+    ${API_TYPE}/generated/vk_layer_dispatch_table.h
+    ${API_TYPE}/generated/vk_dispatch_table_helper.h
+    ${API_TYPE}/generated/vk_dispatch_table_helper.cpp
+    ${API_TYPE}/generated/vk_safe_struct.h
+    ${API_TYPE}/generated/vk_safe_struct_utils.cpp
+    ${API_TYPE}/generated/vk_safe_struct_core.cpp
+    ${API_TYPE}/generated/vk_safe_struct_khr.cpp
+    ${API_TYPE}/generated/vk_safe_struct_ext.cpp
+    ${API_TYPE}/generated/vk_safe_struct_vendor.cpp
+    ${API_TYPE}/generated/vk_object_types.h
+    ${API_TYPE}/generated/vk_api_version.h
+    ${API_TYPE}/generated/vk_extension_helper.h
+    utils/cast_utils.h
+    utils/convert_utils.cpp
+    utils/convert_utils.h
+    utils/hash_util.h
+    utils/hash_util.cpp
+    utils/hash_vk_types.h
+    utils/image_layout_utils.h
+    utils/image_layout_utils.cpp
+    utils/vk_layer_extension_utils.cpp
+    utils/vk_layer_extension_utils.h
+    utils/ray_tracing_utils.cpp
+    utils/ray_tracing_utils.h
+    utils/vk_layer_utils.cpp
+    utils/vk_layer_utils.h
+    vk_layer_config.h
+    vk_layer_config.cpp
+)
 
-    if(BUILD_WSI_WAYLAND_SUPPORT)
-        add_definitions(-DVK_USE_PLATFORM_WAYLAND_KHR -DVK_USE_PLATFORM_WAYLAND_KHX)
-    endif()
-else()
-    message(FATAL_ERROR "Unsupported Platform!")
+target_link_libraries(VkLayer_utils PUBLIC
+    Vulkan::Headers
+    Vulkan::LayerSettings
+    Vulkan::UtilityHeaders
+    ${CMAKE_DL_LIBS}
+)
+target_include_directories(VkLayer_utils SYSTEM PRIVATE external)
+target_include_directories(VkLayer_utils PUBLIC . ${API_TYPE})
+
+find_package(robin_hood CONFIG)
+option(USE_ROBIN_HOOD_HASHING "robin_hood provides faster versions of std::unordered_map and std::unordered_set" ${robin_hood_FOUND})
+if (USE_ROBIN_HOOD_HASHING)
+    target_link_libraries(VkLayer_utils PUBLIC robin_hood::robin_hood)
+    target_compile_definitions(VkLayer_utils PUBLIC USE_ROBIN_HOOD_HASHING)
 endif()
 
-# XXH_NO_LONG_LONG: removes compilation of algorithms relying on 64-bit types (XXH3 and XXH64). Only XXH32 will be compiled.
-# We only need XXH32 due to restrictions requiring a 32 bit hash. This also reduces binary size.
-#
-# v0.8.1 also has compilation issues that are removed by setting this define.
-# https://github.com/KhronosGroup/Vulkan-ValidationLayers/pull/4639
-# https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/4640
-add_definitions(-DXXH_NO_LONG_LONG)
-
-# Configure installation of source files that are dependencies of other repos.
-if(BUILD_LAYER_SUPPORT_FILES)
-    set(LAYER_UTIL_FILES
-        cast_utils.h
-        hash_util.h
-        hash_vk_types.h
-        vk_layer_config.h
-        vk_layer_config.cpp
-        vk_layer_data.h
-        vk_layer_extension_utils.h
-        vk_layer_extension_utils.cpp
-        vk_layer_logging.h
-        vk_layer_utils.h
-        vk_layer_utils.cpp
-        xxhash.h
-        xxhash.c
-        generated/vk_format_utils.h
-        generated/vk_format_utils.cpp
-        generated/vk_validation_error_messages.h
-        generated/vk_layer_dispatch_table.h
-        generated/vk_dispatch_table_helper.h
-        generated/vk_safe_struct.h
-        generated/vk_safe_struct.cpp
-        generated/vk_enum_string_helper.h
-        generated/vk_object_types.h
-        generated/vk_extension_helper.h
-        generated/vk_typemap_helper.h)
-    install(FILES ${LAYER_UTIL_FILES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/vulkan)
+# Using mimalloc on non-Windows OSes currently results in unit test instability with some
+# OS version / driver combinations. On 32-bit systems, using mimalloc cause an increase in
+# the amount of virtual address space needed, which can also cause stability problems.
+if (WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+   find_package(mimalloc CONFIG)
+   option(USE_MIMALLOC "Use mimalloc, a fast malloc/free replacement library" ${mimalloc_FOUND})
+   if (USE_MIMALLOC)
+      target_compile_definitions(VkLayer_utils PUBLIC USE_MIMALLOC)
+      target_link_libraries(VkLayer_utils PUBLIC mimalloc-static)
+   endif()
 endif()
 
-set(TARGET_NAMES
-    VkLayer_khronos_validation)
+if(${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
+    target_compile_options(VkLayer_utils PRIVATE
+        -Wno-sign-conversion
+        -Wno-implicit-int-conversion
+    )
+elseif(MSVC)
+    target_compile_options(VkLayer_utils PRIVATE
+        /wd4324 # padding
+        /wd4458 # hiding class member
+        /wd4457 # hiding function parameter
+        /wd4702 # unreachable code
+        /wd4389 # signed/unsigned mismatch
+    )
+endif()
 
-# System-specific macro to create a library target.
-macro(AddVkLayer target LAYER_COMPILE_DEFINITIONS)
-    add_library(VkLayer_${target} SHARED ${ARGN})
-    set_target_properties(VkLayer_${target} PROPERTIES CXX_STANDARD ${VVL_CPP_STANDARD})
-    target_compile_definitions(VkLayer_${target} PUBLIC ${LAYER_COMPILE_DEFINITIONS})
-    target_link_libraries(VkLayer_${target} PRIVATE VkLayer_utils)
+add_library(vvl MODULE)
 
-    if (VVL_ENABLE_ASAN)
-        target_compile_options(VkLayer_${target} PRIVATE -fsanitize=address)
-        # NOTE: Use target_link_options when cmake 3.13 is available on CI
-        target_link_libraries(VkLayer_${target} PRIVATE "-fsanitize=address")
-    endif()
+target_sources(vvl PRIVATE
+    best_practices/best_practices_error_enums.h
+    best_practices/best_practices_utils.cpp
+    best_practices/bp_buffer.cpp
+    best_practices/bp_cmd_buffer.cpp
+    best_practices/bp_cmd_buffer_nv.cpp
+    best_practices/bp_copy_blit_resolve.cpp
+    best_practices/bp_descriptor.cpp
+    best_practices/bp_device_memory.cpp
+    best_practices/bp_drawdispatch.cpp
+    best_practices/bp_framebuffer.cpp
+    best_practices/bp_image.cpp
+    best_practices/bp_instance_device.cpp
+    best_practices/bp_pipeline.cpp
+    best_practices/bp_ray_tracing.cpp
+    best_practices/bp_render_pass.cpp
+    best_practices/bp_synchronization.cpp
+    best_practices/bp_video.cpp
+    best_practices/bp_wsi.cpp
+    best_practices/best_practices_validation.h
+    containers/qfo_transfer.h
+    containers/range_vector.h
+    containers/sparse_containers.h
+    containers/subresource_adapter.cpp
+    containers/subresource_adapter.h
+    core_checks/cc_android.cpp
+    core_checks/cc_buffer.cpp
+    core_checks/cc_buffer_address.h
+    core_checks/cc_cmd_buffer_dynamic.cpp
+    core_checks/cc_cmd_buffer.cpp
+    core_checks/cc_copy_blit_resolve.cpp
+    core_checks/core_validation.h
+    core_checks/cc_descriptor.cpp
+    core_checks/cc_device.cpp
+    core_checks/cc_device_memory.cpp
+    core_checks/cc_drawdispatch.cpp
+    core_checks/cc_external_object.cpp
+    core_checks/cc_image.cpp
+    core_checks/cc_image_layout.cpp
+    core_checks/cc_pipeline_compute.cpp
+    core_checks/cc_pipeline_graphics.cpp
+    core_checks/cc_pipeline_ray_tracing.cpp
+    core_checks/cc_pipeline.cpp
+    core_checks/cc_query.cpp
+    core_checks/cc_queue.cpp
+    core_checks/cc_ray_tracing.cpp
+    core_checks/cc_render_pass.cpp
+    core_checks/cc_spirv.cpp
+    core_checks/cc_shader_interface.cpp
+    core_checks/cc_shader_object.cpp
+    core_checks/cc_synchronization.cpp
+    core_checks/cc_video.cpp
+    core_checks/cc_wsi.cpp
+    core_checks/cc_ycbcr.cpp
+    drawdispatch/descriptor_validator.cpp
+    drawdispatch/drawdispatch_vuids.cpp
+    external/vma/vma.h
+    external/vma/vma.cpp
+    ${API_TYPE}/generated/best_practices.cpp
+    ${API_TYPE}/generated/best_practices.h
+    ${API_TYPE}/generated/chassis.cpp
+    ${API_TYPE}/generated/valid_enum_values.cpp
+    ${API_TYPE}/generated/valid_enum_values.h
+    ${API_TYPE}/generated/command_validation.cpp
+    ${API_TYPE}/generated/dynamic_state_helper.cpp
+    ${API_TYPE}/generated/dynamic_state_helper.h
+    ${API_TYPE}/generated/enum_flag_bits.h
+    ${API_TYPE}/generated/layer_chassis_dispatch.cpp
+    layer_chassis_dispatch_manual.cpp
+    ${API_TYPE}/generated/object_tracker.cpp
+    ${API_TYPE}/generated/object_tracker.h
+    ${API_TYPE}/generated/spirv_grammar_helper.cpp
+    ${API_TYPE}/generated/spirv_validation_helper.cpp
+    ${API_TYPE}/generated/state_tracker_helper.cpp
+    ${API_TYPE}/generated/state_tracker_helper.h
+    ${API_TYPE}/generated/stateless_validation_helper.cpp
+    ${API_TYPE}/generated/stateless_validation_helper.h
+    ${API_TYPE}/generated/sync_validation_types.cpp
+    ${API_TYPE}/generated/thread_safety.cpp
+    ${API_TYPE}/generated/thread_safety_commands.h
+    ${API_TYPE}/generated/thread_safety_counter_bodies.h
+    ${API_TYPE}/generated/thread_safety_counter_definitions.h
+    ${API_TYPE}/generated/thread_safety_counter_instances.h
+    ${API_TYPE}/generated/vk_safe_struct_utils.cpp
+    ${API_TYPE}/generated/vk_safe_struct_core.cpp
+    ${API_TYPE}/generated/vk_safe_struct_khr.cpp
+    ${API_TYPE}/generated/vk_safe_struct_ext.cpp
+    ${API_TYPE}/generated/vk_safe_struct_vendor.cpp
+    ${API_TYPE}/generated/vk_safe_struct.h
+    gpu_validation/debug_printf.cpp
+    gpu_validation/debug_printf.h
+    gpu_validation/gpu_descriptor_set.cpp
+    gpu_validation/gpu_descriptor_set.h
+    gpu_validation/gpu_error_message.cpp
+    gpu_validation/gpu_error_message.h
+    gpu_validation/gpu_image_layout.cpp
+    gpu_validation/gpu_state_tracker.cpp
+    gpu_validation/gpu_state_tracker.h
+    gpu_validation/gpu_subclasses.cpp
+    gpu_validation/gpu_subclasses.h
+    gpu_validation/gpu_record.cpp
+    gpu_validation/gpu_setup.cpp
+    gpu_validation/gpu_validation.cpp
+    gpu_validation/gpu_validation.h
+    gpu_validation/gpu_vuids.cpp
+    gpu_validation/gpu_vuids.h
+    gpu_shaders/gpu_shaders_constants.h
+    object_tracker/object_lifetime_validation.h
+    object_tracker/object_tracker_utils.cpp
+    state_tracker/buffer_state.cpp
+    state_tracker/buffer_state.h
+    state_tracker/cmd_buffer_state.cpp
+    state_tracker/cmd_buffer_state.h
+    state_tracker/descriptor_sets.cpp
+    state_tracker/descriptor_sets.h
+    state_tracker/device_memory_state.cpp
+    state_tracker/device_memory_state.h
+    state_tracker/device_state.h
+    state_tracker/fence_state.cpp
+    state_tracker/fence_state.h
+    state_tracker/image_layout_map.cpp
+    state_tracker/image_layout_map.h
+    state_tracker/image_state.cpp
+    state_tracker/image_state.h
+    state_tracker/pipeline_layout_state.cpp
+    state_tracker/pipeline_layout_state.h
+    state_tracker/pipeline_state.cpp
+    state_tracker/pipeline_state.h
+    state_tracker/pipeline_sub_state.cpp
+    state_tracker/pipeline_sub_state.h
+    state_tracker/query_state.h
+    state_tracker/semaphore_state.cpp
+    state_tracker/semaphore_state.h
+    state_tracker/state_object.cpp
+    state_tracker/state_object.h
+    state_tracker/queue_state.cpp
+    state_tracker/queue_state.h
+    state_tracker/ray_tracing_state.h
+    state_tracker/render_pass_state.cpp
+    state_tracker/render_pass_state.h
+    state_tracker/sampler_state.h
+    state_tracker/shader_instruction.cpp
+    state_tracker/shader_instruction.h
+    state_tracker/shader_module.cpp
+    state_tracker/shader_module.h
+    state_tracker/shader_object_state.cpp
+    state_tracker/shader_object_state.h
+    state_tracker/state_tracker.cpp
+    state_tracker/state_tracker.h
+    state_tracker/video_session_state.cpp
+    state_tracker/video_session_state.h
+    stateless/sl_buffer.cpp
+    stateless/sl_cmd_buffer_dynamic.cpp
+    stateless/sl_cmd_buffer.cpp
+    stateless/sl_descriptor.cpp
+    stateless/sl_device_memory.cpp
+    stateless/sl_external_object.cpp
+    stateless/sl_framebuffer.cpp
+    stateless/sl_image.cpp
+    stateless/sl_instance_device.cpp
+    stateless/sl_pipeline.cpp
+    stateless/sl_ray_tracing.cpp
+    stateless/sl_render_pass.cpp
+    stateless/sl_shader_object.cpp
+    stateless/sl_synchronization.cpp
+    stateless/sl_utils.cpp
+    stateless/sl_wsi.cpp
+    stateless/stateless_validation.h
+    sync/sync_access_context.cpp
+    sync/sync_access_context.h
+    sync/sync_access_state.cpp
+    sync/sync_access_state.h
+    sync/sync_commandbuffer.cpp
+    sync/sync_commandbuffer.h
+    sync/sync_common.cpp
+    sync/sync_common.h
+    sync/sync_op.cpp
+    sync/sync_op.h
+    sync/sync_renderpass.cpp
+    sync/sync_renderpass.h
+    sync/sync_submit.cpp
+    sync/sync_submit.h
+    sync/sync_utils.cpp
+    sync/sync_utils.h
+    sync/sync_validation.cpp
+    sync/sync_validation.h
+    sync/sync_vuid_maps.cpp
+    sync/sync_vuid_maps.h
+    thread_tracker/thread_safety_validation.cpp
+    thread_tracker/thread_safety_validation.h
+    utils/shader_utils.cpp
+    utils/shader_utils.h
+    layer_options.cpp
+    layer_options.h
+)
+get_target_property(LAYER_SOURCES vvl SOURCES)
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${LAYER_SOURCES})
 
-    if(WIN32)
-        target_sources(VkLayer_${target} PRIVATE VkLayer_${target}.def)
-        target_compile_definitions(VkLayer_${target} PUBLIC NOMINMAX)
-    elseif(APPLE)
-        set_target_properties(VkLayer_${target}
-                              PROPERTIES LINK_FLAGS
-                                         "-Wl"
-                                         INSTALL_RPATH
-                                         "@loader_path/")
-    else(UNIX AND NOT APPLE) # i.e.: Linux
-        set_target_properties(VkLayer_${target} PROPERTIES LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/libVkLayer_${target}.map,-Bsymbolic,--exclude-libs,ALL")
-    endif()
-
-    install(TARGETS VkLayer_${target} DESTINATION ${CMAKE_INSTALL_LIBDIR})
-endmacro()
-
-include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/generated ${VulkanHeaders_INCLUDE_DIR})
+set_target_properties(vvl PROPERTIES OUTPUT_NAME ${LAYER_NAME})
 
 if(MSVC)
-    # Applies to all configurations
-    add_definitions(-D_CRT_SECURE_NO_WARNINGS -DNOMINMAX)
-    # Avoid: fatal error C1128: number of sections exceeded object file format limit: compile with /bigobj
-    add_compile_options("/bigobj")
-    add_compile_options("/we4189")
-    add_compile_options("/we5038")
-    # Allow Windows to use multiprocessor compilation
-    add_compile_options(/MP)
-    # Turn off transitional "changed behavior" warning message for Visual Studio versions prior to 2015. The changed behavior is
-    # that constructor initializers are now fixed to clear the struct members.
-    add_compile_options("$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,19>>:/wd4351>")
+    target_link_options(vvl PRIVATE /DEF:${CMAKE_CURRENT_SOURCE_DIR}/${LAYER_NAME}.def)
+    target_compile_options(vvl PRIVATE /bigobj)
+elseif(MINGW)
+    target_sources(vvl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/${LAYER_NAME}.def)
+    target_compile_options(vvl PRIVATE -Wa,-mbig-obj)
+    set_target_properties(vvl PROPERTIES PREFIX "") # remove the prefix "lib" so the manifest json "library_path" matches
+elseif(APPLE)
+    set_target_properties(vvl PROPERTIES SUFFIX ".dylib")
+    target_link_options(vvl PRIVATE -exported_symbols_list ${CMAKE_CURRENT_SOURCE_DIR}/${LAYER_NAME}.exp)
+elseif(ANDROID)
+    target_link_options(vvl PRIVATE LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/${LAYER_NAME}-android.map)
 else()
-    if(MINGW)
-        add_compile_options("-Wa,-mbig-obj")
+    target_link_options(vvl PRIVATE LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/${LAYER_NAME}.map)
+endif()
+
+target_compile_options(vvl PRIVATE "$<IF:$<CXX_COMPILER_ID:MSVC>,/wd4100,-Wno-unused-parameter>")
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(vvl PRIVATE
+        -Wno-sign-conversion
+        -Wno-implicit-int-conversion
+    )
+elseif(MSVC)
+    target_compile_options(vvl PRIVATE
+        /wd4324 # padding
+        /wd4458 # hiding class member
+        /wd4457 # hiding function parameter
+        /wd4702 # unreachable code
+        /wd4389 # signed/unsigned mismatch
+    )
+endif()
+
+# Order matters here. VkLayer_utils should be the last link library to ensure mimalloc overrides are picked up correctly.
+# Otherwise, libraries after VkLayer_utils will not benefit from this performance improvement.
+target_link_libraries(vvl PRIVATE
+    SPIRV-Headers::SPIRV-Headers
+    SPIRV-Tools-opt
+    SPIRV-Tools-link
+    VkLayer_utils
+)
+
+target_include_directories(vvl SYSTEM PRIVATE external)
+
+if (ANDROID)
+    # https://gitlab.kitware.com/cmake/cmake/issues/18787
+    # https://github.com/android-ndk/ndk/issues/463
+    # "Users should be able to reliably use the toolchain provided by the NDK r23 or later when using CMake 3.21 or later" - Professional CMake
+    if (CMAKE_VERSION VERSION_LESS "3.21")
+        message(FATAL_ERROR "Android build requires at least CMake 3.21!")
     endif()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wpointer-arith -Wno-unused-function -Wno-sign-compare")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wpointer-arith -Wno-unused-function -Wno-sign-compare")
+
+    # Required for __android_log_print. Marking as PUBLIC since the tests use __android_log_print as well.
+    target_link_libraries(VkLayer_utils PUBLIC log)
+
+    # Required for AHardwareBuffer_describe. Marking as PUBLIC since the tests use AHardwareBuffer_describe as well.
+    target_link_libraries(VkLayer_utils PUBLIC android)
+
+    install(TARGETS vvl DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+    return()
 endif()
 
-
-if(ANNOTATED_SPEC_LINK)
-    message("-- ANNOTATED_SPEC_LINK is ${ANNOTATED_SPEC_LINK}")
-    add_definitions(-DANNOTATED_SPEC_LINK=${ANNOTATED_SPEC_LINK})
+# There are 2 primary deliverables for the validation layers.
+# - The actual library VkLayer_khronos_validation.(dll|so|dylib)
+# - The respective json file, VkLayer_khronos_validation.json
+# This code generates the appropriate json for both local testing and the installation.
+# NOTE: For WIN32 the JSON and dll MUST be placed in the same location, due to Win32 using a relative path for installation.
+set(INPUT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/${LAYER_NAME}.json.in")
+set(INTERMEDIATE_FILE "${CMAKE_CURRENT_BINARY_DIR}/json/validation.json")
+set(OUTPUT_FILE_FINAL_NAME "${LAYER_NAME}.json")
+set(LAYER_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
+if (WIN32)
+    set(LAYER_INSTALL_DIR ${CMAKE_INSTALL_BINDIR}) # WIN32/MINGW expect the dll in the `bin` dir, this matches our WIN32 SDK process
 endif()
 
-# Clang warns about unused const variables. Generated files may purposely contain unused consts, so silence this warning in Clang
-if(CMAKE_C_COMPILER_ID MATCHES "Clang")
-    set_source_files_properties(generated/parameter_validation.cpp PROPERTIES COMPILE_FLAGS "-Wno-unused-const-variable")
+if (WIN32)
+    set(JSON_LIBRARY_PATH ".\\\\${LAYER_NAME}.dll")
+elseif(APPLE)
+    set(JSON_LIBRARY_PATH "./lib${LAYER_NAME}.dylib")
+else()
+    set(JSON_LIBRARY_PATH "./lib${LAYER_NAME}.so")
 endif()
 
-set(CHASSIS_LIBRARY_FILES
-    generated/chassis.cpp
-    generated/layer_chassis_dispatch.cpp
-    generated/vk_safe_struct.cpp
-    generated/vk_safe_struct.h
-    layer_options.cpp
-    state_tracker.cpp
-    state_tracker.h
-    image_layout_map.cpp
-    image_layout_map.h
-    range_vector.h
-    vk_layer_settings_ext.h
-    subresource_adapter.cpp
-    subresource_adapter.h
-    sync_utils.cpp
-    sync_utils.h)
+configure_file(${INPUT_FILE} ${INTERMEDIATE_FILE} @ONLY)
 
-set(CORE_VALIDATION_LIBRARY_FILES
-    core_validation.cpp
-    core_validation.h
-    core_validation_error_enums.h
-    core_error_location.h
-    core_error_location.cpp
-    base_node.h
-    base_node.cpp
-    device_memory_state.h
-    device_memory_state.cpp
-    buffer_state.h
-    buffer_state.cpp
-    cmd_buffer_state.h
-    cmd_buffer_state.cpp
-    image_state.h
-    image_state.cpp
-    pipeline_state.h
-    pipeline_state.cpp
-    pipeline_layout_state.cpp
-    pipeline_sub_state.cpp
-    queue_state.h
-    queue_state.cpp
-    query_state.h
-    ray_tracing_state.h
-    render_pass_state.h
-    render_pass_state.cpp
-    sampler_state.h
-    drawdispatch.cpp
-    convert_to_renderpass2.cpp
-    descriptor_sets.cpp
-    descriptor_sets.h
-    descriptor_validation.cpp
-    buffer_validation.cpp
-    buffer_validation.h
-    shader_module.cpp
-    shader_module.h
-    shader_validation.cpp
-    shader_validation.h
-    sync_vuid_maps.cpp
-    sync_vuid_maps.h
-    generated/spirv_validation_helper.cpp
-    generated/spirv_grammar_helper.cpp
-    generated/command_validation.cpp
-    generated/synchronization_validation_types.cpp
-    gpu_validation.cpp
-    generated/corechecks_optick_instrumentation.cpp
-    xxhash.c
-    xxhash.h)
+# To support both multi/single configuration generators just copy the json to the correct directory
+add_custom_command(TARGET vvl POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${INTERMEDIATE_FILE} $<TARGET_FILE_DIR:vvl>/${OUTPUT_FILE_FINAL_NAME}
+)
 
-set(OBJECT_LIFETIMES_LIBRARY_FILES
-    generated/object_tracker.cpp
-    generated/object_tracker.h
-    object_tracker_utils.cpp
-    object_lifetime_validation.h)
+# For UNIX-based systems, `library_path` should not contain a relative path (indicated by "./") before installing to system directories
+# This json isn't used for regular local development, it's used for installation
+if (UNIX)
+    set(UNIX_INTERMEDIATE_FILE "${CMAKE_CURRENT_BINARY_DIR}/json/unix_install_validation.json")
 
-set(THREAD_SAFETY_LIBRARY_FILES
-    generated/thread_safety.cpp
-    generated/thread_safety.h)
-
-set(STATELESS_VALIDATION_LIBRARY_FILES
-    generated/parameter_validation.cpp
-    generated/parameter_validation.h
-    parameter_validation_utils.cpp
-    stateless_validation.h)
-
-set(BEST_PRACTICES_LIBRARY_FILES
-    best_practices_utils.cpp
-    generated/best_practices.cpp
-    generated/best_practices.h
-    best_practices_validation.h
-    best_practices_error_enums.h)
-
-set(GPU_ASSISTED_LIBRARY_FILES
-    gpu_validation.cpp
-    gpu_validation.h)
-
-set(DEBUG_PRINTF_LIBRARY_FILES
-    debug_printf.cpp
-    debug_printf.h)
-
-set(GPU_UTILITY_LIBRARY_FILES
-    gpu_utils.cpp
-    gpu_utils.h)
-
-set(SYNC_VALIDATION_LIBRARY_FILES
-    synchronization_validation.cpp
-    synchronization_validation.h)
-
-# Validation Layer performance instrumentation support using Optick.
-# https://optick.dev/ https://github.com/bombomby/optick
-# To include Optick instrumentation:
-# 1) Download the Optick 1.3.1 release: https://github.com/bombomby/optick/releases/tag/1.3.1.0
-# 2) Copy the files from the src directory to external/optick.
-# 3) Run CMake configure with -DINSTRUMENT_OPTICK.
-set(OPTICK_SOURCE_DIR "${PROJECT_SOURCE_DIR}/external/optick")
-if(INSTRUMENT_OPTICK)
-    # Optick Instrumentation currently supported only on Microsoft toolchain.
-    if(MSVC)
-        if(IS_DIRECTORY "${OPTICK_SOURCE_DIR}")
-            file(GLOB OPTICK_SOURCE_FILES "${OPTICK_SOURCE_DIR}/*.*")
-            source_group("Optick Lib" FILES ${OPTICK_SOURCE_FILES})
-            # Disable GPU performance measurements (timestamp queries).
-            # Not needed for CPU Validation Layer measurements, but would be interesting to try someday.
-            # We'll need to map Vulkan API calls into the layer stack API entry points in order to build.
-            set(KHRONOS_LAYER_COMPILE_DEFINITIONS
-                -DINSTRUMENT_OPTICK
-                -DOPTICK_ENABLE_GPU_D3D12=0
-                -DOPTICK_ENABLE_GPU_VULKAN=0)
-        else()
-            message(WARNING "Optick sources not found at ${OPTICK_SOURCE_DIR} - continuing without instrumentation.")
-            set(INSTRUMENT_OPTICK OFF)
-        endif()
+    if(APPLE)
+        set(JSON_LIBRARY_PATH "lib${LAYER_NAME}.dylib")
     else()
-        message(WARNING "Optick instrumentation not supported on this platform - continuing without instrumentation.")
-        set(INSTRUMENT_OPTICK OFF)
+        set(JSON_LIBRARY_PATH "lib${LAYER_NAME}.so")
     endif()
+
+    configure_file(${INPUT_FILE} ${UNIX_INTERMEDIATE_FILE} @ONLY)
+
+    install(FILES ${UNIX_INTERMEDIATE_FILE} DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/vulkan/explicit_layer.d RENAME ${OUTPUT_FILE_FINAL_NAME})
 endif()
 
-if(BUILD_LAYERS)
-    AddVkLayer(khronos_validation "${KHRONOS_LAYER_COMPILE_DEFINITIONS}"
-        ${CHASSIS_LIBRARY_FILES}
-        ${CORE_VALIDATION_LIBRARY_FILES}
-        ${OBJECT_LIFETIMES_LIBRARY_FILES}
-        ${THREAD_SAFETY_LIBRARY_FILES}
-        ${STATELESS_VALIDATION_LIBRARY_FILES}
-        ${BEST_PRACTICES_LIBRARY_FILES}
-        ${GPU_UTILITY_LIBRARY_FILES}
-        ${GPU_ASSISTED_LIBRARY_FILES}
-        ${DEBUG_PRINTF_LIBRARY_FILES}
-        ${SYNC_VALIDATION_LIBRARY_FILES}
-        ${OPTICK_SOURCE_FILES})
-
-    # Force generation of the PDB file for Release builds.
-    # Note that CMake reduces inlining optimization levels for RelWithDebInfo builds.
-    if(MSVC)
-        target_compile_options(VkLayer_khronos_validation PRIVATE "$<$<CONFIG:Release>:/Zi>")
-        # Need to use this instead of target_link_options() for older versions of CMake.
-        target_link_libraries(VkLayer_khronos_validation PRIVATE "$<$<CONFIG:Release>:-DEBUG:FULL>")
-    endif()
-
-    # Khronos validation additional dependencies
-    target_include_directories(VkLayer_khronos_validation PRIVATE ${GLSLANG_INCLUDE_DIR})
-    if(INSTRUMENT_OPTICK)
-        target_include_directories(VkLayer_khronos_validation PRIVATE ${OPTICK_SOURCE_DIR})
-    endif()
-    if (USE_ROBIN_HOOD_HASHING)
-        target_link_libraries(VkLayer_khronos_validation PRIVATE robin_hood::robin_hood)
-        # This warning produces what look like false positives in robin_hood.h with Visual Studio 2015
-        target_compile_options(VkLayer_khronos_validation PRIVATE "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,19.1>>:/wd4996>")
-    endif()
-    target_include_directories(VkLayer_khronos_validation PRIVATE ${SPIRV_HEADERS_INCLUDE_DIR})
-    target_link_libraries(VkLayer_khronos_validation PRIVATE ${SPIRV_TOOLS_TARGET} SPIRV-Tools-opt)
-
-
-    # The output file needs Unix "/" separators or Windows "\" separators On top of that, Windows separators actually need to be doubled
-    # because the json format uses backslash escapes
-    file(TO_NATIVE_PATH "./" RELATIVE_PATH_PREFIX)
-    string(REPLACE "\\"
-                   "\\\\"
-                   RELATIVE_PATH_PREFIX
-                   "${RELATIVE_PATH_PREFIX}")
-
-    # Fetch header version from vulkan_core.h ----------------------------------------------------------------------------------------
-    file(STRINGS "${VulkanHeaders_INCLUDE_DIRS}/vulkan/vulkan_core.h" lines REGEX "^#define VK_HEADER_VERSION [0-9]+")
-    list(LENGTH lines len)
-    if(${len} EQUAL 1)
-        string(REGEX MATCHALL "[0-9]+" vk_header_version ${lines})
-    else()
-        message(FATAL_ERROR "Unable to fetch version from vulkan_core.h")
-    endif()
-
-    # Run each .json.in file through the generator We need to create the generator.cmake script so that the generator can be run at
-    # compile time, instead of configure time Running at compile time lets us use cmake generator expressions (TARGET_FILE_NAME and
-    # TARGET_FILE_DIR, specifically)
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generator.cmake" "configure_file(\"\${INPUT_FILE}\" \"\${OUTPUT_FILE}\" @ONLY)")
-    foreach(TARGET_NAME ${TARGET_NAMES})
-        set(CONFIG_DEFINES -DINPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/json/${TARGET_NAME}.json.in" -DVK_VERSION=1.3.${vk_header_version})
-        # If this json file is not a metalayer, get the needed properties from that target
-        if(TARGET ${TARGET_NAME})
-            set(CONFIG_DEFINES
-                ${CONFIG_DEFINES}
-                -DOUTPUT_FILE="$<TARGET_FILE_DIR:${TARGET_NAME}>/${TARGET_NAME}.json"
-                -DRELATIVE_LAYER_BINARY="${RELATIVE_PATH_PREFIX}$<TARGET_FILE_NAME:${TARGET_NAME}>")
-            # If this json file is a metalayer, make the output path match core validation, and there is no layer binary file
-        else()
-            set(CONFIG_DEFINES ${CONFIG_DEFINES} -DOUTPUT_FILE="$<TARGET_FILE_DIR:VkLayer_khronos_validation>/${TARGET_NAME}.json")
-        endif()
-        add_custom_target(${TARGET_NAME}-json ALL
-                          COMMAND ${CMAKE_COMMAND} ${CONFIG_DEFINES} -P "${CMAKE_CURRENT_BINARY_DIR}/generator.cmake")
-        if(CMAKE_GENERATOR MATCHES "^Visual Studio.*")
-            set_target_properties(${TARGET_NAME}-json PROPERTIES FOLDER ${LAYERS_HELPER_FOLDER})
-        endif()
-    endforeach()
-
-    # For UNIX-based systems, `library_path` should not contain a relative path (indicated by "./") before installing to system
-    # directories, so we do not include it in the staging-json files which are used for installation
-    if(UNIX)
-        foreach(TARGET_NAME ${TARGET_NAMES})
-            set(INSTALL_DEFINES
-                -DINPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/json/${TARGET_NAME}.json.in"
-                -DOUTPUT_FILE="${CMAKE_CURRENT_BINARY_DIR}/staging-json/${TARGET_NAME}.json"
-                -DVK_VERSION=1.3.${vk_header_version})
-            # If this json file is not a metalayer, get the needed properties from that target
-            if(TARGET ${TARGET_NAME})
-                set(INSTALL_DEFINES ${INSTALL_DEFINES} -DRELATIVE_LAYER_BINARY="$<TARGET_FILE_NAME:${TARGET_NAME}>")
-            endif()
-            add_custom_target(${TARGET_NAME}-staging-json ALL
-                              COMMAND ${CMAKE_COMMAND} ${INSTALL_DEFINES} -P "${CMAKE_CURRENT_BINARY_DIR}/generator.cmake")
-        endforeach()
-    endif()
-
-    # Install the layer json files
-    foreach(TARGET_NAME ${TARGET_NAMES})
-        if(WIN32)
-            install(FILES $<TARGET_FILE_DIR:${TARGET_NAME}>/${TARGET_NAME}.json
-                    DESTINATION ${CMAKE_INSTALL_LIBDIR})
-        elseif(UNIX)
-            install(FILES ${CMAKE_CURRENT_BINARY_DIR}/staging-json/${TARGET_NAME}.json
-                    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/vulkan/explicit_layer.d)
-        endif()
-    endforeach()
+if (WIN32)
+    install(FILES ${INTERMEDIATE_FILE} DESTINATION ${LAYER_INSTALL_DIR} RENAME ${OUTPUT_FILE_FINAL_NAME})
 endif()
+if (MSVC)
+    install(FILES $<TARGET_PDB_FILE:vvl> DESTINATION ${LAYER_INSTALL_DIR})
+endif()
+
+install(TARGETS vvl DESTINATION ${LAYER_INSTALL_DIR})

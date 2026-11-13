@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -317,10 +317,8 @@ void CXFA_FFTextEdit::OnTextWillChange(CFWL_Widget* pWidget,
                                        CFWL_EventTextWillChange* event) {
   GetLayoutItem()->SetStatusBits(XFA_WidgetStatus::kTextEditValueChanged);
 
-  CXFA_EventParam eParam;
-  eParam.m_eType = XFA_EVENT_Change;
+  CXFA_EventParam eParam(XFA_EVENT_Change);
   eParam.m_wsChange = event->GetChangeText();
-  eParam.m_pTarget = m_pNode.Get();
   eParam.m_wsPrevText = event->GetPreviousText();
   eParam.m_iSelStart = static_cast<int32_t>(event->GetSelectionStart());
   eParam.m_iSelEnd = static_cast<int32_t>(event->GetSelectionEnd());
@@ -335,9 +333,7 @@ void CXFA_FFTextEdit::OnTextWillChange(CFWL_Widget* pWidget,
 }
 
 void CXFA_FFTextEdit::OnTextFull(CFWL_Widget* pWidget) {
-  CXFA_EventParam eParam;
-  eParam.m_eType = XFA_EVENT_Full;
-  eParam.m_pTarget = m_pNode.Get();
+  CXFA_EventParam eParam(XFA_EVENT_Full);
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeValue::Full, &eParam);
 }
 

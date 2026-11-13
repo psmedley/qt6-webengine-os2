@@ -18,10 +18,10 @@
 
 #include <cinttypes>
 #include <limits>
+#include <optional>
 #include <string>
 
 #include "perfetto/base/logging.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/string_view.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
@@ -30,7 +30,7 @@
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/json/json_utils.h"
-#include "src/trace_processor/tables/slice_tables.h"
+#include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
 namespace perfetto {
@@ -39,16 +39,16 @@ namespace trace_processor {
 #if PERFETTO_BUILDFLAG(PERFETTO_TP_JSON)
 namespace {
 
-base::Optional<uint64_t> MaybeExtractFlowIdentifier(const Json::Value& value,
-                                                    bool version2) {
+std::optional<uint64_t> MaybeExtractFlowIdentifier(const Json::Value& value,
+                                                   bool version2) {
   std::string id_key = (version2 ? "bind_id" : "id");
   if (!value.isMember(id_key))
-    return base::nullopt;
+    return std::nullopt;
   auto id = value[id_key];
   if (id.isNumeric())
     return id.asUInt64();
   if (!id.isString())
-    return base::nullopt;
+    return std::nullopt;
   const char* c_string = id.asCString();
   return base::CStringToUInt64(c_string, 16);
 }
@@ -87,8 +87,8 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
     return;
   char phase = *ph.asCString();
 
-  base::Optional<uint32_t> opt_pid;
-  base::Optional<uint32_t> opt_tid;
+  std::optional<uint32_t> opt_pid;
+  std::optional<uint32_t> opt_tid;
 
   if (value.isMember("pid"))
     opt_pid = json::CoerceToUint32(value["pid"]);
@@ -109,7 +109,7 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
   base::StringView name = value.isMember("name")
                               ? base::StringView(value["name"].asCString())
                               : base::StringView();
-  StringId name_id = storage->InternString(name);
+  StringId name_id = name.empty() ? kNullStringId : storage->InternString(name);
 
   auto args_inserter = [this, &value](ArgsTracker::BoundInserter* inserter) {
     if (value.isMember("args")) {
@@ -127,13 +127,14 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
     row.ts = timestamp;
     row.track_id = track_id;
     row.category = cat_id;
-    row.name = name_id;
+    row.name =
+        name_id == kNullStringId ? storage->InternString("[No name]") : name_id;
     row.thread_ts = json::CoerceToTs(value["tts"]);
     // tdur will only exist on 'X' events.
     row.thread_dur = json::CoerceToTs(value["tdur"]);
     // JSON traces don't report these counters as part of slices.
-    row.thread_instruction_count = base::nullopt;
-    row.thread_instruction_delta = base::nullopt;
+    row.thread_instruction_count = std::nullopt;
+    row.thread_instruction_delta = std::nullopt;
     return row;
   };
 
@@ -165,15 +166,31 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
     case 'b':
     case 'e':
     case 'n': {
-      if (!opt_pid || id.empty()) {
+      Json::Value id2 = value.isMember("id2") ? value["id2"] : Json::Value();
+      std::string local = id2.isMember("local") ? id2["local"].asString() : "";
+      std::string global =
+          id2.isMember("global") ? id2["global"].asString() : "";
+      if (!opt_pid || (id.empty() && global.empty() && local.empty())) {
         context_->storage->IncrementStats(stats::json_parser_failure);
         break;
       }
       UniquePid upid = context_->process_tracker->GetOrCreateProcess(pid);
-      int64_t cookie = static_cast<int64_t>(base::Hash::Combine(id.c_str()));
-      StringId scope = kNullStringId;
-      TrackId track_id = context_->track_tracker->InternLegacyChromeAsyncTrack(
-          name_id, upid, cookie, true /* source_id_is_process_scoped */, scope);
+      TrackId track_id;
+      if (!id.empty() || !global.empty()) {
+        const std::string& real_id = id.empty() ? global : id;
+        int64_t cookie = static_cast<int64_t>(
+            base::Hasher::Combine(cat_id.raw_id(), real_id));
+        track_id = context_->track_tracker->InternLegacyChromeAsyncTrack(
+            name_id, upid, cookie, false /* source_id_is_process_scoped */,
+            kNullStringId /* source_scope */);
+      } else {
+        PERFETTO_DCHECK(!local.empty());
+        int64_t cookie =
+            static_cast<int64_t>(base::Hasher::Combine(cat_id.raw_id(), local));
+        track_id = context_->track_tracker->InternLegacyChromeAsyncTrack(
+            name_id, upid, cookie, true /* source_id_is_process_scoped */,
+            kNullStringId /* source_scope */);
+      }
 
       if (phase == 'b') {
         slice_tracker->BeginTyped(storage->mutable_slice_table(),
@@ -184,14 +201,14 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
         // We don't handle tts here as we do in the 'E'
         // case above as it's not well defined for aysnc slices.
       } else {
-        context_->slice_tracker->Scoped(timestamp, track_id, cat_id, name_id,
-                                        0);
+        context_->slice_tracker->Scoped(timestamp, track_id, cat_id, name_id, 0,
+                                        args_inserter);
         MaybeAddFlow(track_id, value);
       }
       break;
     }
     case 'X': {  // TRACE_EVENT (scoped event).
-      base::Optional<int64_t> opt_dur = json::CoerceToTs(value["dur"]);
+      std::optional<int64_t> opt_dur = json::CoerceToTs(value["dur"]);
       if (!opt_dur.has_value())
         return;
       TrackId track_id = context_->track_tracker->InternThreadTrack(utid);
@@ -277,7 +294,8 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
         context_->storage->IncrementStats(stats::json_parser_failure);
         break;
       }
-      context_->slice_tracker->Scoped(timestamp, track_id, cat_id, name_id, 0);
+      context_->slice_tracker->Scoped(timestamp, track_id, cat_id, name_id, 0,
+                                      args_inserter);
       break;
     }
     case 's': {  // TRACE_EVENT_FLOW_START
@@ -332,7 +350,7 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
       }
       if (name == "process_name" && !value["args"]["name"].empty()) {
         const char* proc_name = value["args"]["name"].asCString();
-        procs->SetProcessMetadata(pid, base::nullopt, proc_name,
+        procs->SetProcessMetadata(pid, std::nullopt, proc_name,
                                   base::StringView());
         break;
       }
@@ -366,6 +384,9 @@ void JsonTraceParser::MaybeAddFlow(TrackId track_id, const Json::Value& event) {
       context_->storage->IncrementStats(stats::flow_without_direction);
     }
   }
+#else
+  perfetto::base::ignore_result(track_id);
+  perfetto::base::ignore_result(event);
 #endif  // PERFETTO_BUILDFLAG(PERFETTO_TP_JSON)
 }
 

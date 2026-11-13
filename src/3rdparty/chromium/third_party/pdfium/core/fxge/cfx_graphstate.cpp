@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,7 @@
 
 CFX_GraphState::CFX_GraphState() = default;
 
-CFX_GraphState::CFX_GraphState(const CFX_GraphState& that)
-    : m_Ref(that.m_Ref) {}
+CFX_GraphState::CFX_GraphState(const CFX_GraphState& that) = default;
 
 CFX_GraphState::~CFX_GraphState() = default;
 

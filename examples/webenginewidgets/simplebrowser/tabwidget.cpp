@@ -9,6 +9,8 @@
 #include <QTabBar>
 #include <QWebEngineProfile>
 
+using namespace Qt::StringLiterals;
+
 TabWidget::TabWidget(QWebEngineProfile *profile, QWidget *parent)
     : QTabWidget(parent)
     , m_profile(profile)
@@ -19,7 +21,10 @@ TabWidget::TabWidget(QWebEngineProfile *profile, QWidget *parent)
     tabBar->setMovable(true);
     tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(tabBar, &QTabBar::customContextMenuRequested, this, &TabWidget::handleContextMenuRequested);
-    connect(tabBar, &QTabBar::tabCloseRequested, this, &TabWidget::closeTab);
+    connect(tabBar, &QTabBar::tabCloseRequested, [this](int index) {
+        if (WebView *view = webView(index))
+            view->page()->triggerAction(QWebEnginePage::WebAction::RequestClose);
+    });
     connect(tabBar, &QTabBar::tabBarDoubleClicked, [this](int index) {
         if (index == -1)
             createTab();
@@ -32,10 +37,10 @@ TabWidget::TabWidget(QWebEngineProfile *profile, QWidget *parent)
 
     if (profile->isOffTheRecord()) {
         QLabel *icon = new QLabel(this);
-        QPixmap pixmap(QStringLiteral(":ninja.png"));
+        QPixmap pixmap(u":ninja.png"_s);
         icon->setPixmap(pixmap.scaledToHeight(tabBar->height()));
-        setStyleSheet(
-                QStringLiteral("QTabWidget::tab-bar { left: %1px; }").arg(icon->pixmap().width()));
+        setStyleSheet(u"QTabWidget::tab-bar { left: %1px; }"_s.
+                      arg(icon->pixmap().width()));
     }
 }
 

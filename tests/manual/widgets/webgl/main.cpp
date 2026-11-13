@@ -1,5 +1,5 @@
 // Copyright (C) 2018 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QtCore/QDebug>
 #include <QtCore/QLoggingCategory>
@@ -24,7 +24,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    QSize sizeHint() const;
+    QSize sizeHint() const override;
 
 private:
     QWebEngineView *view = nullptr;
@@ -102,9 +102,6 @@ int main(int argc, char *argv[])
     const QString gles = QStringLiteral("gles"); // ANGLE on Windows.
     const QString gles3 = QStringLiteral("gles3"); // ANGLE on Windows.
     const QString softwareGL = QStringLiteral("software");
-
-    QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 
     QString glType = qEnvironmentVariable("QTWEBENGINE_GL_TYPE");
     if (glType.isEmpty()) {

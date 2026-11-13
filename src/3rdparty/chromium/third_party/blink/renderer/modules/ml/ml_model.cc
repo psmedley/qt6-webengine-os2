@@ -103,7 +103,8 @@ ScriptPromise MLModel::compute(
     return ScriptPromise();
   }
 
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
+      script_state, exception_state.GetContext());
   ScriptPromise promise = resolver->Promise();
 
   // First verifies the sizes of inputs.
@@ -260,7 +261,7 @@ void MLModel::OnComputeResult(
 #undef WEBML_SET_TYPED_OUTPUTS_BLINK
   }
 
-  resolver->Resolve(std::move(outputs_blink));
+  resolver->Resolve<IDLRecord<IDLString, MLTensor>>(std::move(outputs_blink));
 }
 
 }  // namespace blink

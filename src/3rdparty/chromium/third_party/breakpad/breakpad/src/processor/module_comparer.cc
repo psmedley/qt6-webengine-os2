@@ -1,5 +1,4 @@
-// Copyright (c) 2010, Google Inc.
-// All rights reserved.
+// Copyright 2010 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -31,6 +30,10 @@
 // See module_comparer.h for documentation.
 //
 // Author: lambxsy@google.com (Siyang Xie)
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
+#endif
 
 #include "processor/module_comparer.h"
 
@@ -65,7 +68,7 @@ bool ModuleComparer::Compare(const string& symbol_data) {
   buffer.reset();
 
   // Serialize BasicSourceLineResolver::Module.
-  unsigned int serialized_size = 0;
+  size_t serialized_size = 0;
   scoped_array<char> serialized_data(
       serializer_.Serialize(*(basic_module.get()), &serialized_size));
   ASSERT_TRUE(serialized_data.get());

@@ -36,6 +36,7 @@ struct TimestampedSetting {
 
 struct RecentSitePermissions {
   GURL origin;
+  std::string display_name;
   bool incognito;
   std::vector<TimestampedSetting> settings;
 
@@ -45,6 +46,7 @@ struct RecentSitePermissions {
       default;
   RecentSitePermissions(RecentSitePermissions&& other);
   RecentSitePermissions(GURL origin,
+                        const std::string& display_name,
                         bool incognito,
                         std::vector<TimestampedSetting> settings);
   ~RecentSitePermissions();

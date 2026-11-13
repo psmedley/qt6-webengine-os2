@@ -19,6 +19,7 @@
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/proc_utils.h"
 #include "perfetto/ext/base/scoped_file.h"
+#include "perfetto/ext/base/string_splitter.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -26,8 +27,9 @@
 #include <sys/types.h>
 #include <time.h>
 
-// For dup().
+// For dup() (and _setmode() on windows).
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#include <fcntl.h>
 #include <io.h>
 #else
 #include <unistd.h>
@@ -50,6 +52,7 @@
 #include "perfetto/ext/base/getopt.h"
 #include "perfetto/ext/base/pipe.h"
 #include "perfetto/ext/base/string_view.h"
+#include "perfetto/ext/base/temp_file.h"
 #include "perfetto/ext/base/thread_utils.h"
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/base/uuid.h"
@@ -57,15 +60,17 @@
 #include "perfetto/ext/traced/traced.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
 #include "perfetto/ext/tracing/core/trace_packet.h"
-#include "perfetto/ext/tracing/ipc/default_socket.h"
 #include "perfetto/protozero/proto_utils.h"
 #include "perfetto/tracing/core/data_source_descriptor.h"
 #include "perfetto/tracing/core/trace_config.h"
 #include "perfetto/tracing/core/tracing_service_state.h"
+#include "perfetto/tracing/default_socket.h"
 #include "src/android_stats/statsd_logging_helper.h"
+#include "src/perfetto_cmd/bugreport_path.h"
 #include "src/perfetto_cmd/config.h"
 #include "src/perfetto_cmd/packet_writer.h"
 #include "src/perfetto_cmd/pbtxt_to_pb.h"
+#include "src/perfetto_cmd/rate_limiter.h"
 #include "src/perfetto_cmd/trigger_producer.h"
 
 #include "protos/perfetto/common/ftrace_descriptor.gen.h"
@@ -77,7 +82,8 @@ namespace {
 
 perfetto::PerfettoCmd* g_perfetto_cmd;
 
-uint32_t kOnTraceDataTimeoutMs = 3000;
+const uint32_t kOnTraceDataTimeoutMs = 3000;
+const uint32_t kCloneTimeoutMs = 10000;
 
 class LoggingErrorReporter : public ErrorReporter {
  public:
@@ -138,7 +144,8 @@ bool ParseTraceConfigPbtxt(const std::string& file_name,
 }
 
 bool IsUserBuild() {
-#if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
+#if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD) && \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   std::string build_type = base::GetAndroidProp("ro.build.type");
   if (build_type.empty()) {
     PERFETTO_ELOG("Unable to read ro.build.type: assuming user build");
@@ -147,10 +154,11 @@ bool IsUserBuild() {
   return build_type == "user";
 #else
   return false;
-#endif  // PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
+#endif  // PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD) &&
+        // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 }
 
-base::Optional<PerfettoStatsdAtom> ConvertRateLimiterResponseToAtom(
+std::optional<PerfettoStatsdAtom> ConvertRateLimiterResponseToAtom(
     RateLimiter::ShouldTraceResponse resp) {
   switch (resp) {
     case RateLimiter::kNotAllowedOnUserBuild:
@@ -162,7 +170,7 @@ base::Optional<PerfettoStatsdAtom> ConvertRateLimiterResponseToAtom(
     case RateLimiter::kHitUploadLimit:
       return PerfettoStatsdAtom::kCmdHitUploadLimit;
     case RateLimiter::kOkToTrace:
-      return base::nullopt;
+      return std::nullopt;
   }
   PERFETTO_FATAL("For GCC");
 }
@@ -196,13 +204,18 @@ void ReportFinalizeTraceUuidToAtrace(const base::Uuid& uuid) {
 const char* kStateDir = "/data/misc/perfetto-traces";
 
 PerfettoCmd::PerfettoCmd() {
-  PERFETTO_DCHECK(!g_perfetto_cmd);
-  g_perfetto_cmd = this;
+  // Only the main thread instance on the main thread will receive ctrl-c.
+  if (!g_perfetto_cmd)
+    g_perfetto_cmd = this;
 }
 
 PerfettoCmd::~PerfettoCmd() {
-  PERFETTO_DCHECK(g_perfetto_cmd == this);
-  g_perfetto_cmd = nullptr;
+  if (g_perfetto_cmd == this) {
+    g_perfetto_cmd = nullptr;
+    if (ctrl_c_handler_installed_) {
+      task_runner_.RemoveFileDescriptorWatch(ctrl_c_evt_.fd());
+    }
+  }
 }
 
 void PerfettoCmd::PrintUsage(const char* argv0) {
@@ -216,12 +229,18 @@ Usage: %s
                              data sources to be started before exiting. Exit
                              code is zero if a successful acknowledgement is
                              received, non-zero otherwise (error or timeout).
+  --clone TSID             : Creates a read-only clone of an existing tracing
+                             session, identified by its ID (see --query).
   --config         -c      : /path/to/trace/config/file or - for stdin
   --out            -o      : /path/to/out/trace/file or - for stdout
+                             If using CLONE_SNAPSHOT triggers, each snapshot
+                             will be saved in a new file with a counter suffix
+                             (e.g., file.0, file.1, file.2).
   --txt                    : Parse config as pbtxt. Not for production use.
                              Not a stable API.
-  --query                  : Queries the service state and prints it as
-                             human-readable text.
+  --query [--long]         : Queries the service state and prints it as
+                             human-readable text. --long allows the output to
+                             extend past 80 chars.
   --query-raw              : Like --query, but prints raw proto-encoded bytes
                              of tracing_service_state.proto.
   --help           -h
@@ -260,14 +279,15 @@ Detach mode. DISCOURAGED, read https://perfetto.dev/docs/concepts/detached-mode
           argv0);
 }
 
-base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
-                                                               char** argv) {
+std::optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
+                                                              char** argv) {
 #if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
   umask(0000);  // make sure that file creation is not affected by umask.
 #endif
   enum LongOption {
     OPT_ALERT_ID = 1000,
     OPT_BUGREPORT,
+    OPT_CLONE,
     OPT_CONFIG_ID,
     OPT_CONFIG_UID,
     OPT_SUBSCRIPTION_ID,
@@ -281,6 +301,7 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     OPT_IS_DETACHED,
     OPT_STOP,
     OPT_QUERY,
+    OPT_LONG,
     OPT_QUERY_RAW,
     OPT_VERSION,
   };
@@ -305,9 +326,11 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
       {"reset-guardrails", no_argument, nullptr, OPT_RESET_GUARDRAILS},
       {"detach", required_argument, nullptr, OPT_DETACH},
       {"attach", required_argument, nullptr, OPT_ATTACH},
+      {"clone", required_argument, nullptr, OPT_CLONE},
       {"is_detached", required_argument, nullptr, OPT_IS_DETACHED},
       {"stop", no_argument, nullptr, OPT_STOP},
       {"query", no_argument, nullptr, OPT_QUERY},
+      {"long", no_argument, nullptr, OPT_LONG},
       {"query-raw", no_argument, nullptr, OPT_QUERY_RAW},
       {"version", no_argument, nullptr, OPT_VERSION},
       {"save-for-bugreport", no_argument, nullptr, OPT_BUGREPORT},
@@ -327,6 +350,7 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     return 1;
   }
 
+  optind = 1;  // Reset getopt state. It's reused by the snapshot thread.
   for (;;) {
     int option =
         getopt_long(argc, argv, "hc:o:dDt:b:s:a:", long_options, nullptr);
@@ -337,6 +361,10 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     if (option == 'c') {
       config_file_name = std::string(optarg);
       if (strcmp(optarg, "-") == 0) {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+        // We don't want the runtime to replace "\n" with "\r\n" on `std::cin`.
+        _setmode(_fileno(stdin), _O_BINARY);
+#endif
         std::istreambuf_iterator<char> begin(std::cin), end;
         trace_config_raw.assign(begin, end);
       } else if (strcmp(optarg, ":test") == 0) {
@@ -349,6 +377,14 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
         opts.categories.emplace_back("power/gpu_frequency");
         PERFETTO_CHECK(CreateConfigFromOptions(opts, &test_config));
         trace_config_raw = test_config.SerializeAsString();
+      } else if (strcmp(optarg, ":mem") == 0) {
+        // This is used by OnCloneSnapshotTriggerReceived(), which passes the
+        // original trace config as a member field. This is needed because, in
+        // the new PerfettoCmd instance, we need to know upfront trace config
+        // fields that affect the behaviour of perfetto_cmd, e.g., the guardrail
+        // overrides, the unique_session_name, the reporter API package etc.
+        PERFETTO_CHECK(!snapshot_config_.empty());
+        trace_config_raw = snapshot_config_;
       } else {
         if (!base::ReadFile(optarg, &trace_config_raw)) {
           PERFETTO_PLOG("Could not open %s", optarg);
@@ -371,6 +407,11 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     if (option == 'D') {
       background_ = true;
       background_wait_ = true;
+      continue;
+    }
+
+    if (option == OPT_CLONE) {
+      clone_tsid_ = static_cast<TracingSessionID>(atoll(optarg));
       continue;
     }
 
@@ -484,6 +525,11 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
       continue;
     }
 
+    if (option == OPT_LONG) {
+      query_service_long_ = true;
+      continue;
+    }
+
     if (option == OPT_QUERY_RAW) {
       query_service_ = true;
       query_service_output_raw_ = true;
@@ -514,6 +560,11 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     return 1;
   }
 
+  if (query_service_long_ && !query_service_) {
+    PERFETTO_ELOG("--long can only be used with --query");
+    return 1;
+  }
+
   if (is_detach() && is_attach()) {
     PERFETTO_ELOG("--attach and --detach are mutually exclusive");
     return 1;
@@ -535,6 +586,14 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     return 1;
   }
 
+  // --save-for-bugreport is the equivalent of:
+  // --clone kBugreportSessionId -o /data/misc/perfetto-traces/bugreport/...
+  if (bugreport_ && trace_out_path_.empty()) {
+    PERFETTO_LOG("Invoked perfetto with --save-for-bugreport");
+    clone_tsid_ = kBugreportSessionId;
+    trace_out_path_ = GetBugreportTracePath();
+  }
+
   // Parse the trace config. It can be either:
   // 1) A proto-encoded file/stdin (-c ...).
   // 2) A proto-text file/stdin (-c ... --txt).
@@ -544,8 +603,8 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
   trace_config_.reset(new TraceConfig());
 
   bool parsed = false;
-  const bool will_trace_or_trigger =
-      !is_attach() && !query_service_ && !bugreport_;
+  bool cfg_could_be_txt = false;
+  const bool will_trace_or_trigger = !is_attach() && !query_service_;
   if (!will_trace_or_trigger) {
     if ((!trace_config_raw.empty() || has_config_options)) {
       PERFETTO_ELOG("Cannot specify a trace config with this option");
@@ -560,7 +619,7 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     }
     parsed = CreateConfigFromOptions(config_options, trace_config_.get());
   } else {
-    if (trace_config_raw.empty()) {
+    if (trace_config_raw.empty() && !clone_tsid_) {
       PERFETTO_ELOG("The TraceConfig is empty");
       return 1;
     }
@@ -570,14 +629,28 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
                                      trace_config_.get());
     } else {
       parsed = trace_config_->ParseFromString(trace_config_raw);
+      cfg_could_be_txt =
+          !parsed && std::all_of(trace_config_raw.begin(),
+                                 trace_config_raw.end(), [](char c) {
+                                   // This is equiv to: isprint(c) || isspace(x)
+                                   // but doesn't depend on and load the locale.
+                                   return (c >= 32 && c <= 126) ||
+                                          (c >= 9 && c <= 13);
+                                 });
     }
   }
 
   if (parsed) {
     *trace_config_->mutable_statsd_metadata() = std::move(statsd_metadata);
     trace_config_raw.clear();
-  } else if (will_trace_or_trigger) {
+  } else if (will_trace_or_trigger && !clone_tsid_) {
     PERFETTO_ELOG("The trace config is invalid, bailing out.");
+    if (cfg_could_be_txt) {
+      PERFETTO_ELOG(
+          "Looks like you are passing a textual config but I'm expecting a "
+          "proto-encoded binary config.");
+      PERFETTO_ELOG("Try adding --txt to the cmdline.");
+    }
     return 1;
   }
 
@@ -754,20 +827,7 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     if (!OpenOutputFile())
       return 1;
     if (!trace_config_->write_into_file())
-      packet_writer_ = CreateFilePacketWriter(trace_out_stream_.get());
-  }
-
-  if (trace_config_->compression_type() ==
-      TraceConfig::COMPRESSION_TYPE_DEFLATE) {
-    if (packet_writer_) {
-#if PERFETTO_BUILDFLAG(PERFETTO_ZLIB)
-      packet_writer_ = CreateZipPacketWriter(std::move(packet_writer_));
-#else
-      PERFETTO_ELOG("Cannot compress. Zlib not enabled in the build config");
-#endif
-    } else {
-      PERFETTO_ELOG("Cannot compress when tracing directly to file.");
-    }
+      packet_writer_.emplace(trace_out_stream_.get());
   }
 
   bool will_trace_indefinitely =
@@ -792,6 +852,7 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
 #endif
     }
 
+    PERFETTO_CHECK(!snapshot_thread_);  // No threads before demonization.
     base::Daemonize([this]() -> int {
       background_wait_pipe_.wr.reset();
 
@@ -804,8 +865,8 @@ base::Optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     background_wait_pipe_.rd.reset();
   }
 
-  return base::nullopt;  // Continues in ConnectToServiceRunAndMaybeNotify()
-                         // below.
+  return std::nullopt;  // Continues in ConnectToServiceRunAndMaybeNotify()
+                        // below.
 }
 
 void PerfettoCmd::NotifyBgProcessPipe(BgProcessStatus status) {
@@ -869,11 +930,14 @@ int PerfettoCmd::ConnectToServiceAndRun() {
     LogTriggerEvents(PerfettoTriggerAtom::kCmdTrigger, triggers_to_activate_);
 
     bool finished_with_success = false;
+    auto weak_this = weak_factory_.GetWeakPtr();
     TriggerProducer producer(
         &task_runner_,
-        [this, &finished_with_success](bool success) {
+        [weak_this, &finished_with_success](bool success) {
+          if (!weak_this)
+            return;
           finished_with_success = success;
-          task_runner_.Quit();
+          weak_this->task_runner_.Quit();
         },
         &triggers_to_activate_);
     task_runner_.Run();
@@ -884,12 +948,12 @@ int PerfettoCmd::ConnectToServiceAndRun() {
     return finished_with_success ? 0 : 1;
   }  // if (triggers_to_activate_)
 
-  if (query_service_ || bugreport_) {
+  if (query_service_) {
     consumer_endpoint_ =
         ConsumerIPCClient::Connect(GetConsumerSocket(), this, &task_runner_);
     task_runner_.Run();
     return 1;  // We can legitimately get here if the service disconnects.
-  }            // if (query_service || bugreport_)
+  }
 
   RateLimiter::Args args{};
   args.is_user_build = IsUserBuild();
@@ -959,11 +1023,19 @@ int PerfettoCmd::ConnectToServiceAndRun() {
 }
 
 void PerfettoCmd::OnConnect() {
+  connected_ = true;
   LogUploadEvent(PerfettoStatsdAtom::kOnConnect);
 
+  uint32_t events_mask = 0;
+  if (GetTriggerMode(*trace_config_) ==
+      TraceConfig::TriggerConfig::CLONE_SNAPSHOT) {
+    events_mask |= ObservableEvents::TYPE_CLONE_TRIGGER_HIT;
+  }
   if (background_wait_) {
-    consumer_endpoint_->ObserveEvents(
-        perfetto::ObservableEvents::TYPE_ALL_DATA_SOURCES_STARTED);
+    events_mask |= ObservableEvents::TYPE_ALL_DATA_SOURCES_STARTED;
+  }
+  if (events_mask) {
+    consumer_endpoint_->ObserveEvents(events_mask);
   }
 
   if (query_service_) {
@@ -976,21 +1048,15 @@ void PerfettoCmd::OnConnect() {
     return;
   }
 
-  if (bugreport_) {
-    consumer_endpoint_->SaveTraceForBugreport(
-        [](bool success, const std::string& msg) {
-          if (success) {
-            PERFETTO_ILOG("Trace saved into %s", msg.c_str());
-            exit(0);
-          }
-          PERFETTO_ELOG("%s", msg.c_str());
-          exit(1);
-        });
+  if (is_attach()) {
+    consumer_endpoint_->Attach(attach_key_);
     return;
   }
 
-  if (is_attach()) {
-    consumer_endpoint_->Attach(attach_key_);
+  if (clone_tsid_.has_value()) {
+    task_runner_.PostDelayedTask(std::bind(&PerfettoCmd::OnTimeout, this),
+                                 kCloneTimeoutMs);
+    consumer_endpoint_->CloneSession(*clone_tsid_);
     return;
   }
 
@@ -1002,8 +1068,9 @@ void PerfettoCmd::OnConnect() {
   }
 
   PERFETTO_DCHECK(trace_config_);
-  trace_config_->set_enable_extra_guardrails(save_to_incidentd_ &&
-                                             !ignore_guardrails_);
+  trace_config_->set_enable_extra_guardrails(
+      (save_to_incidentd_ || report_to_android_framework_) &&
+      !ignore_guardrails_);
 
   // Set the statsd logging flag if we're uploading
 
@@ -1019,6 +1086,10 @@ void PerfettoCmd::OnConnect() {
   }
 
   // Failsafe mechanism to avoid waiting indefinitely if the service hangs.
+  // Note: when using prefer_suspend_clock_for_duration the actual duration
+  // might be < expected_duration_ms_ measured in in wall time. But this is fine
+  // because the resulting timeout will be conservative (it will be accurate
+  // if the device never suspends, and will be more lax if it does).
   if (expected_duration_ms_) {
     uint32_t trace_timeout = expected_duration_ms_ + 60000 +
                              trace_config_->flush_timeout_ms() +
@@ -1029,7 +1100,23 @@ void PerfettoCmd::OnConnect() {
 }
 
 void PerfettoCmd::OnDisconnect() {
-  PERFETTO_LOG("Disconnected from the Perfetto traced service");
+  if (connected_) {
+    PERFETTO_LOG("Disconnected from the traced service");
+  } else {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+    static const char kDocUrl[] =
+        "https://perfetto.dev/docs/quickstart/android-tracing";
+#else
+    static const char kDocUrl[] =
+        "https://perfetto.dev/docs/quickstart/linux-tracing";
+#endif
+    PERFETTO_LOG(
+        "Could not connect to the traced socket %s. Ensure traced is "
+        "running or use tracebox. See %s.",
+        GetConsumerSocket(), kDocUrl);
+  }
+
+  connected_ = false;
   task_runner_.Quit();
 }
 
@@ -1053,6 +1140,7 @@ void PerfettoCmd::CheckTraceDataTimeout() {
 void PerfettoCmd::OnTraceData(std::vector<TracePacket> packets, bool has_more) {
   trace_data_timeout_armed_ = false;
 
+  PERFETTO_CHECK(packet_writer_.has_value());
   if (!packet_writer_->WritePackets(packets)) {
     PERFETTO_ELOG("Failed to write packets");
     FinalizeTraceAndExit();
@@ -1063,11 +1151,23 @@ void PerfettoCmd::OnTraceData(std::vector<TracePacket> packets, bool has_more) {
 }
 
 void PerfettoCmd::OnTracingDisabled(const std::string& error) {
+  ReadbackTraceDataAndQuit(error);
+}
+
+void PerfettoCmd::ReadbackTraceDataAndQuit(const std::string& error) {
   if (!error.empty()) {
     // Some of these errors (e.g. unique session name already exists) are soft
     // errors and likely to happen in nominal condition. As such they shouldn't
     // be marked as "E" in the event log. Hence why LOG and not ELOG here.
     PERFETTO_LOG("Service error: %s", error.c_str());
+
+    // In case of errors don't leave a partial file around. This happens
+    // frequently in the case of --save-for-bugreport if there is no eligible
+    // trace. See also b/279753347 .
+    if (bytes_written_ == 0 && !trace_out_path_.empty() &&
+        trace_out_path_ != "-") {
+      remove(trace_out_path_.c_str());
+    }
 
     // Update guardrail state even if we failed. This is for two
     // reasons:
@@ -1164,15 +1264,32 @@ bool PerfettoCmd::OpenOutputFile() {
 }
 
 void PerfettoCmd::SetupCtrlCSignalHandler() {
-  base::InstallCtrCHandler([] { g_perfetto_cmd->SignalCtrlC(); });
-  task_runner_.AddFileDescriptorWatch(ctrl_c_evt_.fd(), [this] {
+  // Only the main thread instance should handle CTRL+C.
+  if (g_perfetto_cmd != this)
+    return;
+  ctrl_c_handler_installed_ = true;
+  base::InstallCtrlCHandler([] {
+    if (!g_perfetto_cmd)
+      return;
+    g_perfetto_cmd->SignalCtrlC();
+  });
+  auto weak_this = weak_factory_.GetWeakPtr();
+  task_runner_.AddFileDescriptorWatch(ctrl_c_evt_.fd(), [weak_this] {
+    if (!weak_this)
+      return;
     PERFETTO_LOG("SIGINT/SIGTERM received: disabling tracing.");
-    ctrl_c_evt_.Clear();
-    consumer_endpoint_->Flush(0, [this](bool flush_success) {
-      if (!flush_success)
-        PERFETTO_ELOG("Final flush unsuccessful.");
-      consumer_endpoint_->DisableTracing();
-    });
+    weak_this->ctrl_c_evt_.Clear();
+    weak_this->consumer_endpoint_->Flush(
+        0,
+        [weak_this](bool flush_success) {
+          if (!weak_this)
+            return;
+          if (!flush_success)
+            PERFETTO_ELOG("Final flush unsuccessful.");
+          weak_this->consumer_endpoint_->DisableTracing();
+        },
+        FlushFlags(FlushFlags::Initiator::kPerfettoCmd,
+                   FlushFlags::Reason::kTraceStop));
   });
 }
 
@@ -1206,17 +1323,39 @@ void PerfettoCmd::OnAttach(bool success, const TraceConfig& trace_config) {
   PERFETTO_DCHECK(trace_config_->write_into_file());
 
   if (stop_trace_once_attached_) {
-    consumer_endpoint_->Flush(0, [this](bool flush_success) {
-      if (!flush_success)
-        PERFETTO_ELOG("Final flush unsuccessful.");
-      consumer_endpoint_->DisableTracing();
-    });
+    auto weak_this = weak_factory_.GetWeakPtr();
+    consumer_endpoint_->Flush(
+        0,
+        [weak_this](bool flush_success) {
+          if (!weak_this)
+            return;
+          if (!flush_success)
+            PERFETTO_ELOG("Final flush unsuccessful.");
+          weak_this->consumer_endpoint_->DisableTracing();
+        },
+        FlushFlags(FlushFlags::Initiator::kPerfettoCmd,
+                   FlushFlags::Reason::kTraceStop));
   }
 }
 
 void PerfettoCmd::OnTraceStats(bool /*success*/,
                                const TraceStats& /*trace_config*/) {
   // TODO(eseckler): Support GetTraceStats().
+}
+
+void PerfettoCmd::OnSessionCloned(const OnSessionClonedArgs& args) {
+  PERFETTO_DLOG("Cloned tracing session %" PRIu64 ", success=%d",
+                clone_tsid_.value_or(0), args.success);
+  std::string full_error;
+  if (!args.success) {
+    full_error = "Failed to clone tracing session " +
+                 std::to_string(clone_tsid_.value_or(0)) + ": " + args.error;
+  }
+
+  // Kick off the readback and file finalization (as if we started tracing and
+  // reached the duration_ms timeout).
+  uuid_ = args.uuid.ToString();
+  ReadbackTraceDataAndQuit(full_error);
 }
 
 void PerfettoCmd::PrintServiceState(bool success,
@@ -1272,15 +1411,17 @@ NAME                                     PRODUCER                     DETAILS
       }
     }
 
-    printf("%-40s %-40s ", ds.ds_descriptor().name().c_str(),
+    printf("%-40s %-28s ", ds.ds_descriptor().name().c_str(),
            producer_id_and_name);
     // Print the category names for clients using the track event SDK.
+    std::string cats;
     if (!ds.ds_descriptor().track_event_descriptor_raw().empty()) {
       const std::string& raw = ds.ds_descriptor().track_event_descriptor_raw();
       protos::gen::TrackEventDescriptor desc;
       if (desc.ParseFromArray(raw.data(), raw.size())) {
         for (const auto& cat : desc.available_categories()) {
-          printf("%s,", cat.name().c_str());
+          cats.append(cats.empty() ? "" : ",");
+          cats.append(cat.name());
         }
       }
     } else if (!ds.ds_descriptor().ftrace_descriptor_raw().empty()) {
@@ -1288,11 +1429,17 @@ NAME                                     PRODUCER                     DETAILS
       protos::gen::FtraceDescriptor desc;
       if (desc.ParseFromArray(raw.data(), raw.size())) {
         for (const auto& cat : desc.atrace_categories()) {
-          printf("%s,", cat.name().c_str());
+          cats.append(cats.empty() ? "" : ",");
+          cats.append(cat.name());
         }
       }
     }
-    printf("\n");
+    const size_t kCatsShortLen = 40;
+    if (!query_service_long_ && cats.length() > kCatsShortLen) {
+      cats = cats.substr(0, kCatsShortLen);
+      cats.append("... (use --long to expand)");
+    }
+    printf("%s\n", cats.c_str());
   }  // for data_sources()
 
   if (svc_state.supports_tracing_sessions()) {
@@ -1336,6 +1483,69 @@ void PerfettoCmd::OnObservableEvents(
   if (observable_events.all_data_sources_started()) {
     NotifyBgProcessPipe(kBackgroundOk);
   }
+  if (observable_events.has_clone_trigger_hit()) {
+    int64_t tsid = observable_events.clone_trigger_hit().tracing_session_id();
+    OnCloneSnapshotTriggerReceived(static_cast<TracingSessionID>(tsid));
+  }
+}
+
+void PerfettoCmd::OnCloneSnapshotTriggerReceived(TracingSessionID tsid) {
+  PERFETTO_DLOG("Creating snapshot for tracing session %" PRIu64, tsid);
+
+  // Only the main thread instance should be handling snapshots.
+  // We should never end up in a state where each secondary PerfettoCmd
+  // instance handles other snapshots and creates other threads.
+  PERFETTO_CHECK(g_perfetto_cmd == this);
+
+  std::string cmdline;
+  auto add_argv = [&cmdline](const std::string& str) {
+    cmdline.append(str);
+    cmdline.append("\0", 1);
+  };
+  add_argv("perfetto");
+  add_argv("--config");
+  add_argv(":mem");  // Use the copied config from `snapshot_config_`.
+  add_argv("--clone");
+  add_argv(std::to_string(tsid));
+  if (upload_flag_) {
+    add_argv("--upload");
+  } else if (!trace_out_path_.empty()) {
+    add_argv("--out");
+    add_argv(trace_out_path_ + "." + std::to_string(snapshot_count_++));
+  } else {
+    PERFETTO_FATAL("Cannot use CLONE_SNAPSHOT with the current cmdline args");
+  }
+
+  if (!snapshot_thread_) {
+    // The destructor of the main-thread's PerfettoCmdMain will destroy and
+    // join the secondary thread that we are crating here.
+    snapshot_thread_.reset(new base::ThreadTaskRunner(
+        base::ThreadTaskRunner::CreateAndStart("snapshot")));
+  }
+
+  // We need to pass a copy of the trace config to the new PerfettoCmd instance
+  // because the trace config defines a bunch of properties that are used by the
+  // cmdline client (reporter API package, guardrails, etc).
+  std::string trace_config_copy = trace_config_->SerializeAsString();
+
+  snapshot_thread_->PostTask([tsid, cmdline, trace_config_copy] {
+    int argc = 0;
+    char* argv[32];
+    // `splitter` needs to live on the stack for the whole scope as it owns the
+    // underlying string storage (that gets std::moved) passed PerfettoCmd.
+    base::StringSplitter splitter(std::move(cmdline), '\0');
+    while (splitter.Next()) {
+      argv[argc++] = splitter.cur_token();
+      PERFETTO_CHECK(static_cast<size_t>(argc) < base::ArraySize(argv));
+    }
+    perfetto::PerfettoCmd cmd;
+    cmd.snapshot_config_ = std::move(trace_config_copy);
+    auto cmdline_res = cmd.ParseCmdlineAndMaybeDaemonize(argc, argv);
+    PERFETTO_CHECK(!cmdline_res.has_value());  // No daemonization expected.
+    int res = cmd.ConnectToServiceRunAndMaybeNotify();
+    if (res)
+      PERFETTO_ELOG("Cloning session %" PRIu64 " failed (%d)", tsid, res);
+  });
 }
 
 void PerfettoCmd::LogUploadEvent(PerfettoStatsdAtom atom) {

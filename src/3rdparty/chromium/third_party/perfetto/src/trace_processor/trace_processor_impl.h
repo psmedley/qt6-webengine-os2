@@ -22,19 +22,25 @@
 #include <atomic>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/status.h"
 #include "perfetto/trace_processor/trace_processor.h"
-#include "src/trace_processor/sqlite/create_function.h"
-#include "src/trace_processor/sqlite/create_view_function.h"
+#include "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/create_function.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/create_view_function.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/import.h"
 #include "src/trace_processor/sqlite/db_sqlite_table.h"
 #include "src/trace_processor/sqlite/query_cache.h"
 #include "src/trace_processor/sqlite/scoped_db.h"
+#include "src/trace_processor/sqlite/sqlite_engine.h"
 #include "src/trace_processor/trace_processor_storage_impl.h"
+#include "src/trace_processor/util/sql_modules.h"
 
 #include "src/trace_processor/metrics/metrics.h"
 #include "src/trace_processor/util/descriptors.h"
@@ -67,6 +73,8 @@ class TraceProcessorImpl : public TraceProcessor,
 
   base::Status RegisterMetric(const std::string& path,
                               const std::string& sql) override;
+
+  base::Status RegisterSqlModule(SqlModule sql_module) override;
 
   base::Status ExtendMetricsProto(const uint8_t* data, size_t size) override;
 
@@ -101,32 +109,19 @@ class TraceProcessorImpl : public TraceProcessor,
   friend class IteratorImpl;
 
   template <typename Table>
-  void RegisterDbTable(const Table& table) {
-    DbSqliteTable::RegisterTable(*db_, query_cache_.get(), Table::Schema(),
-                                 &table, Table::Name());
+  void RegisterStaticTable(const Table& table) {
+    engine_->RegisterStaticTable(table, Table::Name());
   }
-
-  void RegisterDynamicTable(std::unique_ptr<DynamicTableGenerator> generator) {
-    DbSqliteTable::RegisterTable(*db_, query_cache_.get(),
-                                 std::move(generator));
-  }
-
-  template <typename View>
-  void RegisterView(const View& view);
 
   bool IsRootMetricField(const std::string& metric_name);
 
-  // Keep this first: we need this to be destroyed after we clean up
-  // everything else.
-  ScopedDb db_;
+  void InitPerfettoSqlEngine();
 
-  // State necessary for CREATE_FUNCTION invocations. We store this here as we
-  // need to finalize any prepared statements *before* we destroy the database.
-  CreateFunction::State create_function_state_;
-
-  std::unique_ptr<QueryCache> query_cache_;
+  const Config config_;
+  std::unique_ptr<PerfettoSqlEngine> engine_;
 
   DescriptorPool pool_;
+
   std::vector<metrics::SqlMetricFile> sql_metrics_;
   std::unordered_map<std::string, std::string> proto_field_to_sql_metric_path_;
 
@@ -134,10 +129,8 @@ class TraceProcessorImpl : public TraceProcessor,
   // to prevent single-flow compiler optimizations in ExecuteQuery().
   std::atomic<bool> query_interrupted_{false};
 
-  // Keeps track of the tables created by the ingestion process. This is used
-  // by RestoreInitialTables() to delete all the tables/view that have been
-  // created after that point.
-  std::vector<std::string> initial_tables_;
+  // Track the number of objects registered with SQLite after the constructor.
+  uint64_t sqlite_objects_post_constructor_initialization_ = 0;
 
   std::string current_trace_name_;
   uint64_t bytes_parsed_ = 0;

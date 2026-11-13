@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_BROWSER_PRERENDER_HANDLE_H_
 #define CONTENT_PUBLIC_BROWSER_PRERENDER_HANDLE_H_
 
+#include "content/public/browser/preloading_data.h"
+
 namespace content {
 
 // PrerenderHandle is the class used to encapsulate prerender resources in
@@ -13,10 +15,13 @@ class PrerenderHandle {
  public:
   PrerenderHandle() = default;
   virtual ~PrerenderHandle() = default;
+
   // Returns the initial URL that is passed to PrerenderHostRegistry for
   // starting a prerendering page.
-  virtual GURL GetInitialPrerenderingUrl() = 0;
+  virtual const GURL& GetInitialPrerenderingUrl() const = 0;
   virtual base::WeakPtr<PrerenderHandle> GetWeakPtr() = 0;
+  virtual void SetPreloadingAttemptFailureReason(
+      PreloadingFailureReason reason) = 0;
 };
 
 }  // namespace content

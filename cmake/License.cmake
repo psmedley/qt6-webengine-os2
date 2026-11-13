@@ -16,7 +16,15 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR})
 
 find_package(Gn ${QT_REPO_MODULE_VERSION} EXACT)
 if(NOT Python3_EXECUTABLE)
-    find_package(Python3 3.6 REQUIRED)
+    find_package(Python3 3.8 REQUIRED)
+endif()
+
+set(extraThirdPartyDirs "")
+if(NOT "${EXTRA_THIRD_PARTY_DIRS}" STREQUAL "")
+    string(REPLACE " " ";" dirList ${EXTRA_THIRD_PARTY_DIRS})
+    foreach(dir ${dirList})
+        string(CONCAT extraThirdPartyDirs ${extraThirdPartyDirs}"${dir}",)
+    endforeach()
 endif()
 
 execute_process(
@@ -26,6 +34,7 @@ execute_process(
         --gn-binary ${Gn_EXECUTABLE}
         --gn-target ${GN_TARGET}
         --gn-out-dir ${BUILDDIR}
+        --extra-third-party-dirs=[${extraThirdPartyDirs}]
         credits ${OUTPUT}
     WORKING_DIRECTORY ${BUILDDIR}
     RESULT_VARIABLE gnResult

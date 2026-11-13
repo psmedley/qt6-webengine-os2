@@ -26,7 +26,7 @@ SELECT RUN_METRIC('android/android_proxy_power.sql');
 
 -- View containing estimated power slices broken down by cpu.
 DROP VIEW IF EXISTS power_per_chrome_thread;
-CREATE VIEW power_per_chrome_thread AS
+CREATE PERFETTO VIEW power_per_chrome_thread AS
 SELECT ts,
   dur,
   cpu,
@@ -39,7 +39,7 @@ SELECT ts,
   upid,
   is_main_thread
 FROM power_per_thread
-  JOIN chrome_thread
+JOIN chrome_thread
 WHERE power_per_thread.utid = chrome_thread.utid;
 
 DROP TABLE IF EXISTS {{input}}_power;
@@ -51,7 +51,7 @@ CREATE VIRTUAL TABLE {{input}}_power USING SPAN_JOIN(
 -- Estimated power usage for chrome across the categroy slices contained in
 -- input.
 DROP VIEW IF EXISTS {{output}};
-CREATE VIEW {{output}} AS
+CREATE PERFETTO VIEW {{output}} AS
 SELECT id,
   ts,
   dur,
@@ -65,7 +65,7 @@ FROM (
       s.{{category}},
       SUM(r.power_ma * r.dur) / 1e9 AS mas
     FROM {{input}}_power r
-      JOIN {{input}} s
-    WHERE r.id == s.id
+    JOIN {{input}} s
+    WHERE r.id = s.id
     GROUP BY s.id
   );

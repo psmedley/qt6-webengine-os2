@@ -5,18 +5,20 @@
 #include "content/browser/file_system_access/file_system_chooser.h"
 
 #include "base/files/file_path.h"
+#include "base/functional/callback_helpers.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/rtl.h"
-#include "base/metrics/histogram_functions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/browser/file_system_access/file_system_access_error.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "net/base/mime_util.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/shell_dialogs/select_file_policy.h"
 #include "ui/shell_dialogs/selected_file_info.h"
@@ -35,28 +37,6 @@ constexpr int kMaxDescriptionLength = 64;
 // allowed to be. Any longer extensions will be stripped. This value should be
 // kept in sync with the extension length checks in the renderer.
 constexpr int kMaxExtensionLength = 16;
-
-std::string TypeToString(ui::SelectFileDialog::Type type) {
-  switch (type) {
-    case ui::SelectFileDialog::SELECT_OPEN_FILE:
-      return "OpenFile";
-    case ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE:
-      return "OpenMultipleFiles";
-    case ui::SelectFileDialog::SELECT_SAVEAS_FILE:
-      return "SaveFile";
-    case ui::SelectFileDialog::SELECT_FOLDER:
-      return "OpenDirectory";
-    default:
-      NOTREACHED();
-      return std::string();
-  }
-}
-
-void RecordFileSelectionResult(ui::SelectFileDialog::Type type, int count) {
-  base::UmaHistogramCounts1000("NativeFileSystemAPI.FileChooserResult", count);
-  base::UmaHistogramCounts1000(
-      "NativeFileSystemAPI.FileChooserResult." + TypeToString(type), count);
-}
 
 // Similar to base::FilePath::FinalExtension, but operates with the
 // understanding that the StringType passed in is an extension, not a path.
@@ -242,16 +222,46 @@ base::FilePath FileSystemChooser::Options::ResolveSuggestedNameExtension(
   return suggested_name;
 }
 
+
+FileSystemChooser::ScopedObjects::ScopedObjects() = default;
+FileSystemChooser::ScopedObjects::~ScopedObjects() = default;
+FileSystemChooser::ScopedObjects::ScopedObjects(ScopedObjects&&) = default;
+FileSystemChooser::ScopedObjects& FileSystemChooser::ScopedObjects::operator=(
+    ScopedObjects&&) = default;
+
+FileSystemChooser::ScopedObjects::ScopedObjects(
+    base::ScopedClosureRunner&& fullscreen_block,
+    base::ScopedClosureRunner&& pip_tucker)
+    : fullscreen_block(std::move(fullscreen_block)),
+      pip_tucker(std::move(pip_tucker)) {}
+
+
+namespace {
+// Called when no file is selected due to being aborted.
+void AbortedCallback(FileSystemChooser::ResultCallback callback) {
+  std::move(callback).Run(
+      file_system_access_error::FromStatus(
+          blink::mojom::FileSystemAccessStatus::kOperationAborted),
+      {});
+}
+}  // namespace
+
 // static
 void FileSystemChooser::CreateAndShow(
     WebContents* web_contents,
     const Options& options,
     ResultCallback callback,
-    base::ScopedClosureRunner fullscreen_block) {
+    FileSystemChooser::ScopedObjects scoped_objects) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (web_contents->GetVisibility() == Visibility::HIDDEN) {
+    AbortedCallback(std::move(callback));
+    return;
+  }
+
   // `listener` deletes itself.
-  auto* listener = new FileSystemChooser(options.type(), std::move(callback),
-                                         std::move(fullscreen_block));
+ auto* listener =
+      new FileSystemChooser(options.type(), std::move(callback),
+                            std::move(scoped_objects), web_contents);
   listener->dialog_ = ui::SelectFileDialog::Create(
       listener,
       GetContentClient()->browser()->CreateSelectFilePolicy(web_contents));
@@ -267,8 +277,12 @@ void FileSystemChooser::CreateAndShow(
       options.type(), options.title(), options.default_path(),
       &options.file_type_info(), options.default_file_type_index(),
       /*default_extension=*/base::FilePath::StringType(),
-      web_contents ? web_contents->GetTopLevelNativeWindow() : nullptr,
-      /*params=*/nullptr);
+      web_contents ? web_contents->GetTopLevelNativeWindow()
+                   : gfx::NativeWindow(),
+      /*params=*/nullptr,
+      /*caller=*/
+      web_contents ? &web_contents->GetPrimaryMainFrame()->GetLastCommittedURL()
+                   : nullptr);
 }
 
 // static
@@ -307,12 +321,15 @@ bool FileSystemChooser::IsShellIntegratedExtension(
   return false;
 }
 
-FileSystemChooser::FileSystemChooser(ui::SelectFileDialog::Type type,
-                                     ResultCallback callback,
-                                     base::ScopedClosureRunner fullscreen_block)
-    : callback_(std::move(callback)),
+FileSystemChooser::FileSystemChooser(
+    ui::SelectFileDialog::Type type,
+    ResultCallback callback,
+    FileSystemChooser::ScopedObjects scoped_objects,
+    WebContents* web_contents)
+    : WebContentsObserver(web_contents),
       type_(ValidateType(type)),
-      fullscreen_block_(std::move(fullscreen_block)) {}
+      callback_(std::move(callback)),
+      scoped_objects_(std::move(scoped_objects)) {}
 
 FileSystemChooser::~FileSystemChooser() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -320,30 +337,21 @@ FileSystemChooser::~FileSystemChooser() {
     dialog_->ListenerDestroyed();
 }
 
-void FileSystemChooser::FileSelected(const base::FilePath& path,
+void FileSystemChooser::OnVisibilityChanged(Visibility visibility) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (visibility == Visibility::HIDDEN) {
+    FileSelectionCanceled(nullptr);
+  }
+}
+
+void FileSystemChooser::FileSelected(const ui::SelectedFileInfo& file,
                                      int index,
                                      void* params) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  MultiFilesSelected({path}, params);
+  MultiFilesSelected({file}, params);
 }
 
 void FileSystemChooser::MultiFilesSelected(
-    const std::vector<base::FilePath>& files,
-    void* params) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  MultiFilesSelectedWithExtraInfo(ui::FilePathListToSelectedFileInfoList(files),
-                                  params);
-}
-
-void FileSystemChooser::FileSelectedWithExtraInfo(
-    const ui::SelectedFileInfo& file,
-    int index,
-    void* params) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  MultiFilesSelectedWithExtraInfo({file}, params);
-}
-
-void FileSystemChooser::MultiFilesSelectedWithExtraInfo(
     const std::vector<ui::SelectedFileInfo>& files,
     void* params) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -359,18 +367,13 @@ void FileSystemChooser::MultiFilesSelectedWithExtraInfo(
     }
   }
 
-  RecordFileSelectionResult(type_, result.size());
   std::move(callback_).Run(file_system_access_error::Ok(), std::move(result));
   delete this;
 }
 
 void FileSystemChooser::FileSelectionCanceled(void* params) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  RecordFileSelectionResult(type_, 0);
-  std::move(callback_).Run(
-      file_system_access_error::FromStatus(
-          blink::mojom::FileSystemAccessStatus::kOperationAborted),
-      {});
+  AbortedCallback(std::move(callback_));
   delete this;
 }
 

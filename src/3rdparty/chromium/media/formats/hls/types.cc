@@ -4,8 +4,8 @@
 
 #include "media/formats/hls/types.h"
 
-#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 
 #include "base/containers/contains.h"
@@ -20,14 +20,6 @@
 namespace media::hls::types {
 
 namespace {
-re2::StringPiece to_re2(base::StringPiece str) {
-  return re2::StringPiece(str.data(), str.size());
-}
-
-re2::StringPiece to_re2(SourceString str) {
-  return to_re2(str.Str());
-}
-
 bool IsOneOf(char c, base::StringPiece set) {
   return base::Contains(set, c);
 }
@@ -45,8 +37,7 @@ absl::optional<SourceString> ExtractAttributeName(SourceString* source_str) {
   };
 
   // Extract the substring where `is_char_valid` succeeds
-  const char* end =
-      std::find_if_not(str.Str().cbegin(), str.Str().cend(), is_char_valid);
+  const auto end = base::ranges::find_if_not(str.Str(), is_char_valid);
   const auto name = str.Consume(end - str.Str().cbegin());
 
   // At least one character must have matched
@@ -102,16 +93,6 @@ absl::optional<SourceString> ExtractAttributeValue(SourceString* source_str) {
   return result;
 }
 
-struct AttributeMapComparator {
-  bool operator()(const AttributeMap::Item& left,
-                  const AttributeMap::Item& right) {
-    return left.first < right.first;
-  }
-  bool operator()(const AttributeMap::Item& left, SourceString right) {
-    return left.first < right.Str();
-  }
-};
-
 }  // namespace
 
 ParseStatus::Or<DecimalInteger> ParseDecimalInteger(
@@ -124,7 +105,7 @@ ParseStatus::Or<DecimalInteger> ParseDecimalInteger(
   // NOTE: It may be useful to split this into a separate function which
   // extracts the range containing valid characters from a given
   // base::StringPiece. For now that's the caller's responsibility.
-  if (!RE2::FullMatch(to_re2(str), *decimal_integer_regex)) {
+  if (!RE2::FullMatch(str, *decimal_integer_regex)) {
     return ParseStatusCode::kFailedToParseDecimalInteger;
   }
 
@@ -140,7 +121,7 @@ ParseStatus::Or<DecimalFloatingPoint> ParseDecimalFloatingPoint(
     ResolvedSourceString source_str) {
   // Utilize signed parsing function
   auto result = ParseSignedDecimalFloatingPoint(source_str);
-  if (result.has_error()) {
+  if (!result.has_value()) {
     return ParseStatusCode::kFailedToParseDecimalFloatingPoint;
   }
 
@@ -164,7 +145,7 @@ ParseStatus::Or<SignedDecimalFloatingPoint> ParseSignedDecimalFloatingPoint(
 
   // Check that the set of characters is allowed: - . 0-9
   // `base::StringToDouble` is not as strict as the HLS spec
-  if (!re2::RE2::FullMatch(to_re2(str), *decimal_floating_point_regex)) {
+  if (!re2::RE2::FullMatch(str, *decimal_floating_point_regex)) {
     return ParseStatusCode::kFailedToParseSignedDecimalFloatingPoint;
   }
 
@@ -195,14 +176,14 @@ ParseStatus::Or<DecimalResolution> DecimalResolution::Parse(
   auto width = ParseDecimalInteger(width_str);
   auto height = ParseDecimalInteger(height_str);
   for (auto* x : {&width, &height}) {
-    if (x->has_error()) {
+    if (!x->has_value()) {
       return ParseStatus(ParseStatusCode::kFailedToParseDecimalResolution)
           .AddCause(std::move(*x).error());
     }
   }
 
-  return DecimalResolution{/*.width =*/ std::move(width).value(),
-                           /*.height =*/ std::move(height).value()};
+  return DecimalResolution{.width = std::move(width).value(),
+                           .height = std::move(height).value()};
 }
 
 // static
@@ -213,7 +194,7 @@ ParseStatus::Or<ByteRangeExpression> ByteRangeExpression::Parse(
   const auto at_index = source_str.Str().find_first_of('@');
   const auto length_str = source_str.Consume(at_index);
   auto length = ParseDecimalInteger(length_str);
-  if (length.has_error()) {
+  if (!length.has_value()) {
     return ParseStatus(ParseStatusCode::kFailedToParseByteRange)
         .AddCause(std::move(length).error());
   }
@@ -223,7 +204,7 @@ ParseStatus::Or<ByteRangeExpression> ByteRangeExpression::Parse(
   if (at_index != base::StringPiece::npos) {
     source_str.Consume(1);
     auto offset_result = ParseDecimalInteger(source_str);
-    if (offset_result.has_error()) {
+    if (!offset_result.has_value()) {
       return ParseStatus(ParseStatusCode::kFailedToParseByteRange)
           .AddCause(std::move(offset_result).error());
     }
@@ -231,8 +212,8 @@ ParseStatus::Or<ByteRangeExpression> ByteRangeExpression::Parse(
     offset = std::move(offset_result).value();
   }
 
-  return ByteRangeExpression{/*.length =*/ std::move(length).value(),
-                             /*.offset =*/ offset};
+  return ByteRangeExpression{.length = std::move(length).value(),
+                             .offset = offset};
 }
 
 // static
@@ -343,7 +324,7 @@ ParseStatus::Or<AttributeListIterator::Item> AttributeListIterator::Next() {
   }
 
   remaining_content_ = content;
-  return Item{/*.name =*/ name.value(), /*.value =*/ value.value()};
+  return Item{.name = name.value(), .value = value.value()};
 }
 
 AttributeMap::AttributeMap(base::span<Item> sorted_items)
@@ -355,7 +336,7 @@ AttributeMap::AttributeMap(base::span<Item> sorted_items)
   // tries to access the stored value after filling by the index of a subsequent
   // duplicate key, rather than the first.
   DCHECK(
-      std::is_sorted(items_.begin(), items_.end(), AttributeMapComparator()));
+      base::ranges::is_sorted(items_, std::less(), &AttributeMap::Item::first));
 }
 
 ParseStatus::Or<AttributeListIterator::Item> AttributeMap::Fill(
@@ -365,16 +346,17 @@ ParseStatus::Or<AttributeListIterator::Item> AttributeMap::Fill(
     const auto iter_backup = *iter;
 
     auto result = iter->Next();
-    if (result.has_error()) {
+    if (!result.has_value()) {
       return result;
     }
 
     auto item = std::move(result).value();
 
-    // Look up the item. std::lower_bound performs a binary search to find the
-    // first item where the name comparison function fails.
-    auto entry = std::lower_bound(items_.begin(), items_.end(), item.name,
-                                  AttributeMapComparator());
+    // Look up the item. `base::ranges::lower_bound` performs a binary search to
+    // find the first entry where the name does not compare less than the given
+    // value.
+    auto entry = base::ranges::lower_bound(items_, item.name.Str(), std::less(),
+                                           &AttributeMap::Item::first);
     if (entry == items_.end()) {
       return item;
     }
@@ -395,7 +377,7 @@ ParseStatus::Or<AttributeListIterator::Item> AttributeMap::Fill(
 ParseStatus AttributeMap::FillUntilError(AttributeListIterator* iter) {
   while (true) {
     auto result = Fill(iter);
-    if (result.has_error()) {
+    if (!result.has_value()) {
       return std::move(result).error();
     }
 
@@ -411,7 +393,7 @@ ParseStatus::Or<VariableName> VariableName::Parse(SourceString source_str) {
       "[a-zA-Z0-9_-]+");
 
   // This source_str must match completely
-  if (!re2::RE2::FullMatch(to_re2(source_str), *variable_name_regex)) {
+  if (!re2::RE2::FullMatch(source_str.Str(), *variable_name_regex)) {
     return ParseStatusCode::kMalformedVariableName;
   }
 
@@ -453,7 +435,7 @@ ParseStatus::Or<InstreamId> InstreamId::Parse(ResolvedSourceString str) {
 
   // Parse the number, max allowed value depends on the type
   auto number_result = ParseDecimalInteger(str);
-  if (number_result.has_error()) {
+  if (!number_result.has_value()) {
     return ParseStatusCode::kFailedToParseInstreamId;
   }
   auto number = std::move(number_result).value();
@@ -484,7 +466,7 @@ ParseStatus::Or<AudioChannels> AudioChannels::Parse(ResolvedSourceString str) {
   // First parameter is a decimal-integer indicating the number of channels
   const auto max_channels_str = str.ConsumeDelimiter('/');
   auto max_channels_result = ParseDecimalInteger(max_channels_str);
-  if (max_channels_result.has_error()) {
+  if (!max_channels_result.has_value()) {
     return ParseStatus(ParseStatusCode::kFailedToParseAudioChannels)
         .AddCause(std::move(max_channels_result).error());
   }

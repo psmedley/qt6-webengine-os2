@@ -1,9 +1,11 @@
-// Copyright 2015 PDFium Authors. All rights reserved.
+// Copyright 2015 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef TESTING_EMBEDDER_TEST_H_
 #define TESTING_EMBEDDER_TEST_H_
+
+#include <stdint.h>
 
 #include <fstream>
 #include <map>
@@ -19,9 +21,8 @@
 #include "public/fpdf_save.h"
 #include "public/fpdfview.h"
 #include "testing/fake_file_access.h"
-#include "testing/free_deleter.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class TestLoader;
 
@@ -300,9 +301,8 @@ class EmbedderTest : public ::testing::Test,
   int form_fill_info_version_ = 1;
 #endif  // PDF_ENABLE_XFA
 
-  size_t file_length_ = 0;
   // must outlive `loader_`.
-  std::unique_ptr<char, pdfium::FreeDeleter> file_contents_;
+  std::vector<uint8_t> file_contents_;
   std::unique_ptr<TestLoader> loader_;
   FPDF_FILEACCESS file_access_;                       // must outlive `avail_`.
   std::unique_ptr<FakeFileAccess> fake_file_access_;  // must outlive `avail_`.

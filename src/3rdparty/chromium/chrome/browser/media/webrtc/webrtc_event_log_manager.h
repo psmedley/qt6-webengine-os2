@@ -10,12 +10,13 @@
 #include <utility>
 #include <vector>
 
-#include "base/callback.h"
 #include "base/containers/flat_set.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/updateable_sequenced_task_runner.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
@@ -33,8 +34,11 @@ class WebRTCInternalsIntegrationBrowserTest;
 
 namespace content {
 class BrowserContext;
-class NetworkConnectionTracker;
 }  // namespace content
+
+namespace network {
+class NetworkConnectionTracker;
+}  // namespace network
 
 FORWARD_DECLARE_TEST(WebRtcEventLogCollectionAllowedPolicyTest, RunTest);
 

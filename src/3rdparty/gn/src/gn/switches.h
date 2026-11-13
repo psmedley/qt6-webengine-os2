@@ -70,6 +70,10 @@ extern const char kRootTarget[];
 extern const char kRootTarget_HelpShort[];
 extern const char kRootTarget_Help[];
 
+extern const char kRootPattern[];
+extern const char kRootPattern_HelpShort[];
+extern const char kRootPattern_Help[];
+
 extern const char kRuntimeDepsListFile[];
 extern const char kRuntimeDepsListFile_HelpShort[];
 extern const char kRuntimeDepsListFile_Help[];
@@ -113,6 +117,10 @@ extern const char kDefaultToolchain[];
 // because users should not be setting this switch. It is located in this file
 // so it can be shared between command_gen and ninja_build_writer.
 extern const char kRegeneration[];
+
+// This switch is read by Setup so needs to be in this global place, but is
+// relevant only by command_gen so is documented there.
+extern const char kAddExportCompileCommands[];
 
 }  // namespace switches
 

@@ -24,16 +24,16 @@ export interface PreviewToggleData {
 
 const UIStrings = {
   /**
-  *@description Link text the user can click to provide feedback to the team.
-  */
+   *@description Link text the user can click to provide feedback to the team.
+   */
   previewTextFeedbackLink: 'Send us your feedback.',
   /**
-  *@description Link text the user can click to provide feedback to the team.
-  */
+   *@description Link text the user can click to provide feedback to the team.
+   */
   shortFeedbackLink: 'Send feedback',
   /**
-  *@description Link text the user can click to see documentation.
-  */
+   *@description Link text the user can click to see documentation.
+   */
   learnMoreLink: 'Learn More',
 };
 
@@ -75,10 +75,10 @@ export class PreviewToggle extends HTMLElement {
         <label class="experiment-preview">
           <input type="checkbox" ?checked=${checked} @change=${this.#checkboxChanged} aria-label=${this.#name}/>
           <${IconButton.Icon.Icon.litTagName} .data=${{
-            iconName: 'ic_preview_feature',
+            iconName: 'experiment',
             width: '16px',
             height: '16px',
-            color: 'var(--color-text-secondary)',
+            color: 'var(--icon-default)',
           } as IconButton.Icon.IconData}>
           </${IconButton.Icon.Icon.litTagName}>${this.#name}
         </label>

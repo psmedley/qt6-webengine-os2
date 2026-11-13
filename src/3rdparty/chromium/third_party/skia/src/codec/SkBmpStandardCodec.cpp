@@ -7,15 +7,17 @@
 
 #include "src/codec/SkBmpStandardCodec.h"
 
+#include "include/core/SkAlphaType.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorPriv.h"
+#include "include/core/SkColorType.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkSize.h"
 #include "include/core/SkStream.h"
-#include "include/private/SkTemplates.h"
-#include "src/codec/SkBmpCodec.h"
+#include "include/private/base/SkAlign.h"
+#include "include/private/base/SkTemplates.h"
+#include "src/base/SkMathPriv.h"
 #include "src/codec/SkCodecPriv.h"
-#include "src/core/SkMathPriv.h"
 
 #include <algorithm>
 #include <utility>
@@ -128,7 +130,7 @@ SkCodec::Result SkBmpStandardCodec::onGetPixels(const SkImageInfo& dstInfo,
         }
 
         // Set the color table
-        fColorTable.reset(new SkColorTable(colorTable, maxColors));
+        fColorTable.reset(new SkColorPalette(colorTable, maxColors));
     }
 
     // Bmp-in-Ico files do not use an offset to indicate where the pixel data

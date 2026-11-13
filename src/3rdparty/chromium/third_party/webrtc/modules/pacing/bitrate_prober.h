@@ -45,7 +45,7 @@ struct BitrateProberConfig {
 class BitrateProber {
  public:
   explicit BitrateProber(const FieldTrialsView& field_trials);
-  ~BitrateProber();
+  ~BitrateProber() = default;
 
   void SetEnabled(bool enable);
 
@@ -84,14 +84,12 @@ class BitrateProber {
   enum class ProbingState {
     // Probing will not be triggered in this state at all times.
     kDisabled,
-    // Probing is enabled and ready to trigger on the first packet arrival.
+    // Probing is enabled and ready to trigger on the first packet arrival if
+    // there is a probe cluster.
     kInactive,
     // Probe cluster is filled with the set of data rates to be probed and
     // probes are being sent.
     kActive,
-    // Probing is enabled, but currently suspended until an explicit trigger
-    // to start probing again.
-    kSuspended,
   };
 
   // A probe cluster consists of a set of probes. Each probe in turn can be
@@ -107,6 +105,7 @@ class BitrateProber {
   };
 
   Timestamp CalculateNextProbeTime(const ProbeCluster& cluster) const;
+  bool ReadyToSetActiveState(DataSize packet_size) const;
 
   ProbingState probing_state_;
 
@@ -117,9 +116,6 @@ class BitrateProber {
 
   // Time the next probe should be sent when in kActive state.
   Timestamp next_probe_time_;
-
-  int total_probe_count_;
-  int total_failed_probe_count_;
 
   BitrateProberConfig config_;
 };

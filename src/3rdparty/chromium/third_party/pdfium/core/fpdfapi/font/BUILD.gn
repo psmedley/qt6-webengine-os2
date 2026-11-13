@@ -1,4 +1,4 @@
-# Copyright 2018 The PDFium Authors. All rights reserved.
+# Copyright 2018 The PDFium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -59,10 +59,12 @@ pdfium_unittest_source_set("unittests") {
   sources = [
     "cpdf_cidfont_unittest.cpp",
     "cpdf_cmapparser_unittest.cpp",
+    "cpdf_simplefont_unittest.cpp",
     "cpdf_tounicodemap_unittest.cpp",
   ]
   deps = [
     ":font",
+    "../../fxge",
     "../page:unit_test_support",
     "../parser",
     "../parser:unit_test_support",

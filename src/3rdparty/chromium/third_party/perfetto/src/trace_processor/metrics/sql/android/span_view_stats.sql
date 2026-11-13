@@ -14,17 +14,8 @@
 -- limitations under the License.
 --
 
-DROP TABLE IF EXISTS {{table_name}}_stats;
-CREATE TABLE {{table_name}}_stats (
-  process_name TEXT PRIMARY KEY,
-  min_value REAL,
-  max_value REAL,
-  avg_value REAL,
-  max_delta_value REAL
-);
-
 DROP TABLE IF EXISTS {{table_name}}_delta;
-CREATE TABLE {{table_name}}_delta AS
+CREATE PERFETTO TABLE {{table_name}}_delta AS
 WITH rolling_delta AS (
   -- emits one row per ts point
   SELECT
@@ -40,11 +31,12 @@ WITH rolling_delta AS (
 SELECT
   upid,
   -- max over all ts
-  MAX(delta) delta
+  MAX(delta) AS delta
 FROM rolling_delta
 GROUP BY 1;
 
-INSERT INTO {{table_name}}_stats
+DROP TABLE IF EXISTS {{table_name}}_stats;
+CREATE PERFETTO TABLE {{table_name}}_stats AS
 SELECT
   process.name AS process_name,
   MIN(span.{{table_name}}_val) AS min_value,
@@ -59,7 +51,7 @@ GROUP BY 1
 ORDER BY 1;
 
 DROP VIEW IF EXISTS {{table_name}}_stats_proto;
-CREATE VIEW {{table_name}}_stats_proto AS
+CREATE PERFETTO VIEW {{table_name}}_stats_proto AS
 SELECT
   process_name,
   AndroidMemoryMetric_Counter(

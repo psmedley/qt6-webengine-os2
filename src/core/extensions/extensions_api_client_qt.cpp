@@ -7,6 +7,7 @@
 // found in the LICENSE file.
 
 #include "extensions_api_client_qt.h"
+#include "file_system_delegate_qt.h"
 #include "messaging_delegate_qt.h"
 
 #include <memory>
@@ -17,10 +18,6 @@
 #include "mime_handler_view_guest_delegate_qt.h"
 #include "pdf/buildflags.h"
 #include "printing/buildflags/buildflags.h"
-
-#if BUILDFLAG(ENABLE_PDF)
-#include "components/pdf/browser/pdf_web_contents_helper.h"
-#endif
 
 #if BUILDFLAG(ENABLE_PRINTING) && BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "printing/print_view_manager_qt.h"
@@ -39,9 +36,16 @@ AppViewGuestDelegate *ExtensionsAPIClientQt::CreateAppViewGuestDelegate() const
     return nullptr;
 }
 
-std::unique_ptr<guest_view::GuestViewManagerDelegate> ExtensionsAPIClientQt::CreateGuestViewManagerDelegate(content::BrowserContext *context) const
+FileSystemDelegate *ExtensionsAPIClientQt::GetFileSystemDelegate()
 {
-    return std::make_unique<extensions::ExtensionsGuestViewManagerDelegate>(context);
+    if (!m_fileSystemDelegate)
+        m_fileSystemDelegate = std::make_unique<FileSystemDelegateQt>();
+    return m_fileSystemDelegate.get();
+}
+
+std::unique_ptr<guest_view::GuestViewManagerDelegate> ExtensionsAPIClientQt::CreateGuestViewManagerDelegate() const
+{
+    return std::make_unique<extensions::ExtensionsGuestViewManagerDelegate>();
 }
 
 std::unique_ptr<MimeHandlerViewGuestDelegate> ExtensionsAPIClientQt::CreateMimeHandlerViewGuestDelegate(MimeHandlerViewGuest *guest) const

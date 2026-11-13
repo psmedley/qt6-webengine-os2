@@ -63,6 +63,7 @@ class TFieldListCollection : angle::NonCopyable
     bool containsMatrices() const;
     bool containsType(TBasicType t) const;
     bool containsSamplers() const;
+    bool containsOnlySamplers() const;
 
     size_t objectSize() const;
     // How many locations the field list consumes as a uniform.
@@ -115,6 +116,7 @@ class TType
           qualifier(q),
           invariant(false),
           precise(false),
+          interpolant(false),
           memoryQualifier(TMemoryQualifier::Create()),
           layoutQualifier(TLayoutQualifier::Create()),
           primarySize(ps),
@@ -134,6 +136,7 @@ class TType
           qualifier(t.qualifier),
           invariant(t.invariant),
           precise(t.precise),
+          interpolant(t.interpolant),
           memoryQualifier(t.memoryQualifier),
           layoutQualifier(t.layoutQualifier),
           primarySize(t.primarySize),
@@ -163,6 +166,9 @@ class TType
 
     bool isPrecise() const { return precise; }
     void setPrecise(bool i) { precise = i; }
+
+    bool isInterpolant() const { return interpolant; }
+    void setInterpolant(bool i) { interpolant = i; }
 
     TMemoryQualifier getMemoryQualifier() const { return memoryQualifier; }
     void setMemoryQualifier(const TMemoryQualifier &mq) { memoryQualifier = mq; }
@@ -331,6 +337,7 @@ class TType
     bool isStructureContainingMatrices() const;
     bool isStructureContainingType(TBasicType t) const;
     bool isStructureContainingSamplers() const;
+    bool isStructureContainingOnlySamplers() const;
     bool isInterfaceBlockContainingType(TBasicType t) const;
 
     bool isStructSpecifier() const { return mIsStructSpecifier; }
@@ -372,6 +379,7 @@ class TType
     TQualifier qualifier;
     bool invariant;
     bool precise;
+    bool interpolant;
 
     TMemoryQualifier memoryQualifier;
     TLayoutQualifier layoutQualifier;

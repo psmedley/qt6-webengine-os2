@@ -207,7 +207,7 @@ MemOperand::MemOperand(Register ra, Register rb)
 MemOperand::MemOperand(Register ra, Register rb, int64_t offset)
     : ra_(ra), offset_(offset), rb_(rb) {}
 
-void Assembler::AllocateAndInstallRequestedHeapNumbers(Isolate* isolate) {
+void Assembler::AllocateAndInstallRequestedHeapNumbers(LocalIsolate* isolate) {
   DCHECK_IMPLIES(isolate == nullptr, heap_number_requests_.empty());
   for (auto& request : heap_number_requests_) {
     Handle<HeapObject> object =
@@ -242,17 +242,20 @@ Assembler::Assembler(const AssemblerOptions& options,
   relocations_.reserve(128);
 }
 
-void Assembler::GetCode(Isolate* isolate, CodeDesc* desc,
-                        SafepointTableBuilder* safepoint_table_builder,
+void Assembler::GetCode(Isolate* isolate, CodeDesc* desc) {
+  GetCode(isolate->main_thread_local_isolate(), desc);
+}
+void Assembler::GetCode(LocalIsolate* isolate, CodeDesc* desc,
+                        SafepointTableBuilderBase* safepoint_table_builder,
                         int handler_table_offset) {
   // As a crutch to avoid having to add manual Align calls wherever we use a
-  // raw workflow to create Code objects (mostly in tests), add another Align
-  // call here. It does no harm - the end of the Code object is aligned to the
-  // (larger) kCodeAlignment anyways.
+  // raw workflow to create InstructionStream objects (mostly in tests), add
+  // another Align call here. It does no harm - the end of the InstructionStream
+  // object is aligned to the (larger) kCodeAlignment anyways.
   // TODO(jgruber): Consider moving responsibility for proper alignment to
   // metadata table builders (safepoint, handler, constant pool, code
   // comments).
-  DataAlign(Code::kMetadataAlignment);
+  DataAlign(InstructionStream::kMetadataAlignment);
 
   // Emit constant pool if necessary.
   int constant_pool_size = EmitConstantPool();
@@ -480,9 +483,10 @@ void Assembler::target_at_put(int pos, int target_pos, bool* is_branch) {
       // Load the position of the label relative to the generated code object
       // pointer in a register.
       Register dst = Register::from_code(instr_at(pos + kInstrSize));
-      int32_t offset = target_pos + (Code::kHeaderSize - kHeapObjectTag);
+      int32_t offset =
+          target_pos + (InstructionStream::kHeaderSize - kHeapObjectTag);
       PatchingAssembler patcher(
-          options(), reinterpret_cast<byte*>(buffer_start_ + pos), 2);
+          options(), reinterpret_cast<uint8_t*>(buffer_start_ + pos), 2);
       patcher.bitwise_mov32(dst, offset);
       break;
     }
@@ -497,7 +501,7 @@ void Assembler::target_at_put(int pos, int target_pos, bool* is_branch) {
                           : (SIGN_EXT_IMM22(operands & kImm22Mask));
       int32_t offset = target_pos + delta;
       PatchingAssembler patcher(
-          options(), reinterpret_cast<byte*>(buffer_start_ + pos),
+          options(), reinterpret_cast<uint8_t*>(buffer_start_ + pos),
           2 + static_cast<int32_t>(opcode == kUnboundAddLabelLongOffsetOpcode));
       patcher.bitwise_add32(dst, base, offset);
       if (opcode == kUnboundAddLabelLongOffsetOpcode) patcher.nop();
@@ -507,7 +511,7 @@ void Assembler::target_at_put(int pos, int target_pos, bool* is_branch) {
       // Load the address of the label in a register.
       Register dst = Register::from_code(instr_at(pos + kInstrSize));
       PatchingAssembler patcher(options(),
-                                reinterpret_cast<byte*>(buffer_start_ + pos),
+                                reinterpret_cast<uint8_t*>(buffer_start_ + pos),
                                 kMovInstructionsNoConstantPool);
       // Keep internal references relative until EmitRelocations.
       patcher.bitwise_mov(dst, target_pos);
@@ -515,7 +519,7 @@ void Assembler::target_at_put(int pos, int target_pos, bool* is_branch) {
     }
     case kUnboundJumpTableEntryOpcode: {
       PatchingAssembler patcher(options(),
-                                reinterpret_cast<byte*>(buffer_start_ + pos),
+                                reinterpret_cast<uint8_t*>(buffer_start_ + pos),
                                 kSystemPointerSize / kInstrSize);
       // Keep internal references relative until EmitRelocations.
       patcher.dp(target_pos);
@@ -690,11 +694,11 @@ int Assembler::link(Label* L) {
 // Branch instructions.
 
 void Assembler::bclr(BOfield bo, int condition_bit, LKBit lk) {
-  emit(EXT1 | bo | condition_bit * B16 | BCLRX | lk);
+  emit(EXT1 | static_cast<uint32_t>(bo) | condition_bit * B16 | BCLRX | lk);
 }
 
 void Assembler::bcctr(BOfield bo, int condition_bit, LKBit lk) {
-  emit(EXT1 | bo | condition_bit * B16 | BCCTRX | lk);
+  emit(EXT1 | static_cast<uint32_t>(bo) | condition_bit * B16 | BCCTRX | lk);
 }
 
 // Pseudo op - branch to link register
@@ -708,7 +712,8 @@ void Assembler::bctrl() { bcctr(BA, 0, SetLK); }
 void Assembler::bc(int branch_offset, BOfield bo, int condition_bit, LKBit lk) {
   int imm16 = branch_offset;
   CHECK(is_int16(imm16) && (imm16 & (kAAMask | kLKMask)) == 0);
-  emit(BCX | bo | condition_bit * B16 | (imm16 & kImm16Mask) | lk);
+  emit(BCX | static_cast<uint32_t>(bo) | condition_bit * B16 |
+       (imm16 & kImm16Mask) | lk);
 }
 
 void Assembler::b(int branch_offset, LKBit lk) {
@@ -1510,7 +1515,8 @@ void Assembler::mov_label_offset(Register dst, Label* label) {
   int position = link(label);
   if (label->is_bound()) {
     // Load the position of the label relative to the generated code object.
-    mov(dst, Operand(position + Code::kHeaderSize - kHeapObjectTag));
+    mov(dst,
+        Operand(position + InstructionStream::kHeaderSize - kHeapObjectTag));
   } else {
     // Encode internal reference to unbound label. We use a dummy opcode
     // such that it won't collide with any opcode that might appear in the
@@ -2132,7 +2138,7 @@ void Assembler::GrowBuffer(int needed) {
   // Set up new buffer.
   std::unique_ptr<AssemblerBuffer> new_buffer = buffer_->Grow(new_size);
   DCHECK_EQ(new_size, new_buffer->size());
-  byte* new_start = new_buffer->start();
+  uint8_t* new_start = new_buffer->start();
 
   // Copy the data.
   intptr_t pc_delta = new_start - buffer_start_;
@@ -2160,32 +2166,20 @@ void Assembler::db(uint8_t data) {
   pc_ += sizeof(uint8_t);
 }
 
-void Assembler::dd(uint32_t data, RelocInfo::Mode rmode) {
+void Assembler::dd(uint32_t data) {
   CheckBuffer();
-  if (!RelocInfo::IsNoInfo(rmode)) {
-    DCHECK(RelocInfo::IsLiteralConstant(rmode));
-    RecordRelocInfo(rmode);
-  }
   *reinterpret_cast<uint32_t*>(pc_) = data;
   pc_ += sizeof(uint32_t);
 }
 
-void Assembler::dq(uint64_t value, RelocInfo::Mode rmode) {
+void Assembler::dq(uint64_t value) {
   CheckBuffer();
-  if (!RelocInfo::IsNoInfo(rmode)) {
-    DCHECK(RelocInfo::IsLiteralConstant(rmode));
-    RecordRelocInfo(rmode);
-  }
   *reinterpret_cast<uint64_t*>(pc_) = value;
   pc_ += sizeof(uint64_t);
 }
 
-void Assembler::dp(uintptr_t data, RelocInfo::Mode rmode) {
+void Assembler::dp(uintptr_t data) {
   CheckBuffer();
-  if (!RelocInfo::IsNoInfo(rmode)) {
-    DCHECK(RelocInfo::IsLiteralConstant(rmode));
-    RecordRelocInfo(rmode);
-  }
   *reinterpret_cast<uintptr_t*>(pc_) = data;
   pc_ += sizeof(uintptr_t);
 }
@@ -2203,7 +2197,7 @@ void Assembler::EmitRelocations() {
        it != relocations_.end(); it++) {
     RelocInfo::Mode rmode = it->rmode();
     Address pc = reinterpret_cast<Address>(buffer_start_) + it->position();
-    RelocInfo rinfo(pc, rmode, it->data(), Code());
+    RelocInfo rinfo(pc, rmode, it->data());
 
     // Fix up internal references now that they are guaranteed to be bound.
     if (RelocInfo::IsInternalReference(rmode)) {
@@ -2258,7 +2252,7 @@ void Assembler::CheckTrampolinePool() {
 }
 
 PatchingAssembler::PatchingAssembler(const AssemblerOptions& options,
-                                     byte* address, int instructions)
+                                     uint8_t* address, int instructions)
     : Assembler(options, ExternalAssemblerBuffer(
                              address, instructions * kInstrSize + kGap)) {
   DCHECK_EQ(reloc_info_writer.pos(), buffer_start_ + buffer_->size());
@@ -2268,20 +2262,6 @@ PatchingAssembler::~PatchingAssembler() {
   // Check that the code was patched as expected.
   DCHECK_EQ(pc_, buffer_start_ + buffer_->size() - kGap);
   DCHECK_EQ(reloc_info_writer.pos(), buffer_start_ + buffer_->size());
-}
-
-UseScratchRegisterScope::UseScratchRegisterScope(Assembler* assembler)
-    : assembler_(assembler),
-      old_available_(*assembler->GetScratchRegisterList()) {}
-
-UseScratchRegisterScope::~UseScratchRegisterScope() {
-  *assembler_->GetScratchRegisterList() = old_available_;
-}
-
-Register UseScratchRegisterScope::Acquire() {
-  RegList* available = assembler_->GetScratchRegisterList();
-  DCHECK_NOT_NULL(available);
-  return available->PopFirst();
 }
 
 }  // namespace internal

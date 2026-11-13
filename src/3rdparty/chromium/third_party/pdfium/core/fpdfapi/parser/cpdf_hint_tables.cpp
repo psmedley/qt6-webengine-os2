@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,7 @@
 #include "core/fxcrt/cfx_bitstream.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "third_party/base/check.h"
-#include "third_party/base/numerics/safe_conversions.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 namespace {
 
@@ -326,7 +325,7 @@ bool CPDF_HintTables::ReadSharedObjHintTable(CFX_BitStream* hStream,
   }
 
   m_SharedObjGroupInfos.resize(dwSharedObjTotal);
-  // Table F.6 –  Shared object hint table, shared object group entries:
+  // Table F.6 - Shared object hint table, shared object group entries:
   // Item 1: A number that, when added to the least shared object
   // group length.
   FX_SAFE_FILESIZE prev_shared_group_end_offset = m_szFirstPageObjOffset;

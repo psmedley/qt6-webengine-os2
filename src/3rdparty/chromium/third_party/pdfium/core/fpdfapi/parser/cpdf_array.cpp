@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -210,20 +210,20 @@ void CPDF_Array::ConvertToIndirectObjectAt(size_t index,
   if (!m_Objects[index] || m_Objects[index]->IsReference())
     return;
 
-  CPDF_Object* pNew = pHolder->AddIndirectObject(std::move(m_Objects[index]));
-  m_Objects[index] = pNew->MakeReference(pHolder);
+  pHolder->AddIndirectObject(m_Objects[index]);
+  m_Objects[index] = m_Objects[index]->MakeReference(pHolder);
 }
 
-void CPDF_Array::SetAt(size_t index, RetainPtr<CPDF_Object> pObj) {
-  (void)SetAtInternal(index, std::move(pObj));
+void CPDF_Array::SetAt(size_t index, RetainPtr<CPDF_Object> object) {
+  (void)SetAtInternal(index, std::move(object));
 }
 
-void CPDF_Array::InsertAt(size_t index, RetainPtr<CPDF_Object> pObj) {
-  (void)InsertAtInternal(index, std::move(pObj));
+void CPDF_Array::InsertAt(size_t index, RetainPtr<CPDF_Object> object) {
+  (void)InsertAtInternal(index, std::move(object));
 }
 
-void CPDF_Array::Append(RetainPtr<CPDF_Object> pObj) {
-  (void)AppendInternal(std::move(pObj));
+void CPDF_Array::Append(RetainPtr<CPDF_Object> object) {
+  (void)AppendInternal(std::move(object));
 }
 
 CPDF_Object* CPDF_Array::SetAtInternal(size_t index,

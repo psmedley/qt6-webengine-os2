@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,7 @@ bool CPDF_String::WriteTo(IFX_ArchiveStream* archive,
     encrypted_data = encryptor->Encrypt(data);
     data = encrypted_data;
   }
-  ByteStringView raw(data.data(), data.size());
+  ByteStringView raw(data);
   ByteString content =
       m_bHex ? PDF_HexEncodeString(raw) : PDF_EncodeString(raw);
   return archive->WriteString(content.AsStringView());

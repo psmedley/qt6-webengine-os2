@@ -11,7 +11,9 @@
 #ifndef VPX_VP8_ENCODER_ONYX_INT_H_
 #define VPX_VP8_ENCODER_ONYX_INT_H_
 
+#include <assert.h>
 #include <stdio.h>
+
 #include "vpx_config.h"
 #include "vp8/common/onyx.h"
 #include "treewriter.h"
@@ -213,7 +215,7 @@ enum {
 typedef struct {
   /* Layer configuration */
   double framerate;
-  int target_bandwidth;
+  int target_bandwidth; /* bits per second */
 
   /* Layer specific coding parameters */
   int64_t starting_buffer_level;
@@ -358,7 +360,7 @@ typedef struct VP8_COMP {
   /* GF interval chosen when we coded the last GF */
   int current_gf_interval;
 
-  /* Total bits overspent becasue of GF boost (cumulative) */
+  /* Total bits overspent because of GF boost (cumulative) */
   int gf_overspend_bits;
 
   /* Used in the few frames following a GF to recover the extra bits
@@ -436,7 +438,7 @@ typedef struct VP8_COMP {
   int kf_boost;
   int last_boost;
 
-  int target_bandwidth;
+  int target_bandwidth; /* bits per second */
   struct vpx_codec_pkt_list *output_pkt_list;
 
 #if 0
@@ -524,6 +526,7 @@ typedef struct VP8_COMP {
 #if CONFIG_MULTITHREAD
   /* multithread data */
   vpx_atomic_int *mt_current_mb_col;
+  int mt_current_mb_col_size;
   int mt_sync_range;
   vpx_atomic_int b_multi_threaded;
   int encoding_thread_count;
@@ -705,13 +708,19 @@ typedef struct VP8_COMP {
   // Always update correction factor used for rate control after each frame for
   // realtime encoding.
   int rt_always_update_correction_factor;
+
+  // Flag to indicate frame may be dropped due to large expected overshoot,
+  // and re-encoded on next frame at max_qp.
+  int rt_drop_recode_on_overshoot;
 } VP8_COMP;
 
 void vp8_initialize_enc(void);
 
 void vp8_alloc_compressor_data(VP8_COMP *cpi);
 int vp8_reverse_trans(int x);
-void vp8_init_temporal_layer_context(VP8_COMP *cpi, VP8_CONFIG *oxcf,
+void vp8_reset_temporal_layer_change(VP8_COMP *cpi, const VP8_CONFIG *oxcf,
+                                     const int prev_num_layers);
+void vp8_init_temporal_layer_context(VP8_COMP *cpi, const VP8_CONFIG *oxcf,
                                      const int layer,
                                      double prev_layer_framerate);
 void vp8_update_layer_contexts(VP8_COMP *cpi);
@@ -727,24 +736,8 @@ void vp8_tokenize_mb(VP8_COMP *, MACROBLOCK *, TOKENEXTRA **);
 
 void vp8_set_speed_features(VP8_COMP *cpi);
 
-#if CONFIG_DEBUG
-#define CHECK_MEM_ERROR(lval, expr)                                         \
-  do {                                                                      \
-    (lval) = (expr);                                                        \
-    if (!(lval))                                                            \
-      vpx_internal_error(&cpi->common.error, VPX_CODEC_MEM_ERROR,           \
-                         "Failed to allocate " #lval " at %s:%d", __FILE__, \
-                         __LINE__);                                         \
-  } while (0)
-#else
-#define CHECK_MEM_ERROR(lval, expr)                               \
-  do {                                                            \
-    (lval) = (expr);                                              \
-    if (!(lval))                                                  \
-      vpx_internal_error(&cpi->common.error, VPX_CODEC_MEM_ERROR, \
-                         "Failed to allocate " #lval);            \
-  } while (0)
-#endif
+int vp8_check_drop_buffer(VP8_COMP *cpi);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

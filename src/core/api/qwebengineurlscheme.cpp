@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:data-parser
 
 #include "qwebengineurlscheme.h"
 
@@ -162,6 +163,11 @@ public:
   this includes access from other schemes. The appropriate CORS headers are
   generated automatically by the QWebEngineUrlRequestJob class. By default only
   \c http and \c https are CORS enabled. (Added in Qt 5.14)
+
+  \value [since 6.6] FetchApiAllowed
+  Enables a URL scheme to be used by the HTML5 fetch API and \c XMLHttpRequest.send with
+  a body. By default only \c http and \c https can be send to using the Fetch API or with
+  an XMLHttpRequest with a body.
 */
 
 QWebEngineUrlScheme::QWebEngineUrlScheme(QWebEngineUrlSchemePrivate *d) : d(d) {}
@@ -330,29 +336,33 @@ void QWebEngineUrlScheme::setFlags(Flags newValue)
 void QWebEngineUrlScheme::registerScheme(const QWebEngineUrlScheme &scheme)
 {
     if (scheme.d->name.empty()) {
-        qWarning() << "QWebEngineUrlScheme::registerScheme: Scheme name cannot be empty";
+        qWarning("QWebEngineUrlScheme::registerScheme: Scheme name cannot be empty");
         return;
     }
 
     bool needsPort = scheme.d->has_port_component();
     bool hasPort = scheme.d->default_port != url::PORT_UNSPECIFIED;
     if (needsPort && !hasPort) {
-        qWarning() << "QWebEngineUrlScheme::registerScheme: Scheme" << scheme.name() << "needs a default port";
+        qWarning("QWebEngineUrlScheme::registerScheme: Scheme %s needs a default port",
+                 scheme.d->name.data());
         return;
     }
 
     if (url::CustomScheme::FindScheme(scheme.d->name)) {
-        qWarning() << "QWebEngineUrlScheme::registerScheme: Scheme" << scheme.name() << "already registered";
+        qWarning("QWebEngineUrlScheme::registerScheme: Scheme %s already registered",
+                 scheme.d->name.data());
         return;
     }
 
     if (url::IsStandard(scheme.d->name.data(), url::Component(0, static_cast<int>(scheme.d->name.size())))) {
-        qWarning() << "QWebEngineUrlScheme::registerScheme: Scheme" << scheme.name() << "is a standard scheme";
+        qWarning("QWebEngineUrlScheme::registerScheme: Scheme %s is a standard scheme",
+                 scheme.d->name.data());
         return;
     }
 
     if (g_schemesLocked) {
-        qWarning() << "QWebEngineUrlScheme::registerScheme: Too late to register scheme" << scheme.name();
+        qWarning("QWebEngineUrlScheme::registerScheme: Too late to register scheme %s",
+                 scheme.d->name.data());
         return;
     }
 
@@ -367,7 +377,7 @@ void QWebEngineUrlScheme::registerScheme(const QWebEngineUrlScheme &scheme)
 */
 QWebEngineUrlScheme QWebEngineUrlScheme::schemeByName(const QByteArray &name)
 {
-    base::StringPiece namePiece{ name.data(), static_cast<size_t>(name.size()) };
+    std::string_view namePiece{ name.data(), static_cast<size_t>(name.size()) };
     if (const url::CustomScheme *cs = url::CustomScheme::FindScheme(namePiece))
         return QWebEngineUrlScheme(new QWebEngineUrlSchemePrivate(*cs));
     return QWebEngineUrlScheme();

@@ -8,9 +8,12 @@
 
 #include <objbase.h>
 #include <stdint.h>
+
+#include <string_view>
 #include <utility>
 
 #include "base/location.h"
+#include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/scoped_thread_priority.h"
@@ -131,8 +134,8 @@ ComPtr<IWbemServices> CreateWmiConnection(bool set_blanket,
 }
 
 bool CreateWmiClassMethodObject(IWbemServices* wmi_services,
-                                WStringPiece class_name,
-                                WStringPiece method_name,
+                                std::wstring_view class_name,
+                                std::wstring_view method_name,
                                 ComPtr<IWbemClassObject>* class_instance) {
   // We attempt to instantiate a COM object that represents a WMI object plus
   // a method rolled into one entity.
@@ -213,17 +216,16 @@ bool WmiLaunchProcess(const std::wstring& command_line, int* process_id) {
 
 // static
 WmiComputerSystemInfo WmiComputerSystemInfo::Get() {
-  WmiComputerSystemInfo info;
-
-  ComPtr<IEnumWbemClassObject> enumerator_bios;
-  auto error =
-      RunWmiQuery(kCimV2ServerName, kSerialNumberQuery, &enumerator_bios);
-  if (error.has_value())
+  static const base::NoDestructor<WmiComputerSystemInfo> static_info([] {
+    WmiComputerSystemInfo info;
+    ComPtr<IEnumWbemClassObject> enumerator_bios;
+    auto error =
+        RunWmiQuery(kCimV2ServerName, kSerialNumberQuery, &enumerator_bios);
+    if (!error.has_value())
+      info.PopulateSerialNumber(enumerator_bios);
     return info;
-
-  info.PopulateSerialNumber(enumerator_bios);
-
-  return info;
+  }());
+  return *static_info;
 }
 
 void WmiComputerSystemInfo::PopulateSerialNumber(

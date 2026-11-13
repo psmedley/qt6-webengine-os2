@@ -15,14 +15,14 @@
 
 
 DROP VIEW IF EXISTS android_jank_cuj_event;
-CREATE VIEW android_jank_cuj_event AS
+CREATE PERFETTO VIEW android_jank_cuj_event AS
 -- Computed CUJ boundaries.
 SELECT
   'slice' AS track_type,
   cuj.cuj_name AS track_name,
   boundary.ts,
   boundary.dur,
-  cuj.cuj_name || ' (adjusted, id=' || cuj_id || ') '  AS slice_name,
+  cuj.cuj_name || ' (adjusted, id=' || cuj_id || ') ' AS slice_name,
   'CUJ Boundaries' AS group_name
 FROM android_jank_cuj cuj
 JOIN android_jank_cuj_boundary boundary USING (cuj_id)

@@ -43,16 +43,16 @@ class CORE_EXPORT CanvasFontCache final
   unsigned HardMaxFonts();
 
   void WillUseCurrentFont() { SchedulePruningIfNeeded(); }
-  bool GetFontUsingDefaultStyle(HTMLCanvasElement& canvas,
-                                const String&,
-                                Font&);
+  const Font* GetFontUsingDefaultStyle(HTMLCanvasElement& canvas,
+                                       const String&);
 
   // TaskObserver implementation
   void DidProcessTask(const base::PendingTask&) override;
   void WillProcessTask(const base::PendingTask&, bool) override {}
 
   // For testing
-  bool IsInCache(const String&);
+  bool IsInCache(const String&) const;
+  unsigned int GetCacheSize() const;
 
   ~CanvasFontCache() override;
 
@@ -62,12 +62,12 @@ class CORE_EXPORT CanvasFontCache final
   typedef HeapHashMap<String, Member<MutableCSSPropertyValueSet>>
       MutableStylePropertyMap;
 
-  HashMap<String, Font> fonts_resolved_using_default_style_;
+  HeapHashMap<String, Member<const Font>> fonts_resolved_using_default_style_;
   MutableStylePropertyMap fetched_fonts_;
   LinkedHashSet<String> font_lru_list_;
   std::unique_ptr<FontCachePurgePreventer> main_cache_purge_preventer_;
   Member<Document> document_;
-  scoped_refptr<ComputedStyle> default_font_style_;
+  Member<const ComputedStyle> default_font_style_;
   bool pruning_scheduled_;
 };
 

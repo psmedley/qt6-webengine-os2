@@ -4,7 +4,12 @@
 
 #include "quiche/quic/core/quic_packets.h"
 
+#include <memory>
+
 #include "absl/memory/memory.h"
+#include "quiche/quic/core/quic_time.h"
+#include "quiche/quic/core/quic_types.h"
+#include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/quic/platform/api/quic_test.h"
 #include "quiche/quic/test_tools/quic_test_utils.h"
 #include "quiche/common/test_tools/quiche_test_utils.h"
@@ -72,6 +77,14 @@ TEST_F(QuicPacketsTest, GetClientConnectionIdAsSender) {
             GetClientConnectionIdAsSender(header, Perspective::IS_CLIENT));
 }
 
+TEST_F(QuicPacketsTest, CopyQuicPacketHeader) {
+  QuicPacketHeader header;
+  QuicPacketHeader header2 = CreateFakePacketHeader();
+  EXPECT_NE(header, header2);
+  QuicPacketHeader header3(header2);
+  EXPECT_EQ(header2, header3);
+}
+
 TEST_F(QuicPacketsTest, CopySerializedPacket) {
   std::string buffer(1000, 'a');
   quiche::SimpleBufferAllocator allocator;
@@ -105,6 +118,16 @@ TEST_F(QuicPacketsTest, CopySerializedPacket) {
       CopySerializedPacket(packet, &allocator, /*copy_buffer=*/false));
   EXPECT_EQ(packet.encrypted_buffer, copy2->encrypted_buffer);
   EXPECT_EQ(1000u, copy2->encrypted_length);
+}
+
+TEST_F(QuicPacketsTest, CloneReceivedPacket) {
+  SetQuicReloadableFlag(quic_clone_ecn, true);
+  char header[4] = "bar";
+  QuicReceivedPacket packet("foo", 3, QuicTime::Zero(), false, 0, true, header,
+                            sizeof(header) - 1, false,
+                            QuicEcnCodepoint::ECN_ECT1);
+  std::unique_ptr<QuicReceivedPacket> copy = packet.Clone();
+  EXPECT_EQ(packet.ecn_codepoint(), copy->ecn_codepoint());
 }
 
 }  // namespace

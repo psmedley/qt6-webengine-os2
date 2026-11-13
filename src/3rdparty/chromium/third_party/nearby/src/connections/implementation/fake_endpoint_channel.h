@@ -20,7 +20,6 @@
 #include "connections/implementation/endpoint_channel.h"
 #include "internal/platform/byte_array.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -28,7 +27,7 @@ namespace connections {
 // output can be set.
 class FakeEndpointChannel : public EndpointChannel {
  public:
-  using Medium = location::nearby::proto::connections::Medium;
+  using Medium = ::location::nearby::proto::connections::Medium;
 
   FakeEndpointChannel(Medium medium, const std::string& service_id)
       : medium_(medium), service_id_(service_id) {}
@@ -54,16 +53,20 @@ class FakeEndpointChannel : public EndpointChannel {
     return write_output_;
   }
   void Close() override { is_closed_ = true; }
-  void Close(proto::connections::DisconnectionReason reason) override {
+  void Close(location::nearby::proto::connections::DisconnectionReason reason)
+      override {
     is_closed_ = true;
     disconnection_reason_ = reason;
   }
-  proto::connections::ConnectionTechnology GetTechnology() const override {
-    return proto::connections::ConnectionTechnology::
+  location::nearby::proto::connections::ConnectionTechnology GetTechnology()
+      const override {
+    return location::nearby::proto::connections::ConnectionTechnology::
         CONNECTION_TECHNOLOGY_BLE_GATT;
   }
-  proto::connections::ConnectionBand GetBand() const override {
-    return proto::connections::ConnectionBand::CONNECTION_BAND_CELLULAR_BAND_2G;
+  location::nearby::proto::connections::ConnectionBand GetBand()
+      const override {
+    return location::nearby::proto::connections::ConnectionBand::
+        CONNECTION_BAND_CELLULAR_BAND_2G;
   }
   int GetFrequency() const override { return 0; }
   int GetTryCount() const override { return 0; }
@@ -74,6 +77,10 @@ class FakeEndpointChannel : public EndpointChannel {
   int GetMaxTransmitPacketSize() const override { return 512; }
   void EnableEncryption(std::shared_ptr<EncryptionContext> context) override {}
   void DisableEncryption() override {}
+  bool IsEncrypted() override { return false; }
+  ExceptionOr<ByteArray> TryDecrypt(const ByteArray& data) override {
+    return Exception::kFailed;
+  }
   bool IsPaused() const override { return is_paused_; }
   void Pause() override { is_paused_ = true; }
   void Resume() override { is_paused_ = false; }
@@ -85,7 +92,8 @@ class FakeEndpointChannel : public EndpointChannel {
   void set_read_output(ExceptionOr<ByteArray> output) { read_output_ = output; }
   void set_write_output(Exception output) { write_output_ = output; }
   bool is_closed() const { return is_closed_; }
-  proto::connections::DisconnectionReason disconnection_reason() const {
+  location::nearby::proto::connections::DisconnectionReason
+  disconnection_reason() const {
     return disconnection_reason_;
   }
 
@@ -98,11 +106,11 @@ class FakeEndpointChannel : public EndpointChannel {
   absl::Time write_timestamp_ = absl::InfinitePast();
   bool is_closed_ = false;
   bool is_paused_ = false;
-  proto::connections::DisconnectionReason disconnection_reason_;
+  location::nearby::proto::connections::DisconnectionReason
+      disconnection_reason_;
 };
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // NEARBY_CONNECTIONS_IMPLEMENTATION_FAKE_ENDPOINT_CHANNEL_H_

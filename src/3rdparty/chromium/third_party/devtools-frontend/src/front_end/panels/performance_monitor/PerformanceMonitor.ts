@@ -7,57 +7,57 @@ import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import * as IconButton from '../../ui/components/icon_button/icon_button.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as ThemeSupport from '../../ui/legacy/theme_support/theme_support.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import performanceMonitorStyles from './performanceMonitor.css.js';
 
 const UIStrings = {
   /**
-  *@description Aria accessible name in Performance Monitor of the Performance monitor tab
-  */
+   *@description Aria accessible name in Performance Monitor of the Performance monitor tab
+   */
   graphsDisplayingARealtimeViewOf: 'Graphs displaying a real-time view of performance metrics',
   /**
-  *@description Text in Performance Monitor of the Performance monitor tab
-  */
+   *@description Text in Performance Monitor of the Performance monitor tab
+   */
   paused: 'Paused',
   /**
-  *@description Text in Performance Monitor of the Performance monitor tab
-  */
+   *@description Text in Performance Monitor of the Performance monitor tab
+   */
   cpuUsage: 'CPU usage',
   /**
-  *@description Text in Performance Monitor of the Performance monitor tab
-  */
+   *@description Text in Performance Monitor of the Performance monitor tab
+   */
   jsHeapSize: 'JS heap size',
   /**
-  *@description Text in Performance Monitor of the Performance monitor tab
-  */
+   *@description Text in Performance Monitor of the Performance monitor tab
+   */
   domNodes: 'DOM Nodes',
   /**
-  *@description Text in Performance Monitor of the Performance monitor tab
-  */
+   *@description Text in Performance Monitor of the Performance monitor tab
+   */
   jsEventListeners: 'JS event listeners',
   /**
-  *@description Text for documents, a type of resources
-  */
+   *@description Text for documents, a type of resources
+   */
   documents: 'Documents',
   /**
-  *@description Text in Performance Monitor of the Performance monitor tab
-  */
+   *@description Text in Performance Monitor of the Performance monitor tab
+   */
   documentFrames: 'Document Frames',
   /**
-  *@description Text in Performance Monitor of the Performance monitor tab
-  */
+   *@description Text in Performance Monitor of the Performance monitor tab
+   */
   layoutsSec: 'Layouts / sec',
   /**
-  *@description Text in Performance Monitor of the Performance monitor tab
-  */
+   *@description Text in Performance Monitor of the Performance monitor tab
+   */
   styleRecalcsSec: 'Style recalcs / sec',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/performance_monitor/PerformanceMonitor.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
-
-let performanceMonitorImplInstance: PerformanceMonitorImpl;
 
 export class PerformanceMonitorImpl extends UI.Widget.HBox implements
     SDK.TargetManager.SDKModelObserver<SDK.PerformanceMetricsModel.PerformanceMetricsModel> {
@@ -76,15 +76,17 @@ export class PerformanceMonitorImpl extends UI.Widget.HBox implements
   private startTimestamp?: number;
   private pollTimer?: number;
 
-  constructor() {
+  constructor(pollIntervalMs: number = 500) {
     super(true);
+
+    this.element.setAttribute('jslog', `${VisualLogging.panel().context('performance-monitor')}`);
 
     this.contentElement.classList.add('perfmon-pane');
     this.metricsBuffer = [];
     /** @const */
     this.pixelsPerMs = 10 / 1000;
     /** @const */
-    this.pollIntervalMs = 500;
+    this.pollIntervalMs = pollIntervalMs;
     /** @const */
     this.scaleHeight = 16;
     /** @const */
@@ -94,23 +96,14 @@ export class PerformanceMonitorImpl extends UI.Widget.HBox implements
     const chartContainer = this.contentElement.createChild('div', 'perfmon-chart-container');
     this.canvas = chartContainer.createChild('canvas') as HTMLCanvasElement;
     this.canvas.tabIndex = -1;
-    UI.ARIAUtils.setAccessibleName(this.canvas, i18nString(UIStrings.graphsDisplayingARealtimeViewOf));
+    UI.ARIAUtils.setLabel(this.canvas, i18nString(UIStrings.graphsDisplayingARealtimeViewOf));
     this.contentElement.createChild('div', 'perfmon-chart-suspend-overlay fill').createChild('div').textContent =
         i18nString(UIStrings.paused);
     this.controlPane.addEventListener(Events.MetricChanged, this.recalcChartHeight, this);
     SDK.TargetManager.TargetManager.instance().observeModels(SDK.PerformanceMetricsModel.PerformanceMetricsModel, this);
   }
 
-  static instance(opts = {forceNew: null}): PerformanceMonitorImpl {
-    const {forceNew} = opts;
-    if (!performanceMonitorImplInstance || forceNew) {
-      performanceMonitorImplInstance = new PerformanceMonitorImpl();
-    }
-
-    return performanceMonitorImplInstance;
-  }
-
-  wasShown(): void {
+  override wasShown(): void {
     if (!this.model) {
       return;
     }
@@ -129,7 +122,7 @@ export class PerformanceMonitorImpl extends UI.Widget.HBox implements
     this.suspendStateChanged();
   }
 
-  willHide(): void {
+  override willHide(): void {
     if (!this.model) {
       return;
     }
@@ -140,7 +133,7 @@ export class PerformanceMonitorImpl extends UI.Widget.HBox implements
   }
 
   modelAdded(model: SDK.PerformanceMetricsModel.PerformanceMetricsModel): void {
-    if (this.model) {
+    if (model.target() !== SDK.TargetManager.TargetManager.instance().primaryPageTarget()) {
       return;
     }
     this.model = model;
@@ -265,17 +258,18 @@ export class PerformanceMonitorImpl extends UI.Widget.HBox implements
       });
     }
     const backgroundColor =
-        Common.Color.Color.parse(ThemeSupport.ThemeSupport.instance().getComputedValue('--color-background'));
+        Common.Color.parse(ThemeSupport.ThemeSupport.instance().getComputedValue('--sys-color-cdt-base-container'))
+            ?.asLegacyColor();
 
     if (backgroundColor) {
       for (const path of paths.reverse()) {
         const color = path.color;
         ctx.save();
-        const parsedColor = Common.Color.Color.parse(color);
+        const parsedColor = Common.Color.parse(color);
         if (!parsedColor) {
           continue;
         }
-        ctx.fillStyle = backgroundColor.blendWith(parsedColor.setAlpha(0.2)).asString(null) || '';
+        ctx.fillStyle = backgroundColor.blendWith(parsedColor.setAlpha(0.2).asLegacyColor()).asString() || '';
         ctx.fill(path.path);
         ctx.strokeStyle = color;
         ctx.lineWidth = 0.5;
@@ -417,7 +411,7 @@ export class PerformanceMonitorImpl extends UI.Widget.HBox implements
     }
   }
 
-  onResize(): void {
+  override onResize(): void {
     super.onResize();
     this.width = this.canvas.offsetWidth;
     this.canvas.width = Math.round(this.width * window.devicePixelRatio);
@@ -581,6 +575,8 @@ export class ControlPane extends Common.ObjectWrapper.ObjectWrapper<EventTypes> 
       const chartName = chartInfo.metrics[0].name;
       const active = this.enabledCharts.has(chartName);
       const indicator = new MetricIndicator(this.element, chartInfo, active, this.onToggle.bind(this, chartName));
+      indicator.element.setAttribute(
+          'jslog', `${VisualLogging.toggle().track({click: true, keydown: 'Enter'}).context(chartName)}`);
       this.indicators.set(chartName, indicator);
     }
   }
@@ -632,21 +628,23 @@ export class MetricIndicator {
   private active: boolean;
   private readonly onToggle: (arg0: boolean) => void;
   element: HTMLElement;
-  private readonly swatchElement: UI.Icon.Icon;
+  private readonly swatchElement: IconButton.Icon.Icon;
   private valueElement: HTMLElement;
+  private color: string;
 
   constructor(parent: Element, info: ChartInfo, active: boolean, onToggle: (arg0: boolean) => void) {
-    const color = info.color || info.metrics[0].color;
+    this.color = info.color || info.metrics[0].color;
     this.info = info;
     this.active = active;
     this.onToggle = onToggle;
     this.element = parent.createChild('div', 'perfmon-indicator') as HTMLElement;
-    this.swatchElement = UI.Icon.Icon.create('smallicon-checkmark-square', 'perfmon-indicator-swatch');
-    this.swatchElement.style.backgroundColor = color;
+    this.swatchElement = new IconButton.Icon.Icon();
+    this.swatchElement.classList.add('perfmon-indicator-swatch');
+    this.updateSwatchElement();
     this.element.appendChild(this.swatchElement);
     this.element.createChild('div', 'perfmon-indicator-title').textContent = info.title;
     this.valueElement = this.element.createChild('div', 'perfmon-indicator-value') as HTMLElement;
-    this.valueElement.style.color = color;
+    this.valueElement.style.color = this.color;
     this.element.addEventListener('click', () => this.toggleIndicator());
     this.element.addEventListener('keypress', event => this.handleKeypress(event));
     this.element.classList.toggle('active', active);
@@ -674,8 +672,14 @@ export class MetricIndicator {
     this.valueElement.textContent = MetricIndicator.formatNumber(value, this.info);
   }
 
+  private updateSwatchElement(): void {
+    const color = this.active ? this.color : 'var(--icon-disabled)';
+    this.swatchElement.data = {iconName: 'checkmark', color, width: '16px', height: '14px'};
+  }
+
   private toggleIndicator(): void {
     this.active = !this.active;
+    this.updateSwatchElement();
     this.element.classList.toggle('active', this.active);
     UI.ARIAUtils.setChecked(this.element, this.active);
     this.onToggle(this.active);

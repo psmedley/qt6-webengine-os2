@@ -21,10 +21,6 @@
 namespace v8 {
 namespace internal {
 
-class Isolate;
-template <typename T>
-class Handle;
-
 namespace wasm {
 
 class V8_EXPORT_PRIVATE WasmError {
@@ -33,22 +29,26 @@ class V8_EXPORT_PRIVATE WasmError {
 
   WasmError(uint32_t offset, std::string message)
       : offset_(offset), message_(std::move(message)) {
-    // The error message must not be empty, otherwise {empty()} would be true.
+    DCHECK_NE(kNoErrorOffset, offset);
     DCHECK(!message_.empty());
   }
 
   PRINTF_FORMAT(3, 4)
   WasmError(uint32_t offset, const char* format, ...) : offset_(offset) {
+    DCHECK_NE(kNoErrorOffset, offset);
     va_list args;
     va_start(args, format);
     message_ = FormatError(format, args);
     va_end(args);
-    // The error message must not be empty, otherwise {empty()} would be true.
     DCHECK(!message_.empty());
   }
 
-  bool empty() const { return message_.empty(); }
-  bool has_error() const { return !message_.empty(); }
+  bool has_error() const {
+    DCHECK_EQ(offset_ == kNoErrorOffset, message_.empty());
+    return offset_ != kNoErrorOffset;
+  }
+
+  operator bool() const { return has_error(); }
 
   uint32_t offset() const { return offset_; }
   const std::string& message() const& { return message_; }
@@ -58,7 +58,8 @@ class V8_EXPORT_PRIVATE WasmError {
   static std::string FormatError(const char* format, va_list args);
 
  private:
-  uint32_t offset_ = 0;
+  static constexpr uint32_t kNoErrorOffset = kMaxUInt32;
+  uint32_t offset_ = kNoErrorOffset;
   std::string message_;
 };
 
@@ -85,7 +86,16 @@ class Result {
 
   explicit Result(WasmError error) : error_(std::move(error)) {}
 
-  bool ok() const { return error_.empty(); }
+  // Implicitly convert a Result<T> to Result<U> if T implicitly converts to U.
+  // Only provide that for r-value references (i.e. temporary objects) though,
+  // to be used if passing or returning a result by value.
+  template <typename U,
+            typename = std::enable_if_t<std::is_assignable_v<U, T&&>>>
+  operator Result<U>() const&& {
+    return ok() ? Result<U>{std::move(value_)} : Result<U>{error_};
+  }
+
+  bool ok() const { return !failed(); }
   bool failed() const { return error_.has_error(); }
   const WasmError& error() const& { return error_; }
   WasmError&& error() && { return std::move(error_); }
@@ -167,20 +177,6 @@ class V8_EXPORT_PRIVATE ErrorThrower {
   // ErrorThrower should always be stack-allocated, since it constitutes a scope
   // (things happen in the destructor).
   DISALLOW_NEW_AND_DELETE()
-};
-
-// Like an ErrorThrower, but turns all pending exceptions into scheduled
-// exceptions when going out of scope. Use this in API methods.
-// Note that pending exceptions are not necessarily created by the ErrorThrower,
-// but e.g. by the wasm start function. There might also be a scheduled
-// exception, created by another API call (e.g. v8::Object::Get). But there
-// should never be both pending and scheduled exceptions.
-class V8_EXPORT_PRIVATE ScheduledErrorThrower : public ErrorThrower {
- public:
-  ScheduledErrorThrower(i::Isolate* isolate, const char* context)
-      : ErrorThrower(isolate, context) {}
-
-  ~ScheduledErrorThrower();
 };
 
 // Use {nullptr_t} as data value to indicate that this only stores the error,

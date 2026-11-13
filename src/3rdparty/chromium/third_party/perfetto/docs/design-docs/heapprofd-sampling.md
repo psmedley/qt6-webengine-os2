@@ -1,6 +1,6 @@
 # heapprofd: Sampling for Memory Profiles
 
-_tomlewin, fmayer **·** 2021-04-14_  
+_tomlewin, fmayer **·** 2021-04-14_
 
 ## Background
 
@@ -172,8 +172,8 @@ chance of sampling an allocation at least once, given the sampling rate we’re
 using. This resolves the above issues.
 
 [algorithm]:
-  https://cs.android.com/android/platform/superproject/+/master:external/perfetto/src/profiling/memory/sampler.h
-[example visualization]: /docs/images/syssrv-apk-assets-two.png
+  https://cs.android.com/android/platform/superproject/+/main:external/perfetto/src/profiling/memory/sampler.h
+[example visualization]: /docs/images/native-heap-prof.png
 [Android Heap Profiler]: /docs/design-docs/heapprofd-design
 [mean absolute percentage error]: https://en.wikipedia.org/wiki/Mean_absolute_percentage_error
 [full results]: https://gist.github.com/fmayer/3aafcaf58f8db09714ba09aa4ac2b1ac

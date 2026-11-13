@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,7 +84,7 @@ class CPDF_RenderStatus {
   bool GetDropObjects() const { return m_bDropObjects; }
   bool IsPrint() const { return m_bPrint; }
   bool IsStopped() const { return m_bStopped; }
-  CPDF_RenderContext* GetContext() const { return m_pContext.Get(); }
+  CPDF_RenderContext* GetContext() const { return m_pContext; }
   const CPDF_Dictionary* GetFormResource() const {
     return m_pFormResource.Get();
   }
@@ -94,7 +94,7 @@ class CPDF_RenderStatus {
   CFX_RenderDevice* GetRenderDevice() const { return m_pDevice; }
   const CPDF_RenderOptions& GetRenderOptions() const { return m_Options; }
 
-#if defined(_SKIA_SUPPORT_)
+#if defined(PDF_USE_SKIA)
   void DebugVerifyDeviceIsPreMultiplied() const;
 #endif
 
@@ -112,11 +112,12 @@ class CPDF_RenderStatus {
                           const CPDF_PageObject* pPageObj,
                           const CFX_Matrix& mtObj2Device,
                           bool stroke);
+  // `pDIBitmap` must be non-null.
   void CompositeDIBitmap(const RetainPtr<CFX_DIBitmap>& pDIBitmap,
                          int left,
                          int top,
                          FX_ARGB mask_argb,
-                         int bitmap_alpha,
+                         float alpha,
                          BlendMode blend_mode,
                          const CPDF_Transparency& transparency);
 
@@ -167,15 +168,15 @@ class CPDF_RenderStatus {
                    const CFX_Matrix& mtObj2Device);
   FX_RECT GetClippedBBox(const FX_RECT& rect) const;
   RetainPtr<CFX_DIBitmap> GetBackdrop(const CPDF_PageObject* pObj,
-                                      const FX_RECT& rect,
+                                      const FX_RECT& bbox,
                                       bool bBackAlphaRequired);
   RetainPtr<CFX_DIBitmap> LoadSMask(CPDF_Dictionary* pSMaskDict,
                                     FX_RECT* pClipRect,
                                     const CFX_Matrix& mtMatrix);
   // Optionally write the colorspace family value into |pCSFamily|.
-  FX_ARGB GetBackColor(const CPDF_Dictionary* pSMaskDict,
-                       const CPDF_Dictionary* pGroupDict,
-                       CPDF_ColorSpace::Family* pCSFamily);
+  FX_ARGB GetBackgroundColor(const CPDF_Dictionary* pSMaskDict,
+                             const CPDF_Dictionary* pGroupDict,
+                             CPDF_ColorSpace::Family* pCSFamily);
   FX_ARGB GetStrokeArgb(CPDF_PageObject* pObj) const;
   FX_RECT GetObjectClippedRect(const CPDF_PageObject* pObj,
                                const CFX_Matrix& mtObj2Device) const;

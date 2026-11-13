@@ -18,13 +18,14 @@
 
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
-#include "protos/perfetto/trace/track_event/chrome_compositor_scheduler_state.pbzero.h"
-#include "protos/perfetto/trace/track_event/track_event.pbzero.h"
 #include "src/protozero/test/example_proto/test_messages.pbzero.h"
-#include "src/trace_processor/importers/track_event.descriptor.h"
+#include "src/trace_processor/importers/proto/track_event.descriptor.h"
 #include "src/trace_processor/test_messages.descriptor.h"
 #include "src/trace_processor/util/descriptors.h"
 #include "test/gtest_and_gmock.h"
+
+#include "protos/perfetto/trace/track_event/chrome_compositor_scheduler_state.pbzero.h"
+#include "protos/perfetto/trace/track_event/track_event.pbzero.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -231,7 +232,7 @@ TEST_F(ProtozeroToTextTestMessageTest, FieldVarIntInt64) {
 
 TEST_F(ProtozeroToTextTestMessageTest, FieldVarIntSint64) {
   protozero::HeapBuffered<EveryField> msg;
-  msg->set_field_sint64(-3000000000);
+  msg->set_field_sint64(INT64_C(-3000000000));
 
   EXPECT_EQ(ProtozeroToText(pool_, ".protozero.test.protos.EveryField",
                             msg.SerializeAsArray(), kIncludeNewLines),
@@ -594,6 +595,57 @@ TEST_F(ProtozeroToTextTestMessageTest, FieldLengthLimitedPackedFixed64Double) {
           "\n"),
       ElementsAre(StartsWith("field_double: -42"),
                   StartsWith("field_double: 42.125")));
+}
+
+TEST_F(ProtozeroToTextTestMessageTest, FieldLengthLimitedPackedSmallEnum) {
+  protozero::HeapBuffered<PackedRepeatedFields> msg;
+  protozero::PackedVarInt buf;
+  buf.Append(1);
+  buf.Append(0);
+  buf.Append(-1);
+  msg->set_small_enum(buf);
+
+  EXPECT_THAT(
+      base::SplitString(
+          ProtozeroToText(pool_, ".protozero.test.protos.PackedRepeatedFields",
+                          msg.SerializeAsArray(), kIncludeNewLines),
+          "\n"),
+      ElementsAre(Eq("small_enum: TO_BE"), Eq("small_enum: NOT_TO_BE"),
+                  Eq("51: -1")));
+}
+
+TEST_F(ProtozeroToTextTestMessageTest, FieldLengthLimitedPackedSignedEnum) {
+  protozero::HeapBuffered<PackedRepeatedFields> msg;
+  protozero::PackedVarInt buf;
+  buf.Append(1);
+  buf.Append(0);
+  buf.Append(-1);
+  buf.Append(-100);
+  msg->set_signed_enum(buf);
+
+  EXPECT_THAT(
+      base::SplitString(
+          ProtozeroToText(pool_, ".protozero.test.protos.PackedRepeatedFields",
+                          msg.SerializeAsArray(), kIncludeNewLines),
+          "\n"),
+      ElementsAre(Eq("signed_enum: POSITIVE"), Eq("signed_enum: NEUTRAL"),
+                  Eq("signed_enum: NEGATIVE"), Eq("52: -100")));
+}
+
+TEST_F(ProtozeroToTextTestMessageTest, FieldLengthLimitedPackedBigEnum) {
+  protozero::HeapBuffered<PackedRepeatedFields> msg;
+  protozero::PackedVarInt buf;
+  buf.Append(10);
+  buf.Append(100500);
+  buf.Append(-1);
+  msg->set_big_enum(buf);
+
+  EXPECT_THAT(
+      base::SplitString(
+          ProtozeroToText(pool_, ".protozero.test.protos.PackedRepeatedFields",
+                          msg.SerializeAsArray(), kIncludeNewLines),
+          "\n"),
+      ElementsAre(Eq("big_enum: BEGIN"), Eq("big_enum: END"), Eq("53: -1")));
 }
 
 TEST_F(ProtozeroToTextTestMessageTest, FieldLengthLimitedPackedFixedErrShort) {

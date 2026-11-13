@@ -16,9 +16,13 @@
 #define PLATFORM_API_CRYPTO_H_
 
 #include "absl/strings/string_view.h"
+#ifdef NEARBY_CHROMIUM
+#include "crypto/random.h"
+#else
+#include "internal/crypto_cros/random.h"
+#endif
 #include "internal/platform/byte_array.h"
 
-namespace location {
 namespace nearby {
 
 // A provider of standard hashing algorithms.
@@ -32,7 +36,15 @@ class Crypto {
   static ByteArray Sha256(absl::string_view input);
 };
 
+// Creates an object of type T initialized with random data.
+// This template should be used for simple data types: int, char, etc.
+template <typename T>
+T RandData() {
+  T data;
+  ::crypto::RandBytes(&data, sizeof(data));
+  return data;
+}
+
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_API_CRYPTO_H_

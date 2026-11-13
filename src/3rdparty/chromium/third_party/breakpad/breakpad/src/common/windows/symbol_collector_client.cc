@@ -1,3 +1,7 @@
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
+#endif
+
 #include "common/windows/symbol_collector_client.h"
 
 #include <stdio.h>
@@ -71,7 +75,8 @@ namespace google_breakpad {
       const wstring& upload_key,
       const wstring& debug_file,
       const wstring& debug_id,
-      const wstring& type) {
+      const wstring& type,
+      const wstring& product_name) {
     wstring url = api_url +
         L"/v1/uploads/" + upload_key + L":complete"
         L"?key=" + api_key;
@@ -83,11 +88,18 @@ namespace google_breakpad {
         L"debug_id: \"" +
         debug_id +
         L"\" "
-        L"}, "
-        L"symbol_upload_type: \"" +
-        type +
-        L"\", "
-        L"use_async_processing: true }";
+        L"}, ";
+    if (!product_name.empty()) {
+      body +=
+          L"metadata: {"
+          L"product_name: \"" +
+          product_name +
+          L"\""
+          L"},";
+    }
+    body += L"symbol_upload_type: \"" + type +
+            L"\", "
+            L"use_async_processing: true }";
     wstring response;
     int response_code;
 

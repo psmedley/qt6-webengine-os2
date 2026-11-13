@@ -4,7 +4,7 @@
 
 #include "gpu/vulkan/vulkan_fence_helper.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "gpu/vulkan/vulkan_device_queue.h"
 #include "gpu/vulkan/vulkan_function_pointers.h"
@@ -34,9 +34,9 @@ void VulkanFenceHelper::Destroy() {
 // TODO(ericrk): Handle recycling fences.
 VkResult VulkanFenceHelper::GetFence(VkFence* fence) {
   VkFenceCreateInfo create_info{
-      VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-      nullptr,
-      0,
+      .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+      .pNext = nullptr,
+      .flags = 0,
   };
   return vkCreateFence(device_queue_->GetVulkanDevice(), &create_info,
                        nullptr /* pAllocator */, fence);

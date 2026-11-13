@@ -12,11 +12,13 @@
 #include "base/check.h"
 #include "base/hash/hash.h"
 #include "base/hash/md5.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_byteorder.h"
+#include "third_party/abseil-cpp/absl/strings/ascii.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
 #include "ui/display/util/display_util.h"
 #include "ui/gfx/geometry/size.h"
@@ -32,6 +34,7 @@ constexpr char kBlockZeroSerialNumberTypeMetric[] =
 constexpr char kNumOfSerialNumbersProvidedByExternalDisplay[] =
     "Display.External.NumOfSerialNumbersProvided";
 constexpr uint8_t kMaxSerialNumberCount = 2;
+constexpr uint8_t kDisplayIdExtensionTag = 0x70;
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
@@ -100,7 +103,8 @@ EdidParser::EdidParser(const std::vector<uint8_t>& edid_blob, bool is_external)
       year_of_manufacture_(display::kInvalidYearOfManufacture),
       gamma_(0.0),
       bits_per_channel_(-1),
-      primaries_({0}) {
+      primaries_({0}),
+      audio_formats_(0) {
   ParseEdid(edid_blob);
 }
 
@@ -172,6 +176,10 @@ std::string EdidParser::ProductIdToString(uint16_t product_id) {
   return base::StringPrintf("%02X%02X", upper_char, lower_char);
 }
 
+bool EdidParser::TileCanScaleToFit() const {
+  return tile_can_scale_to_fit_;
+}
+
 void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
   // See http://en.wikipedia.org/wiki/Extended_display_identification_data
   // for the details of EDID data format.  We use the following data:
@@ -199,7 +207,7 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
   }
   product_id_ = (edid[kProductIdOffset] << 8) + edid[kProductIdOffset + 1];
 
-  //   Bytes 12-15: dislay serial number, in little-endian (LSB). This field is
+  //   Bytes 12-15: display serial number, in little-endian (LSB). This field is
   //   optional and its absence is marked by having all bytes set to 0x00.
   //   Values do not represent ASCII characters.
   constexpr size_t kSerialNumberOffset = 12;
@@ -467,16 +475,15 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
     if (edid[offset] == 0 && edid[offset + 1] == 0 && edid[offset + 2] == 0 &&
         edid[offset + 3] == kDisplayRangeLimitsDescriptor) {
       // byte 4: Offsets for display range limits
-      const uint8_t kRateOffset = edid[offset + 4];
+      const uint8_t rateOffset = edid[offset + 4];
       // bits 7-4: Reserved \0
-      if (kRateOffset & 0x10)
+      if (rateOffset & 0xf0)
         continue;
       // bit 3: Horizontal max rate offset (not used)
       // bit 2: Horizontal min rate offset (not used)
-      // bit 1: Vertical max rate offset
-      const uint8_t verticalMaxRateOffset = kRateOffset & (1 << 1) ? 255 : 0;
+      // bit 1: Vertical max rate offset (not used)
       // bit 0: Vertical min rate offset
-      const uint8_t verticalMinRateOffset = kRateOffset & (1 << 0) ? 255 : 0;
+      const uint8_t verticalMinRateOffset = rateOffset & (1 << 0) ? 255 : 0;
 
       // bytes 5-8: Rate limits
       // Each byte must be within [1, 255].
@@ -484,9 +491,8 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
           edid[offset + 7] == 0 || edid[offset + 8] == 0)
         continue;
       // byte 5: Min vertical rate in Hz
-      min_vfreq_ = edid[offset + 5] + verticalMinRateOffset;
-      // byte 6: Max vertical rate in Hz
-      max_vfreq_ = edid[offset + 6] + verticalMaxRateOffset;
+      vsync_rate_min_ = edid[offset + 5] + verticalMinRateOffset;
+      // byte 6: Max vertical rate in Hz (not used)
       // byte 7: Min horizontal rate in kHz (not used)
       // byte 8: Max horizontal rate in kHz (not used)
 
@@ -524,7 +530,10 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
   // Replace unprintable chars with white space.
   std::replace_if(
       display_name_.begin(), display_name_.end(),
-      [](char c) { return !isascii(c) || !isprint(c); }, ' ');
+      [](unsigned char c) {
+        return !absl::ascii_isascii(c) || !absl::ascii_isprint(c);
+      },
+      ' ');
 
   // See http://en.wikipedia.org/wiki/Extended_display_identification_data
   // for the extension format of EDID.  Also see EIA/CEA-861 spec for
@@ -538,6 +547,7 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
   constexpr size_t kDataBlockOffset = 4;
   constexpr uint8_t kCEAExtensionTag = '\x02';
   constexpr uint8_t kExpectedExtensionRevision = '\x03';
+  constexpr uint8_t kAudioTag = 1;
   constexpr uint8_t kExtendedTag = 7;
   constexpr uint8_t kExtendedVideoCapabilityTag = 0;
   constexpr uint8_t kPTOverscanFlagPosition = 4;
@@ -545,24 +555,30 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
   constexpr uint8_t kCEOverscanFlagPosition = 0;
   // See CTA-861-F, particularly Table 56 "Colorimetry Data Block".
   constexpr uint8_t kColorimetryDataBlockCapabilityTag = 0x05;
-  constexpr gfx::ColorSpace::PrimaryID kPrimaryIDMap[] = {
-      // xvYCC601. Standard Definition Colorimetry based on IEC 61966-2-4.
-      gfx::ColorSpace::PrimaryID::SMPTE170M,
-      // xvYCC709. High Definition Colorimetry based on IEC 61966-2-4.
-      gfx::ColorSpace::PrimaryID::BT709,
-      // sYCC601. Colorimetry based on IEC 61966-2-1/Amendment 1.
-      gfx::ColorSpace::PrimaryID::SMPTE170M,
-      // opYCC601. Colorimetry based on IEC 61966-2-5, Annex A.
-      gfx::ColorSpace::PrimaryID::SMPTE170M,
-      // opRGB, Colorimetry based on IEC 61966-2-5.
-      gfx::ColorSpace::PrimaryID::SMPTE170M,
-      // BT2020RGB. Colorimetry based on ITU-R BT.2020 R’G’B’.
-      gfx::ColorSpace::PrimaryID::BT2020,
-      // BT2020YCC. Colorimetry based on ITU-R BT.2020 Y’C’BC’R.
-      gfx::ColorSpace::PrimaryID::BT2020,
-      // BT2020cYCC. Colorimetry based on ITU-R BT.2020 Y’cC’BCC’RC.
-      gfx::ColorSpace::PrimaryID::BT2020,
-  };
+  constexpr std::pair<gfx::ColorSpace::PrimaryID, gfx::ColorSpace::MatrixID>
+      kPrimaryMatrixIDMap[] = {
+          // xvYCC601. Standard Definition Colorimetry based on IEC 61966-2-4.
+          {gfx::ColorSpace::PrimaryID::SMPTE170M,
+           gfx::ColorSpace::MatrixID::SMPTE170M},
+          // xvYCC709. High Definition Colorimetry based on IEC 61966-2-4.
+          {gfx::ColorSpace::PrimaryID::BT709, gfx::ColorSpace::MatrixID::BT709},
+          // sYCC601. Colorimetry based on IEC 61966-2-1/Amendment 1.
+          {gfx::ColorSpace::PrimaryID::SMPTE170M,
+           gfx::ColorSpace::MatrixID::SMPTE170M},
+          // opYCC601. Colorimetry based on IEC 61966-2-5, Annex A.
+          {gfx::ColorSpace::PrimaryID::SMPTE170M,
+           gfx::ColorSpace::MatrixID::SMPTE170M},
+          // opRGB, Colorimetry based on IEC 61966-2-5.
+          {gfx::ColorSpace::PrimaryID::SMPTE170M,
+           gfx::ColorSpace::MatrixID::RGB},
+          // BT2020cYCC. Colorimetry based on ITU-R BT.2020 Y’cC’BCC’RC.
+          {gfx::ColorSpace::PrimaryID::BT2020,
+           gfx::ColorSpace::MatrixID::BT2020_CL},
+          // BT2020YCC. Colorimetry based on ITU-R BT.2020 Y’C’BC’R.
+          {gfx::ColorSpace::PrimaryID::BT2020,
+           gfx::ColorSpace::MatrixID::BT2020_NCL},
+          // BT2020RGB. Colorimetry based on ITU-R BT.2020 R’G’B’.
+          {gfx::ColorSpace::PrimaryID::BT2020, gfx::ColorSpace::MatrixID::RGB}};
   // See CEA 861.G-2018, Sec.7.5.13, "HDR Static Metadata Data Block" for these.
   constexpr uint8_t kHDRStaticMetadataCapabilityTag = 0x6;
   constexpr gfx::ColorSpace::TransferID kTransferIDMap[] = {
@@ -587,10 +603,17 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
       break;
 
     const size_t extension_offset = kExtensionBaseOffset + i * kExtensionSize;
-    const uint8_t cea_tag = edid[extension_offset];
+    const uint8_t extention_tag = edid[extension_offset];
     const uint8_t revision = edid[extension_offset + 1];
-    if (cea_tag != kCEAExtensionTag || revision != kExpectedExtensionRevision)
+
+    if (extention_tag == kDisplayIdExtensionTag) {
+      ParseDisplayIdExtension(edid, extension_offset);
       continue;
+    }
+    if (extention_tag != kCEAExtensionTag ||
+        revision != kExpectedExtensionRevision) {
+      continue;
+    }
 
     const uint8_t timing_descriptors_start = std::min(
         edid[extension_offset + 2], static_cast<unsigned char>(kExtensionSize));
@@ -598,8 +621,8 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
     for (size_t data_offset = extension_offset + kDataBlockOffset;
          data_offset < extension_offset + timing_descriptors_start;) {
       // A data block is encoded as:
-      // - byte 1 high 3 bits: tag. '07' for extended tags.
-      // - byte 1 remaining bits: the length of data block.
+      // - byte 1 high 3 bits: tag: '1' for audio, '7' for extended tags.
+      // - byte 1 remaining bits: the length of data block after header.
       // - byte 2: the extended tag. E.g. '0' for video capability. Values are
       //   defined by the k...CapabilityTag constants.
       // - byte 3: the capability.
@@ -607,6 +630,35 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
       const uint8_t payload_length = edid[data_offset] & 0x1f;
       if (data_offset + payload_length + 1 > edid.size())
         break;
+
+      // Short Audio Descriptors contain passthrough audio support information.
+      // Note: Short Audio Descriptors also contain channel count and sampling
+      // frequency information as described in:
+      // CTA-861-G (2017) section 7.5.2 Audio Data Block.
+      if (tag == kAudioTag) {
+        constexpr uint8_t kCEAShortAudioDescriptorLength = 3;
+        constexpr uint8_t kFormatBitsLPCM = 1;
+        constexpr uint8_t kFormatBitsDTS = 7;
+        constexpr uint8_t kFormatBitsDTSHD = 11;
+
+        for (int sad_index = 0;
+             sad_index + kCEAShortAudioDescriptorLength <= payload_length;
+             sad_index += kCEAShortAudioDescriptorLength) {
+          switch ((edid[data_offset + 1 + sad_index] >> 3) & 0x1F) {
+            case kFormatBitsLPCM:
+              audio_formats_ |= kAudioBitstreamPcmLinear;
+              break;
+            case kFormatBitsDTS:
+              audio_formats_ |= kAudioBitstreamDts;
+              break;
+            case kFormatBitsDTSHD:
+              audio_formats_ |= kAudioBitstreamDtsHd;
+              break;
+          }
+        }
+        data_offset += payload_length + 1;
+        continue;
+      }
 
       if (tag != kExtendedTag || payload_length < 2) {
         data_offset += payload_length + 1;
@@ -628,27 +680,33 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
           const std::bitset<kMaxNumColorimetryEntries>
               supported_primaries_bitfield(edid[data_offset + 2]);
           static_assert(
-              kMaxNumColorimetryEntries == std::size(kPrimaryIDMap),
+              kMaxNumColorimetryEntries == std::size(kPrimaryMatrixIDMap),
               "kPrimaryIDMap should describe all possible colorimetry entries");
           for (size_t entry = 0; entry < kMaxNumColorimetryEntries; ++entry) {
-            if (supported_primaries_bitfield[entry])
-              supported_color_primary_ids_.insert(kPrimaryIDMap[entry]);
+            if (supported_primaries_bitfield[entry]) {
+              supported_color_primary_matrix_ids_.insert(
+                  kPrimaryMatrixIDMap[entry]);
+            }
           }
           break;
         }
 
         case kHDRStaticMetadataCapabilityTag: {
-          constexpr size_t kMaxNumHDRStaticMedatataEntries = 4;
-          const std::bitset<kMaxNumHDRStaticMedatataEntries>
+          constexpr size_t kMaxNumHDRStaticMetadataEntries = 4;
+          const std::bitset<kMaxNumHDRStaticMetadataEntries>
               supported_eotfs_bitfield(edid[data_offset + 2]);
           static_assert(
-              kMaxNumHDRStaticMedatataEntries == std::size(kTransferIDMap),
+              kMaxNumHDRStaticMetadataEntries == std::size(kTransferIDMap),
               "kTransferIDMap should describe all possible transfer entries");
-          for (size_t entry = 0; entry < kMaxNumHDRStaticMedatataEntries;
+          for (size_t entry = 0; entry < kMaxNumHDRStaticMetadataEntries;
                ++entry) {
             if (supported_eotfs_bitfield[entry])
               supported_color_transfer_ids_.insert(kTransferIDMap[entry]);
           }
+          hdr_static_metadata_ =
+              absl::make_optional<gfx::HDRStaticMetadata>({});
+          hdr_static_metadata_->supported_eotf_mask =
+              base::checked_cast<uint8_t>(supported_eotfs_bitfield.to_ulong());
 
           // See CEA 861.3-2015, Sec.7.5.13, "HDR Static Metadata Data Block"
           // for details on the following calculations.
@@ -657,8 +715,6 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
           if (length_of_data_block <= 3)
             break;
           const uint8_t desired_content_max_luminance = edid[data_offset + 4];
-          hdr_static_metadata_ =
-              absl::make_optional<gfx::HDRStaticMetadata>({});
           hdr_static_metadata_->max =
               50.0 * pow(2, desired_content_max_luminance / 32.0);
 
@@ -687,6 +743,99 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
   base::UmaHistogramEnumeration(kParseEdidFailureMetric,
                                 ParseEdidFailure::kNoError);
   ReportEdidOptionalsForExternalDisplay();
+}
+
+// TODO(b/316356595): Move DisplayID parsing into its own class.
+// NOTE: Refer to figure Figure 2-1 of VESA DisplayID Standard Version 2.1 for
+// how DisplayID Structure v2.0 is laid out as an EDID extension.
+void EdidParser::ParseDisplayIdExtension(const std::vector<uint8_t>& edid,
+                                         size_t extension_offset) {
+  const uint8_t extension_tag = edid[extension_offset];
+  if (extension_tag != kDisplayIdExtensionTag) {
+    LOG(ERROR) << "Unable to proceed with parsing DisplayID extension as "
+                  "extension tag is not for DisplayID (0x70). Actual tag: "
+               << extension_tag;
+    return;
+  }
+
+  // There are two data blocks that describe tiled displays:
+  // * DisplayID v1.3 with tag 0x12
+  // * DisplayID v2.0 with tag 0x28
+  // The v1.3 block is superscede by v2.0. Both of the blocks are laregely
+  // identical.
+  constexpr uint8_t kTiledDisplayDataBlockTag2_0 = 0x28;
+  constexpr uint8_t kTiledDisplayDataBlockTag1_3 = 0x12;
+
+  // Section data block is divided into (block tag, revision #, number of
+  // payload bytes, payload), where everything except for the payload is one
+  // byte long.
+  constexpr size_t kDataBlockNumPayloadBytesOffset = 2;
+  constexpr size_t kDataBlockNonPayloadBytes = 3;
+
+  // The EDID-extension section block tag is the first byte
+  // (|extension_offset|), followed by 4 bytes of DisplayID extension section
+  // header, then the data blocks.
+  const size_t displayid_extension_offset = extension_offset + 1;
+  const size_t displayid_data_block_base = displayid_extension_offset + 4;
+  size_t current_data_block_offset = displayid_data_block_base;
+
+  // The second byte in the extension section header indicates the total number
+  // of bytes in the section data block(s). This should always be 121.
+  const uint8_t num_bytes_in_section_data_blocks =
+      edid[displayid_extension_offset + 1];
+  if (num_bytes_in_section_data_blocks != 121) {
+    LOG(WARNING) << "Number of bytes in section data block should be 121 "
+                    "according to the "
+                    "DisplayID spec. Actual # of bytes: "
+                 << num_bytes_in_section_data_blocks;
+    return;
+  }
+
+  const size_t max_offset =
+      std::min(edid.size(),
+               displayid_data_block_base + num_bytes_in_section_data_blocks);
+  while (current_data_block_offset < max_offset
+         // If there are no remaining data blocks before the fixed 121 bytes of
+         // section data block space runs out, the remaining space is padded
+         // with 0. Since there are no data block tag with ID 0, if a data block
+         // tag is 0 then the rest of the section is just padding.
+         && edid[current_data_block_offset] != 0) {
+    const uint8_t current_data_block_tag = edid[current_data_block_offset];
+    switch (current_data_block_tag) {
+      case kTiledDisplayDataBlockTag1_3:
+      case kTiledDisplayDataBlockTag2_0:
+        ParseTiledDisplayBlock(edid, current_data_block_offset);
+        break;
+    }
+    // NOTE: Parse other DisplayID blocks here.
+
+    // Increment |current_data_block_offset| to point to the next data block's
+    // tag (1st byte of the section data block).
+    current_data_block_offset +=
+        edid[current_data_block_offset + kDataBlockNumPayloadBytesOffset] +
+        kDataBlockNonPayloadBytes;
+  }
+}
+
+// DisplayID 1.3 and 2.0 tiled display data blocks look identical, at
+// least for the current set of fields. Consult both of the specs before
+// parsing more fields.
+void EdidParser::ParseTiledDisplayBlock(const std::vector<uint8_t>& edid,
+                                        size_t block_offset) {
+  // See:
+  // https://en.wikipedia.org/wiki/DisplayID#0x28_Tiled_display_topology
+  // "Tile capabilities" is described in the 4th byte (offset + 3).
+  // Bits 2:0 describe "Tile Behavior when It Is the Only Tile Receiving an
+  // Image from the Source". With value of 2 indicating that the tile will
+  // "Scale to fit the display" when it is the only tile receiving an image from
+  // the source.
+  constexpr size_t kTileCapabilitiesOffset = 3;
+  constexpr uint8_t kSingleTileBehaviorBitmask = 0b111;
+  constexpr uint8_t kSingleTileStretchToFit = 0x02;
+
+  tile_can_scale_to_fit_ =
+      (edid[block_offset + kTileCapabilitiesOffset] &
+       kSingleTileBehaviorBitmask) == kSingleTileStretchToFit;
 }
 
 void EdidParser::ReportEdidOptionalsForExternalDisplay() const {

@@ -1,5 +1,5 @@
 // Copyright (C) 2016 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -9,6 +9,7 @@
 #include <QtTest/QtTest>
 #include <QQuickWebEngineProfile>
 #include <QtWebEngineQuick/private/qquickwebengineview_p.h>
+#include <QWebEnginePage>
 
 #define INSPECTOR_SERVER_PORT "23654"
 static const QUrl s_inspectorServerHttpBaseUrl("http://localhost:" INSPECTOR_SERVER_PORT);
@@ -16,12 +17,15 @@ static const QUrl s_inspectorServerHttpBaseUrl("http://localhost:" INSPECTOR_SER
 class tst_InspectorServer : public QObject {
     Q_OBJECT
 public:
+    static void initMain();
+
     tst_InspectorServer();
 
 private Q_SLOTS:
     void init();
     void cleanup();
 
+    void testDevToolsId();
     void testPageList();
     void testRemoteDebuggingMessage();
     void openRemoteDebuggingSession();
@@ -34,10 +38,15 @@ private:
     QScopedPointer<QQmlComponent> m_component;
 };
 
+void tst_InspectorServer::initMain()
+{
+    QtWebEngineQuick::initialize();
+}
+
 tst_InspectorServer::tst_InspectorServer()
 {
+    qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--remote-allow-origins=*");
     qputenv("QTWEBENGINE_REMOTE_DEBUGGING", INSPECTOR_SERVER_PORT);
-    QtWebEngineQuick::initialize();
     QQuickWebEngineProfile::defaultProfile()->setOffTheRecord(true);
     prepareWebViewComponent();
 }
@@ -78,7 +87,7 @@ inline QQuickWebEngineView* tst_InspectorServer::webView() const
 QJsonArray tst_InspectorServer::fetchPageList() const
 {
     QNetworkAccessManager qnam;
-    QSignalSpy spy(&qnam, &QNetworkAccessManager::finished);;
+    QSignalSpy spy(&qnam, &QNetworkAccessManager::finished);
     QNetworkRequest request(s_inspectorServerHttpBaseUrl.resolved(QUrl("json/list")));
     QScopedPointer<QNetworkReply> reply(qnam.get(request));
     spy.wait();
@@ -88,6 +97,21 @@ QJsonArray tst_InspectorServer::fetchPageList() const
         spy.wait();
     }
     return QJsonDocument::fromJson(reply->readAll()).array();
+}
+
+void tst_InspectorServer::testDevToolsId()
+{
+    const QUrl testPageUrl = QUrl::fromLocalFile(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()
+                                                 + QLatin1String("/html/basic_page.html"));
+    QSignalSpy loadSpy(webView(), SIGNAL(loadingChanged(QWebEngineLoadingInfo)));
+    webView()->setUrl(testPageUrl);
+    QTRY_VERIFY_WITH_TIMEOUT(loadSpy.size() && !webView()->isLoading(), 10000);
+
+    // Our page should be the only one in the list.
+    QJsonArray pageList = fetchPageList();
+    QCOMPARE(pageList.size(), 1);
+    QCOMPARE(testPageUrl.toString(), pageList.at(0).toObject().value("url").toString());
+    QCOMPARE(webView()->devToolsId(), pageList.at(0).toObject().value("id").toString());
 }
 
 void tst_InspectorServer::testPageList()

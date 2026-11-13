@@ -18,9 +18,9 @@
 #define SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_HEAP_GRAPH_MODULE_H_
 
 #include "perfetto/base/build_config.h"
+#include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/proto/heap_graph_tracker.h"
 #include "src/trace_processor/importers/proto/proto_importer_module.h"
-#include "src/trace_processor/parser_types.h"
 
 #include "protos/perfetto/trace/profiling/deobfuscation.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
@@ -42,7 +42,7 @@ class HeapGraphModule : public ProtoImporterModule {
  private:
   void ParseHeapGraph(uint32_t seq_id, int64_t ts, protozero::ConstBytes);
   void ParseDeobfuscationMapping(protozero::ConstBytes);
-  void DeobfuscateClass(base::Optional<StringPool::Id> package_name_id,
+  void DeobfuscateClass(std::optional<StringPool::Id> package_name_id,
                         StringPool::Id obfuscated_class_id,
                         const protos::pbzero::ObfuscatedClass::Decoder& cls);
 

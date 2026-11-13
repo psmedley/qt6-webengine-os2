@@ -18,6 +18,9 @@
 #include "api/test/create_peerconnection_quality_test_fixture.h"
 #include "api/test/metrics/global_metrics_logger_and_exporter.h"
 #include "api/test/network_emulation_manager.h"
+#include "api/test/pclf/media_configuration.h"
+#include "api/test/pclf/media_quality_test_params.h"
+#include "api/test/pclf/peer_configurer.h"
 #include "api/test/peerconnection_quality_test_fixture.h"
 #include "call/simulated_network.h"
 #include "system_wrappers/include/field_trial.h"
@@ -39,22 +42,6 @@ namespace {
 
 class PeerConnectionE2EQualityTestSmokeTest : public ::testing::Test {
  public:
-  using EmulatedSFUConfig =
-      PeerConnectionE2EQualityTestFixture::EmulatedSFUConfig;
-  using PeerConfigurer = PeerConnectionE2EQualityTestFixture::PeerConfigurer;
-  using RunParams = PeerConnectionE2EQualityTestFixture::RunParams;
-  using VideoConfig = PeerConnectionE2EQualityTestFixture::VideoConfig;
-  using VideoCodecConfig =
-      PeerConnectionE2EQualityTestFixture::VideoCodecConfig;
-  using AudioConfig = PeerConnectionE2EQualityTestFixture::AudioConfig;
-  using ScreenShareConfig =
-      PeerConnectionE2EQualityTestFixture::ScreenShareConfig;
-  using ScrollingParams = PeerConnectionE2EQualityTestFixture::ScrollingParams;
-  using VideoSimulcastConfig =
-      PeerConnectionE2EQualityTestFixture::VideoSimulcastConfig;
-  using EchoEmulationConfig =
-      PeerConnectionE2EQualityTestFixture::EchoEmulationConfig;
-
   void SetUp() override {
     network_emulation_ = CreateNetworkEmulationManager();
     auto video_quality_analyzer = std::make_unique<DefaultVideoQualityAnalyzer>(
@@ -93,8 +80,11 @@ class PeerConnectionE2EQualityTestSmokeTest : public ::testing::Test {
   }
 
   void AddPeer(EmulatedNetworkManagerInterface* network,
-               rtc::FunctionView<void(PeerConfigurer*)> configurer) {
-    fixture_->AddPeer(network->network_dependencies(), configurer);
+               rtc::FunctionView<void(PeerConfigurer*)> update_configurer) {
+    auto configurer =
+        std::make_unique<PeerConfigurer>(network->network_dependencies());
+    update_configurer(configurer.get());
+    fixture_->AddPeer(std::move(configurer));
   }
 
   void RunAndCheckEachVideoStreamReceivedFrames(const RunParams& run_params) {
@@ -148,7 +138,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Smoke) {
 
     AudioConfig audio;
     audio.stream_label = "alice-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_alice_source", "wav");
     audio.sampling_frequency_in_hz = 48000;
@@ -170,7 +159,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Smoke) {
 
     AudioConfig audio;
     audio.stream_label = "charlie-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_bob_source", "wav");
     charlie->SetAudioConfig(std::move(audio));
@@ -221,7 +209,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest,
 
     AudioConfig audio;
     audio.stream_label = "alice-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_alice_source", "wav");
     audio.sampling_frequency_in_hz = 48000;
@@ -241,7 +228,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest,
 
     AudioConfig audio;
     audio.stream_label = "charlie-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_bob_source", "wav");
     charlie->SetAudioConfig(std::move(audio));
@@ -272,7 +258,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, SmokeH264) {
 
     AudioConfig audio;
     audio.stream_label = "alice-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_alice_source", "wav");
     audio.sampling_frequency_in_hz = 48000;
@@ -291,7 +276,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, SmokeH264) {
 
     AudioConfig audio;
     audio.stream_label = "charlie-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_bob_source", "wav");
     charlie->SetAudioConfig(std::move(audio));
@@ -400,8 +384,8 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Screenshare) {
     screenshare.content_hint = VideoTrackInterface::ContentHint::kText;
     ScreenShareConfig screen_share_config =
         ScreenShareConfig(TimeDelta::Seconds(2));
-    screen_share_config.scrolling_params = ScrollingParams(
-        TimeDelta::Millis(1800), kDefaultSlidesWidth, kDefaultSlidesHeight);
+    screen_share_config.scrolling_params =
+        ScrollingParams{.duration = TimeDelta::Millis(1800)};
     auto screen_share_frame_generator =
         CreateScreenShareFrameGenerator(screenshare, screen_share_config);
     alice->AddVideoConfig(std::move(screenshare),
@@ -423,7 +407,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Echo) {
   AddPeer(network_links.first, [](PeerConfigurer* alice) {
     AudioConfig audio;
     audio.stream_label = "alice-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_alice_source", "wav");
     audio.sampling_frequency_in_hz = 48000;
@@ -432,7 +415,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Echo) {
   AddPeer(network_links.second, [](PeerConfigurer* bob) {
     AudioConfig audio;
     audio.stream_label = "bob-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_bob_source", "wav");
     bob->SetAudioConfig(std::move(audio));
@@ -460,7 +442,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Simulcast) {
 
     AudioConfig audio;
     audio.stream_label = "alice-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_alice_source", "wav");
     alice->SetAudioConfig(std::move(audio));
@@ -488,7 +469,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Svc) {
     alice->AddVideoConfig(std::move(simulcast));
 
     AudioConfig audio("alice-audio");
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_alice_source", "wav");
     alice->SetAudioConfig(std::move(audio));
@@ -525,7 +505,6 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_HighBitrate) {
 
     AudioConfig audio;
     audio.stream_label = "alice-audio";
-    audio.mode = AudioConfig::Mode::kFile;
     audio.input_file_name =
         test::ResourcePath("pc_quality_smoke_test_alice_source", "wav");
     audio.sampling_frequency_in_hz = 48000;

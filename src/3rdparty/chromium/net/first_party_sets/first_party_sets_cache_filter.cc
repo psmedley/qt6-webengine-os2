@@ -13,20 +13,17 @@ FirstPartySetsCacheFilter::MatchInfo::MatchInfo(
 
 FirstPartySetsCacheFilter::MatchInfo::MatchInfo::~MatchInfo() = default;
 
+#if !BUILDFLAG(IS_MAC_13)
 bool FirstPartySetsCacheFilter::MatchInfo::operator==(
-    const FirstPartySetsCacheFilter::MatchInfo& other) const {
-  return std::tie(clear_at_run_id, browser_run_id) ==
-         std::tie(other.clear_at_run_id, other.browser_run_id);
-}
+    const FirstPartySetsCacheFilter::MatchInfo& other) const = default;
+#endif
 
 FirstPartySetsCacheFilter::FirstPartySetsCacheFilter() = default;
 FirstPartySetsCacheFilter::FirstPartySetsCacheFilter(
     base::flat_map<net::SchemefulSite, int64_t> filter,
     int64_t browser_run_id)
     : filter_(std::move(filter)), browser_run_id_(std::move(browser_run_id)) {
-  if (browser_run_id_ == 0) {
-    DCHECK(filter_.empty());
-  }
+  CHECK(browser_run_id != 0 || filter_.empty());
 }
 
 FirstPartySetsCacheFilter::FirstPartySetsCacheFilter(
@@ -36,11 +33,10 @@ FirstPartySetsCacheFilter& FirstPartySetsCacheFilter::operator=(
 
 FirstPartySetsCacheFilter::~FirstPartySetsCacheFilter() = default;
 
+#if !BUILDFLAG(IS_MAC_13)
 bool FirstPartySetsCacheFilter::operator==(
-    const FirstPartySetsCacheFilter& other) const {
-  return std::tie(filter_, browser_run_id_) ==
-         std::tie(other.filter_, other.browser_run_id_);
-}
+    const FirstPartySetsCacheFilter& other) const = default;
+#endif
 
 FirstPartySetsCacheFilter FirstPartySetsCacheFilter::Clone() const {
   return FirstPartySetsCacheFilter(filter_, browser_run_id_);

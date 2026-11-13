@@ -4,10 +4,12 @@
 
 #include "content/browser/notifications/notification_event_dispatcher_impl.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
-#include "base/metrics/histogram_functions.h"
+#include <optional>
+
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "content/browser/notifications/devtools_event_logging.h"
 #include "content/browser/notifications/platform_notification_context_impl.h"
@@ -16,11 +18,11 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/weak_document_ptr.h"
 #include "content/public/common/persistent_notification_status.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/notifications/platform_notification_data.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 
@@ -77,6 +79,7 @@ PersistentNotificationStatus ConvertServiceWorkerStatus(
     case blink::ServiceWorkerStatusCode::kErrorDisallowed:
     case blink::ServiceWorkerStatusCode::kErrorInvalidArguments:
     case blink::ServiceWorkerStatusCode::kErrorStorageDisconnected:
+    case blink::ServiceWorkerStatusCode::kErrorStorageDataCorrupted:
       return PersistentNotificationStatus::kServiceWorkerError;
   }
   NOTREACHED();
@@ -145,6 +148,7 @@ void DispatchNotificationEventOnRegistration(
     case blink::ServiceWorkerStatusCode::kErrorDisallowed:
     case blink::ServiceWorkerStatusCode::kErrorInvalidArguments:
     case blink::ServiceWorkerStatusCode::kErrorStorageDisconnected:
+    case blink::ServiceWorkerStatusCode::kErrorStorageDataCorrupted:
       status = PersistentNotificationStatus::kServiceWorkerError;
       break;
     case blink::ServiceWorkerStatusCode::kOk:
@@ -184,7 +188,7 @@ void FindServiceWorkerRegistration(
   // NotificationDatabaseData should be changed to use StorageKey.
   service_worker_context->FindReadyRegistrationForId(
       notification_database_data.service_worker_registration_id,
-      blink::StorageKey(origin),
+      blink::StorageKey::CreateFirstParty(origin),
       base::BindOnce(&DispatchNotificationEventOnRegistration,
                      notification_database_data,
                      std::move(notification_action_callback),
@@ -216,8 +220,8 @@ void ReadNotificationDatabaseData(
 void DispatchNotificationClickEventOnWorker(
     const scoped_refptr<ServiceWorkerVersion>& service_worker,
     const NotificationDatabaseData& notification_database_data,
-    const absl::optional<int>& action_index,
-    const absl::optional<std::u16string>& reply,
+    const std::optional<int>& action_index,
+    const std::optional<std::u16string>& reply,
     ServiceWorkerVersion::StatusCallback callback,
     blink::ServiceWorkerStatusCode start_worker_status) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -241,8 +245,8 @@ void DispatchNotificationClickEventOnWorker(
 
 // Dispatches the notification click event on the |service_worker_registration|.
 void DoDispatchNotificationClickEvent(
-    const absl::optional<int>& action_index,
-    const absl::optional<std::u16string>& reply,
+    const std::optional<int>& action_index,
+    const std::optional<std::u16string>& reply,
     const scoped_refptr<PlatformNotificationContext>& notification_context,
     BrowserContext* browser_context,
     const ServiceWorkerRegistration* service_worker_registration,
@@ -380,10 +384,6 @@ void OnDispatchNotificationClickEventComplete(
     PersistentNotificationDispatchCompleteCallback dispatch_complete_callback,
     PersistentNotificationStatus status,
     blink::ServiceWorkerStatusCode service_worker_status) {
-  base::UmaHistogramEnumeration(
-      "Notifications.PersistentWebNotificationClickEventResult",
-      service_worker_status);
-
   std::move(dispatch_complete_callback).Run(status);
 }
 
@@ -391,10 +391,6 @@ void OnDispatchNotificationCloseEventComplete(
     PersistentNotificationDispatchCompleteCallback dispatch_complete_callback,
     PersistentNotificationStatus status,
     blink::ServiceWorkerStatusCode service_worker_status) {
-  base::UmaHistogramEnumeration(
-      "Notifications.PersistentWebNotificationCloseEventResult",
-      service_worker_status);
-
   std::move(dispatch_complete_callback).Run(status);
 }
 
@@ -417,8 +413,11 @@ NotificationEventDispatcherImpl::~NotificationEventDispatcherImpl() = default;
 NotificationEventDispatcherImpl::NonPersistentNotificationListenerInfo::
     NonPersistentNotificationListenerInfo(
         mojo::Remote<blink::mojom::NonPersistentNotificationListener> remote,
-        WeakDocumentPtr document)
-    : remote(std::move(remote)), document(document) {}
+        WeakDocumentPtr document,
+        RenderProcessHost::NotificationServiceCreatorType creator_type)
+    : remote(std::move(remote)),
+      document(document),
+      creator_type(creator_type) {}
 
 NotificationEventDispatcherImpl::NonPersistentNotificationListenerInfo::
     NonPersistentNotificationListenerInfo(
@@ -439,33 +438,47 @@ bool NotificationEventDispatcherImpl::
     return false;
   }
 
-  if (RenderFrameHost* rfh =
-          listener->second.document.AsRenderFrameHostIfValid()) {
-    // If the associated document is currently in back/forward cache, the
-    // function
-    // returns false to prevent the listener from being triggered.
-    // TODO: in the future, this could be improved to cover more lifecycle
-    // state. see: https://crrev.com/c/3861889/comment/e1759c1e_4dd15e4e/
-    return !rfh->IsInLifecycleState(
-        RenderFrameHost::LifecycleState::kInBackForwardCache);
+  // The non-persistent notification should not be created by service workers.
+  DCHECK(listener->second.creator_type !=
+         RenderProcessHost::NotificationServiceCreatorType::kServiceWorker);
+
+  RenderFrameHost* rfh = listener->second.document.AsRenderFrameHostIfValid();
+  if (!rfh) {
+    switch (listener->second.creator_type) {
+      case RenderProcessHost::NotificationServiceCreatorType::kDedicatedWorker:
+      case RenderProcessHost::NotificationServiceCreatorType::kDocument: {
+        // The weak document pointer should be pointing to the document that the
+        // notification service is communicating with, if it's empty, it's
+        // possible that the document is already destroyed. In this case, the
+        // notification event shouldn't be dispatched.
+        return false;
+      }
+      case RenderProcessHost::NotificationServiceCreatorType::kSharedWorker: {
+        // In this case, the weak document pointer is always null and we
+        // shouldn't block the notification.
+        return true;
+      }
+      case RenderProcessHost::NotificationServiceCreatorType::kServiceWorker: {
+        NOTREACHED();
+        return false;
+      }
+    }
   }
 
-  // TODO(https://crbug.com/1350944): if the rfh is not set, there are two
-  // possible cases: it's possible that the notification service is registered
-  // from a shared/service worker, or the original page is gone and the
-  // disconnect handler does not complete yet. We can't set this to false
-  // since it will break the notification that's created from a shared/service
-  // worker. A better support will be added in another CL
-  // (https://crrev.com/c/3876770).
-  return true;
+  // If the associated document is currently in back/forward cache, the
+  // function returns false to prevent the listener from being triggered.
+  // TODO: in the future, this could be improved to cover more lifecycle
+  // state. see: https://crrev.com/c/3861889/comment/e1759c1e_4dd15e4e/
+  return !rfh->IsInLifecycleState(
+      RenderFrameHost::LifecycleState::kInBackForwardCache);
 }
 
 void NotificationEventDispatcherImpl::DispatchNotificationClickEvent(
     BrowserContext* browser_context,
     const std::string& notification_id,
     const GURL& origin,
-    const absl::optional<int>& action_index,
-    const absl::optional<std::u16string>& reply,
+    const std::optional<int>& action_index,
+    const std::optional<std::u16string>& reply,
     NotificationDispatchCompleteCallback dispatch_complete_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -502,7 +515,8 @@ void NotificationEventDispatcherImpl::RegisterNonPersistentNotificationListener(
     const std::string& notification_id,
     mojo::PendingRemote<blink::mojom::NonPersistentNotificationListener>
         event_listener_remote,
-    const WeakDocumentPtr& event_document_ptr) {
+    const WeakDocumentPtr& event_document_ptr,
+    const RenderProcessHost::NotificationServiceCreatorType creator_type) {
   mojo::Remote<blink::mojom::NonPersistentNotificationListener> bound_remote(
       std::move(event_listener_remote));
 
@@ -527,7 +541,8 @@ void NotificationEventDispatcherImpl::RegisterNonPersistentNotificationListener(
   }
   non_persistent_notification_listeners_.emplace(
       std::piecewise_construct, std::forward_as_tuple(notification_id),
-      std::forward_as_tuple(std::move(bound_remote), event_document_ptr));
+      std::forward_as_tuple(std::move(bound_remote), event_document_ptr,
+                            creator_type));
 }
 
 // Only fire the notification listeners (including show, click and

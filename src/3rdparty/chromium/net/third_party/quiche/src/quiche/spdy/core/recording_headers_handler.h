@@ -6,8 +6,6 @@
 #define QUICHE_SPDY_CORE_RECORDING_HEADERS_HANDLER_H_
 
 #include <cstddef>
-#include <cstdint>
-#include <string>
 
 #include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_export.h"
@@ -18,7 +16,7 @@ namespace spdy {
 
 // RecordingHeadersHandler copies the headers emitted from the deframer, and
 // when needed can forward events to another wrapped handler.
-class QUICHE_EXPORT_PRIVATE RecordingHeadersHandler
+class QUICHE_EXPORT RecordingHeadersHandler
     : public SpdyHeadersHandlerInterface {
  public:
   explicit RecordingHeadersHandler(

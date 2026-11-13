@@ -19,6 +19,7 @@
 #include "components/renderer_context_menu/render_view_context_menu_observer.h"
 #include "components/renderer_context_menu/render_view_context_menu_proxy.h"
 #include "content/public/browser/context_menu_params.h"
+#include "content/public/browser/page_navigator.h"
 #include "content/public/browser/site_instance.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
@@ -120,12 +121,11 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   void RemoveMenuItem(int command_id) override;
   void RemoveAdjacentSeparators() override;
   void RemoveSeparatorBeforeMenuItem(int command_id) override;
-  content::RenderViewHost* GetRenderViewHost() const override;
   content::WebContents* GetWebContents() const override;
   content::BrowserContext* GetBrowserContext() const override;
 
   // May return nullptr if the frame was deleted while the menu was open.
-  content::RenderFrameHost* GetRenderFrameHost() const;
+  content::RenderFrameHost* GetRenderFrameHost() const override;
 
  protected:
   friend class RenderViewContextMenuTest;
@@ -163,24 +163,36 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
 
   // TODO(oshima): Remove this.
   virtual void AppendPlatformEditableItems() {}
-  virtual void ExecOpenInReadAnything() = 0;
 
   bool IsCustomItemChecked(int id) const;
   bool IsCustomItemEnabled(int id) const;
 
-  // Opens the specified URL string in a new tab.
+  // Opens the specified URL.
   void OpenURL(const GURL& url,
                const GURL& referrer,
+               const url::Origin& initiator,
                WindowOpenDisposition disposition,
                ui::PageTransition transition);
 
-  // Opens the specified URL string in a new tab with the extra headers.
-  void OpenURLWithExtraHeaders(const GURL& url,
-                               const GURL& referrer,
-                               WindowOpenDisposition disposition,
-                               ui::PageTransition transition,
-                               const std::string& extra_headers,
-                               bool started_from_context_menu);
+  // Opens the specified URL with extra headers.
+  virtual void OpenURLWithExtraHeaders(const GURL& url,
+                                       const GURL& referrer,
+                                       const url::Origin& initiator,
+                                       WindowOpenDisposition disposition,
+                                       ui::PageTransition transition,
+                                       const std::string& extra_headers,
+                                       bool started_from_context_menu);
+
+  // Populates OpenURLParams for opening the specified URL string in a new tab
+  // with the extra headers.
+  content::OpenURLParams GetOpenURLParamsWithExtraHeaders(
+      const GURL& url,
+      const GURL& referring_url,
+      const url::Origin& initiator,
+      WindowOpenDisposition disposition,
+      ui::PageTransition transition,
+      const std::string& extra_headers,
+      bool started_from_context_menu);
 
   content::ContextMenuParams params_;
   const raw_ptr<content::WebContents> source_web_contents_;

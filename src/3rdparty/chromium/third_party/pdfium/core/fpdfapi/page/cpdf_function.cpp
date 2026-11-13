@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "core/fpdfapi/page/cpdf_function.h"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -21,7 +22,6 @@
 #include "core/fxcrt/scoped_set_insertion.h"
 #include "core/fxcrt/stl_util.h"
 #include "third_party/base/containers/contains.h"
-#include "third_party/base/cxx17_backports.h"
 
 namespace {
 
@@ -141,7 +141,7 @@ absl::optional<uint32_t> CPDF_Function::Call(
     if (domain1 > domain2)
       return absl::nullopt;
 
-    clamped_inputs[i] = pdfium::clamp(inputs[i], domain1, domain2);
+    clamped_inputs[i] = std::clamp(inputs[i], domain1, domain2);
   }
   if (!v_Call(clamped_inputs, results))
     return absl::nullopt;
@@ -155,7 +155,7 @@ absl::optional<uint32_t> CPDF_Function::Call(
     if (range1 > range2)
       return absl::nullopt;
 
-    results[i] = pdfium::clamp(results[i], range1, range2);
+    results[i] = std::clamp(results[i], range1, range2);
   }
   return m_nOutputs;
 }
@@ -170,7 +170,7 @@ float CPDF_Function::Interpolate(float x,
   return ymin + (divisor ? (x - xmin) * (ymax - ymin) / divisor : 0);
 }
 
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
+#if defined(PDF_USE_SKIA)
 const CPDF_SampledFunc* CPDF_Function::ToSampledFunc() const {
   return m_Type == Type::kType0Sampled
              ? static_cast<const CPDF_SampledFunc*>(this)
@@ -188,4 +188,4 @@ const CPDF_StitchFunc* CPDF_Function::ToStitchFunc() const {
              ? static_cast<const CPDF_StitchFunc*>(this)
              : nullptr;
 }
-#endif  // defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
+#endif  // defined(PDF_USE_SKIA)

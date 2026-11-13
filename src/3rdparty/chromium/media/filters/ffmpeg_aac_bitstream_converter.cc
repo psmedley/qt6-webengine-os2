@@ -63,17 +63,17 @@ bool GenerateAdtsHeader(int codec,
   hdr[1] |= 1;
 
   switch (audio_profile) {
-    case FF_PROFILE_AAC_MAIN:
+    case AV_PROFILE_AAC_MAIN:
       break;
-    case FF_PROFILE_AAC_HE:
-    case FF_PROFILE_AAC_HE_V2:
-    case FF_PROFILE_AAC_LOW:
+    case AV_PROFILE_AAC_HE:
+    case AV_PROFILE_AAC_HE_V2:
+    case AV_PROFILE_AAC_LOW:
       hdr[2] |= (1 << 6);
       break;
-    case FF_PROFILE_AAC_SSR:
+    case AV_PROFILE_AAC_SSR:
       hdr[2] |= (2 << 6);
       break;
-    case FF_PROFILE_AAC_LTP:
+    case AV_PROFILE_AAC_LTP:
       hdr[2] |= (3 << 6);
       break;
     default:
@@ -195,14 +195,23 @@ bool FFmpegAACBitstreamConverter::ConvertPacket(AVPacket* packet) {
   if (!header_generated_ || codec_ != stream_codec_parameters_->codec_id ||
       audio_profile_ != stream_codec_parameters_->profile ||
       sample_rate_index_ != sample_rate_index ||
-      channel_configuration_ != stream_codec_parameters_->channels ||
+      channel_configuration_ !=
+#if LIBAVCODEC_VERSION_MAJOR > 60
+          stream_codec_parameters_->ch_layout.nb_channels ||
+#else
+          stream_codec_parameters_->channels ||
+#endif
       frame_length_ != header_plus_packet_size) {
     header_generated_ =
         GenerateAdtsHeader(stream_codec_parameters_->codec_id,
                            0,  // layer
                            stream_codec_parameters_->profile, sample_rate_index,
                            0,  // private stream
+#if LIBAVCODEC_VERSION_MAJOR > 60
+                           stream_codec_parameters_->ch_layout.nb_channels,
+#else
                            stream_codec_parameters_->channels,
+#endif
                            0,  // originality
                            0,  // home
                            0,  // copyrighted_stream
@@ -214,7 +223,11 @@ bool FFmpegAACBitstreamConverter::ConvertPacket(AVPacket* packet) {
     codec_ = stream_codec_parameters_->codec_id;
     audio_profile_ = stream_codec_parameters_->profile;
     sample_rate_index_ = sample_rate_index;
+#if LIBAVCODEC_VERSION_MAJOR > 60
+    channel_configuration_ = stream_codec_parameters_->ch_layout.nb_channels;
+#else
     channel_configuration_ = stream_codec_parameters_->channels;
+#endif
     frame_length_ = header_plus_packet_size;
   }
 

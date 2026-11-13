@@ -1,4 +1,4 @@
-// Copyright 2019 PDFium Authors. All rights reserved.
+// Copyright 2019 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,10 @@
 
 #include "core/fxcodec/jpx/jpx_decode_utils.h"
 #include "core/fxcrt/fx_safe_types.h"
+#include "core/fxcrt/span_util.h"
+#include "core/fxge/calculate_pitch.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/cxx17_backports.h"
-#include "third_party/base/ptr_util.h"
+#include "third_party/base/memory/ptr_util.h"
 
 #if !defined(USE_SYSTEM_LIBOPENJPEG2)
 #include "third_party/libopenjpeg/opj_malloc.h"
@@ -86,9 +87,9 @@ void sycc_to_rgb(int offset,
                  int* out_b) {
   cb -= offset;
   cr -= offset;
-  *out_r = pdfium::clamp(y + static_cast<int>(1.402 * cr), 0, upb);
-  *out_g = pdfium::clamp(y - static_cast<int>(0.344 * cb + 0.714 * cr), 0, upb);
-  *out_b = pdfium::clamp(y + static_cast<int>(1.772 * cb), 0, upb);
+  *out_r = std::clamp(y + static_cast<int>(1.402 * cr), 0, upb);
+  *out_g = std::clamp(y - static_cast<int>(0.344 * cb + 0.714 * cr), 0, upb);
+  *out_b = std::clamp(y + static_cast<int>(1.772 * cb), 0, upb);
 }
 
 void sycc444_to_rgb(opj_image_t* img) {
@@ -390,10 +391,11 @@ void color_sycc_to_rgb(opj_image_t* img) {
 // static
 std::unique_ptr<CJPX_Decoder> CJPX_Decoder::Create(
     pdfium::span<const uint8_t> src_span,
-    CJPX_Decoder::ColorSpaceOption option) {
+    CJPX_Decoder::ColorSpaceOption option,
+    uint8_t resolution_levels_to_skip) {
   // Private ctor.
   auto decoder = pdfium::WrapUnique(new CJPX_Decoder(option));
-  if (!decoder->Init(src_span))
+  if (!decoder->Init(src_span, resolution_levels_to_skip))
     return nullptr;
   return decoder;
 }
@@ -408,18 +410,21 @@ CJPX_Decoder::CJPX_Decoder(ColorSpaceOption option)
 
 CJPX_Decoder::~CJPX_Decoder() {
   if (m_Codec)
-    opj_destroy_codec(m_Codec.Release());
+    opj_destroy_codec(m_Codec.ExtractAsDangling());
   if (m_Stream)
-    opj_stream_destroy(m_Stream.Release());
+    opj_stream_destroy(m_Stream.ExtractAsDangling());
   if (m_Image)
-    opj_image_destroy(m_Image.Release());
+    opj_image_destroy(m_Image.ExtractAsDangling());
 }
 
-bool CJPX_Decoder::Init(pdfium::span<const uint8_t> src_data) {
-  static const unsigned char szJP2Header[] = {
-      0x00, 0x00, 0x00, 0x0c, 0x6a, 0x50, 0x20, 0x20, 0x0d, 0x0a, 0x87, 0x0a};
-  if (src_data.empty() || src_data.size() < sizeof(szJP2Header))
+bool CJPX_Decoder::Init(pdfium::span<const uint8_t> src_data,
+                        uint8_t resolution_levels_to_skip) {
+  static constexpr uint8_t kJP2Header[] = {0x00, 0x00, 0x00, 0x0c, 0x6a, 0x50,
+                                           0x20, 0x20, 0x0d, 0x0a, 0x87, 0x0a};
+  if (src_data.size() < sizeof(kJP2Header) ||
+      resolution_levels_to_skip > kMaxResolutionsToSkip) {
     return false;
+  }
 
   m_Image = nullptr;
   m_SrcData = src_data;
@@ -431,7 +436,8 @@ bool CJPX_Decoder::Init(pdfium::span<const uint8_t> src_data) {
   opj_set_default_decoder_parameters(&m_Parameters);
   m_Parameters.decod_format = 0;
   m_Parameters.cod_format = 3;
-  if (memcmp(m_SrcData.data(), szJP2Header, sizeof(szJP2Header)) == 0) {
+  m_Parameters.cp_reduce = resolution_levels_to_skip;
+  if (memcmp(m_SrcData.data(), kJP2Header, sizeof(kJP2Header)) == 0) {
     m_Codec = opj_create_decompress(OPJ_CODEC_JP2);
     m_Parameters.decod_format = 1;
   } else {
@@ -442,15 +448,15 @@ bool CJPX_Decoder::Init(pdfium::span<const uint8_t> src_data) {
 
   if (m_ColorSpaceOption == kIndexedColorSpace)
     m_Parameters.flags |= OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG;
-  opj_set_info_handler(m_Codec.Get(), fx_ignore_callback, nullptr);
-  opj_set_warning_handler(m_Codec.Get(), fx_ignore_callback, nullptr);
-  opj_set_error_handler(m_Codec.Get(), fx_ignore_callback, nullptr);
-  if (!opj_setup_decoder(m_Codec.Get(), &m_Parameters))
+  opj_set_info_handler(m_Codec, fx_ignore_callback, nullptr);
+  opj_set_warning_handler(m_Codec, fx_ignore_callback, nullptr);
+  opj_set_error_handler(m_Codec, fx_ignore_callback, nullptr);
+  if (!opj_setup_decoder(m_Codec, &m_Parameters))
     return false;
 
   m_Image = nullptr;
   opj_image_t* pTempImage = nullptr;
-  if (!opj_read_header(m_Stream.Get(), m_Codec.Get(), &pTempImage))
+  if (!opj_read_header(m_Stream, m_Codec, &pTempImage))
     return false;
 
   m_Image = pTempImage;
@@ -459,23 +465,23 @@ bool CJPX_Decoder::Init(pdfium::span<const uint8_t> src_data) {
 
 bool CJPX_Decoder::StartDecode() {
   if (!m_Parameters.nb_tile_to_decode) {
-    if (!opj_set_decode_area(m_Codec.Get(), m_Image.Get(), m_Parameters.DA_x0,
+    if (!opj_set_decode_area(m_Codec, m_Image, m_Parameters.DA_x0,
                              m_Parameters.DA_y0, m_Parameters.DA_x1,
                              m_Parameters.DA_y1)) {
-      opj_image_destroy(m_Image.Release());
+      opj_image_destroy(m_Image.ExtractAsDangling());
       return false;
     }
-    if (!(opj_decode(m_Codec.Get(), m_Stream.Get(), m_Image.Get()) &&
-          opj_end_decompress(m_Codec.Get(), m_Stream.Get()))) {
-      opj_image_destroy(m_Image.Release());
+    if (!(opj_decode(m_Codec, m_Stream, m_Image) &&
+          opj_end_decompress(m_Codec, m_Stream))) {
+      opj_image_destroy(m_Image.ExtractAsDangling());
       return false;
     }
-  } else if (!opj_get_decoded_tile(m_Codec.Get(), m_Stream.Get(), m_Image.Get(),
+  } else if (!opj_get_decoded_tile(m_Codec, m_Stream, m_Image,
                                    m_Parameters.tile_index)) {
     return false;
   }
 
-  opj_stream_destroy(m_Stream.Release());
+  opj_stream_destroy(m_Stream.ExtractAsDangling());
   if (m_Image->color_space != OPJ_CLRSPC_SYCC && m_Image->numcomps == 3 &&
       m_Image->comps[0].dx == m_Image->comps[0].dy &&
       m_Image->comps[1].dx != 1) {
@@ -484,7 +490,7 @@ bool CJPX_Decoder::StartDecode() {
     m_Image->color_space = OPJ_CLRSPC_GRAY;
   }
   if (m_Image->color_space == OPJ_CLRSPC_SYCC)
-    color_sycc_to_rgb(m_Image.Get());
+    color_sycc_to_rgb(m_Image);
 
   if (m_Image->icc_profile_buf) {
     // TODO(palmer): Using |opj_free| here resolves the crash described in
@@ -502,24 +508,42 @@ bool CJPX_Decoder::StartDecode() {
 }
 
 CJPX_Decoder::JpxImageInfo CJPX_Decoder::GetInfo() const {
-  return {m_Image->x1, m_Image->y1, m_Image->numcomps, m_Image->color_space};
+  return {m_Image->comps[0].w, m_Image->comps[0].h, m_Image->numcomps,
+          m_Image->color_space};
 }
 
-bool CJPX_Decoder::Decode(uint8_t* dest_buf, uint32_t pitch, bool swap_rgb) {
-  if (m_Image->comps[0].w != m_Image->x1 || m_Image->comps[0].h != m_Image->y1)
-    return false;
+bool CJPX_Decoder::Decode(pdfium::span<uint8_t> dest_buf,
+                          uint32_t pitch,
+                          bool swap_rgb,
+                          uint32_t component_count) {
+  CHECK_LE(component_count, m_Image->numcomps);
+  uint32_t channel_count = component_count;
+  if (channel_count == 3 && m_Image->numcomps == 4) {
+    // When decoding for an ARGB image, include the alpha channel in the channel
+    // count.
+    channel_count = 4;
+  }
 
-  if (pitch < ((m_Image->comps[0].w * 8 * m_Image->numcomps + 31) >> 5) << 2)
+  absl::optional<uint32_t> calculated_pitch =
+      fxge::CalculatePitch32(8 * channel_count, m_Image->comps[0].w);
+  if (!calculated_pitch.has_value() || pitch < calculated_pitch.value()) {
     return false;
+  }
 
-  if (swap_rgb && m_Image->numcomps < 3)
+  if (swap_rgb && channel_count < 3) {
     return false;
+  }
 
-  memset(dest_buf, 0xff, m_Image->y1 * pitch);
+  // Initialize `channel_bufs` and `adjust_comps` to store information from all
+  // the channels of the JPX image. They will contain more information besides
+  // the color component data if `m_Image->numcomps` > `component_count`.
+  // Currently only the color component data is used for rendering.
+  // TODO(crbug.com/pdfium/1747): Make full use of the component information.
+  fxcrt::spanset(dest_buf.first(m_Image->comps[0].h * pitch), 0xff);
   std::vector<uint8_t*> channel_bufs(m_Image->numcomps);
   std::vector<int> adjust_comps(m_Image->numcomps);
   for (uint32_t i = 0; i < m_Image->numcomps; i++) {
-    channel_bufs[i] = dest_buf + i;
+    channel_bufs[i] = dest_buf.subspan(i).data();
     adjust_comps[i] = m_Image->comps[i].prec - 8;
     if (i > 0) {
       if (m_Image->comps[i].dx != m_Image->comps[i - 1].dx ||
@@ -534,7 +558,7 @@ bool CJPX_Decoder::Decode(uint8_t* dest_buf, uint32_t pitch, bool swap_rgb) {
 
   uint32_t width = m_Image->comps[0].w;
   uint32_t height = m_Image->comps[0].h;
-  for (uint32_t channel = 0; channel < m_Image->numcomps; ++channel) {
+  for (uint32_t channel = 0; channel < channel_count; ++channel) {
     uint8_t* pChannel = channel_bufs[channel];
     const int adjust = adjust_comps[channel];
     const opj_image_comp_t& comps = m_Image->comps[channel];
@@ -548,7 +572,7 @@ bool CJPX_Decoder::Decode(uint8_t* dest_buf, uint32_t pitch, bool swap_rgb) {
       for (uint32_t row = 0; row < height; ++row) {
         uint8_t* pScanline = pChannel + row * pitch;
         for (uint32_t col = 0; col < width; ++col) {
-          uint8_t* pPixel = pScanline + col * m_Image->numcomps;
+          uint8_t* pPixel = pScanline + col * channel_count;
           int src = comps.data[row * width + col] + src_offset;
           *pPixel = static_cast<uint8_t>(src << -adjust);
         }
@@ -557,7 +581,7 @@ bool CJPX_Decoder::Decode(uint8_t* dest_buf, uint32_t pitch, bool swap_rgb) {
       for (uint32_t row = 0; row < height; ++row) {
         uint8_t* pScanline = pChannel + row * pitch;
         for (uint32_t col = 0; col < width; ++col) {
-          uint8_t* pPixel = pScanline + col * m_Image->numcomps;
+          uint8_t* pPixel = pScanline + col * channel_count;
           int src = comps.data[row * width + col] + src_offset;
           *pPixel = static_cast<uint8_t>(src);
         }
@@ -566,10 +590,10 @@ bool CJPX_Decoder::Decode(uint8_t* dest_buf, uint32_t pitch, bool swap_rgb) {
       for (uint32_t row = 0; row < height; ++row) {
         uint8_t* pScanline = pChannel + row * pitch;
         for (uint32_t col = 0; col < width; ++col) {
-          uint8_t* pPixel = pScanline + col * m_Image->numcomps;
+          uint8_t* pPixel = pScanline + col * channel_count;
           int src = comps.data[row * width + col] + src_offset;
           int pixel = (src >> adjust) + ((src >> (adjust - 1)) % 2);
-          pixel = pdfium::clamp(pixel, 0, 255);
+          pixel = std::clamp(pixel, 0, 255);
           *pPixel = static_cast<uint8_t>(pixel);
         }
       }

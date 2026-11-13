@@ -279,7 +279,7 @@ class USBDevicesFormatter : public ChromePermissionMessageFormatter {
 };
 
 int GetEnterpriseReportingPrivatePermissionMessageId() {
-#if !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_QTWEBENGINE)
   if (!base::FeatureList::IsEnabled(
           enterprise_signals::features::kNewEvSignalsEnabled)) {
     return IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_REPORTING_PRIVATE;
@@ -460,25 +460,19 @@ ChromePermissionMessageRule::GetAllRules() {
       // History-related permission messages.
       // History already allows reading favicons, tab access and accessing the
       // list of most frequently visited sites.
-      {IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE_AND_SESSIONS,
-       {APIPermissionID::kHistory, APIPermissionID::kSessions},
-       {APIPermissionID::kDeclarativeNetRequestFeedback,
-        APIPermissionID::kFavicon, APIPermissionID::kProcesses,
-        APIPermissionID::kTab, APIPermissionID::kTopSites,
-        APIPermissionID::kWebNavigation}},
-      {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ_AND_SESSIONS,
-       {APIPermissionID::kTab, APIPermissionID::kSessions},
-       {APIPermissionID::kDeclarativeNetRequestFeedback,
-        APIPermissionID::kFavicon, APIPermissionID::kProcesses,
-        APIPermissionID::kTopSites, APIPermissionID::kWebNavigation}},
-      {IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE,
+      {IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE_ON_ALL_DEVICES,
        {APIPermissionID::kHistory},
        {APIPermissionID::kDeclarativeNetRequestFeedback,
         APIPermissionID::kFavicon, APIPermissionID::kProcesses,
         APIPermissionID::kTab, APIPermissionID::kTopSites,
         APIPermissionID::kWebNavigation}},
+      {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ_ON_ALL_DEVICES,
+       {APIPermissionID::kTab, APIPermissionID::kSessions},
+       {APIPermissionID::kDeclarativeNetRequestFeedback,
+        APIPermissionID::kFavicon, APIPermissionID::kProcesses,
+        APIPermissionID::kTopSites, APIPermissionID::kWebNavigation}},
       // Note: kSessions allows reading history from other devices only if kTab
-      // is also present. Therefore, there are no _AND_SESSIONS versions of
+      // is also present. Therefore, there are no _ON_ALL_DEVICES versions of
       // the other rules that generate the HISTORY_READ warning.
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ,
        {APIPermissionID::kTab},
@@ -640,6 +634,9 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_BOOKMARKS,
        {APIPermissionID::kBookmark},
        {}},
+      {IDS_EXTENSION_PROMPT_WARNING_READING_LIST,
+       {APIPermissionID::kReadingList},
+       {}},
       {IDS_EXTENSION_PROMPT_WARNING_CLIPBOARD_READWRITE,
        {APIPermissionID::kClipboardRead, APIPermissionID::kClipboardWrite},
        {}},
@@ -724,6 +721,9 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_DEVICE_ATTRIBUTES,
        {APIPermissionID::kEnterpriseDeviceAttributes},
        {}},
+      {IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_KIOSK_INPUT,
+       {APIPermissionID::kEnterpriseKioskInput},
+       {}},
       {IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_NETWORKING_ATTRIBUTES,
        {APIPermissionID::kEnterpriseNetworkingAttributes},
        {}},
@@ -745,8 +745,20 @@ ChromePermissionMessageRule::GetAllRules() {
        {}},
 
       // Telemetry System Extension permission messages.
+      {IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_ATTACHED_DEVICE_INFO,
+       {APIPermissionID::kChromeOSAttachedDeviceInfo},
+       {}},
+      {IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_BLUETOOTH_PERIPHERALS_INFO,
+       {APIPermissionID::kChromeOSBluetoothPeripheralsInfo},
+       {}},
       {IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_DIAGNOSTICS,
        {APIPermissionID::kChromeOSDiagnostics},
+       {}},
+      {IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_EVENTS,
+       {APIPermissionID::kChromeOSEvents},
+       {}},
+      {IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_MANAGEMENT_AUDIO,
+       {APIPermissionID::kChromeOSManagementAudio},
        {}},
       {IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_TELEMETRY,
        {APIPermissionID::kChromeOSTelemetry},

@@ -7,15 +7,15 @@
 
 #include <vector>
 
-#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
-#include "content/common/buildflags.h"
 #include "content/public/browser/browser_plugin_guest_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
 
 namespace content {
+class RenderFrameHostImpl;
 class WebContentsImpl;
 
 // A browser plugin guest provides functionality for WebContents to operate in
@@ -66,22 +66,9 @@ class BrowserPluginGuest : public WebContentsObserver {
 
   void PrimaryMainFrameRenderProcessGone(
       base::TerminationStatus status) override;
-#if BUILDFLAG(IS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
-  // On MacOS X popups are painted by the browser process. We handle them here
-  // so that they are positioned correctly.
-  void ShowPopupMenu(
-      RenderFrameHost* render_frame_host,
-      mojo::PendingRemote<blink::mojom::PopupMenuClient>* popup_client,
-      const gfx::Rect& bounds,
-      int32_t item_height,
-      double font_size,
-      int32_t selected_item,
-      std::vector<blink::mojom::MenuItemPtr>* menu_items,
-      bool right_aligned,
-      bool allow_multiple_selection);
-#endif
 
   WebContentsImpl* GetWebContents() const;
+  RenderFrameHostImpl* GetProspectiveOuterDocument();
 
  private:
   // BrowserPluginGuest is a WebContentsObserver of |web_contents| and
@@ -91,7 +78,8 @@ class BrowserPluginGuest : public WebContentsObserver {
 
   void InitInternal(WebContentsImpl* owner_web_contents);
 
-  const raw_ptr<BrowserPluginGuestDelegate> delegate_;
+  // May be null during guest destruction.
+  const base::WeakPtr<BrowserPluginGuestDelegate> delegate_;
 };
 
 }  // namespace content

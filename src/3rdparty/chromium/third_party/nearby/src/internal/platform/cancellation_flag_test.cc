@@ -15,6 +15,7 @@
 #include "internal/platform/cancellation_flag.h"
 
 #include <memory>
+#include <utility>
 
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
@@ -23,7 +24,6 @@
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/medium_environment.h"
 
-namespace location {
 namespace nearby {
 
 class CancellationFlagPeer {
@@ -96,7 +96,8 @@ TEST_P(CancellationFlagTest, CanCancel) {
   EXPECT_CALL(mock_cancel_callback, Call)
       .Times(feature_flags_.enable_cancellation_flag ? 1 : 0);
   CancellationFlag flag;
-  CancellationFlagListener cancellation_flag_listener(&flag, cancel_callback);
+  CancellationFlagListener cancellation_flag_listener(
+      &flag, std::move(cancel_callback));
   flag.Cancel();
 
   // If FeatureFlag is disabled, return as no-op immediately and
@@ -117,7 +118,8 @@ TEST_P(CancellationFlagTest, ShouldOnlyCancelOnce) {
       .Times(feature_flags_.enable_cancellation_flag ? 1 : 0);
 
   CancellationFlag flag;
-  CancellationFlagListener cancellation_flag_listener(&flag, cancel_callback);
+  CancellationFlagListener cancellation_flag_listener(
+      &flag, std::move(cancel_callback));
   flag.Cancel();
   flag.Cancel();
   flag.Cancel();
@@ -139,8 +141,8 @@ TEST_P(CancellationFlagTest, CannotCancelAfterUnregister) {
   EXPECT_CALL(mock_cancel_callback, Call).Times(0);
 
   CancellationFlag flag;
-  auto cancellation_flag_listener =
-      std::make_unique<CancellationFlagListener>(&flag, cancel_callback);
+  auto cancellation_flag_listener = std::make_unique<CancellationFlagListener>(
+      &flag, std::move(cancel_callback));
   // Release immediately.
   cancellation_flag_listener.reset();
   flag.Cancel();
@@ -153,20 +155,20 @@ INSTANTIATE_TEST_SUITE_P(ParametrisedCancellationFlagTest, CancellationFlagTest,
 
 TEST(CancellationFlagTest,
      CancelMultiplesIfMultiplePointersToTheSameFunctionRegistered) {
-  location::nearby::FeatureFlags::Flags feature_flags_ =
-      location::nearby::FeatureFlags::Flags{
-          .enable_cancellation_flag = true,
-      };
+  nearby::FeatureFlags::Flags feature_flags_ = nearby::FeatureFlags::Flags{
+      .enable_cancellation_flag = true,
+  };
   MediumEnvironment::Instance().SetFeatureFlags(feature_flags_);
 
   StrictMock<MockFunction<void()>> mock_cancel_callback;
   CancellationFlag::CancelListener cancel_callback =
       mock_cancel_callback.AsStdFunction();
+  CancellationFlag::CancelListener cancel_callback_copy =
+      mock_cancel_callback.AsStdFunction();
 
   CancellationFlag::CancelListener* callback_pointer_1 = &cancel_callback;
-  auto callback_pointer_2 =
-      std::make_unique<CancellationFlag::CancelListener>();
-  *callback_pointer_2 = cancel_callback;
+  auto callback_pointer_2 = std::make_unique<CancellationFlag::CancelListener>(
+      std::move(cancel_callback_copy));
 
   EXPECT_NE(callback_pointer_1, callback_pointer_2.get());
   EXPECT_CALL(mock_cancel_callback, Call).Times(2);
@@ -185,10 +187,9 @@ TEST(CancellationFlagTest,
 }
 
 TEST(CancellationFlagTest, RegisteredMultuipleTimesOnlyCancelOnce) {
-  location::nearby::FeatureFlags::Flags feature_flags_ =
-      location::nearby::FeatureFlags::Flags{
-          .enable_cancellation_flag = true,
-      };
+  nearby::FeatureFlags::Flags feature_flags_ = nearby::FeatureFlags::Flags{
+      .enable_cancellation_flag = true,
+  };
   MediumEnvironment::Instance().SetFeatureFlags(feature_flags_);
 
   StrictMock<MockFunction<void()>> mock_cancel_callback;
@@ -210,4 +211,3 @@ TEST(CancellationFlagTest, RegisteredMultuipleTimesOnlyCancelOnce) {
 }
 
 }  // namespace nearby
-}  // namespace location

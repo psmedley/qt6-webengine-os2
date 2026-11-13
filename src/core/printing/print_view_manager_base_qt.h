@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -36,9 +37,6 @@ class PrintViewManagerBaseQt : public printing::PrintManager
 public:
     ~PrintViewManagerBaseQt() override;
 
-    // Whether printing is enabled or not.
-    void UpdatePrintingEnabled();
-
     std::u16string RenderSourceName();
 
     // mojom::PrintManagerHost:
@@ -46,11 +44,10 @@ public:
     void DidPrintDocument(printing::mojom::DidPrintDocumentParamsPtr params,
                           DidPrintDocumentCallback callback) override;
     void GetDefaultPrintSettings(GetDefaultPrintSettingsCallback callback) override;
-    void UpdatePrintSettings(int32_t cookie, base::Value::Dict job_settings,
-                             UpdatePrintSettingsCallback callback) override;
+    void UpdatePrintSettings(base::Value::Dict, UpdatePrintSettingsCallback) override;
+    void IsPrintingEnabled(IsPrintingEnabledCallback callback) override;
     void ScriptedPrint(printing::mojom::ScriptedPrintParamsPtr,
                        printing::mojom::PrintManagerHost::ScriptedPrintCallback) override;
-    void ShowInvalidPrinterSettingsError() override;
     void PrintingFailed(int32_t cookie,
                         printing::mojom::PrintFailureReason reason) override;
 
@@ -83,9 +80,6 @@ protected:
     void StopWorker(int documentCookie);
 
 private:
-    // content::WebContentsObserver implementation.
-    void DidStartLoading() override;
-
     // Requests the RenderView to render all the missing pages for the print job.
     // No-op if no print job is pending. Returns true if at least one page has
     // been requested to the renderer.
@@ -135,9 +129,6 @@ private:
 
     // Release the PrinterQuery associated with our |cookie_|.
     void ReleasePrinterQuery();
-
-    // Helper method for UpdatePrintingEnabled().
-    void SendPrintingEnabled(bool enabled, content::RenderFrameHost* rfh);
 
 private:
     content::NotificationRegistrar m_registrar;

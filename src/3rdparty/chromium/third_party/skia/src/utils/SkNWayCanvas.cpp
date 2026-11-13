@@ -7,23 +7,21 @@
 
 #include "include/utils/SkNWayCanvas.h"
 
-#include "include/core/SkBlendMode.h"
 #include "include/core/SkCanvas.h"
-#include "include/core/SkClipOp.h"
 #include "include/core/SkColor.h"
-#include "include/core/SkM44.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkRefCnt.h"
-#include "include/core/SkSamplingOptions.h"
 #include "include/core/SkScalar.h"
 #include "include/core/SkShader.h"
 #include "include/core/SkTypes.h"
-#include "include/private/SkTDArray.h"
+#include "include/private/base/SkTDArray.h"
 #include "include/utils/SkNoDrawCanvas.h"
 #include "src/core/SkCanvasPriv.h"
 
+#include <algorithm>
+#include <iterator>
 #include <utility>
 
 namespace sktext {
@@ -40,6 +38,8 @@ class SkRRect;
 class SkRegion;
 class SkTextBlob;
 class SkVertices;
+enum class SkBlendMode;
+enum class SkClipOp;
 struct SkDrawShadowRec;
 
 SkNWayCanvas::SkNWayCanvas(int width, int height) : INHERITED(width, height) {}
@@ -53,7 +53,7 @@ void SkNWayCanvas::addCanvas(SkCanvas* canvas) {
         // We are using the nway canvas as a wrapper for the originally added canvas, and the device
         // on the nway may contradict calls for the device on this canvas. So, to add a second
         // canvas, the devices on the first canvas, and the nway base device must be different.
-        SkASSERT(fList[0]->baseDevice() != this->baseDevice());
+        SkASSERT(fList[0]->rootDevice() != this->rootDevice());
     }
     if (canvas) {
         *fList.append() = canvas;
@@ -61,9 +61,9 @@ void SkNWayCanvas::addCanvas(SkCanvas* canvas) {
 }
 
 void SkNWayCanvas::removeCanvas(SkCanvas* canvas) {
-    int index = fList.find(canvas);
-    if (index >= 0) {
-        fList.removeShuffle(index);
+    auto found = std::find(fList.begin(), fList.end(), canvas);
+    if (found != fList.end()) {
+        fList.removeShuffle(std::distance(fList.begin(), found));
     }
 }
 
@@ -332,14 +332,12 @@ void SkNWayCanvas::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y
     }
 }
 
-#if SK_SUPPORT_GPU
 void SkNWayCanvas::onDrawSlug(const sktext::gpu::Slug* slug) {
     Iter iter(fList);
     while (iter.next()) {
         iter->drawSlug(slug);
     }
 }
-#endif
 
 void SkNWayCanvas::onDrawPicture(const SkPicture* picture, const SkMatrix* matrix,
                                  const SkPaint* paint) {
@@ -403,12 +401,5 @@ void SkNWayCanvas::onDrawEdgeAAImageSet2(const ImageSetEntry set[], int count,
     while (iter.next()) {
         iter->experimental_DrawEdgeAAImageSet(
                 set, count, dstClips, preViewMatrices, sampling, paint, constraint);
-    }
-}
-
-void SkNWayCanvas::onFlush() {
-    Iter iter(fList);
-    while (iter.next()) {
-        iter->flush();
     }
 }

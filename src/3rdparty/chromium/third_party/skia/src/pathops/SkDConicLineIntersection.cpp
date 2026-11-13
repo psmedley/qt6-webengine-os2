@@ -8,6 +8,7 @@
 #include "include/core/SkPoint.h"
 #include "include/core/SkScalar.h"
 #include "include/core/SkTypes.h"
+#include "include/private/base/SkDebug.h"
 #include "src/pathops/SkIntersections.h"
 #include "src/pathops/SkPathOpsConic.h"
 #include "src/pathops/SkPathOpsCurve.h"
@@ -218,7 +219,7 @@ protected:
             if (fIntersections->hasOppT(lineT)) {
                 continue;
             }
-            double conicT = ((SkDCurve*) &fConic)->nearPoint(SkPath::kConic_Verb,
+            double conicT = ((const SkDCurve*) &fConic)->nearPoint(SkPath::kConic_Verb,
                 (*fLine)[lIndex], (*fLine)[!lIndex]);
             if (conicT < 0) {
                 continue;

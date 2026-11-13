@@ -1,8 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2017 The Glslang Authors. All rights reserved.
-# Copyright (c) 2018 Valve Corporation
-# Copyright (c) 2018-2021 LunarG, Inc.
+# Copyright (c) 2018-2023 Valve Corporation
+# Copyright (c) 2018-2023 LunarG, Inc.
+# Copyright (c) 2023-2023 RasterGrid Kft.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,11 +31,6 @@ This program is intended to assist a developer of this repository
 this home repository depend on.  It also checks out each dependent
 repository at a "known-good" commit in order to provide stability in
 the dependent repositories.
-
-Python Compatibility
---------------------
-
-This program can be used with Python 2.7 and Python 3.
 
 Known-Good JSON Database
 ------------------------
@@ -117,6 +113,10 @@ examples of all of these elements.
 The name of the dependent repository.  This field can be referenced
 by the "deps.repo_name" structure to record a dependency.
 
+- api
+
+The name of the API the dependency is specific to (e.g. "vulkan").
+
 - url
 
 Specifies the URL of the repository.
@@ -141,8 +141,6 @@ to the "top" directory.
 
 The commit used to checkout the repository.  This can be a SHA-1
 object name or a refname used with the remote name "origin".
-For example, this field can be set to "origin/sdk-1.1.77" to
-select the end of the sdk-1.1.77 branch.
 
 - deps (optional)
 
@@ -206,11 +204,6 @@ A list of options to pass to CMake during the generation phase.
 A list of environment variables where one must be set to "true"
 (case-insensitive) in order for this repo to be fetched and built.
 This list can be used to specify repos that should be built only in CI.
-Typically, this list might contain "TRAVIS" and/or "APPVEYOR" because
-each of these CI systems sets an environment variable with its own
-name to "true".  Note that this could also be (ab)used to control
-the processing of the repo with any environment variable.  The default
-is an empty list, which means that the repo is always processed.
 
 - build_step (optional)
 
@@ -225,6 +218,7 @@ Legal options include:
 "windows"
 "linux"
 "darwin"
+"android"
 
 Builds on all platforms by default.
 
@@ -238,10 +232,9 @@ option can be a relative or absolute path.
 
 """
 
-from __future__ import print_function
-
 import argparse
 import json
+import os
 import os.path
 import subprocess
 import sys
@@ -261,7 +254,8 @@ CONFIG_MAP = {
     'minsizerel': 'MinSizeRel'
 }
 
-VERBOSE = False
+# NOTE: CMake also uses the VERBOSE environment variable. This is intentional.
+VERBOSE = os.getenv("VERBOSE")
 
 DEVNULL = open(os.devnull, 'wb')
 
@@ -269,7 +263,7 @@ DEVNULL = open(os.devnull, 'wb')
 def on_rm_error( func, path, exc_info):
     """Error handler for recursively removing a directory. The
     shutil.rmtree function can fail on Windows due to read-only files.
-    This handler will change the permissions for tha file and continue.
+    This handler will change the permissions for the file and continue.
     """
     os.chmod( path, stat.S_IWRITE )
     os.unlink( path )
@@ -280,25 +274,40 @@ def make_or_exist_dirs(path):
     if not os.path.isdir(path):
         os.makedirs(path)
 
-def command_output(cmd, directory, fail_ok=False):
-    """Runs a command in a directory and returns its standard output stream.
-
-    Captures the standard error stream and prints it if error.
-
-    Raises a RuntimeError if the command fails to launch or otherwise fails.
-    """
+def command_output(cmd, directory):
+    # Runs a command in a directory and returns its standard output stream.
+    # Captures the standard error stream and prints it an error occurs.
+    # Raises a RuntimeError if the command fails to launch or otherwise fails.
     if VERBOSE:
         print('In {d}: {cmd}'.format(d=directory, cmd=cmd))
-    p = subprocess.Popen(
-        cmd, cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    (stdout, stderr) = p.communicate()
-    if p.returncode != 0:
-        print('*** Error ***\nstderr contents:\n{}'.format(stderr))
-        if not fail_ok:
-            raise RuntimeError('Failed to run {} in {}'.format(cmd, directory))
+
+    result = subprocess.run(cmd, cwd=directory, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f'{result.stderr}', file=sys.stderr)
+        raise RuntimeError(f'Failed to run {cmd} in {directory}')
+
     if VERBOSE:
-        print(stdout)
-    return stdout
+        print(result.stdout)
+    return result.stdout
+
+def run_cmake_command(cmake_cmd):
+    # NOTE: Because CMake is an exectuable that runs executables
+    # stdout/stderr are mixed together. So this combines the outputs
+    # and prints them properly in case there is a non-zero exit code.
+    result = subprocess.run(cmake_cmd, 
+        stdout = subprocess.PIPE,
+        stderr = subprocess.STDOUT,
+        text = True
+    )
+
+    if VERBOSE:
+        print(result.stdout)
+        print(f"CMake command: {cmake_cmd} ", flush=True)
+
+    if result.returncode != 0:
+        print(result.stdout, file=sys.stderr)
+        sys.exit(result.returncode)
 
 def escape(path):
     return path.replace('\\', '/')
@@ -340,6 +349,7 @@ class GoodRepo(object):
         self.build_step = json['build_step'] if ('build_step' in json) else 'build'
         self.build_platforms = json['build_platforms'] if ('build_platforms' in json) else []
         self.optional = set(json.get('optional', []))
+        self.api = json['api'] if ('api' in json) else None
         # Absolute paths for a repo's directories
         dir_top = os.path.abspath(args.dir)
         self.repo_dir = os.path.join(dir_top, self.sub_dir)
@@ -347,13 +357,21 @@ class GoodRepo(object):
             self.build_dir = os.path.join(dir_top, self.build_dir)
         if self.install_dir:
             self.install_dir = os.path.join(dir_top, self.install_dir)
-	    # Check if platform is one to build on
+
+        # By default the target platform is the host platform.
+        target_platform = platform.system().lower()
+        # However, we need to account for cross-compiling.
+        for cmake_var in self._args.cmake_var:
+            if "android.toolchain.cmake" in cmake_var:
+                target_platform = 'android'
+
         self.on_build_platform = False
-        if self.build_platforms == [] or platform.system().lower() in self.build_platforms:
+        if self.build_platforms == [] or target_platform in self.build_platforms:
             self.on_build_platform = True
 
     def Clone(self, retries=10, retry_seconds=60):
-        print('Cloning {n} into {d}'.format(n=self.name, d=self.repo_dir))
+        if VERBOSE:
+            print('Cloning {n} into {d}'.format(n=self.name, d=self.repo_dir))
         for retry in range(retries):
             make_or_exist_dirs(self.repo_dir)
             try:
@@ -394,7 +412,9 @@ class GoodRepo(object):
                 raise e
 
     def Checkout(self):
-        print('Checking out {n} in {d}'.format(n=self.name, d=self.repo_dir))
+        if VERBOSE:
+            print('Checking out {n} in {d}'.format(n=self.name, d=self.repo_dir))
+
         if self._args.do_clean_repo:
             if os.path.isdir(self.repo_dir):
                 shutil.rmtree(self.repo_dir, onerror = on_rm_error)
@@ -405,7 +425,9 @@ class GoodRepo(object):
             command_output(['git', 'checkout', self._args.ref], self.repo_dir)
         else:
             command_output(['git', 'checkout', self.commit], self.repo_dir)
-        print(command_output(['git', 'status'], self.repo_dir))
+
+        if VERBOSE:
+            print(command_output(['git', 'status'], self.repo_dir))
 
     def CustomPreProcess(self, cmd_str, repo_dict):
         return cmd_str.format(repo_dict, self._args, CONFIG_MAP[self._args.config])
@@ -423,6 +445,12 @@ class GoodRepo(object):
 
     def CustomBuild(self, repo_dict):
         """Execute any custom_build steps from the repo root"""
+
+        # It's not uncommon for builds to not support universal binaries
+        if self._args.OSX_ARCHITECTURES:
+            print("Universal Binaries not supported for custom builds", file=sys.stderr)
+            exit(-1)
+
         for p in self.custom_build:
             cmd = self.CustomPreProcess(p, repo_dict)
             command_output(shlex.split(cmd), self.repo_dir)
@@ -430,9 +458,11 @@ class GoodRepo(object):
     def CMakeConfig(self, repos):
         """Build CMake command for the configuration phase and execute it"""
         if self._args.do_clean_build:
-            shutil.rmtree(self.build_dir)
+            if os.path.isdir(self.build_dir):
+                shutil.rmtree(self.build_dir, onerror=on_rm_error)
         if self._args.do_clean_install:
-            shutil.rmtree(self.install_dir)
+            if os.path.isdir(self.install_dir):
+                shutil.rmtree(self.install_dir, onerror=on_rm_error)
 
         # Create and change to build directory
         make_or_exist_dirs(self.build_dir)
@@ -442,6 +472,11 @@ class GoodRepo(object):
             'cmake', self.repo_dir,
             '-DCMAKE_INSTALL_PREFIX=' + self.install_dir
         ]
+
+        # Allow users to pass in arbitrary cache variables
+        for cmake_var in self._args.cmake_var:
+            pieces = cmake_var.split('=', 1)
+            cmake_cmd.append('-D{}={}'.format(pieces[0], pieces[1]))
 
         # For each repo this repo depends on, generate a CMake variable
         # definitions for "...INSTALL_DIR" that points to that dependent
@@ -457,10 +492,13 @@ class GoodRepo(object):
         for option in self.cmake_options:
             cmake_cmd.append(escape(option.format(**self.__dict__)))
 
-        # Set build config for single-configuration generators
-        if platform.system() == 'Linux' or platform.system() == 'Darwin':
-            cmake_cmd.append('-DCMAKE_BUILD_TYPE={config}'.format(
-                config=CONFIG_MAP[self._args.config]))
+        # Set build config for single-configuration generators (this is a no-op on multi-config generators)
+        cmake_cmd.append(f'-D CMAKE_BUILD_TYPE={CONFIG_MAP[self._args.config]}')
+
+        if self._args.OSX_ARCHITECTURES:
+            # CMAKE_OSX_ARCHITECTURES must be a semi-colon seperated list
+            cmake_osx_archs = self._args.OSX_ARCHITECTURES.replace(':', ';')
+            cmake_cmd.append(f'-D CMAKE_OSX_ARCHITECTURES={cmake_osx_archs}')
 
         # Use the CMake -A option to select the platform architecture
         # without needing a Visual Studio generator.
@@ -478,68 +516,49 @@ class GoodRepo(object):
         if self._args.generator is not None:
             cmake_cmd.extend(['-G', self._args.generator])
 
-        if VERBOSE:
-            print("CMake command: " + " ".join(cmake_cmd))
+        # Removes warnings related to unused CLI
+        # EX: Setting CMAKE_CXX_COMPILER for a C project
+        if not VERBOSE:
+            cmake_cmd.append("--no-warn-unused-cli")
 
-        ret_code = subprocess.call(cmake_cmd)
-        if ret_code != 0:
-            sys.exit(ret_code)
+        run_cmake_command(cmake_cmd)
 
     def CMakeBuild(self):
         """Build CMake command for the build phase and execute it"""
-        cmake_cmd = ['cmake', '--build', self.build_dir, '--target', 'install']
+        cmake_cmd = ['cmake', '--build', self.build_dir, '--target', 'install', '--config', CONFIG_MAP[self._args.config]]
         if self._args.do_clean:
             cmake_cmd.append('--clean-first')
 
-        if platform.system() == 'Windows':
-            cmake_cmd.append('--config')
-            cmake_cmd.append(CONFIG_MAP[self._args.config])
+        # Xcode / Ninja are parallel by default.
+        if self._args.generator != "Ninja" or self._args.generator != "Xcode":
+            cmake_cmd.append('--parallel')
+            cmake_cmd.append(format(multiprocessing.cpu_count()))
 
-        # Speed up the build.
-        if platform.system() == 'Linux' or platform.system() == 'Darwin':
-            cmake_cmd.append('--')
-            num_make_jobs = multiprocessing.cpu_count()
-            env_make_jobs = os.environ.get('MAKE_JOBS', None)
-            if env_make_jobs is not None:
-                try:
-                    num_make_jobs = min(num_make_jobs, int(env_make_jobs))
-                except ValueError:
-                    print('warning: environment variable MAKE_JOBS has non-numeric value "{}".  '
-                          'Using {} (CPU count) instead.'.format(env_make_jobs, num_make_jobs))
-            cmake_cmd.append('-j{}'.format(num_make_jobs))
-        if platform.system() == 'Windows' and self._args.generator != "Ninja":
-            cmake_cmd.append('--')
-            cmake_cmd.append('/maxcpucount')
-
-        if VERBOSE:
-            print("CMake command: " + " ".join(cmake_cmd))
-
-        ret_code = subprocess.call(cmake_cmd)
-        if ret_code != 0:
-            sys.exit(ret_code)
+        run_cmake_command(cmake_cmd)
 
     def Build(self, repos, repo_dict):
-        """Build the dependent repo"""
-        print('Building {n} in {d}'.format(n=self.name, d=self.repo_dir))
-        print('Build dir = {b}'.format(b=self.build_dir))
-        print('Install dir = {i}\n'.format(i=self.install_dir))
+        """Build the dependent repo and time how long it took"""
+        if VERBOSE:
+            print('Building {n} in {d}'.format(n=self.name, d=self.repo_dir))
+            print('Build dir = {b}'.format(b=self.build_dir))
+            print('Install dir = {i}\n'.format(i=self.install_dir))
 
-        # Run any prebuild commands
+        start = time.time()
+
         self.PreBuild()
 
         if self.build_step == 'custom':
             self.CustomBuild(repo_dict)
-            return
+        else:
+            self.CMakeConfig(repos)
+            self.CMakeBuild()
 
-        # Build and execute CMake command for creating build files
-        self.CMakeConfig(repos)
+        total_time = time.time() - start
 
-        # Build and execute CMake command for the build
-        self.CMakeBuild()
+        print(f"Installed {self.name} ({self.commit}) in {total_time} seconds", flush=True)
 
     def IsOptional(self, opts):
-        if len(self.optional.intersection(opts)) > 0: return True
-        else: return False
+        return len(self.optional.intersection(opts)) > 0
 
 def GetGoodRepos(args):
     """Returns the latest list of GoodRepo objects.
@@ -596,6 +615,10 @@ def CreateHelper(args, repos, filename):
     install_names = GetInstallNames(args)
     with open(filename, 'w') as helper_file:
         for repo in repos:
+            # If the repo has an API tag and that does not match
+            # the target API then skip it
+            if repo.api is not None and repo.api != args.api:
+                continue
             if install_names and repo.name in install_names and repo.on_build_platform:
                 helper_file.write('set({var} "{dir}" CACHE STRING "" FORCE)\n'
                                   .format(
@@ -619,7 +642,7 @@ def main():
         '--ref',
         dest='ref',
         default='',
-        help="Override 'commit' with git reference. E.g., 'origin/master'")
+        help="Override 'commit' with git reference. E.g., 'origin/main'")
     parser.add_argument(
         '--no-build',
         dest='do_build',
@@ -652,11 +675,17 @@ def main():
         help="Delete install directory before building",
         default=False)
     parser.add_argument(
+        '--skip-existing-install',
+        dest='skip_existing_install',
+        action='store_true',
+        help="Skip build if install directory exists",
+        default=False)
+    parser.add_argument(
         '--arch',
         dest='arch',
         choices=['32', '64', 'x86', 'x64', 'win32', 'win64'],
         type=str.lower,
-        help="Set build files architecture (Windows)",
+        help="Set build files architecture (Visual Studio Generator Only)",
         default='64')
     parser.add_argument(
         '--config',
@@ -665,6 +694,12 @@ def main():
         type=str.lower,
         help="Set build files configuration",
         default='debug')
+    parser.add_argument(
+        '--api',
+        dest='api',
+        default='vulkan',
+        choices=['vulkan'],
+        help="Target API")
     parser.add_argument(
         '--generator',
         dest='generator',
@@ -676,9 +711,25 @@ def main():
         type=lambda a: set(a.lower().split(',')),
         help="Comma-separated list of 'optional' resources that may be skipped. Only 'tests' is currently supported as 'optional'",
         default=set())
+    parser.add_argument(
+        '--cmake_var',
+        dest='cmake_var',
+        action='append',
+        metavar='VAR[=VALUE]',
+        help="Add CMake command line option -D'VAR'='VALUE' to the CMake generation command line; may be used multiple times",
+        default=[])
+    parser.add_argument(
+        '--osx-archs',
+        dest='OSX_ARCHITECTURES',
+        help="Architectures when building a universal binary. Takes a colon seperated list. Ex: arm64:x86_64",
+        type=str,
+        default=None)
 
     args = parser.parse_args()
     save_cwd = os.getcwd()
+
+    if args.OSX_ARCHITECTURES:
+        print(f"Building dependencies as universal binaries targeting {args.OSX_ARCHITECTURES}")
 
     # Create working "top" directory if needed
     make_or_exist_dirs(args.dir)
@@ -689,9 +740,22 @@ def main():
 
     print('Starting builds in {d}'.format(d=abs_top_dir))
     for repo in repos:
+        # If the repo has an API tag and that does not match
+        # the target API then skip it
+        if repo.api is not None and repo.api != args.api:
+            continue
+
         # If the repo has a platform whitelist, skip the repo
         # unless we are building on a whitelisted platform.
         if not repo.on_build_platform:
+            continue
+
+        # Skip building the repo if its install directory already exists
+        # and requested via an option.  This is useful for cases where the
+        # install directory is restored from a cache that is known to be up
+        # to date.
+        if args.skip_existing_install and os.path.isdir(repo.install_dir):
+            print('Skipping build for repo {n} due to existing install directory'.format(n=repo.name))
             continue
 
         # Skip test-only repos if the --tests option was not passed in
@@ -721,7 +785,7 @@ def main():
         if len(repo.ci_only):
             do_build = False
             for env in repo.ci_only:
-                if not env in os.environ:
+                if env not in os.environ:
                     continue
                 if os.environ[env].lower() == 'true':
                     do_build = True
@@ -745,3 +809,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

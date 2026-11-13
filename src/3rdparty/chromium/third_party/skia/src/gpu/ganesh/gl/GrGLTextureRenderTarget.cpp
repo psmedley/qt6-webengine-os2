@@ -14,15 +14,16 @@
 #include "src/gpu/ganesh/gl/GrGLGpu.h"
 
 GrGLTextureRenderTarget::GrGLTextureRenderTarget(GrGLGpu* gpu,
-                                                 SkBudgeted budgeted,
+                                                 skgpu::Budgeted budgeted,
                                                  int sampleCount,
                                                  const GrGLTexture::Desc& texDesc,
                                                  const GrGLRenderTarget::IDs& rtIDs,
                                                  GrMipmapStatus mipmapStatus,
                                                  std::string_view label)
-        : GrSurface(gpu, texDesc.fSize, GrProtected::kNo, label)
+        : GrSurface(gpu, texDesc.fSize, texDesc.fIsProtected, label)
         , GrGLTexture(gpu, texDesc, nullptr, mipmapStatus, label)
-        , GrGLRenderTarget(gpu, texDesc.fSize, texDesc.fFormat, sampleCount, rtIDs, label) {
+        , GrGLRenderTarget(gpu, texDesc.fSize, texDesc.fFormat, sampleCount, rtIDs,
+                           texDesc.fIsProtected, label) {
     this->registerWithCache(budgeted);
 }
 
@@ -34,9 +35,10 @@ GrGLTextureRenderTarget::GrGLTextureRenderTarget(GrGLGpu* gpu,
                                                  GrWrapCacheable cacheable,
                                                  GrMipmapStatus mipmapStatus,
                                                  std::string_view label)
-        : GrSurface(gpu, texDesc.fSize, GrProtected::kNo, label)
+        : GrSurface(gpu, texDesc.fSize, texDesc.fIsProtected, label)
         , GrGLTexture(gpu, texDesc, std::move(parameters), mipmapStatus, label)
-        , GrGLRenderTarget(gpu, texDesc.fSize, texDesc.fFormat, sampleCount, rtIDs, label) {
+        , GrGLRenderTarget(gpu, texDesc.fSize, texDesc.fFormat, sampleCount, rtIDs,
+                           texDesc.fIsProtected, label) {
     this->registerWithCacheWrapped(cacheable);
 }
 

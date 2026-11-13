@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/storage/settings_sync_processor.h"
 
 #include "base/logging.h"
+#include "base/values.h"
 #include "chrome/browser/extensions/api/storage/settings_sync_util.h"
 #include "components/sync/model/model_error.h"
 #include "components/sync/model/sync_change_processor.h"
@@ -32,18 +33,18 @@ SettingsSyncProcessor::~SettingsSyncProcessor() {
   DCHECK(IsOnBackendSequence());
 }
 
-void SettingsSyncProcessor::Init(const base::Value& initial_state) {
+void SettingsSyncProcessor::Init(const base::Value::Dict& initial_state) {
   DCHECK(IsOnBackendSequence());
   CHECK(!initialized_) << "Init called multiple times";
 
-  for (auto iter : initial_state.DictItems()) {
+  for (auto iter : initial_state) {
     synced_keys_.insert(iter.first);
   }
 
   initialized_ = true;
 }
 
-absl::optional<syncer::ModelError> SettingsSyncProcessor::SendChanges(
+std::optional<syncer::ModelError> SettingsSyncProcessor::SendChanges(
     const value_store::ValueStoreChangeList& changes) {
   DCHECK(IsOnBackendSequence());
   CHECK(initialized_) << "Init not called";
@@ -77,19 +78,19 @@ absl::optional<syncer::ModelError> SettingsSyncProcessor::SendChanges(
   }
 
   if (sync_changes.empty())
-    return absl::nullopt;
+    return std::nullopt;
 
-  absl::optional<syncer::ModelError> error =
+  std::optional<syncer::ModelError> error =
       sync_processor_->ProcessSyncChanges(FROM_HERE, sync_changes);
   if (error.has_value())
     return error;
 
   synced_keys_.insert(added_keys.begin(), added_keys.end());
-  for (auto i = deleted_keys.begin(); i != deleted_keys.end(); ++i) {
-    synced_keys_.erase(*i);
+  for (const auto& deleted_key : deleted_keys) {
+    synced_keys_.erase(deleted_key);
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 void SettingsSyncProcessor::NotifyChanges(

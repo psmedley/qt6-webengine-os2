@@ -1,16 +1,29 @@
-// Copyright 2021 The Tint Authors.
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package gen
 
@@ -60,7 +73,7 @@ func (p *Permuter) Permute(overload *sem.Overload) ([]Permutation, error) {
 	state := permutationState{
 		Permuter:        p,
 		templateTypes:   map[sem.TemplateParam]sem.FullyQualifiedName{},
-		templateNumbers: map[sem.TemplateParam]interface{}{},
+		templateNumbers: map[sem.TemplateParam]any{},
 		parameters:      map[int]sem.FullyQualifiedName{},
 	}
 
@@ -83,9 +96,10 @@ func (p *Permuter) Permute(overload *sem.Overload) ([]Permutation, error) {
 				return nil
 			}
 			o.Parameters = append(o.Parameters, sem.Parameter{
-				Name:    p.Name,
-				Type:    ty,
-				IsConst: p.IsConst,
+				Name:      p.Name,
+				Type:      ty,
+				IsConst:   p.IsConst,
+				TestValue: p.TestValue,
 			})
 		}
 		if overload.ReturnType != nil {
@@ -110,8 +124,12 @@ func (p *Permuter) Permute(overload *sem.Overload) ([]Permutation, error) {
 
 		// Check for hash collisions
 		if existing, collision := hashes[shortHash]; collision {
-			return fmt.Errorf("hash '%v' collision between %v and %v\nIncrease hashLength in %v",
-				shortHash, existing, desc, fileutils.GoSourcePath())
+			return fmt.Errorf(`hash '%v' collision between
+  %v
+and
+  %v
+Increase hashLength in %v`,
+				shortHash, existing, desc, fileutils.ThisLine())
 		}
 		hashes[shortHash] = desc
 		return nil
@@ -208,7 +226,7 @@ func (p *Permuter) Permute(overload *sem.Overload) ([]Permutation, error) {
 type permutationState struct {
 	*Permuter
 	templateTypes   map[sem.TemplateParam]sem.FullyQualifiedName
-	templateNumbers map[sem.TemplateParam]interface{}
+	templateNumbers map[sem.TemplateParam]any
 	parameters      map[int]sem.FullyQualifiedName
 }
 
@@ -226,7 +244,7 @@ func (s permutationState) String() string {
 }
 
 func (s *permutationState) permutateFQN(in sem.FullyQualifiedName) ([]sem.FullyQualifiedName, error) {
-	args := append([]interface{}{}, in.TemplateArguments...)
+	args := append([]any{}, in.TemplateArguments...)
 	out := []sem.FullyQualifiedName{}
 
 	// permutate appends a permutation to out.
@@ -236,8 +254,11 @@ func (s *permutationState) permutateFQN(in sem.FullyQualifiedName) ([]sem.FullyQ
 	switch target := in.Target.(type) {
 	case *sem.Type:
 		permutate = func() error {
+			// Inner-most permutate lambda.
+			// Append a the current permutation to out
 			out = append(out, sem.FullyQualifiedName{Target: in.Target, TemplateArguments: args})
-			args = append([]interface{}{}, in.TemplateArguments...)
+			// Clone the argument list, for the next permutation to use.
+			args = append([]any{}, args...)
 			return nil
 		}
 	case sem.TemplateParam:
@@ -327,17 +348,22 @@ func validate(fqn sem.FullyQualifiedName, uses *sem.StageUses) bool {
 		return false // Builtin, untypeable return type
 	}
 
-	switch fqn.Target.GetName() {
-	case "array":
-		elTy := fqn.TemplateArguments[0].(sem.FullyQualifiedName)
+	isStorable := func(elTy sem.FullyQualifiedName) bool {
 		elTyName := elTy.Target.GetName()
 		switch {
-		case elTyName == "bool" ||
+		case elTyName == "bool",
 			strings.Contains(elTyName, "sampler"),
-			strings.Contains(elTyName, "texture"):
-			return false // Not storable
-		case IsAbstract(DeepestElementType(elTy)):
-			return false // Abstract types are not typeable
+			strings.Contains(elTyName, "texture"),
+			IsAbstract(DeepestElementType(elTy)):
+			return false
+		}
+		return true
+	}
+
+	switch fqn.Target.GetName() {
+	case "array":
+		if !isStorable(fqn.TemplateArguments[0].(sem.FullyQualifiedName)) {
+			return false
 		}
 	case "ptr":
 		// https://gpuweb.github.io/gpuweb/wgsl/#address-space
@@ -352,6 +378,9 @@ func validate(fqn sem.FullyQualifiedName, uses *sem.StageUses) bool {
 			uses.Vertex = false
 			uses.Fragment = false
 			if access != "read_write" {
+				return false
+			}
+			if !isStorable(fqn.TemplateArguments[1].(sem.FullyQualifiedName)) {
 				return false
 			}
 		case "uniform":

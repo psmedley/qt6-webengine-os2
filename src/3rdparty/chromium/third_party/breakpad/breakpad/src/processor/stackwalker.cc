@@ -1,5 +1,4 @@
-// Copyright (c) 2010 Google Inc.
-// All rights reserved.
+// Copyright 2010 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -32,6 +31,10 @@
 // See stackwalker.h for documentation.
 //
 // Author: Mark Mentovai
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
+#endif
 
 #include "google_breakpad/processor/stackwalker.h"
 
@@ -55,6 +58,8 @@
 #include "processor/stackwalker_arm.h"
 #include "processor/stackwalker_arm64.h"
 #include "processor/stackwalker_mips.h"
+#include "processor/stackwalker_riscv.h"
+#include "processor/stackwalker_riscv64.h"
 
 namespace google_breakpad {
 
@@ -270,6 +275,20 @@ Stackwalker* Stackwalker::StackwalkerForCPU(
                                              context->GetContextARM64(),
                                              memory, modules,
                                              frame_symbolizer);
+      break;
+
+    case MD_CONTEXT_RISCV:
+      cpu_stackwalker = new StackwalkerRISCV(system_info,
+                                             context->GetContextRISCV(),
+                                             memory, modules,
+                                             frame_symbolizer);
+      break;
+
+    case MD_CONTEXT_RISCV64:
+      cpu_stackwalker = new StackwalkerRISCV64(system_info,
+                                               context->GetContextRISCV64(),
+                                               memory, modules,
+                                               frame_symbolizer);
       break;
   }
 

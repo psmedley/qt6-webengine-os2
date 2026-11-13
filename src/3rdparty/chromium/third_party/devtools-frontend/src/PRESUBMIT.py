@@ -36,9 +36,11 @@ import sys
 import six
 import time
 
+# Depot tools imports
+import rdb_wrapper
+
 AUTOROLL_ACCOUNT = "devtools-ci-autoroll-builder@chops-service-accounts.iam.gserviceaccount.com"
 USE_PYTHON3 = True
-
 
 def _ExecuteSubProcess(input_api, output_api, script_path, args, results):
     if isinstance(script_path, six.string_types):
@@ -171,6 +173,17 @@ def _CheckExperimentTelemetry(input_api, output_api):
     ]
     script_path = input_api.os_path.join(input_api.PresubmitLocalPath(),
                                          'scripts', 'check_experiments.js')
+    results.extend(_checkWithNodeScript(input_api, output_api, script_path))
+    return results
+
+
+def _CheckESBuildVersion(input_api, output_api):
+    results = [
+        output_api.PresubmitNotifyResult('Running ESBuild version check:')
+    ]
+    script_path = input_api.os_path.join(input_api.PresubmitLocalPath(),
+                                         'scripts',
+                                         'check_esbuild_versions.js')
     results.extend(_checkWithNodeScript(input_api, output_api, script_path))
     return results
 
@@ -429,6 +442,8 @@ def _CheckGeneratedFiles(input_api, output_api):
 
     generated_aria_path = input_api.os_path.join(scripts_build_path, 'generate_aria.py')
     generated_supported_css_path = input_api.os_path.join(scripts_build_path, 'generate_supported_css.py')
+    generated_deprecation_path = input_api.os_path.join(
+        scripts_build_path, 'generate_deprecations.py')
     generated_protocol_path = input_api.os_path.join(scripts_build_path, 'code_generator_frontend.py')
     generated_protocol_typescript_path = input_api.os_path.join(
         input_api.PresubmitLocalPath(), 'scripts', 'protocol_typescript')
@@ -442,6 +457,7 @@ def _CheckGeneratedFiles(input_api, output_api):
                                'pyjson5'),
         generated_aria_path,
         generated_supported_css_path,
+        generated_deprecation_path,
         concatenate_protocols_path,
         generated_protocol_path,
         scripts_generated_output_path,
@@ -461,28 +477,25 @@ def _CheckGeneratedFiles(input_api, output_api):
     return _ExecuteSubProcess(input_api, output_api, generate_protocol_resources_path, [], results)
 
 
-def _CollectStrings(input_api, output_api):
+def _CheckL10nStrings(input_api, output_api):
     devtools_root = input_api.PresubmitLocalPath()
     devtools_front_end = input_api.os_path.join(devtools_root, 'front_end')
     script_path = input_api.os_path.join(devtools_root, 'third_party', 'i18n',
-                                         'collect-strings.js')
+                                         'check-strings.js')
     affected_front_end_files = _getAffectedFiles(
         input_api, [devtools_front_end, script_path], [], ['.js', '.ts'])
     if len(affected_front_end_files) == 0:
         return [
             output_api.PresubmitNotifyResult(
-                'No affected files to run collect-strings')
+                'No affected files to run check-strings')
         ]
 
     results = [
-        output_api.PresubmitNotifyResult('Collecting strings from front_end:')
+        output_api.PresubmitNotifyResult('Checking UI strings from front_end:')
     ]
     results.extend(
         _checkWithNodeScript(input_api, output_api, script_path,
                              [devtools_front_end]))
-    results.append(
-        output_api.PresubmitNotifyResult(
-            'Please commit en-US.json/en-XL.json if changes are generated.'))
     return results
 
 
@@ -535,42 +548,62 @@ def _CheckForTooLargeFiles(input_api, output_api):
         return []
 
 
-def _RunCannedChecks(input_api, output_api):
-    results = []
-    results.extend(
-        input_api.canned_checks.CheckOwnersFormat(input_api, output_api))
-    results.extend(input_api.canned_checks.CheckOwners(input_api, output_api))
-    results.extend(
-        input_api.canned_checks.CheckChangeHasNoCrAndHasOnlyOneEol(
-            input_api, output_api))
-    results.extend(
-        input_api.canned_checks.CheckChangeHasNoStrayWhitespace(
-            input_api,
-            output_api,
-            source_file_filter=lambda file: not file.LocalPath().startswith(
-                'node_modules')))
-    results.extend(
-        input_api.canned_checks.CheckGenderNeutral(input_api, output_api))
+def _CheckObsoleteScreenshotGoldens(input_api, output_api):
+    results = [
+        output_api.PresubmitNotifyResult('Obsolete screenshot images check')
+    ]
+    interaction_test_root_path = input_api.os_path.join(
+        input_api.PresubmitLocalPath(), 'test', 'interactions')
+    interaction_test_files = [interaction_test_root_path]
+
+    interaction_test_files_changed = _getAffectedFiles(input_api,
+                                                       interaction_test_files,
+                                                       [], [])
+
+    if len(interaction_test_files_changed) > 0:
+        script_path = input_api.os_path.join(input_api.PresubmitLocalPath(),
+                                             'scripts', 'test',
+                                             'check_obsolete_goldens.js')
+
+        script_args = ["--interaction-test-root", interaction_test_root_path]
+        errors_from_script = _checkWithNodeScript(input_api, output_api,
+                                                  script_path, script_args)
+        results.extend(errors_from_script)
+
     return results
 
 
-def _CommonChecks(input_api, output_api):
-    """Checks common to both upload and commit."""
-    results = []
-    results.extend(
-        input_api.canned_checks.CheckAuthorizedAuthor(
-            input_api, output_api, bot_allowlist=[AUTOROLL_ACCOUNT]))
-    results.extend(_CheckExperimentTelemetry(input_api, output_api))
-    results.extend(_CheckGeneratedFiles(input_api, output_api))
-    results.extend(_CheckDevToolsStyleJS(input_api, output_api))
-    results.extend(_CheckDevToolsStyleCSS(input_api, output_api))
-    results.extend(_CheckDevToolsRunESLintTests(input_api, output_api))
-    results.extend(_CheckDevToolsRunBuildTests(input_api, output_api))
-    results.extend(_CheckDevToolsNonJSFileLicenseHeaders(
-        input_api, output_api))
+def _WithArgs(checkType, **kwargs):
+    def _WithArgsWrapper(input_api, output_api):
+        return checkType(input_api, output_api, **kwargs)
 
-    results.extend(_CheckFormat(input_api, output_api))
-    results.extend(_CheckChangesAreExclusiveToDirectory(input_api, output_api))
+    _WithArgsWrapper.__name__ = checkType.__name__
+    return _WithArgsWrapper
+
+
+def _CannedChecks(canned_checks):
+    return [
+        canned_checks.CheckForCommitObjects,
+        canned_checks.CheckOwnersFormat,
+        canned_checks.CheckOwners,
+        canned_checks.CheckChangeHasNoCrAndHasOnlyOneEol,
+        _WithArgs(canned_checks.CheckChangeHasNoStrayWhitespace,
+                  source_file_filter=lambda file: not file.LocalPath().
+                  startswith('node_modules')),
+        canned_checks.CheckGenderNeutral,
+    ]
+
+
+def _CommonChecks(canned_checks):
+    local_checks = [
+        _WithArgs(canned_checks.CheckAuthorizedAuthor,
+                  bot_allowlist=[AUTOROLL_ACCOUNT]), _CheckExperimentTelemetry,
+        _CheckGeneratedFiles, _CheckDevToolsStyleJS, _CheckDevToolsStyleCSS,
+        _CheckDevToolsRunESLintTests, _CheckDevToolsRunBuildTests,
+        _CheckDevToolsNonJSFileLicenseHeaders, _CheckFormat,
+        _CheckESBuildVersion, _CheckChangesAreExclusiveToDirectory,
+        _CheckObsoleteScreenshotGoldens
+    ]
     # Run the canned checks from `depot_tools` after the custom DevTools checks.
     # The canned checks for example check that lines have line endings. The
     # DevTools presubmit checks automatically fix these issues. If we would run
@@ -580,8 +613,7 @@ def _CommonChecks(input_api, output_api):
     # be continued regardless. By fixing the issues before we reach the canned checks,
     # we don't show the message to suppress these errors, which would otherwise be
     # causing CQ to fail.
-    results.extend(_RunCannedChecks(input_api, output_api))
-    return results
+    return local_checks + _CannedChecks(canned_checks)
 
 
 def _SideEffectChecks(input_api, output_api):
@@ -592,25 +624,56 @@ def _SideEffectChecks(input_api, output_api):
     return results
 
 
+def _RunAllChecks(checks, input_api, output_api):
+    with rdb_wrapper.client("presubmit:") as sink:
+        results = []
+        for check in checks:
+            start_time = time.time()
+
+            result = check(input_api, output_api)
+
+            elapsed_time = time.time() - start_time
+            results.extend(result)
+
+            if not sink:
+                continue
+            failure_reason = None
+            status = rdb_wrapper.STATUS_PASS
+            if any(r.fatal for r in result):
+                status = rdb_wrapper.STATUS_FAIL
+                failure_reasons = []
+                for r in result:
+                    fields = r.json_format()
+                    message = fields['message']
+                    items = '\n'.join('  %s' % item
+                                      for item in fields['items'])
+                    failure_reasons.append('\n'.join([message, items]))
+                if failure_reasons:
+                    failure_reason = '\n'.join(failure_reasons)
+            sink.report(check.__name__, status, elapsed_time, failure_reason)
+
+        return results
+
+
 def CheckChangeOnUpload(input_api, output_api):
-    results = []
-    results.extend(_CommonChecks(input_api, output_api))
-    results.extend(_CollectStrings(input_api, output_api))
-    # Run checks that rely on output from other DevTool checks
-    results.extend(_SideEffectChecks(input_api, output_api))
-    results.extend(_CheckBugAssociation(input_api, output_api, False))
-    return results
+    checks = _CommonChecks(input_api.canned_checks) + [
+        _CheckL10nStrings,
+        # Run checks that rely on output from other DevTool checks
+        _SideEffectChecks,
+        _WithArgs(_CheckBugAssociation, is_committing=False),
+    ]
+    return _RunAllChecks(checks, input_api, output_api)
 
 
 def CheckChangeOnCommit(input_api, output_api):
-    results = []
-    results.extend(_CommonChecks(input_api, output_api))
-    results.extend(_CollectStrings(input_api, output_api))
-    # Run checks that rely on output from other DevTool checks
-    results.extend(_SideEffectChecks(input_api, output_api))
-    results.extend(input_api.canned_checks.CheckChangeHasDescription(input_api, output_api))
-    results.extend(_CheckBugAssociation(input_api, output_api, True))
-    return results
+    checks = _CommonChecks(input_api.canned_checks) + [
+        _CheckL10nStrings,
+        # Run checks that rely on output from other DevTool checks
+        _SideEffectChecks,
+        input_api.canned_checks.CheckChangeHasDescription,
+        _WithArgs(_CheckBugAssociation, is_committing=True),
+    ]
+    return _RunAllChecks(checks, input_api, output_api)
 
 
 def _getAffectedFiles(input_api, parent_directories, excluded_actions, accepted_endings):  # pylint: disable=invalid-name

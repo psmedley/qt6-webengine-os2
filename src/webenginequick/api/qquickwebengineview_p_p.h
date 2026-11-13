@@ -19,7 +19,7 @@
 #include "qquickwebengineview_p.h"
 #include "render_view_context_menu_qt.h"
 #include "touch_handle_drawable_client.h"
-#include "ui_delegates_manager.h"
+#include "ui_delegates_manager_p.h"
 #include "web_contents_adapter_client.h"
 
 #include <QtCore/qcompilerdetection.h>
@@ -37,7 +37,6 @@ class WebContentsAdapter;
 
 QT_BEGIN_NAMESPACE
 class QQmlComponent;
-class QQuickWebEngineFaviconProvider;
 class QQuickWebEngineScriptCollection;
 class QQuickWebEngineSettings;
 class QQuickWebEngineView;
@@ -45,7 +44,7 @@ class QWebEngineContextMenuRequest;
 class QWebEngineFindTextResult;
 class QWebEngineHistory;
 
-class Q_WEBENGINEQUICK_PRIVATE_EXPORT QQuickWebEngineViewPrivate : public QtWebEngineCore::WebContentsAdapterClient
+class Q_WEBENGINEQUICK_EXPORT QQuickWebEngineViewPrivate : public QtWebEngineCore::WebContentsAdapterClient
 {
 public:
     Q_DECLARE_PUBLIC(QQuickWebEngineView)
@@ -65,6 +64,7 @@ public:
     void titleChanged(const QString&) override;
     void urlChanged() override;
     void iconChanged(const QUrl&) override;
+    void zoomFactorChanged(qreal factor) override;
     void loadProgressChanged(int progress) override;
     void didUpdateTargetURL(const QUrl&) override;
     void selectionChanged() override;
@@ -88,14 +88,19 @@ public:
     void requestFullScreenMode(const QUrl &origin, bool fullscreen) override;
     bool isFullScreenMode() const override;
     void contextMenuRequested(QWebEngineContextMenuRequest *request) override;
-    void navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame) override;
+    void navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame, bool hasFrameData) override;
     void javascriptDialog(QSharedPointer<QtWebEngineCore::JavaScriptDialogController>) override;
     void runFileChooser(QSharedPointer<QtWebEngineCore::FilePickerController>) override;
+    void desktopMediaRequested(QtWebEngineCore::DesktopMediaController *) override;
     void showColorDialog(QSharedPointer<QtWebEngineCore::ColorChooserController>) override;
-    void didRunJavaScript(quint64, const QVariant&) override;
+    void runJavaScript(const QString &script, quint32 worldId, quint64 frameId,
+                       const std::function<void(const QVariant &)> &callback) override;
     void didFetchDocumentMarkup(quint64, const QString&) override { }
     void didFetchDocumentInnerText(quint64, const QString&) override { }
-    void didPrintPage(quint64 requestId, QSharedPointer<QByteArray>) override;
+    void printToPdf(const QString &filePath, const QPageLayout &layout, const QPageRanges &ranges,
+                    quint64 frameId) override;
+    void printToPdf(std::function<void(QSharedPointer<QByteArray>)> &&callback,
+                    const QPageLayout &layout, const QPageRanges &ranges, quint64 frameId) override;
     void didPrintPageToPdf(const QString &filePath, bool success) override;
     bool passOnFocus(bool reverse) override;
     void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString& message, int lineNumber, const QString& sourceID) override;
@@ -109,7 +114,7 @@ public:
     void allowCertificateError(const QWebEngineCertificateError &error) override;
     void selectClientCert(const QSharedPointer<QtWebEngineCore::ClientCertSelectController>
                                   &selectController) override;
-    void runFeaturePermissionRequest(QtWebEngineCore::ProfileAdapter::PermissionType permission, const QUrl &securityOrigin) override;
+    void runFeaturePermissionRequest(QWebEnginePermission::PermissionType permissionType, const QUrl &securityOrigin) override;
     void renderProcessTerminated(RenderProcessTerminationStatus terminationStatus, int exitCode) override;
     void requestGeometryChange(const QRect &geometry, const QRect &frameGeometry) override;
     void updateScrollPosition(const QPointF &position) override;
@@ -128,10 +133,13 @@ public:
     QtWebEngineCore::ProfileAdapter *profileAdapter() override;
     QtWebEngineCore::WebContentsAdapter *webContentsAdapter() override;
     void printRequested() override;
+    void printRequestedByFrame(quint64 frameId) override;
     void findTextFinished(const QWebEngineFindTextResult &result) override;
     void showAutofillPopup(QtWebEngineCore::AutofillPopupController *controller,
                            const QRect &bounds, bool autoselectFirstSuggestion) override;
     void hideAutofillPopup() override;
+    void showWebAuthDialog(QWebEngineWebAuthUxRequest *request) override;
+    QWebEnginePermission createFeaturePermissionObject(const QUrl &securityOrigin, QWebEnginePermission::PermissionType permissionType) override;
 
     void updateAction(QQuickWebEngineView::WebAction) const;
     bool adoptWebContents(QtWebEngineCore::WebContentsAdapter *webContents);
@@ -156,7 +164,6 @@ public:
     bool m_fullscreenMode;
     bool isLoading;
     bool m_activeFocusOnPress;
-    QMap<quint64, QJSValue> m_callbacks;
     QQmlWebChannel *m_webChannel;
     QPointer<QQuickWebEngineView> inspectedView;
     QPointer<QQuickWebEngineView> devToolsView;
@@ -176,7 +183,6 @@ private:
     bool m_profileInitialized;
     QWebEngineContextMenuRequest *m_contextMenuRequest;
     QScopedPointer<QQuickWebEngineScriptCollection> m_scriptCollection;
-    QPointer<QQuickWebEngineFaviconProvider> m_faviconProvider;
     QQmlComponent *m_touchHandleDelegate;
 };
 

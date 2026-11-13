@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert} from 'chrome://resources/js/assert_ts.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.js';
 
-import {NamedDestinationMessageData, SaveRequestType} from './constants.js';
-import {PdfPluginElement} from './internal_plugin.js';
-import {PinchPhase, Viewport} from './viewport.js';
+import type {NamedDestinationMessageData, Rect, SaveRequestType} from './constants.js';
+import type {PdfPluginElement} from './internal_plugin.js';
+import type {Viewport} from './viewport.js';
+import {PinchPhase} from './viewport.js';
 
 export interface MessageData {
   type: string;
@@ -81,7 +82,7 @@ export interface ContentController {
     fileName: string,
     dataToSave: ArrayBuffer,
     editModeForTesting?: boolean,
-  }>;
+  }|null>;
 
   /**
    * Requests that the attachment at a certain index be saved.
@@ -322,6 +323,13 @@ export class PluginController implements ContentController {
     this.postMessage_({type: 'loadPreviewPage', url: url, index: index});
   }
 
+  getPageBoundingBox(page: number): Promise<Rect> {
+    return this.postMessageWithReply_({
+      type: 'getPageBoundingBox',
+      page,
+    });
+  }
+
   getPasswordComplete(password: string) {
     this.postMessage_({type: 'getPasswordComplete', password: password});
   }
@@ -347,7 +355,7 @@ export class PluginController implements ContentController {
 
   save(requestType: SaveRequestType) {
     const resolver =
-        new PromiseResolver<{fileName: string, dataToSave: ArrayBuffer}>();
+        new PromiseResolver<{fileName: string, dataToSave: ArrayBuffer}|null>();
     const newToken = createToken();
     this.pendingTokens_.set(newToken, resolver);
     this.postMessage_({

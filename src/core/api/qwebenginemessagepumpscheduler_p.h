@@ -1,5 +1,6 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef QWEBENGINEMESSAGEPUMPSCHEDULER_P_H
 #define QWEBENGINEMESSAGEPUMPSCHEDULER_P_H
@@ -23,7 +24,7 @@
 
 QT_BEGIN_NAMESPACE
 
-class Q_WEBENGINECORE_PRIVATE_EXPORT QWebEngineMessagePumpScheduler : public QObject
+class Q_WEBENGINECORE_EXPORT QWebEngineMessagePumpScheduler : public QObject
 {
     Q_OBJECT
 public:

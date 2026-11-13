@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "base/memory/raw_ptr_exclusion.h"
 #include "mojo/public/cpp/bindings/array_data_view.h"
 #include "mojo/public/cpp/bindings/lib/array_serialization.h"
 #include "mojo/public/cpp/bindings/lib/map_data_internal.h"
@@ -36,7 +37,8 @@ class MapReaderBase {
   void* GetDataIfExists() { return nullptr; }
 
  protected:
-  MaybeConstUserType& input_;
+  // RAW_PTR_EXCLUSION: Binary size increase.
+  RAW_PTR_EXCLUSION MaybeConstUserType& input_;
   MaybeConstIterator iter_;
 };
 

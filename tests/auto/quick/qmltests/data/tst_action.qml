@@ -1,5 +1,5 @@
 // Copyright (C) 2018 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 import QtQuick
 import QtTest
@@ -65,7 +65,9 @@ TestWebEngineView {
                    { webAction: WebEngineView.Indent, text: "&Indent", iconName: "", enabled: true },
                    { webAction: WebEngineView.Outdent, text: "&Outdent", iconName: "", enabled: true },
                    { webAction: WebEngineView.InsertOrderedList, text: "Insert &Ordered List", iconName: "", enabled: true },
-                   { webAction: WebEngineView.InsertUnorderedList, text: "Insert &Unordered List", iconName: "", enabled: true }
+                   { webAction: WebEngineView.InsertUnorderedList, text: "Insert &Unordered List", iconName: "", enabled: true },
+                   { webAction: WebEngineView.ChangeTextDirectionLTR, text: "Change text direction left to right", iconName: "", enabled: true },
+                   { webAction: WebEngineView.ChangeTextDirectionRTL, text: "Change text direction right to left", iconName: "", enabled: true }
             ];
         }
 

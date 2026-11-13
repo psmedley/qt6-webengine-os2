@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -259,13 +259,6 @@ CFX_Matrix CXFA_FFPageView::GetDisplayMatrix(const FX_RECT& rtDisp,
     return CFX_Matrix();
 
   return GetPageMatrix(CFX_RectF(0, 0, pItem->GetPageSize()), rtDisp, iRotate);
-}
-
-CXFA_FFWidget::IteratorIface* CXFA_FFPageView::CreateGCedFormWidgetIterator(
-    Mask<XFA_WidgetStatus> dwWidgetFilter) {
-  return cppgc::MakeGarbageCollected<CXFA_FFPageWidgetIterator>(
-      GetDocView()->GetDoc()->GetHeap()->GetAllocationHandle(), this,
-      dwWidgetFilter);
 }
 
 CXFA_FFWidget::IteratorIface* CXFA_FFPageView::CreateGCedTraverseWidgetIterator(

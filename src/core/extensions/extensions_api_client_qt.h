@@ -13,6 +13,7 @@
 
 namespace extensions {
 
+class FileSystemDelegate;
 class MessagingDelegate;
 
 class ExtensionsAPIClientQt : public ExtensionsAPIClient
@@ -22,14 +23,16 @@ public:
 
     // ExtensionsAPIClient implementation.
     AppViewGuestDelegate *CreateAppViewGuestDelegate() const override;
+    FileSystemDelegate *GetFileSystemDelegate() override;
     std::unique_ptr<guest_view::GuestViewManagerDelegate>
-    CreateGuestViewManagerDelegate(content::BrowserContext *context) const override;
+    CreateGuestViewManagerDelegate() const override;
     std::unique_ptr<MimeHandlerViewGuestDelegate>
     CreateMimeHandlerViewGuestDelegate(MimeHandlerViewGuest *guest) const override;
     void AttachWebContentsHelpers(content::WebContents *web_contents) const override;
     MessagingDelegate *GetMessagingDelegate() override;
 
 private:
+    std::unique_ptr<FileSystemDelegate> m_fileSystemDelegate;
     std::unique_ptr<MessagingDelegate> m_messagingDelegate;
 };
 

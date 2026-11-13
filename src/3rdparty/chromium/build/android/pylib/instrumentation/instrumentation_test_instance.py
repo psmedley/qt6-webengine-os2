@@ -9,7 +9,6 @@ import os
 import pickle
 import re
 
-import six
 from devil.android import apk_helper
 from pylib import constants
 from pylib.base import base_test_result
@@ -22,7 +21,6 @@ from pylib.symbols import deobfuscator
 from pylib.symbols import stack_symbolizer
 from pylib.utils import dexdump
 from pylib.utils import gold_utils
-from pylib.utils import shared_preference_utils
 from pylib.utils import test_filter
 
 
@@ -188,7 +186,7 @@ def GenerateTestResults(result_code, result_bundle, statuses, duration_ms,
   if current_result:
     if current_result.GetType() == base_test_result.ResultType.UNKNOWN:
       crashed = (result_code == _ACTIVITY_RESULT_CANCELED and any(
-          _NATIVE_CRASH_RE.search(l) for l in six.itervalues(result_bundle)))
+          _NATIVE_CRASH_RE.search(l) for l in result_bundle.values()))
       if crashed:
         current_result.SetType(base_test_result.ResultType.CRASH)
 
@@ -231,7 +229,9 @@ def _ParseExceptionMessage(stack):
   return stack
 
 
-def FilterTests(tests, filter_str=None, annotations=None,
+def FilterTests(tests,
+                filter_strs=None,
+                annotations=None,
                 excluded_annotations=None):
   """Filter a list of tests
 
@@ -239,7 +239,7 @@ def FilterTests(tests, filter_str=None, annotations=None,
     tests: a list of tests. e.g. [
            {'annotations": {}, 'class': 'com.example.TestA', 'method':'test1'},
            {'annotations": {}, 'class': 'com.example.TestB', 'method':'test2'}]
-    filter_str: googletest-style filter string.
+    filter_strs: list of googletest-style filter string.
     annotations: a dict of wanted annotations for test methods.
     excluded_annotations: a dict of annotations to exclude.
 
@@ -341,21 +341,21 @@ def FilterTests(tests, filter_str=None, annotations=None,
         filtered_tests.append(t)
     return filtered_tests
 
-  def gtests_filter(tests, combined_filter):
-    ''' Returns the tests after the filter_str has been applied
+  def gtests_filter(tests, combined_filters):
+    ''' Returns the tests after the combined_filters have been applied
 
     Args:
       tests: a list of tests. e.g. [
             {'annotations": {}, 'class': 'com.example.TestA', 'method':'test1'},
             {'annotations": {}, 'class': 'com.example.TestB', 'method':'test2'}]
-      combined_filter: the filter string representing tests to exclude
+      combined_filters: the filter string representing tests to exclude
 
     Return:
-      A list of tests that should still be included after the filter_str is
-      applied to their names
+      A list of tests that should still be included after the combined_filters
+      are applied to their names
     '''
 
-    if not combined_filter:
+    if not combined_filters:
       return tests
 
     # Collect all test names
@@ -366,20 +366,20 @@ def FilterTests(tests, filter_str=None, annotations=None,
       for name in tests_to_names[id(t)]:
         all_test_names.add(name)
 
-    pattern_groups = filter_str.split('-')
-    negative_pattern = pattern_groups[1] if len(pattern_groups) > 1 else None
-    positive_pattern = pattern_groups[0]
+    for combined_filter in combined_filters:
+      pattern_groups = combined_filter.split('-')
+      negative_pattern = pattern_groups[1] if len(pattern_groups) > 1 else None
+      positive_pattern = pattern_groups[0]
+      if positive_pattern:
+        # Only use the test names that match the positive pattern
+        positive_test_names = test_names_from_pattern(positive_pattern,
+                                                      all_test_names)
+        tests = get_tests_from_names(tests, positive_test_names, tests_to_names)
 
-    if positive_pattern:
-      # Only use the test names that match the positive pattern
-      positive_test_names = test_names_from_pattern(positive_pattern,
-                                                    all_test_names)
-      tests = get_tests_from_names(tests, positive_test_names, tests_to_names)
-
-    if negative_pattern:
-      # Remove any test the negative filter matches
-      remove_names = test_names_from_pattern(negative_pattern, all_test_names)
-      tests = remove_tests_from_names(tests, remove_names, tests_to_names)
+      if negative_pattern:
+        # Remove any test the negative filter matches
+        remove_names = test_names_from_pattern(negative_pattern, all_test_names)
+        tests = remove_tests_from_names(tests, remove_names, tests_to_names)
 
     return tests
 
@@ -415,7 +415,7 @@ def FilterTests(tests, filter_str=None, annotations=None,
     return filter_av == av
 
   return_tests = []
-  for t in gtests_filter(tests, filter_str):
+  for t in gtests_filter(tests, filter_strs):
     # Enforce that all tests declare their size.
     if not any(a in _VALID_ANNOTATIONS for a in t['annotations']):
       raise MissingSizeAnnotationError(GetTestName(t))
@@ -479,8 +479,8 @@ def _GetTestsFromDexdump(test_apk):
     return test_methods
 
   for dump in dex_dumps:
-    for package_name, package_info in six.iteritems(dump):
-      for class_name, class_info in six.iteritems(package_info['classes']):
+    for package_name, package_info in dump.items():
+      for class_name, class_info in package_info['classes'].items():
         if class_name.endswith('Test') and not class_info['is_abstract']:
           classAnnotations, methodsAnnotations = class_info['annotations']
           tests.append({
@@ -525,7 +525,7 @@ def GetTestName(test, sep='#'):
     The test name as a string.
   """
   test_name = '%s%s%s' % (test['class'], sep, test['method'])
-  assert ' *-:' not in test_name, (
+  assert not any(char in test_name for char in ' *-:'), (
       'The test name must not contain any of the characters in " *-:". See '
       'https://crbug.com/912199')
   return test_name
@@ -570,7 +570,7 @@ def GetUniqueTestName(test, sep='#'):
     sanitized_flags = [x.replace('-', '_') for x in test['flags']]
     display_name = '%s_with_%s' % (display_name, '_'.join(sanitized_flags))
 
-  assert ' *-:' not in display_name, (
+  assert not any(char in display_name for char in ' *-:'), (
       'The test name must not contain any of the characters in " *-:". See '
       'https://crbug.com/912199')
 
@@ -606,16 +606,23 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._data_deps = None
     self._data_deps_delegate = None
     self._runtime_deps_path = None
-    self._store_data_in_app_directory = False
+    self._variations_test_seed_path = args.variations_test_seed_path
+    self._webview_variations_test_seed_path = (
+        args.webview_variations_test_seed_path)
+    self._store_data_dependencies_in_temp = False
     self._initializeDataDependencyAttributes(args, data_deps_delegate)
-
     self._annotations = None
     self._excluded_annotations = None
-    self._test_filter = None
+    self._test_filters = None
     self._initializeTestFilterAttributes(args)
+
+    self._run_setup_commands = []
+    self._run_teardown_commands = []
+    self._initializeSetupTeardownCommandAttributes(args)
 
     self._flags = None
     self._use_apk_under_test_flags_file = False
+    self._webview_flags = args.webview_command_line_arg
     self._initializeFlagAttributes(args)
 
     self._screenshot_dir = None
@@ -632,9 +639,6 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._proguard_mapping_path = None
     self._deobfuscator = None
     self._initializeLogAttributes(args)
-
-    self._edit_shared_prefs = []
-    self._initializeEditPrefsAttributes(args)
 
     self._replace_system_package = None
     self._initializeReplaceSystemPackageAttributes(args)
@@ -666,6 +670,8 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._is_unit_test = False
     self._initializeUnitTestFlag(args)
 
+    self._run_disabled = args.run_disabled
+
   def _initializeApkAttributes(self, args, error_func):
     if args.apk_under_test:
       apk_under_test_path = args.apk_under_test
@@ -685,13 +691,15 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       self._apk_under_test = apk_helper.ToHelper(apk_under_test_path)
 
     test_apk_path = args.test_apk
-    if not os.path.exists(test_apk_path):
+    if (not args.test_apk.endswith('.apk')
+        and not args.test_apk.endswith('.apks')):
       test_apk_path = os.path.join(
           constants.GetOutDirectory(), constants.SDK_BUILD_APKS_DIR,
           '%s.apk' % args.test_apk)
-      # TODO(jbudorick): Move the realpath up to the argument parser once
-      # APK-by-name is no longer supported.
-      test_apk_path = os.path.realpath(test_apk_path)
+
+    # TODO(jbudorick): Move the realpath up to the argument parser once
+    # APK-by-name is no longer supported.
+    test_apk_path = os.path.realpath(test_apk_path)
 
     if not os.path.exists(test_apk_path):
       error_func('Unable to find test APK: %s' % test_apk_path)
@@ -742,10 +750,11 @@ class InstrumentationTestInstance(test_instance.TestInstance):
 
     if self._junit4_runner_class:
       if self._test_apk_incremental_install_json:
-        self._junit4_runner_supports_listing = next(
-            (True for x in self._test_apk.GetAllMetadata()
-             if 'real-instr' in x[0] and x[1] in _TEST_LIST_JUNIT4_RUNNERS),
-            False)
+        for name, value in self._test_apk.GetAllMetadata():
+          if (name.startswith('incremental-install-instrumentation-')
+              and value in _TEST_LIST_JUNIT4_RUNNERS):
+            self._junit4_runner_supports_listing = True
+            break
       else:
         self._junit4_runner_supports_listing = (
             self._junit4_runner_class in _TEST_LIST_JUNIT4_RUNNERS)
@@ -753,7 +762,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._package_info = None
     if self._apk_under_test:
       package_under_test = self._apk_under_test.GetPackageName()
-      for package_info in six.itervalues(constants.PACKAGE_INFO):
+      for package_info in constants.PACKAGE_INFO.values():
         if package_under_test == package_info.package:
           self._package_info = package_info
           break
@@ -782,13 +791,14 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   def _initializeDataDependencyAttributes(self, args, data_deps_delegate):
     self._data_deps = []
     self._data_deps_delegate = data_deps_delegate
+    self._store_data_dependencies_in_temp = args.store_data_dependencies_in_temp
     self._runtime_deps_path = args.runtime_deps_path
-    self._store_data_in_app_directory = args.store_data_in_app_directory
+
     if not self._runtime_deps_path:
       logging.warning('No data dependencies will be pushed.')
 
   def _initializeTestFilterAttributes(self, args):
-    self._test_filter = test_filter.InitializeFilterFromArgs(args)
+    self._test_filters = test_filter.InitializeFiltersFromArgs(args)
 
     def annotation_element(a):
       a = a.split('=', 1)
@@ -797,7 +807,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     if args.annotation_str:
       self._annotations = [
           annotation_element(a) for a in args.annotation_str.split(',')]
-    elif not self._test_filter:
+    elif not self._test_filters:
       self._annotations = [
           annotation_element(a) for a in _DEFAULT_ANNOTATIONS]
     else:
@@ -818,6 +828,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       self._excluded_annotations.extend(
           annotation_element(a) for a in _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS
           if a not in requested_annotations)
+
+  def _initializeSetupTeardownCommandAttributes(self, args):
+    self._run_setup_commands = args.run_setup_commands
+    self._run_teardown_commands = args.run_teardown_commands
 
   def _initializeFlagAttributes(self, args):
     self._use_apk_under_test_flags_file = args.use_apk_under_test_flags_file
@@ -848,15 +862,6 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._store_tombstones = args.store_tombstones
     self._symbolizer = stack_symbolizer.Symbolizer(
         self.apk_under_test.path if self.apk_under_test else None)
-
-  def _initializeEditPrefsAttributes(self, args):
-    if not hasattr(args, 'shared_prefs_file') or not args.shared_prefs_file:
-      return
-    if not isinstance(args.shared_prefs_file, str):
-      logging.warning("Given non-string for a filepath")
-      return
-    self._edit_shared_prefs = shared_preference_utils.ExtractSettingsFromJson(
-        args.shared_prefs_file)
 
   def _initializeReplaceSystemPackageAttributes(self, args):
     if (not hasattr(args, 'replace_system_package')
@@ -947,10 +952,6 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._coverage_directory
 
   @property
-  def edit_shared_prefs(self):
-    return self._edit_shared_prefs
-
-  @property
   def enable_breakpad_dump(self):
     return self._enable_breakpad_dump
 
@@ -960,7 +961,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
 
   @property
   def flags(self):
-    return self._flags
+    return self._flags[:]
 
   @property
   def is_unit_test(self):
@@ -987,12 +988,24 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._replace_system_package
 
   @property
+  def run_setup_commands(self):
+    return self._run_setup_commands
+
+  @property
+  def run_teardown_commands(self):
+    return self._run_teardown_commands
+
+  @property
   def use_voice_interaction_service(self):
     return self._use_voice_interaction_service
 
   @property
   def use_webview_provider(self):
     return self._use_webview_provider
+
+  @property
+  def webview_flags(self):
+    return self._webview_flags[:]
 
   @property
   def screenshot_dir(self):
@@ -1003,8 +1016,8 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._skia_gold_properties
 
   @property
-  def store_data_in_app_directory(self):
-    return self._store_data_in_app_directory
+  def store_data_dependencies_in_temp(self):
+    return self._store_data_dependencies_in_temp
 
   @property
   def store_tombstones(self):
@@ -1035,8 +1048,8 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._test_apk_incremental_install_json
 
   @property
-  def test_filter(self):
-    return self._test_filter
+  def test_filters(self):
+    return self._test_filters
 
   @property
   def test_launcher_batch_limit(self):
@@ -1061,6 +1074,14 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   @property
   def use_apk_under_test_flags_file(self):
     return self._use_apk_under_test_flags_file
+
+  @property
+  def variations_test_seed_path(self):
+    return self._variations_test_seed_path
+
+  @property
+  def webview_variations_test_seed_path(self):
+    return self._webview_variations_test_seed_path
 
   @property
   def wait_for_java_debugger(self):
@@ -1101,6 +1122,9 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   def GetDataDependencies(self):
     return self._data_deps
 
+  def GetRunDisabledFlag(self):
+    return self._run_disabled
+
   def GetTests(self):
     if self._test_apk_incremental_install_json:
       # Would likely just be a matter of calling GetAllTestsFromApk on all
@@ -1121,13 +1145,12 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     if self._junit4_runner_class is None and any(
         t['is_junit4'] for t in inflated_tests):
       raise MissingJUnit4RunnerException()
-    filtered_tests = FilterTests(
-        inflated_tests, self._test_filter, self._annotations,
-        self._excluded_annotations)
-    if self._test_filter and not filtered_tests:
+    filtered_tests = FilterTests(inflated_tests, self._test_filters,
+                                 self._annotations, self._excluded_annotations)
+    if self._test_filters and not filtered_tests:
       for t in inflated_tests:
         logging.debug('  %s', GetUniqueTestName(t))
-      logging.warning('Unmatched Filter: %s', self._test_filter)
+      logging.warning('Unmatched Filters: %s', self._test_filters)
     return filtered_tests
 
   def IsApkForceQueryable(self, apk):
@@ -1173,7 +1196,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       if clazz == _PARAMETERIZED_COMMAND_LINE_FLAGS:
         list_of_switches = []
         for annotation in methods['value']:
-          for c, m in six.iteritems(annotation):
+          for c, m in annotation.items():
             list_of_switches += _annotationToSwitches(c, m)
         return list_of_switches
       return []
@@ -1190,7 +1213,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       list_of_switches = []
       _checkParameterization(annotations)
       if _SKIP_PARAMETERIZATION not in annotations:
-        for clazz, methods in six.iteritems(annotations):
+        for clazz, methods in annotations.items():
           list_of_switches += _annotationToSwitches(clazz, methods)
       if list_of_switches:
         _setTestFlags(t, _switchesToFlags(list_of_switches[0]))

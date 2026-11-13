@@ -1,16 +1,29 @@
-// Copyright 2021 The Tint Authors.
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // Package lexer provides a basic lexer for the Tint intrinsic definition
 // language
@@ -50,7 +63,7 @@ func (l *lexer) lex() error {
 			return nil
 		case ' ', '\t':
 			l.next()
-		case '\n':
+		case '\r', '\n':
 			l.next()
 		case '@':
 			l.tok(1, tok.Attr)
@@ -93,18 +106,58 @@ func (l *lexer) lex() error {
 			case l.match("/", tok.Divide):
 			case l.match(".", tok.Dot):
 			case l.match("->", tok.Arrow):
-			case l.match("-", tok.Minus):
-			case l.match("fn", tok.Function):
-			case l.match("op", tok.Operator):
-			case l.match("enum", tok.Enum):
-			case l.match("type", tok.Type):
-			case l.match("ctor", tok.Constructor):
-			case l.match("conv", tok.Converter):
-			case l.match("match", tok.Match):
 			case unicode.IsLetter(l.peek(0)) || l.peek(0) == '_':
-				l.tok(l.count(alphaNumericOrUnderscore), tok.Identifier)
-			case unicode.IsNumber(l.peek(0)):
-				l.tok(l.count(unicode.IsNumber), tok.Integer)
+				n := l.count(alphaNumericOrUnderscore)
+				switch string(l.runes[:n]) {
+				case "fn":
+					l.tok(n, tok.Function)
+				case "op":
+					l.tok(n, tok.Operator)
+				case "enum":
+					l.tok(n, tok.Enum)
+				case "type":
+					l.tok(n, tok.Type)
+				case "ctor":
+					l.tok(n, tok.Constructor)
+				case "conv":
+					l.tok(n, tok.Converter)
+				case "match":
+					l.tok(n, tok.Match)
+				case "import":
+					l.tok(n, tok.Import)
+				default:
+					l.tok(n, tok.Identifier)
+				}
+			case unicode.IsNumber(l.peek(0)) || l.peek(0) == '-':
+				isFloat := false
+				isNegative := false
+				isFirst := true
+				pred := func(r rune) bool {
+					if isFirst && r == '-' {
+						isNegative = true
+						isFirst = false
+						return true
+					}
+					isFirst = false
+
+					if unicode.IsNumber(r) {
+						return true
+					}
+
+					if !isFloat && r == '.' {
+						isFloat = true
+						return true
+					}
+					return false
+				}
+				n := l.count(pred)
+				if isNegative && n == 1 {
+					l.tok(1, tok.Minus)
+				} else if isFloat {
+					l.tok(n, tok.Float)
+				} else {
+					l.tok(n, tok.Integer)
+				}
 			case l.match("&&", tok.AndAnd):
 			case l.match("&", tok.And):
 			case l.match("||", tok.OrOr):

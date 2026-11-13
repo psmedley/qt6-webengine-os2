@@ -9,25 +9,13 @@ Returns the length of e (e.g. abs(e) if T is a scalar, or sqrt(e[0]^2 + e[1]^2 +
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { TypeF32, TypeVec } from '../../../../../util/conversion.js';
-import { lengthInterval } from '../../../../../util/f32_interval.js';
-import { fullF32Range, kVectorTestValues } from '../../../../../util/math.js';
-import {
-  allInputSources,
-  Case,
-  makeUnaryToF32IntervalCase,
-  makeVectorToF32IntervalCase,
-  run,
-} from '../../expression.js';
+import { TypeF16, TypeF32, TypeVec } from '../../../../../util/conversion.js';
+import { allInputSources, run } from '../../expression.js';
 
 import { builtin } from './builtin.js';
+import { d } from './length.cache.js';
 
 export const g = makeTestGroup(GPUTest);
-
-/** @returns a `length` Case for a vector of f32s input */
-const makeCaseVecF32 = (x: number[]): Case => {
-  return makeVectorToF32IntervalCase(x, lengthInterval);
-};
 
 g.test('abstract_float')
   .specURL('https://www.w3.org/TR/WGSL/#numeric-builtin-functions')
@@ -42,11 +30,7 @@ g.test('f32')
   .desc(`f32 tests`)
   .params(u => u.combine('inputSource', allInputSources))
   .fn(async t => {
-    const makeCase = (x: number): Case => {
-      return makeUnaryToF32IntervalCase(x, lengthInterval);
-    };
-    const cases: Case[] = fullF32Range().map(makeCase);
-
+    const cases = await d.get('f32');
     await run(t, builtin('length'), [TypeF32], TypeF32, t.params, cases);
   });
 
@@ -55,8 +39,9 @@ g.test('f32_vec2')
   .desc(`f32 tests using vec2s`)
   .params(u => u.combine('inputSource', allInputSources))
   .fn(async t => {
-    const cases: Case[] = kVectorTestValues[2].map(makeCaseVecF32);
-
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f32_vec2_const' : 'f32_vec2_non_const'
+    );
     await run(t, builtin('length'), [TypeVec(2, TypeF32)], TypeF32, t.params, cases);
   });
 
@@ -65,8 +50,9 @@ g.test('f32_vec3')
   .desc(`f32 tests using vec3s`)
   .params(u => u.combine('inputSource', allInputSources))
   .fn(async t => {
-    const cases: Case[] = kVectorTestValues[3].map(makeCaseVecF32);
-
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f32_vec3_const' : 'f32_vec3_non_const'
+    );
     await run(t, builtin('length'), [TypeVec(3, TypeF32)], TypeF32, t.params, cases);
   });
 
@@ -75,15 +61,62 @@ g.test('f32_vec4')
   .desc(`f32 tests using vec4s`)
   .params(u => u.combine('inputSource', allInputSources))
   .fn(async t => {
-    const cases: Case[] = kVectorTestValues[4].map(makeCaseVecF32);
-
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f32_vec4_const' : 'f32_vec4_non_const'
+    );
     await run(t, builtin('length'), [TypeVec(4, TypeF32)], TypeF32, t.params, cases);
   });
 
 g.test('f16')
   .specURL('https://www.w3.org/TR/WGSL/#numeric-builtin-functions')
   .desc(`f16 tests`)
-  .params(u =>
-    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
-  )
-  .unimplemented();
+  .params(u => u.combine('inputSource', allInputSources))
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get('f16');
+    await run(t, builtin('length'), [TypeF16], TypeF16, t.params, cases);
+  });
+
+g.test('f16_vec2')
+  .specURL('https://www.w3.org/TR/WGSL/#numeric-builtin-functions')
+  .desc(`f16 tests using vec2s`)
+  .params(u => u.combine('inputSource', allInputSources))
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f16_vec2_const' : 'f16_vec2_non_const'
+    );
+    await run(t, builtin('length'), [TypeVec(2, TypeF16)], TypeF16, t.params, cases);
+  });
+
+g.test('f16_vec3')
+  .specURL('https://www.w3.org/TR/WGSL/#numeric-builtin-functions')
+  .desc(`f16 tests using vec3s`)
+  .params(u => u.combine('inputSource', allInputSources))
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f16_vec3_const' : 'f16_vec3_non_const'
+    );
+    await run(t, builtin('length'), [TypeVec(3, TypeF16)], TypeF16, t.params, cases);
+  });
+
+g.test('f16_vec4')
+  .specURL('https://www.w3.org/TR/WGSL/#numeric-builtin-functions')
+  .desc(`f16 tests using vec4s`)
+  .params(u => u.combine('inputSource', allInputSources))
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f16_vec4_const' : 'f16_vec4_non_const'
+    );
+    await run(t, builtin('length'), [TypeVec(4, TypeF16)], TypeF16, t.params, cases);
+  });

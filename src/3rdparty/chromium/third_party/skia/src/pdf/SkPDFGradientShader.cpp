@@ -7,8 +7,9 @@
 
 #include "src/pdf/SkPDFGradientShader.h"
 
+#include "include/core/SkTileMode.h"
 #include "include/docs/SkPDFDocument.h"
-#include "src/core/SkOpts.h"
+#include "src/core/SkChecksum.h"
 #include "src/pdf/SkPDFDocumentPriv.h"
 #include "src/pdf/SkPDFFormXObject.h"
 #include "src/pdf/SkPDFGraphicState.h"
@@ -16,28 +17,30 @@
 #include "src/pdf/SkPDFTypes.h"
 #include "src/pdf/SkPDFUtils.h"
 
+using namespace skia_private;
+
 static uint32_t hash(const SkShaderBase::GradientInfo& v) {
     uint32_t buffer[] = {
         (uint32_t)v.fColorCount,
-        SkOpts::hash(v.fColors, v.fColorCount * sizeof(SkColor)),
-        SkOpts::hash(v.fColorOffsets, v.fColorCount * sizeof(SkScalar)),
-        SkOpts::hash(v.fPoint, 2 * sizeof(SkPoint)),
-        SkOpts::hash(v.fRadius, 2 * sizeof(SkScalar)),
+        SkChecksum::Hash32(v.fColors, v.fColorCount * sizeof(SkColor)),
+        SkChecksum::Hash32(v.fColorOffsets, v.fColorCount * sizeof(SkScalar)),
+        SkChecksum::Hash32(v.fPoint, 2 * sizeof(SkPoint)),
+        SkChecksum::Hash32(v.fRadius, 2 * sizeof(SkScalar)),
         (uint32_t)v.fTileMode,
         v.fGradientFlags,
     };
-    return SkOpts::hash(buffer, sizeof(buffer));
+    return SkChecksum::Hash32(buffer, sizeof(buffer));
 }
 
 static uint32_t hash(const SkPDFGradientShader::Key& k) {
     uint32_t buffer[] = {
         (uint32_t)k.fType,
         hash(k.fInfo),
-        SkOpts::hash(&k.fCanvasTransform, sizeof(SkMatrix)),
-        SkOpts::hash(&k.fShaderTransform, sizeof(SkMatrix)),
-        SkOpts::hash(&k.fBBox, sizeof(SkIRect))
+        SkChecksum::Hash32(&k.fCanvasTransform, sizeof(SkMatrix)),
+        SkChecksum::Hash32(&k.fShaderTransform, sizeof(SkMatrix)),
+        SkChecksum::Hash32(&k.fBBox, sizeof(SkIRect))
     };
-    return SkOpts::hash(buffer, sizeof(buffer));
+    return SkChecksum::Hash32(buffer, sizeof(buffer));
 }
 
 static void unit_to_points_matrix(const SkPoint pts[2], SkMatrix* matrix) {
@@ -246,7 +249,7 @@ static void gradient_function_code(const SkShaderBase::GradientInfo& info,
     result->writeText(" 0} if\n");
 
     // Optimize out ranges which don't make any visual difference.
-    SkAutoSTMalloc<4, size_t> rangeEnds(info.fColorCount);
+    AutoSTMalloc<4, size_t> rangeEnds(info.fColorCount);
     size_t rangeEndsCount = 0;
     for (int i = 1; i < info.fColorCount; ++i) {
         // Ignoring the alpha, is this range the same solid color as the next range?
@@ -340,7 +343,7 @@ static std::unique_ptr<SkPDFDict> gradientStitchCode(const SkShaderBase::Gradien
         colorOffsets[i - 1] -= 0.00001f;
     }
 
-    SkAutoSTMalloc<4, ColorTuple> colorDataAlloc(colorCount);
+    AutoSTMalloc<4, ColorTuple> colorDataAlloc(colorCount);
     ColorTuple *colorData = colorDataAlloc.get();
     for (int idx = 0; idx < colorCount; idx++) {
         colorData[idx][0] = SkColorGetR(colors[idx]);
@@ -756,7 +759,6 @@ static SkPDFIndirectReference make_function_shader(SkPDFDocument* doc,
                 transformPoints[1] = transformPoints[0];
                 transformPoints[1].fX += SK_Scalar1;
                 break;
-            case SkShaderBase::GradientType::kColor:
             case SkShaderBase::GradientType::kNone:
             default:
                 return SkPDFIndirectReference();

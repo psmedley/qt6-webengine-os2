@@ -122,11 +122,12 @@ bool OperatorProperties::NeedsExactContext(const Operator* op) {
       break;
 
 #define CASE(Name) case IrOpcode::k##Name:
-      // Non-JavaScript operators don't have a notion of "context"
+      // Non-JavaScript operators don't have a notion of "context".
       COMMON_OP_LIST(CASE)
       CONTROL_OP_LIST(CASE)
       MACHINE_OP_LIST(CASE)
-      MACHINE_SIMD_OP_LIST(CASE)
+      MACHINE_SIMD128_OP_LIST(CASE)
+      IF_WASM(MACHINE_SIMD256_OP_LIST, CASE)
       SIMPLIFIED_OP_LIST(CASE)
       break;
 #undef CASE
@@ -213,6 +214,8 @@ bool OperatorProperties::HasFrameStateInput(const Operator* op) {
     case IrOpcode::kJSToName:
     case IrOpcode::kJSToNumber:
     case IrOpcode::kJSToNumberConvertBigInt:
+    case IrOpcode::kJSToBigInt:
+    case IrOpcode::kJSToBigIntConvertNumber:
     case IrOpcode::kJSToNumeric:
     case IrOpcode::kJSToObject:
     case IrOpcode::kJSToString:
@@ -223,6 +226,7 @@ bool OperatorProperties::HasFrameStateInput(const Operator* op) {
     case IrOpcode::kJSConstruct:
     case IrOpcode::kJSConstructWithArrayLike:
     case IrOpcode::kJSConstructWithSpread:
+    case IrOpcode::kJSConstructForwardAllArgs:
     case IrOpcode::kJSCallForwardVarargs:
     case IrOpcode::kJSCall:
     case IrOpcode::kJSCallWithArrayLike:

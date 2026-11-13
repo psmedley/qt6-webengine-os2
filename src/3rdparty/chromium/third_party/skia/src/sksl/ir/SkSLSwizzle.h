@@ -9,9 +9,10 @@
 #define SKSL_SWIZZLE
 
 #include "include/core/SkTypes.h"
-#include "include/private/SkSLDefines.h"
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLDefines.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 #include "src/sksl/ir/SkSLType.h"
 
 #include <cstdint>
@@ -25,15 +26,31 @@ namespace SkSL {
 class Context;
 enum class OperatorPrecedence : uint8_t;
 
+namespace SwizzleComponent {
+
+enum Type : int8_t {
+    X  =  0,  Y =  1,  Z =  2,  W =  3,
+    R  =  4,  G =  5,  B =  6,  A =  7,
+    S  =  8,  T =  9,  P = 10,  Q = 11,
+    UL = 12, UT = 13, UR = 14, UB = 15,
+    ZERO,
+    ONE
+};
+
+}  // namespace SwizzleComponent
+
 /**
  * Represents a vector swizzle operation such as 'float3(1, 2, 3).zyx'.
  */
-struct Swizzle final : public Expression {
-    inline static constexpr Kind kExpressionKind = Kind::kSwizzle;
+class Swizzle final : public Expression {
+public:
+    inline static constexpr Kind kIRNodeKind = Kind::kSwizzle;
+
+    using Component = SwizzleComponent::Type;
 
     Swizzle(const Context& context, Position pos, std::unique_ptr<Expression> base,
             const ComponentArray& components)
-            : INHERITED(pos, kExpressionKind,
+            : INHERITED(pos, kIRNodeKind,
                         &base->type().componentType().toCompound(context, components.size(), 1))
             , fBase(std::move(base))
             , fComponents(components) {
@@ -81,10 +98,13 @@ struct Swizzle final : public Expression {
 
     std::string description(OperatorPrecedence) const override;
 
+    // Converts an array of swizzle components into a string.
+    static std::string MaskString(const ComponentArray& inComponents);
+
 private:
     Swizzle(Position pos, const Type* type, std::unique_ptr<Expression> base,
             const ComponentArray& components)
-        : INHERITED(pos, kExpressionKind, type)
+        : INHERITED(pos, kIRNodeKind, type)
         , fBase(std::move(base))
         , fComponents(components) {
         SkASSERT(this->components().size() >= 1 && this->components().size() <= 4);

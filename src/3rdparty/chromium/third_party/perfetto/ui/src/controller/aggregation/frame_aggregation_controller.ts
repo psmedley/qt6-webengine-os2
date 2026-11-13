@@ -13,14 +13,11 @@
 // limitations under the License.
 
 import {ColumnDef} from '../../common/aggregation_data';
-import {Engine} from '../../common/engine';
+import {pluginManager} from '../../common/plugins';
 import {Area, Sorting} from '../../common/state';
-import {toNs} from '../../common/time';
-import {
-  ACTUAL_FRAMES_SLICE_TRACK_KIND,
-  Config,
-} from '../../tracks/actual_frames';
-import {globals} from '../globals';
+import {globals} from '../../frontend/globals';
+import {Engine} from '../../trace_processor/engine';
+import {ACTUAL_FRAMES_SLICE_TRACK_KIND} from '../../tracks/frames';
 
 import {AggregationController} from './aggregation_controller';
 
@@ -28,13 +25,15 @@ export class FrameAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
-    const selectedSqlTrackIds = [];
-    for (const trackId of area.tracks) {
-      const track = globals.state.tracks[trackId];
+    const selectedSqlTrackIds: number[] = [];
+    for (const trackKey of area.tracks) {
+      const track = globals.state.tracks[trackKey];
       // Track will be undefined for track groups.
-      if (track !== undefined &&
-          track.kind === ACTUAL_FRAMES_SLICE_TRACK_KIND) {
-        selectedSqlTrackIds.push((track.config as Config).trackIds);
+      if (track?.uri !== undefined) {
+        const trackInfo = pluginManager.resolveTrackInfo(track.uri);
+        if (trackInfo?.kind === ACTUAL_FRAMES_SLICE_TRACK_KIND) {
+          trackInfo.trackIds && selectedSqlTrackIds.push(...trackInfo.trackIds);
+        }
       }
     }
     if (selectedSqlTrackIds.length === 0) return false;
@@ -48,8 +47,8 @@ export class FrameAggregationController extends AggregationController {
         MAX(dur) as maxDur
         FROM actual_frame_timeline_slice
         WHERE track_id IN (${selectedSqlTrackIds}) AND
-        ts + dur > ${toNs(area.startSec)} AND
-        ts < ${toNs(area.endSec)} group by jank_type`;
+        ts + dur > ${area.start} AND
+        ts < ${area.end} group by jank_type`;
 
     await engine.query(query);
     return true;

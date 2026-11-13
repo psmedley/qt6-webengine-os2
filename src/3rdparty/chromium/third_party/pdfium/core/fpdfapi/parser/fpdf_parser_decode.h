@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CPDF_Array;
 class CPDF_Dictionary;
@@ -51,12 +51,6 @@ std::unique_ptr<fxcodec::ScanlineDecoder> CreateFlateDecoder(
     int nComps,
     int bpc,
     const CPDF_Dictionary* pParams);
-
-DataVector<uint8_t> FlateEncode(pdfium::span<const uint8_t> src_span);
-
-uint32_t FlateDecode(pdfium::span<const uint8_t> src_span,
-                     std::unique_ptr<uint8_t, FxFreeDeleter>* dest_buf,
-                     uint32_t* dest_size);
 
 uint32_t RunLengthDecode(pdfium::span<const uint8_t> src_span,
                          std::unique_ptr<uint8_t, FxFreeDeleter>* dest_buf,

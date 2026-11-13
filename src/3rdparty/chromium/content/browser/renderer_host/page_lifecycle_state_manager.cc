@@ -4,15 +4,33 @@
 
 #include "content/browser/renderer_host/page_lifecycle_state_manager.h"
 
-#include "base/callback_helpers.h"
+#include "base/feature_list.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/common/content_navigation_policy.h"
 #include "content/public/browser/render_process_host.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace {
-constexpr base::TimeDelta kBackForwardCacheTimeoutInSeconds = base::Seconds(3);
+// ASAN builds are slow and we see flakes caused by reaching this timeout. 6s
+// was not enough to stop the flakes. Trying 12s just to ensure that there isn't
+// something else going on that we don't understand.
+// See https://crbug.com/1224355.
+#if defined(ADDRESS_SANITIZER)
+constexpr base::TimeDelta kBackForwardCacheTimeout = base::Seconds(12);
+#else
+constexpr base::TimeDelta kBackForwardCacheTimeout = base::Seconds(3);
+#endif
+base::TimeDelta GetBackForwardCacheEntryTimeout() {
+  if (base::FeatureList::IsEnabled(features::kBackForwardCacheEntryTimeout)) {
+    return kBackForwardCacheTimeout;
+  } else {
+    return base::TimeDelta::Max();
+  }
+}
 }
 
 namespace content {
@@ -81,7 +99,7 @@ void PageLifecycleStateManager::SetIsInBackForwardCache(
     // Set a timeout monitor to check that the transition finishes within the
     // time limit.
     back_forward_cache_timeout_monitor_.Start(
-        FROM_HERE, kBackForwardCacheTimeoutInSeconds,
+        FROM_HERE, GetBackForwardCacheEntryTimeout(),
         base::BindOnce(&PageLifecycleStateManager::OnBackForwardCacheTimeout,
                        weak_ptr_factory_.GetWeakPtr()));
     pagehide_dispatch_ = blink::mojom::PagehideDispatch::kDispatchedPersisted;
@@ -147,8 +165,8 @@ void PageLifecycleStateManager::SendUpdatesToRendererIfNeeded(
     // TODO(https://crbug.com/1153155): For some tests, |render_view_host_impl_|
     // does not have the associated page.
     if (done_cb) {
-      base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                    std::move(done_cb));
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE, std::move(done_cb));
     }
     return;
   }
@@ -201,8 +219,37 @@ void PageLifecycleStateManager::OnPageLifecycleChangedAck(
 
   last_acknowledged_state_ = std::move(acknowledged_state);
 
-  if (last_acknowledged_state_->is_in_back_forward_cache)
+  if (last_acknowledged_state_->is_in_back_forward_cache) {
     did_receive_back_forward_cache_ack_ = true;
+
+    // TODO(crbug.com/1521212): currently after the navigation, the old
+    // RenderViewHost is marked as inactive.
+    // `RenderViewHostImpl::GetMainRenderFrameHost()` will return nullptr. This
+    // prevents us from getting the RenderFrameHost even if the main frame of
+    // this RenderViewHost is stored in BFCache. Now we are getting the
+    // RenderFrameHost from the BackForwardCacheImpl as a workaround, but
+    // eventually we might allow getting the RenderFrameHost from a
+    // RenderViewHost that's in BFCache.
+    for (auto* entry :
+         render_view_host_impl_->frame_tree()
+             ->controller()
+             .GetBackForwardCache()
+             .GetEntriesForRenderViewHostImpl(render_view_host_impl_)) {
+      if (entry->render_frame_host()->LoadedWithCacheControlNoStoreHeader()) {
+        // If the BFCached document was loaded with "Cache-control: no-store"
+        // header, we clear the fallback surface and force the browser to embed
+        // a completely new surface when this page is activated from BFCache.
+        // This avoids displaying sensitive information between it's restored
+        // and the `pageshow` handler completes.
+        RenderWidgetHostViewBase* rwhv =
+            render_view_host_impl_->GetWidget()->GetRenderWidgetHostViewBase();
+        if (rwhv) {
+          rwhv->InvalidateLocalSurfaceIdAndAllocationGroup();
+          rwhv->ClearFallbackSurfaceForCommitPending();
+        }
+      }
+    }
+  }
 
   // Call |MaybeEvictFromBackForwardCache| after setting
   // |last_acknowledged_state_|.

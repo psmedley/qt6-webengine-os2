@@ -6,14 +6,22 @@
 
 #include <string>
 
-#include "base/bind.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
+#include "base/files/file.h"
+#include "base/functional/bind.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/types/pass_key.h"
 #include "components/cdm/renderer/external_clear_key_key_system_info.h"
 #include "components/network_hints/renderer/web_prescient_networking_impl.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
+#include "content/public/common/pseudonymization_util.h"
+#include "content/public/common/web_identity.h"
+#include "content/public/renderer/render_frame.h"
+#include "content/public/renderer/render_thread.h"
 #include "content/public/test/test_service.mojom.h"
 #include "content/shell/common/main_frame_counter_test_impl.h"
 #include "content/shell/common/power_monitor_test_impl.h"
@@ -26,7 +34,10 @@
 #include "net/base/net_errors.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "sandbox/policy/sandbox.h"
+#include "third_party/blink/public/platform/url_loader_throttle_provider.h"
 #include "third_party/blink/public/platform/web_url_error.h"
+#include "third_party/blink/public/web/modules/credentialmanagement/throttle_helper.h"
+#include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_testing_support.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "v8/include/v8.h"
@@ -112,11 +123,90 @@ class TestRendererServiceImpl : public mojom::TestService {
     NOTREACHED();
   }
 
+  void CloneSharedMemoryContents(
+      base::ReadOnlySharedMemoryRegion region,
+      CloneSharedMemoryContentsCallback callback) override {
+    NOTREACHED();
+  }
+
   void IsProcessSandboxed(IsProcessSandboxedCallback callback) override {
     std::move(callback).Run(sandbox::policy::Sandbox::IsProcessSandboxed());
   }
 
+  void PseudonymizeString(const std::string& value,
+                          PseudonymizeStringCallback callback) override {
+    std::move(callback).Run(
+        PseudonymizationUtil::PseudonymizeStringForTesting(value));
+  }
+
+  void PassWriteableFile(base::File file,
+                         PassWriteableFileCallback callback) override {
+    std::move(callback).Run();
+  }
+
+  void WriteToPreloadedPipe() override { NOTREACHED(); }
+
   mojo::Receiver<mojom::TestService> receiver_;
+};
+
+class ShellContentRendererUrlLoaderThrottleProvider
+    : public blink::URLLoaderThrottleProvider {
+ public:
+  ShellContentRendererUrlLoaderThrottleProvider()
+      : main_thread_task_runner_(
+            content::RenderThread::IsMainThread()
+                ? base::SequencedTaskRunner::GetCurrentDefault()
+                : nullptr) {}
+
+  // This constructor works in conjunction with Clone().
+  ShellContentRendererUrlLoaderThrottleProvider(
+      const scoped_refptr<base::SequencedTaskRunner>& main_thread_task_runner,
+      base::PassKey<ShellContentRendererUrlLoaderThrottleProvider>)
+      : main_thread_task_runner_(std::move(main_thread_task_runner)) {}
+
+  std::unique_ptr<URLLoaderThrottleProvider> Clone() override {
+    return std::make_unique<ShellContentRendererUrlLoaderThrottleProvider>(
+        main_thread_task_runner_,
+        base::PassKey<ShellContentRendererUrlLoaderThrottleProvider>());
+  }
+
+  blink::WebVector<std::unique_ptr<blink::URLLoaderThrottle>> CreateThrottles(
+      base::optional_ref<const blink::LocalFrameToken> local_frame_token,
+      const network::ResourceRequest& request) override {
+    blink::WebVector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
+    if (local_frame_token.has_value()) {
+      auto throttle =
+          content::MaybeCreateIdentityUrlLoaderThrottle(base::BindRepeating(
+              [](const blink::LocalFrameToken& local_frame_token,
+                 const scoped_refptr<base::SequencedTaskRunner>
+                     main_thread_task_runner,
+                 const url::Origin& origin,
+                 blink::mojom::IdpSigninStatus status) {
+                if (content::RenderThread::IsMainThread()) {
+                  blink::SetIdpSigninStatus(local_frame_token, origin, status);
+                  return;
+                }
+                if (main_thread_task_runner) {
+                  main_thread_task_runner->PostTask(
+                      FROM_HERE,
+                      base::BindOnce(&blink::SetIdpSigninStatus,
+                                     local_frame_token, origin, status));
+                }
+              },
+              local_frame_token.value(), main_thread_task_runner_));
+      if (throttle)
+        throttles.push_back(std::move(throttle));
+    }
+
+    return throttles;
+  }
+
+  void SetOnline(bool is_online) override {}
+
+ private:
+  // Set only when `this` was created on the main thread, or cloned from a
+  // provider which was created on the main thread.
+  scoped_refptr<base::SequencedTaskRunner> main_thread_task_runner_;
 };
 
 void CreateRendererTestService(
@@ -140,17 +230,17 @@ void ShellContentRendererClient::ExposeInterfacesToBrowser(
     mojo::BinderMap* binders) {
   binders->Add<mojom::TestService>(
       base::BindRepeating(&CreateRendererTestService),
-      base::ThreadTaskRunnerHandle::Get());
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   binders->Add<mojom::PowerMonitorTest>(
       base::BindRepeating(&PowerMonitorTestImpl::MakeSelfOwnedReceiver),
-      base::ThreadTaskRunnerHandle::Get());
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   binders->Add<mojom::MainFrameCounterTest>(
       base::BindRepeating(&MainFrameCounterTestImpl::Bind),
-      base::ThreadTaskRunnerHandle::Get());
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   binders->Add<web_cache::mojom::WebCache>(
       base::BindRepeating(&web_cache::WebCacheImpl::BindReceiver,
                           base::Unretained(web_cache_impl_.get())),
-      base::ThreadTaskRunnerHandle::Get());
+      base::SingleThreadTaskRunner::GetCurrentDefault());
 }
 
 void ShellContentRendererClient::RenderFrameCreated(RenderFrame* render_frame) {
@@ -201,12 +291,19 @@ void ShellContentRendererClient::DidInitializeWorkerContextOnWorkerThread(
   }
 }
 
+std::unique_ptr<blink::URLLoaderThrottleProvider>
+ShellContentRendererClient::CreateURLLoaderThrottleProvider(
+    blink::URLLoaderThrottleProviderType provider_type) {
+  return std::make_unique<ShellContentRendererUrlLoaderThrottleProvider>();
+}
+
 #if BUILDFLAG(ENABLE_MOJO_CDM)
 void ShellContentRendererClient::GetSupportedKeySystems(
     media::GetSupportedKeySystemsCB cb) {
-  media::KeySystemInfoVector key_systems;
+  media::KeySystemInfos key_systems;
   if (base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting))
-    key_systems.push_back(std::make_unique<cdm::ExternalClearKeyProperties>());
+    key_systems.push_back(
+        std::make_unique<cdm::ExternalClearKeyKeySystemInfo>());
   std::move(cb).Run(std::move(key_systems));
 }
 #endif

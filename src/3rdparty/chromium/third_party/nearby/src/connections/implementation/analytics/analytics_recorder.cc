@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,22 +15,28 @@
 #include "connections/implementation/analytics/analytics_recorder.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <memory>
-#include <optional>
+#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
+#include "absl/container/btree_map.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "internal/analytics/event_logger.h"
+#include "internal/platform/count_down_latch.h"
+#include "internal/platform/error_code_params.h"
+#include "internal/platform/implementation/system_clock.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mutex_lock.h"
-#include "internal/platform/system_clock.h"
+#include "internal/platform/single_thread_executor.h"
 #include "internal/proto/analytics/connections_log.pb.h"
 #include "proto/connections_enums.pb.h"
 
-namespace location {
 namespace nearby {
 namespace analytics {
 
@@ -99,7 +105,8 @@ AnalyticsRecorder::AnalyticsRecorder(EventLogger *event_logger)
 
 AnalyticsRecorder::~AnalyticsRecorder() {
   serial_executor_.Shutdown();
-  ResetClientSessionLoggingResouces();
+  MutexLock lock(&mutex_);
+  ResetClientSessionLoggingResoucesLocked();
 }
 
 bool AnalyticsRecorder::IsSessionLogged() {
@@ -107,8 +114,7 @@ bool AnalyticsRecorder::IsSessionLogged() {
   return session_was_logged_;
 }
 
-void AnalyticsRecorder::ResetClientSessionLoggingResouces() {
-  MutexLock lock(&mutex_);
+void AnalyticsRecorder::ResetClientSessionLoggingResoucesLocked() {
   NEARBY_LOGS(INFO) << "Reset AnalyticsRecorder ctor event_logger_="
                     << event_logger_;
 
@@ -207,6 +213,26 @@ void AnalyticsRecorder::OnStopDiscovery() {
   RecordDiscoveryPhaseDurationLocked();
 }
 
+void AnalyticsRecorder::OnStartedIncomingConnectionListening(
+    connections::Strategy strategy) {
+  MutexLock lock(&mutex_);
+  if (!CanRecordAnalyticsLocked("OnStartedIncomingConnectionListening")) {
+    return;
+  }
+  UpdateStrategySessionLocked(strategy, ADVERTISER);
+  if (started_advertising_phase_time_ == absl::InfinitePast()) {
+    started_advertising_phase_time_ = SystemClock::ElapsedRealtime();
+  }
+}
+
+void AnalyticsRecorder::OnStoppedIncomingConnectionListening() {
+  MutexLock lock(&mutex_);
+  if (!CanRecordAnalyticsLocked("OnStoppedIncomingConnectionListening")) {
+    return;
+  }
+  RecordAdvertisingPhaseDurationLocked();
+}
+
 void AnalyticsRecorder::OnEndpointFound(Medium medium) {
   MutexLock lock(&mutex_);
   if (!CanRecordAnalyticsLocked("OnEndpointFound")) {
@@ -222,6 +248,19 @@ void AnalyticsRecorder::OnEndpointFound(Medium medium) {
   discovered_endpoint->set_medium(medium);
   discovered_endpoint->set_latency_millis(absl::ToInt64Milliseconds(
       SystemClock::ElapsedRealtime() - started_discovery_phase_time_));
+}
+
+void AnalyticsRecorder::OnRequestConnection(
+    const connections::Strategy &strategy, const std::string &endpoint_id) {
+  MutexLock lock(&mutex_);
+  if (!CanRecordAnalyticsLocked("onRequestConnection")) {
+    return;
+  }
+
+  UpdateStrategySessionLocked(strategy, DISCOVERER);
+  if (started_discovery_phase_time_ == absl::InfinitePast()) {
+    started_discovery_phase_time_ = SystemClock::ElapsedRealtime();
+  }
 }
 
 void AnalyticsRecorder::OnConnectionRequestReceived(
@@ -446,6 +485,14 @@ void AnalyticsRecorder::OnConnectionClosed(const std::string &endpoint_id,
   if (!CanRecordAnalyticsLocked("OnConnectionClosed")) {
     return;
   }
+
+  if (current_strategy_session_ == nullptr) {
+    NEARBY_LOGS(VERBOSE)
+        << "AnalyticsRecorder CanRecordAnalytics Unexpected call " << __func__
+        << " since current_strategy_session_ is required.";
+    return;
+  }
+
   auto it = active_connections_.find(endpoint_id);
   if (it == active_connections_.end()) {
     return;
@@ -458,24 +505,11 @@ void AnalyticsRecorder::OnConnectionClosed(const std::string &endpoint_id,
     // re-established with a new ConnectionRequest.
     auto pair = active_connections_.extract(it);
     std::unique_ptr<LogicalConnection> &logical_connection = pair.mapped();
-    logical_connection->GetEstablisedConnections();
 
-    // TODO(b/245553737): the recent change in protobuf may broken the class of
-    // RepeatedFieldPtr. Our app will crash after sending file. The app also
-    // crashes even only print the size of mutable_established_connection. we
-    // need to reccover the code when protobuf fixes the issue.
-
-    //     auto pair = active_connections_.extract(it);
-    //     std::unique_ptr<LogicalConnection> &logical_connection =
-    //     pair.mapped();
-
-    //     std::vector<ConnectionsLog::EstablishedConnection> connections =
-    //         logical_connection->GetEstablisedConnections();
-    //     auto established_connections =
-    //         current_strategy_session_->mutable_established_connection();
-    //     for (auto &connection : connections) {
-    //       established_connections->Add(std::move(connection));
-    //     }
+    absl::c_copy(
+        logical_connection->GetEstablisedConnections(),
+        RepeatedFieldBackInserter(
+            current_strategy_session_->mutable_established_connection()));
   }
 }
 
@@ -627,33 +661,35 @@ void AnalyticsRecorder::OnErrorCode(const ErrorCodeParams &params) {
     error_code->set_common_error(params.common_error);
   } else {
     switch (params.event) {
-      case errorcode::proto::START_ADVERTISING:
+      case location::nearby::errorcode::proto::START_ADVERTISING:
         error_code->set_start_advertising_error(params.start_advertising_error);
         break;
-      case errorcode::proto::STOP_ADVERTISING:
+      case location::nearby::errorcode::proto::STOP_ADVERTISING:
         error_code->set_stop_advertising_error(params.stop_advertising_error);
         break;
-      case errorcode::proto::START_LISTENING_INCOMING_CONNECTION:
+      case location::nearby::errorcode::proto::
+          START_LISTENING_INCOMING_CONNECTION:
         error_code->set_start_listening_incoming_connection_error(
             params.start_listening_incoming_connection_error);
         break;
-      case errorcode::proto::STOP_LISTENING_INCOMING_CONNECTION:
+      case location::nearby::errorcode::proto::
+          STOP_LISTENING_INCOMING_CONNECTION:
         error_code->set_stop_listening_incoming_connection_error(
             params.stop_listening_incoming_connection_error);
         break;
-      case errorcode::proto::START_DISCOVERING:
+      case location::nearby::errorcode::proto::START_DISCOVERING:
         error_code->set_start_discovering_error(params.start_discovering_error);
         break;
-      case errorcode::proto::STOP_DISCOVERING:
+      case location::nearby::errorcode::proto::STOP_DISCOVERING:
         error_code->set_stop_discovering_error(params.stop_discovering_error);
         break;
-      case errorcode::proto::CONNECT:
+      case location::nearby::errorcode::proto::CONNECT:
         error_code->set_connect_error(params.connect_error);
         break;
-      case errorcode::proto::DISCONNECT:
+      case location::nearby::errorcode::proto::DISCONNECT:
         error_code->set_disconnect_error(params.disconnect_error);
         break;
-      case errorcode::proto::UNKNOWN_EVENT:
+      case location::nearby::errorcode::proto::UNKNOWN_EVENT:
       default:
         error_code->set_common_error(params.common_error);
         break;
@@ -687,7 +723,7 @@ void AnalyticsRecorder::LogStartSession() {
 
   session_was_logged_ = false;
   if (CanRecordAnalyticsLocked(kOnStartClientSession)) {
-    client_session_ = std::make_unique<proto::ConnectionsLog::ClientSession>();
+    client_session_ = std::make_unique<ConnectionsLog::ClientSession>();
     started_client_session_time_ = SystemClock::ElapsedRealtime();
     start_client_session_was_logged_ = true;
     LogEvent(START_CLIENT_SESSION);
@@ -702,7 +738,7 @@ void AnalyticsRecorder::LogSession() {
   FinishStrategySessionLocked();
   client_session_->set_duration_millis(absl::ToInt64Milliseconds(
       SystemClock::ElapsedRealtime() - started_client_session_time_));
-  LogClientSession();
+  LogClientSessionLocked();
   LogEvent(STOP_CLIENT_SESSION);
   session_was_logged_ = true;
 }
@@ -738,7 +774,7 @@ bool AnalyticsRecorder::CanRecordAnalyticsLocked(
   }
 
   if (session_was_logged_) {
-    NEARBY_LOGS(WARNING)
+    NEARBY_LOGS(VERBOSE)
         << "AnalyticsRecorder CanRecordAnalytics Unexpected call "
         << method_name << " after session has already been logged.";
     return false;
@@ -747,12 +783,13 @@ bool AnalyticsRecorder::CanRecordAnalyticsLocked(
   return true;
 }
 
-void AnalyticsRecorder::LogClientSession() {
+void AnalyticsRecorder::LogClientSessionLocked() {
   serial_executor_.Execute(
-      "analytics-recorder", [this]() {
+      "analytics-recorder",
+      [this, client_session = std::move(client_session_)]() mutable {
         ConnectionsLog connections_log;
         connections_log.set_event_type(CLIENT_SESSION);
-        connections_log.set_allocated_client_session(client_session_.release());
+        connections_log.set_allocated_client_session(client_session.release());
         connections_log.set_version(kVersion);
 
         NEARBY_LOGS(VERBOSE)
@@ -760,8 +797,8 @@ void AnalyticsRecorder::LogClientSession() {
             << connections_log.DebugString();
 
         event_logger_->Log(connections_log);
-        ResetClientSessionLoggingResouces();
       });
+  ResetClientSessionLoggingResoucesLocked();
 }
 
 void AnalyticsRecorder::LogEvent(EventType event_type) {
@@ -1010,10 +1047,15 @@ void AnalyticsRecorder::FinishStrategySessionLocked() {
     bandwidth_upgrade_attempts_.clear();
 
     // Add the StrategySession in ClientSession
-    current_strategy_session_->set_duration_millis(absl::ToInt64Milliseconds(
-        started_strategy_session_time_ - SystemClock::ElapsedRealtime()));
-    *client_session_->add_strategy_session() =
-        *std::move(current_strategy_session_);
+    if (current_strategy_session_ != nullptr) {
+      current_strategy_session_->set_duration_millis(absl::ToInt64Milliseconds(
+          SystemClock::ElapsedRealtime() - started_strategy_session_time_));
+      *client_session_->add_strategy_session() =
+          *std::move(current_strategy_session_);
+    }
+
+    current_strategy_session_ = nullptr;
+    current_strategy_ = connections::Strategy::kNone;
     LogEvent(STOP_STRATEGY_SESSION);
   }
 }
@@ -1280,6 +1322,11 @@ AnalyticsRecorder::LogicalConnection::ResolvePendingPayloads(
   return completed_payloads;
 }
 
+void AnalyticsRecorder::Sync() {
+  CountDownLatch latch(1);
+  serial_executor_.Execute([&]() { latch.CountDown(); });
+  latch.Await();
+}
+
 }  // namespace analytics
 }  // namespace nearby
-}  // namespace location

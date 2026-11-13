@@ -9,8 +9,8 @@
 #define GrOpFlushState_DEFINED
 
 #include <utility>
-#include "src/core/SkArenaAlloc.h"
-#include "src/core/SkArenaAllocList.h"
+#include "src/base/SkArenaAlloc.h"
+#include "src/base/SkArenaAllocList.h"
 #include "src/gpu/ganesh/GrAppliedClip.h"
 #include "src/gpu/ganesh/GrBufferAllocPool.h"
 #include "src/gpu/ganesh/GrDeferredUpload.h"
@@ -109,19 +109,19 @@ public:
         return *fOpArgs;
     }
 
-    void setSampledProxyArray(SkTArray<GrSurfaceProxy*, true>* sampledProxies) {
+    void setSampledProxyArray(skia_private::TArray<GrSurfaceProxy*, true>* sampledProxies) {
         fSampledProxies = sampledProxies;
     }
 
-    SkTArray<GrSurfaceProxy*, true>* sampledProxyArray() override {
+    skia_private::TArray<GrSurfaceProxy*, true>* sampledProxyArray() override {
         return fSampledProxies;
     }
 
     /** Overrides of GrDeferredUploadTarget. */
 
     const skgpu::TokenTracker* tokenTracker() final { return fTokenTracker; }
-    skgpu::DrawToken addInlineUpload(GrDeferredTextureUploadFn&&) final;
-    skgpu::DrawToken addASAPUpload(GrDeferredTextureUploadFn&&) final;
+    skgpu::AtlasToken addInlineUpload(GrDeferredTextureUploadFn&&) final;
+    skgpu::AtlasToken addASAPUpload(GrDeferredTextureUploadFn&&) final;
 
     /** Overrides of GrMeshDrawTarget. */
     void recordDraw(const GrGeometryProcessor*,
@@ -184,7 +184,9 @@ public:
     // At this point we know we're flushing so full access to the GrAtlasManager and
     // SmallPathAtlasMgr is required (and permissible).
     GrAtlasManager* atlasManager() const final;
-    skgpu::v1::SmallPathAtlasMgr* smallPathAtlasManager() const final;
+#if !defined(SK_ENABLE_OPTIMIZE_SIZE)
+    skgpu::ganesh::SmallPathAtlasMgr* smallPathAtlasManager() const final;
+#endif
 
     /** GrMeshDrawTarget override. */
     SkArenaAlloc* allocator() override { return &fArena; }
@@ -263,10 +265,10 @@ public:
 
 private:
     struct InlineUpload {
-        InlineUpload(GrDeferredTextureUploadFn&& upload, skgpu::DrawToken token)
+        InlineUpload(GrDeferredTextureUploadFn&& upload, skgpu::AtlasToken token)
                 : fUpload(std::move(upload)), fUploadBeforeToken(token) {}
         GrDeferredTextureUploadFn fUpload;
-        skgpu::DrawToken fUploadBeforeToken;
+        skgpu::AtlasToken fUploadBeforeToken;
     };
 
     // A set of contiguous draws that share a draw token, geometry processor, and pipeline. The
@@ -301,7 +303,7 @@ private:
 
     // All draws we store have an implicit draw token. This is the draw token for the first draw
     // in fDraws.
-    skgpu::DrawToken fBaseDrawToken = skgpu::DrawToken::AlreadyFlushedToken();
+    skgpu::AtlasToken fBaseDrawToken = skgpu::AtlasToken::InvalidToken();
 
     // Info about the op that is currently preparing or executing using the flush state or null if
     // an op is not currently preparing of executing.
@@ -309,7 +311,7 @@ private:
 
     // This field is only transiently set during flush. Each OpsTask will set it to point to an
     // array of proxies it uses before call onPrepare and onExecute.
-    SkTArray<GrSurfaceProxy*, true>* fSampledProxies;
+    skia_private::TArray<GrSurfaceProxy*, true>* fSampledProxies;
 
     GrGpu* fGpu;
     GrResourceProvider* fResourceProvider;

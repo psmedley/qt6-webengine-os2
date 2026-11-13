@@ -7,13 +7,15 @@
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_future.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_instance.h"
+#include "content/public/browser/network_service_util.h"
 #include "content/public/browser/service_process_host.h"
 #include "content/public/browser/service_process_info.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/network_service_util.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -24,7 +26,6 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "sandbox/features.h"
 #include "sandbox/policy/features.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/transferable_socket.h"
@@ -41,21 +42,18 @@ namespace {
 class TransferableSocketBrowserTest : public ContentBrowserTest {
  public:
   TransferableSocketBrowserTest() {
-    std::vector<base::test::FeatureRef> enabled_features = {
 #if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_FUCHSIA)
       // Network Service Sandboxing is unconditionally enabled on these
       // platforms.
-      sandbox::policy::features::kNetworkServiceSandbox,
-#endif
-    };
-    scoped_feature_list_.InitWithFeatures(
-        enabled_features,
-        /*disabled_features=*/{features::kNetworkServiceInProcess});
+      scoped_feature_list_.InitAndEnableFeature(
+          sandbox::policy::features::kNetworkServiceSandbox);
+#endif  // !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_FUCHSIA)
+      ForceOutOfProcessNetworkService();
   }
 
   void SetUp() override {
 #if BUILDFLAG(IS_WIN)
-    if (!sandbox::features::IsAppContainerSandboxSupported()) {
+    if (!sandbox::policy::features::IsNetworkSandboxSupported()) {
       // On *some* Windows, sandboxing cannot be enabled. We skip all the tests
       // on such platforms.
       GTEST_SKIP();
@@ -100,7 +98,7 @@ IN_PROC_BROWSER_TEST_F(TransferableSocketBrowserTest, TransferSocket) {
 
   mojo::PendingRemote<network::mojom::NetworkServiceTest>
       network_service_pending;
-  GetNetworkService()->BindTestInterface(
+  GetNetworkService()->BindTestInterfaceForTesting(
       network_service_pending.InitWithNewPipeAndPassReceiver());
   net::TCPSocket socket(nullptr, nullptr, net::NetLogSource());
   socket.Open(net::AddressFamily::ADDRESS_FAMILY_IPV4);
@@ -140,9 +138,15 @@ IN_PROC_BROWSER_TEST_F(TransferableSocketBrowserTest, TransferSocket) {
   network::TransferableSocket transferable(
       socket.ReleaseSocketDescriptorForTesting(), network_process);
 #else
-  network::TransferableSocket transferable(
-      socket.ReleaseSocketDescriptorForTesting());
+  base::test::TestFuture<net::SocketDescriptor> socket_descriptor;
+  GetIOThreadTaskRunner({})->PostTaskAndReplyWithResult(
+      FROM_HERE, base::BindLambdaForTesting([&]() {
+        return socket.ReleaseSocketDescriptorForTesting();
+      }),
+      socket_descriptor.GetCallback());
+  network::TransferableSocket transferable(socket_descriptor.Get());
 #endif
+
   {
     base::RunLoop network_service_runloop;
     network_service_test()->MakeRequestToServer(

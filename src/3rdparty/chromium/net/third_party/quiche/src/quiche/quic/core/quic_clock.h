@@ -16,7 +16,7 @@
 namespace quic {
 
 // Interface for retrieving the current time.
-class QUIC_EXPORT_PRIVATE QuicClock {
+class QUICHE_EXPORT QuicClock {
  public:
   QuicClock() = default;
   virtual ~QuicClock() = default;
@@ -34,10 +34,6 @@ class QUIC_EXPORT_PRIVATE QuicClock {
   // WallNow returns the current wall-time - a time that is consistent across
   // different clocks.
   virtual QuicWallTime WallNow() const = 0;
-
-  // Converts |walltime| to a QuicTime relative to this clock's epoch.
-  virtual QuicTime ConvertWallTimeToQuicTime(
-      const QuicWallTime& walltime) const;
 
  protected:
   // Creates a new QuicTime using |time_us| as the internal value.

@@ -17,9 +17,9 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_ACTIVE_CHROME_PROCESSES_TRACKER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_ACTIVE_CHROME_PROCESSES_TRACKER_H_
 
+#include <optional>
 #include <set>
 #include <vector>
-#include "perfetto/ext/base/optional.h"
 
 #include "perfetto/ext/base/flat_hash_map.h"
 #include "src/trace_processor/storage/trace_storage.h"
@@ -30,9 +30,9 @@ namespace trace_processor {
 
 struct ProcessWithDataLoss {
   UniquePid upid;
-  // If not nullopt, the process data is reliable from this point until
+  // If not std::nullopt, the process data is reliable from this point until
   // the end of the trace.
-  base::Optional<int64_t> reliable_from;
+  std::optional<int64_t> reliable_from;
 };
 
 // Tracks ActiveProcesses metadata packets from ChromeTrackEvent,
@@ -43,9 +43,7 @@ class ActiveChromeProcessesTracker {
   explicit ActiveChromeProcessesTracker(TraceProcessorContext* context)
       : context_(context) {}
 
-  void AddActiveProcessMetadata(int64_t timestamp, UniquePid upid) {
-    process_data_[upid].metadata_timestamps.insert(timestamp);
-  }
+  void AddActiveProcessMetadata(int64_t timestamp, UniquePid upid);
   void AddProcessDescriptor(int64_t timestamp, UniquePid upid) {
     process_data_[upid].descriptor_timestamps.insert(timestamp);
   }
@@ -60,6 +58,8 @@ class ActiveChromeProcessesTracker {
 
   TraceProcessorContext* context_;
   base::FlatHashMap<UniquePid, ProcessData> process_data_;
+  // Metadata timestamps across all processes.
+  std::set<int64_t> global_metadata_timestamps_;
 };
 
 }  // namespace trace_processor

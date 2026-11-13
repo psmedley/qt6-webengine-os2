@@ -10,11 +10,13 @@
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#if !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_QTWEBENGINE)
 #include "components/permissions/permission_prompt.h"
 #endif
+#include "content/public/browser/permission_result.h"
 #include "components/permissions/permission_request_enums.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-forward.h"
 
 namespace blink {
 enum class PermissionType;
@@ -23,14 +25,12 @@ enum class PermissionType;
 namespace content {
 class RenderFrameHost;
 class RenderProcessHost;
-struct PermissionResult;
 }  // namespace content
 
 class GURL;
 
 namespace permissions {
 class PermissionRequest;
-struct PermissionResult;
 
 // This enum backs a UMA histogram, so it must be treated as append-only.
 enum class PermissionAction {
@@ -45,6 +45,12 @@ enum class PermissionAction {
   NUM,
 };
 
+enum PermissionPromptViewID {
+  VIEW_ID_PERMISSION_PROMPT_NONE = 0,
+  VIEW_ID_PERMISSION_PROMPT_EXTRA_TEXT,
+  VIEW_ID_PERMISSION_PROMPT_LINK,
+};
+
 // A utility class for permissions.
 class PermissionUtil {
  public:
@@ -55,9 +61,11 @@ class PermissionUtil {
   // Returns the permission string for the given permission.
   static std::string GetPermissionString(ContentSettingsType);
 
+#if !BUILDFLAG(IS_QTWEBENGINE)
   // Returns the gesture type corresponding to whether a permission request is
   // made with or without a user gesture.
   static PermissionRequestGestureType GetGestureType(bool user_gesture);
+#endif
 
   // Limited conversion of ContentSettingsType to PermissionType. Returns true
   // if the conversion was performed.
@@ -66,6 +74,11 @@ class PermissionUtil {
   // histogram value to count permission request metrics.
   static bool GetPermissionType(ContentSettingsType type,
                                 blink::PermissionType* out);
+
+  // Returns the corresponding permissions policy feature to the given content
+  // settings type, or nullopt if there is none.
+  static absl::optional<blink::mojom::PermissionsPolicyFeature>
+  GetPermissionsPolicyFeature(ContentSettingsType type);
 
   // Checks whether the given ContentSettingsType is a permission. Use this
   // to determine whether a specific ContentSettingsType is supported by the
@@ -114,11 +127,6 @@ class PermissionUtil {
   static blink::mojom::PermissionStatus ContentSettingToPermissionStatus(
       ContentSetting setting);
 
-  static content::PermissionResult ToContentPermissionResult(
-      PermissionResult result);
-
-  static PermissionResult ToPermissionResult(content::PermissionResult result);
-
   // If an iframed document/worker inherits a different StoragePartition from
   // its embedder than it would use if it were a main frame, we should block
   // undelegated permissions. Because permissions are scoped to BrowserContext
@@ -145,11 +153,18 @@ class PermissionUtil {
                                  const GURL& requesting_origin,
                                  const GURL& embedding_origin);
 
-#if !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_QTWEBENGINE)
   // Returns `true` if at least one of the `delegate->Requests()` was requested
   // with a user gesture.
   static bool HasUserGesture(PermissionPrompt::Delegate* delegate);
+
+  static bool CanPermissionRequestIgnoreStatus(
+      const PermissionRequestData& request,
+      content::PermissionStatusSource source);
 #endif
+
+  // Returns `true` if the current platform support permission chips.
+  static bool DoesPlatformSupportChip();
 };
 
 }  // namespace permissions

@@ -7,21 +7,20 @@
 
 #include "src/sksl/ir/SkSLExpression.h"
 
-#include "include/private/SkSLDefines.h"
-#include "include/sksl/SkSLErrorReporter.h"
-#include "include/sksl/SkSLOperator.h"
 #include "src/sksl/SkSLContext.h"
+#include "src/sksl/SkSLDefines.h"
+#include "src/sksl/SkSLErrorReporter.h"
+#include "src/sksl/SkSLOperator.h"
 
 namespace SkSL {
 
 std::string Expression::description() const {
-    return this->description(OperatorPrecedence::kTopLevel);
+    return this->description(OperatorPrecedence::kExpression);
 }
 
 bool Expression::isIncomplete(const Context& context) const {
     switch (this->kind()) {
         case Kind::kFunctionReference:
-        case Kind::kExternalFunctionReference:
             context.fErrors->error(fPosition.after(), "expected '(' to begin function call");
             return true;
 
@@ -31,7 +30,7 @@ bool Expression::isIncomplete(const Context& context) const {
 
         case Kind::kTypeReference:
             context.fErrors->error(fPosition.after(),
-                    "expected '(' to begin constructor invocation");
+                                   "expected '(' to begin constructor invocation");
             return true;
 
         default:
@@ -41,7 +40,7 @@ bool Expression::isIncomplete(const Context& context) const {
 
 ExpressionArray ExpressionArray::clone() const {
     ExpressionArray cloned;
-    cloned.reserve_back(this->count());
+    cloned.reserve_exact(this->size());
     for (const std::unique_ptr<Expression>& expr : *this) {
         cloned.push_back(expr ? expr->clone() : nullptr);
     }

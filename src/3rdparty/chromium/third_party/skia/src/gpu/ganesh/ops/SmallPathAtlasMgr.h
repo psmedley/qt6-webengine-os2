@@ -8,14 +8,16 @@
 #ifndef SmallPathAtlasMgr_DEFINED
 #define SmallPathAtlasMgr_DEFINED
 
+#if !defined(SK_ENABLE_OPTIMIZE_SIZE)
+
+#include "src/base/SkTInternalLList.h"
 #include "src/core/SkTDynamicHash.h"
-#include "src/core/SkTInternalLList.h"
 #include "src/gpu/ganesh/GrDrawOpAtlas.h"
 #include "src/gpu/ganesh/GrOnFlushResourceProvider.h"
 
 class GrStyledShape;
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 class SmallPathShapeData;
 class SmallPathShapeDataKey;
@@ -47,11 +49,11 @@ public:
                                         int width, int height, const void* image,
                                         skgpu::AtlasLocator*);
 
-    void setUseToken(SmallPathShapeData*, skgpu::DrawToken);
+    void setUseToken(SmallPathShapeData*, skgpu::AtlasToken);
 
     // GrOnFlushCallbackObject overrides
     bool preFlush(GrOnFlushResourceProvider* onFlushRP) override {
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
         if (onFlushRP->failFlushTimeCallbacks()) {
             return false;
         }
@@ -63,7 +65,7 @@ public:
         return true;
     }
 
-    void postFlush(skgpu::DrawToken startTokenForNextFlush) override {
+    void postFlush(skgpu::AtlasToken startTokenForNextFlush) override {
         if (fAtlas) {
             fAtlas->compact(startTokenForNextFlush);
         }
@@ -93,6 +95,8 @@ private:
     ShapeDataList                  fShapeList;
 };
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh
+
+#endif // SK_ENABLE_OPTIMIZE_SIZE
 
 #endif // SmallPathAtlasMgr_DEFINED

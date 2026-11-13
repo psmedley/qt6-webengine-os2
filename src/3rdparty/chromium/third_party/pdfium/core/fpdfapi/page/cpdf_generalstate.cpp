@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,8 +71,7 @@ BlendMode GetBlendTypeInternal(const ByteString& mode) {
 
 CPDF_GeneralState::CPDF_GeneralState() = default;
 
-CPDF_GeneralState::CPDF_GeneralState(const CPDF_GeneralState& that)
-    : m_Ref(that.m_Ref) {}
+CPDF_GeneralState::CPDF_GeneralState(const CPDF_GeneralState& that) = default;
 
 CPDF_GeneralState::~CPDF_GeneralState() = default;
 
@@ -124,7 +123,9 @@ BlendMode CPDF_GeneralState::GetBlendType() const {
 }
 
 void CPDF_GeneralState::SetBlendType(BlendMode type) {
-  m_Ref.GetPrivateCopy()->m_BlendType = type;
+  if (GetBlendType() != type) {
+    m_Ref.GetPrivateCopy()->m_BlendType = type;
+  }
 }
 
 float CPDF_GeneralState::GetFillAlpha() const {
@@ -133,7 +134,9 @@ float CPDF_GeneralState::GetFillAlpha() const {
 }
 
 void CPDF_GeneralState::SetFillAlpha(float alpha) {
-  m_Ref.GetPrivateCopy()->m_FillAlpha = alpha;
+  if (GetFillAlpha() != alpha) {
+    m_Ref.GetPrivateCopy()->m_FillAlpha = alpha;
+  }
 }
 
 float CPDF_GeneralState::GetStrokeAlpha() const {
@@ -142,7 +145,9 @@ float CPDF_GeneralState::GetStrokeAlpha() const {
 }
 
 void CPDF_GeneralState::SetStrokeAlpha(float alpha) {
-  m_Ref.GetPrivateCopy()->m_StrokeAlpha = alpha;
+  if (GetStrokeAlpha() != alpha) {
+    m_Ref.GetPrivateCopy()->m_StrokeAlpha = alpha;
+  }
 }
 
 RetainPtr<const CPDF_Dictionary> CPDF_GeneralState::GetSoftMask() const {
@@ -261,6 +266,24 @@ void CPDF_GeneralState::SetMatrix(const CFX_Matrix& matrix) {
 
 CFX_Matrix* CPDF_GeneralState::GetMutableMatrix() {
   return &m_Ref.GetPrivateCopy()->m_Matrix;
+}
+
+void CPDF_GeneralState::SetGraphicsResourceNames(
+    std::vector<ByteString> names) {
+  m_Ref.GetPrivateCopy()->m_GraphicsResourceNames = std::move(names);
+}
+
+void CPDF_GeneralState::AppendGraphicsResourceName(ByteString name) {
+  m_Ref.GetPrivateCopy()->m_GraphicsResourceNames.push_back(std::move(name));
+}
+
+pdfium::span<const ByteString> CPDF_GeneralState::GetGraphicsResourceNames()
+    const {
+  const StateData* data = m_Ref.GetObject();
+  if (!data) {
+    return {};
+  }
+  return data->m_GraphicsResourceNames;
 }
 
 CPDF_GeneralState::StateData::StateData() = default;

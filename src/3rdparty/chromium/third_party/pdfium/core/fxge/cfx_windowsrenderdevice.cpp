@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "core/fxge/win32/cgdi_printer_driver.h"
 #include "core/fxge/win32/cps_printer_driver.h"
 #include "core/fxge/win32/ctext_only_printer_driver.h"
-#include "third_party/base/check_op.h"
 
 namespace {
 
@@ -54,9 +53,3 @@ CFX_WindowsRenderDevice::CFX_WindowsRenderDevice(
 }
 
 CFX_WindowsRenderDevice::~CFX_WindowsRenderDevice() = default;
-
-#if defined(_SKIA_SUPPORT_)
-void CFX_WindowsRenderDevice::DebugVerifyBitmapIsPreMultiplied() const {
-  DCHECK_EQ(GetDeviceCaps(FXDC_BITS_PIXEL), 32);
-}
-#endif

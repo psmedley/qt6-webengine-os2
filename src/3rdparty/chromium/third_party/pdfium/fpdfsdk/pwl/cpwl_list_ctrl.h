@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,9 @@ class CPWL_ListCtrl {
                                   float fSmallStep,
                                   float fBigStep) = 0;
     virtual void OnSetScrollPosY(float fy) = 0;
-    virtual void OnInvalidateRect(const CFX_FloatRect& rect) = 0;
+
+    // Returns true if `this` is still allocated.
+    [[nodiscard]] virtual bool OnInvalidateRect(const CFX_FloatRect& rect) = 0;
   };
 
   CPWL_ListCtrl();

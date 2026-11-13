@@ -9,7 +9,6 @@
 
 #include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/browser/gpu/gpu_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
@@ -25,6 +24,8 @@
 
 #include <QFont>
 #include <QTimer>
+
+using namespace Qt::StringLiterals;
 
 namespace QtWebEngineCore {
 
@@ -57,10 +58,27 @@ static inline bool isTouchEventsAPIEnabled() {
     return touchEventsAPIEnabled;
 }
 
+blink::mojom::ImageAnimationPolicy
+toBlinkImageAnimationPolicy(QWebEngineSettings::ImageAnimationPolicy policy)
+{
+    switch (policy) {
+    case QWebEngineSettings::ImageAnimationPolicy::Allow:
+        return blink::mojom::ImageAnimationPolicy::kImageAnimationPolicyAllowed;
+    case QWebEngineSettings::ImageAnimationPolicy::AnimateOnce:
+        return blink::mojom::ImageAnimationPolicy::kImageAnimationPolicyAnimateOnce;
+    case QWebEngineSettings::ImageAnimationPolicy::Disallow:
+        return blink::mojom::ImageAnimationPolicy::kImageAnimationPolicyNoAnimation;
+    case QWebEngineSettings::ImageAnimationPolicy::Inherited:
+        break;
+    }
+    return blink::mojom::ImageAnimationPolicy::kImageAnimationPolicyAllowed;
+}
+
 WebEngineSettings::WebEngineSettings(WebEngineSettings *_parentSettings)
     : m_adapter(nullptr)
     , parentSettings(_parentSettings)
     , m_unknownUrlSchemePolicy(QWebEngineSettings::InheritedUnknownUrlSchemePolicy)
+    , m_imageAnimationPolicy(QWebEngineSettings::ImageAnimationPolicy::Inherited)
 {
     if (parentSettings)
         parentSettings->childSettings.insert(this);
@@ -192,6 +210,24 @@ QString WebEngineSettings::defaultTextEncoding() const
 void WebEngineSettings::setUnknownUrlSchemePolicy(QWebEngineSettings::UnknownUrlSchemePolicy policy)
 {
     m_unknownUrlSchemePolicy = policy;
+    scheduleApplyRecursively();
+}
+
+void WebEngineSettings::setImageAnimationPolicy(QWebEngineSettings::ImageAnimationPolicy policy)
+{
+    m_imageAnimationPolicy = policy;
+    scheduleApplyRecursively();
+}
+
+QWebEngineSettings::ImageAnimationPolicy WebEngineSettings::imageAnimationPolicy() const
+{
+    if (m_imageAnimationPolicy != QWebEngineSettings::ImageAnimationPolicy::Inherited)
+        return m_imageAnimationPolicy;
+
+    if (parentSettings)
+        return parentSettings->imageAnimationPolicy();
+
+    return QWebEngineSettings::ImageAnimationPolicy::Allow;
 }
 
 QWebEngineSettings::UnknownUrlSchemePolicy WebEngineSettings::unknownUrlSchemePolicy() const
@@ -262,6 +298,11 @@ void WebEngineSettings::initDefaults()
         s_defaultAttributes.insert(QWebEngineSettings::PdfViewerEnabled, false);
 #endif
         s_defaultAttributes.insert(QWebEngineSettings::NavigateOnDropEnabled, true);
+        bool noReadingFromCanvas =
+                commandLine->HasSwitch(switches::kDisableReadingFromCanvas);
+        s_defaultAttributes.insert(QWebEngineSettings::ReadingFromCanvasEnabled, !noReadingFromCanvas);
+        bool forceDarkMode = commandLine->HasSwitch(switches::kForceDarkMode);
+        s_defaultAttributes.insert(QWebEngineSettings::ForceDarkMode, forceDarkMode);
     }
 
     if (s_defaultFontFamilies.isEmpty()) {
@@ -294,8 +335,9 @@ void WebEngineSettings::initDefaults()
         s_defaultFontSizes.insert(QWebEngineSettings::DefaultFontSize, 16);
     }
 
-    m_defaultEncoding = QStringLiteral("ISO-8859-1");
+    m_defaultEncoding = u"ISO-8859-1"_s;
     m_unknownUrlSchemePolicy = QWebEngineSettings::InheritedUnknownUrlSchemePolicy;
+    m_imageAnimationPolicy = QWebEngineSettings::ImageAnimationPolicy::Inherited;
 }
 
 void WebEngineSettings::scheduleApply()
@@ -321,6 +363,9 @@ void WebEngineSettings::doApply()
 
 void WebEngineSettings::applySettingsToWebPreferences(blink::web_pref::WebPreferences *prefs)
 {
+    // Not supported
+    prefs->picture_in_picture_enabled = false;
+
     // Override for now
     prefs->touch_event_feature_detection_enabled = isTouchEventsAPIEnabled();
 #if !QT_CONFIG(webengine_embedded_build)
@@ -355,6 +400,7 @@ void WebEngineSettings::applySettingsToWebPreferences(blink::web_pref::WebPrefer
     prefs->fullscreen_supported = testAttribute(QWebEngineSettings::FullScreenSupportEnabled);
     prefs->accelerated_2d_canvas_enabled =
             testAttribute(QWebEngineSettings::Accelerated2dCanvasEnabled);
+    prefs->force_dark_mode_enabled = testAttribute(QWebEngineSettings::ForceDarkMode);
     prefs->webgl1_enabled = prefs->webgl2_enabled = testAttribute(QWebEngineSettings::WebGLEnabled);
     prefs->should_print_backgrounds = testAttribute(QWebEngineSettings::PrintElementBackgrounds);
     prefs->allow_running_insecure_content =
@@ -369,7 +415,8 @@ void WebEngineSettings::applySettingsToWebPreferences(blink::web_pref::WebPrefer
     }
     prefs->dom_paste_enabled = testAttribute(QWebEngineSettings::JavascriptCanPaste);
     prefs->dns_prefetching_enabled = testAttribute(QWebEngineSettings::DnsPrefetchEnabled);
-    prefs->navigate_on_drag_drop = testAttribute(QWebEngineSettings::NavigateOnDropEnabled);
+    prefs->disable_reading_from_canvas = !testAttribute(QWebEngineSettings::ReadingFromCanvasEnabled);
+    prefs->animation_policy = toBlinkImageAnimationPolicy(imageAnimationPolicy());
 
     // Fonts settings.
     prefs->standard_font_family_map[blink::web_pref::kCommonScript] =

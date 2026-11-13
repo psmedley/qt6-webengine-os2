@@ -1,5 +1,6 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef PROXYING_RESTRICTED_COOKIE_MANAGER_QT_H
 #define PROXYING_RESTRICTED_COOKIE_MANAGER_QT_H
@@ -27,36 +28,41 @@ public:
     void GetAllForUrl(const GURL &url,
                       const net::SiteForCookies &site_for_cookies,
                       const url::Origin &top_frame_origin,
+                      bool has_storage_access,
                       network::mojom::CookieManagerGetOptionsPtr options,
-                      bool partitioned_cookies_runtime_feature_enabled,
+                      bool is_ad_tagged,
                       GetAllForUrlCallback callback) override;
+
     void SetCanonicalCookie(const net::CanonicalCookie& cookie,
                             const GURL &url,
                             const net::SiteForCookies &site_for_cookies,
                             const url::Origin &top_frame_origin,
+                            bool has_storage_access,
                             net::CookieInclusionStatus status,
                             SetCanonicalCookieCallback callback) override;
     void AddChangeListener(const GURL &url,
                            const net::SiteForCookies &site_for_cookies,
                            const url::Origin &top_frame_origin,
+                           bool has_storage_access,
                            mojo::PendingRemote<network::mojom::CookieChangeListener> listener,
                            AddChangeListenerCallback callback) override;
     void SetCookieFromString(const GURL &url,
                              const net::SiteForCookies &site_for_cookies,
                              const url::Origin &top_frame_origin,
+                             bool has_storage_access,
                              const std::string &cookie,
-                             bool partitioned_cookies_runtime_feature_enabled,
                              SetCookieFromStringCallback callback) override;
     void GetCookiesString(const GURL &url,
                           const net::SiteForCookies &site_for_cookies,
                           const url::Origin &top_frame_origin,
-                          bool partitioned_cookies_runtime_feature_enabled,
+                          bool has_storage_access, bool get_version_shared_memory,
+                          bool is_ad_tagged,
                           GetCookiesStringCallback callback) override;
     void CookiesEnabledFor(const GURL &url,
                            const net::SiteForCookies &site_for_cookies,
                            const url::Origin &top_frame_origin,
+                           bool has_storage_access,
                            CookiesEnabledForCallback callback) override;
-    void ConvertPartitionedCookiesToUnpartitioned(const GURL&) override;
 
     // Internal:
     bool allowCookies(const GURL &url, const net::SiteForCookies &site_for_cookies) const;

@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_API_TAB_CAPTURE_TAB_CAPTURE_PERFORMANCE_TEST_BASE_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,7 +16,6 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/test/trace_event_analyzer.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class CommandLine;
@@ -137,7 +137,7 @@ class TabCapturePerformanceTestBase : public InProcessBrowserTest {
   // that would also preempt BEST_EFFORT tasks in utility processes, and
   // TabCapturePerformanceTest.Performance relies on BEST_EFFORT tasks in
   // utility process for tracing.
-  absl::optional<base::ThreadPoolInstance::ScopedBestEffortExecutionFence>
+  std::optional<base::ThreadPoolInstance::ScopedBestEffortExecutionFence>
       best_effort_fence_;
 
   bool is_full_performance_run_ = false;
@@ -151,7 +151,7 @@ class TabCapturePerformanceTestBase : public InProcessBrowserTest {
   std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
       const net::test_server::HttpRequest& request);
 
-  raw_ptr<const extensions::Extension> extension_ = nullptr;
+  raw_ptr<const extensions::Extension, DanglingUntriaged> extension_ = nullptr;
 
   // Manages the Audio Service feature set, enabled for these performance tests.
   base::test::ScopedFeatureList feature_list_;

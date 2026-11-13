@@ -56,7 +56,7 @@
    * To kick off a try job, use the 'CQ Dry Run' button, or set the Commit-Queue +1 label to trigger
      a dry run of the CQ (will not land the change).
    * If you are not part of the `angle-committers` group, you will need to either ask to be added or
-     ask a member of the group to submit the tryjob for you. Add jmadill or geofflang as a reviewer
+     ask a member of the group to submit the tryjob for you. Add syoussefi or geofflang as a reviewer
      for assistance.
    * Wait for the bots to report the result on the code review page. The bot results should be
      visible in Gerrit as yellow (in-progress), green (passed), or red (failed). This can take up to
@@ -119,7 +119,7 @@
 
 ### <a name="getting-started-with-gerrit"></a>Getting started with Gerrit for ANGLE
 
-1. Go to [https://chromium-review.googlesource.com/new-password][CR-passwd]
+1. Go to [https://chromium.googlesource.com/new-password][CR-passwd]
 2. Log in with the email you use for your git commits.
 3. Follow the directions on the new-password page to set up authentication with your Google account.
 4. Make sure to set your real name.
@@ -136,7 +136,7 @@
    * *BE AWARE:* Some patch management tools, such as StGit, currently bypass git hooks. They should
      not currently be used with changes intended for review.
 
-[CR-passwd]: https://chromium-review.googlesource.com/new-password
+[CR-passwd]: https://chromium.googlesource.com/new-password
 [CR-settings]: https://chromium-review.googlesource.com/#/settings
 [commit-msg-hook]: https://chromium-review.googlesource.com/tools/hooks/commit-msg
 

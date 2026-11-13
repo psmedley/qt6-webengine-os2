@@ -23,22 +23,4 @@ bool VulkanImage::InitializeFromGpuMemoryBufferHandle(
   return false;
 }
 
-base::win::ScopedHandle VulkanImage::GetMemoryHandle(
-    VkExternalMemoryHandleTypeFlagBits handle_type) {
-  VkMemoryGetWin32HandleInfoKHR get_handle_info = {VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR};
-  get_handle_info.memory = device_memory_;
-  get_handle_info.handleType = handle_type;
-
-  VkDevice device = device_queue_->GetVulkanDevice();
-
-  HANDLE handle = nullptr;
-  vkGetMemoryWin32HandleKHR(device, &get_handle_info, &handle);
-  if (handle == nullptr) {
-    DLOG(ERROR) << "Unable to extract file handle out of external VkImage";
-    return base::win::ScopedHandle();
-  }
-
-  return base::win::ScopedHandle(handle);
-}
-
 }  // namespace gpu

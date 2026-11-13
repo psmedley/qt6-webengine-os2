@@ -9,18 +9,19 @@
 #include <vector>
 
 #include "base/auto_reset.h"
-#include "base/bind.h"
 #include "base/check_op.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/task/delay_policy.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/base/devtools_instrumentation.h"
+#include "cc/base/features.h"
 #include "cc/metrics/begin_main_frame_metrics.h"
 #include "cc/metrics/compositor_frame_reporting_controller.h"
 #include "cc/metrics/compositor_timing_history.h"
-#include "components/power_scheduler/power_mode_arbiter.h"
 #include "components/viz/common/frame_sinks/delay_based_time_source.h"
 #include "services/tracing/public/cpp/perfetto/macros.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_compositor_scheduler_state.pbzero.h"
@@ -31,6 +32,22 @@ namespace {
 // This is a fudge factor we subtract from the deadline to account
 // for message latency and kernel scheduling variability.
 const base::TimeDelta kDeadlineFudgeFactor = base::Microseconds(1000);
+
+// This adjustment is applied by multiplying with the previous, begin-main-frame
+// to activate threshold. For example, if we want to consider a page fast if it
+// it takes half the threshold, we would return 0.5. Naturally, this function
+// will return values in the range [0, 1].
+double FastMainThreadThresholdAdjustment() {
+  if (base::FeatureList::IsEnabled(features::kAdjustFastMainThreadThreshold)) {
+    double result = base::GetFieldTrialParamByFeatureAsDouble(
+        features::kAdjustFastMainThreadThreshold, "Scalar", -1.0);
+    if (result >= 0.0 && result <= 1.0) {
+      return result;
+    }
+  }
+  return 1.0;
+}
+
 }  // namespace
 
 Scheduler::Scheduler(
@@ -39,8 +56,7 @@ Scheduler::Scheduler(
     int layer_tree_host_id,
     base::SingleThreadTaskRunner* task_runner,
     std::unique_ptr<CompositorTimingHistory> compositor_timing_history,
-    CompositorFrameReportingController* compositor_frame_reporting_controller,
-    power_scheduler::PowerModeArbiter* power_mode_arbiter)
+    CompositorFrameReportingController* compositor_frame_reporting_controller)
     : settings_(settings),
       client_(client),
       layer_tree_host_id_(layer_tree_host_id),
@@ -49,9 +65,7 @@ Scheduler::Scheduler(
       compositor_frame_reporting_controller_(
           compositor_frame_reporting_controller),
       begin_impl_frame_tracker_(FROM_HERE),
-      state_machine_(settings),
-      power_mode_voter_(
-          power_mode_arbiter->NewVoter("PowerModeVoter.MainThreadAnimation")) {
+      state_machine_(settings) {
   TRACE_EVENT1("cc", "Scheduler::Scheduler", "settings", settings_.AsValue());
   DCHECK(client_);
   DCHECK(!state_machine_.BeginFrameNeeded());
@@ -167,20 +181,6 @@ void Scheduler::DidSubmitCompositorFrame(uint32_t frame_token,
                                          base::TimeTicks submit_time,
                                          EventMetricsSet events_metrics,
                                          bool has_missing_content) {
-  // Timedelta used from begin impl frame to submit frame.
-  const auto cc_begin_impl_to_submit_ = Now() - cc_frame_start_;
-  if (cc_frame_time_available_ >= cc_begin_impl_to_submit_) {
-    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-        "Scheduling.Renderer.FrameProduction.TimeUnused",
-        cc_frame_time_available_ - cc_begin_impl_to_submit_,
-        base::Microseconds(1), base::Milliseconds(50), 50);
-  } else {
-    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-        "Scheduling.Renderer.FrameProduction.TimeOverused",
-        cc_begin_impl_to_submit_ - cc_frame_time_available_,
-        base::Microseconds(1), base::Milliseconds(50), 50);
-  }
-
   // Hardware and software draw may occur at the same frame simultaneously for
   // Android WebView. There is no need to call DidSubmitCompositorFrame here for
   // software draw.
@@ -534,8 +534,10 @@ void Scheduler::BeginImplFrameWithDeadline(const viz::BeginFrameArgs& args) {
   base::TimeDelta bmf_to_activate_estimate_critical =
       compositor_timing_history_
           ->BeginMainFrameQueueToActivateCriticalEstimate();
+  base::TimeDelta fast_main_thread_threshold =
+      bmf_to_activate_threshold * FastMainThreadThresholdAdjustment();
   state_machine_.SetCriticalBeginMainFrameToActivateIsFast(
-      bmf_to_activate_estimate_critical < bmf_to_activate_threshold);
+      bmf_to_activate_estimate_critical < fast_main_thread_threshold);
 
   // Update the BeginMainFrame args now that we know whether the main
   // thread will be on the critical path or not.
@@ -678,9 +680,6 @@ void Scheduler::BeginImplFrame(const viz::BeginFrameArgs& args,
             SchedulerStateMachine::BeginImplFrameState::IDLE);
   DCHECK(!begin_impl_frame_deadline_timer_.IsRunning());
   DCHECK(state_machine_.HasInitializedLayerTreeFrameSink());
-  cc_frame_time_available_ = args.interval - kDeadlineFudgeFactor -
-                             compositor_timing_history_->DrawDurationEstimate();
-  cc_frame_start_ = now;
 
   {
     DCHECK(!inside_scheduled_action_);
@@ -738,7 +737,9 @@ void Scheduler::ScheduleBeginImplFrameDeadline() {
       // Send early DidNotProduceFrame if we don't expect to produce a frame
       // soon so that display scheduler doesn't wait unnecessarily.
       // Note: This will only send one DidNotProduceFrame ack per begin frame.
-      if (!state_machine_.NewActiveTreeLikely()) {
+      if (!base::FeatureList::IsEnabled(
+              features::kResetTimerWhenNoActiveTreeLikely) &&
+          !state_machine_.NewActiveTreeLikely()) {
         SendDidNotProduceFrame(begin_impl_frame_tracker_.Current(),
                                FrameSkippedReason::kNoDamage);
       }
@@ -775,7 +776,7 @@ void Scheduler::ScheduleBeginImplFrameDeadline() {
         FROM_HERE, deadline_,
         base::BindOnce(&Scheduler::OnBeginImplFrameDeadline,
                        base::Unretained(this)),
-        base::ExactDeadline(true));
+        base::subtle::DelayPolicy::kPrecise);
   }
 }
 
@@ -819,15 +820,11 @@ void Scheduler::FinishImplFrameSynchronous() {
 void Scheduler::DrawIfPossible() {
   DCHECK(!inside_scheduled_action_);
   base::AutoReset<bool> mark_inside(&inside_scheduled_action_, true);
-  bool drawing_with_new_active_tree =
-      state_machine_.active_tree_needs_first_draw() &&
-      !state_machine_.previous_pending_tree_was_impl_side();
   compositor_timing_history_->WillDraw();
   state_machine_.WillDraw();
   DrawResult result = client_->ScheduledActionDrawIfPossible();
   state_machine_.DidDraw(result);
-  compositor_timing_history_->DidDraw(drawing_with_new_active_tree,
-                                      client_->HasInvalidationAnimation());
+  compositor_timing_history_->DidDraw();
 }
 
 void Scheduler::DrawForced() {
@@ -847,8 +844,7 @@ void Scheduler::DrawForced() {
   state_machine_.WillDraw();
   DrawResult result = client_->ScheduledActionDrawForced();
   state_machine_.DidDraw(result);
-  compositor_timing_history_->DidDraw(drawing_with_new_active_tree,
-                                      client_->HasInvalidationAnimation());
+  compositor_timing_history_->DidDraw();
 }
 
 void Scheduler::SetDeferBeginMainFrame(bool defer_begin_main_frame) {
@@ -978,7 +974,6 @@ void Scheduler::ProcessScheduledActions() {
 
   PostPendingBeginFrameTask();
   StartOrStopBeginFrames();
-  UpdatePowerModeVote();
 }
 
 void Scheduler::AsProtozeroInto(
@@ -1040,36 +1035,6 @@ void Scheduler::ClearHistory() {
   // Ensure we reset decisions based on history from the previous navigation.
   compositor_timing_history_->ClearHistory();
   ProcessScheduledActions();
-}
-
-void Scheduler::UpdatePowerModeVote() {
-  // After three aborted BeginMainFrames, consider the main thread's involvement
-  // in frame production unimportant. PowerMode detection for compositor-driven
-  // animation or no-op animation relies on the voter in the frame sink in this
-  // case.
-  constexpr int kMaxAbortedBeginMainFrames = 2;
-
-  bool main_thread_animation =
-      observing_begin_frame_source_ &&
-      (state_machine_.needs_begin_main_frame() ||
-       state_machine_.CommitPending() || state_machine_.has_pending_tree()) &&
-      state_machine_.aborted_begin_main_frame_count() <=
-          kMaxAbortedBeginMainFrames;
-
-  power_scheduler::PowerMode vote =
-      main_thread_animation ? power_scheduler::PowerMode::kMainThreadAnimation
-                            : power_scheduler::PowerMode::kIdle;
-
-  if (last_power_mode_vote_ == vote)
-    return;
-
-  last_power_mode_vote_ = vote;
-  if (vote == power_scheduler::PowerMode::kIdle) {
-    power_mode_voter_->ResetVoteAfterTimeout(
-        power_scheduler::PowerModeVoter::kAnimationTimeout);
-  } else {
-    power_mode_voter_->VoteFor(vote);
-  }
 }
 
 }  // namespace cc

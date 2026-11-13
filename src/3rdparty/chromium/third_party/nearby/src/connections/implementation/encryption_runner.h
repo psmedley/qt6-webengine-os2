@@ -18,6 +18,7 @@
 #include <string>
 
 #include "securegcm/ukey2_handshake.h"
+#include "absl/functional/any_invocable.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/listeners.h"
@@ -25,7 +26,6 @@
 #include "internal/platform/scheduled_executor.h"
 #include "internal/platform/single_thread_executor.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -40,15 +40,20 @@ class EncryptionRunner {
   ~EncryptionRunner();
 
   struct ResultListener {
+    void CallSuccessCallback(const std::string& endpoint_id,
+                             std::unique_ptr<securegcm::UKey2Handshake> ukey2,
+                             const std::string& auth_token,
+                             const ByteArray& raw_auth_token);
+    void CallFailureCallback(const std::string& endpoint_id,
+                             EndpointChannel* channel);
+    void Reset();
+
     // @EncryptionRunnerThread
-    std::function<void(const std::string& endpoint_id,
-                       std::unique_ptr<securegcm::UKey2Handshake> ukey2,
-                       const std::string& auth_token,
-                       const ByteArray& raw_auth_token)>
-        on_success_cb =
-            DefaultCallback<const std::string&,
-                            std::unique_ptr<securegcm::UKey2Handshake>,
-                            const std::string&, const ByteArray&>();
+    absl::AnyInvocable<void(const std::string& endpoint_id,
+                            std::unique_ptr<securegcm::UKey2Handshake> ukey2,
+                            const std::string& auth_token,
+                            const ByteArray& raw_auth_token) &&>
+        on_success_cb;
 
     // Encryption has failed. The remote_endpoint_id and channel are given so
     // that any pending state can be cleaned up.
@@ -59,19 +64,19 @@ class EncryptionRunner {
     // channel to the same endpoint.
     //
     // @EncryptionRunnerThread
-    std::function<void(const std::string& endpoint_id,
-                       EndpointChannel* channel)>
-        on_failure_cb = DefaultCallback<const std::string&, EndpointChannel*>();
+    absl::AnyInvocable<void(const std::string& endpoint_id,
+                            EndpointChannel* channel) &&>
+        on_failure_cb;
   };
 
   // @AnyThread
   void StartServer(ClientProxy* client, const std::string& endpoint_id,
                    EndpointChannel* endpoint_channel,
-                   ResultListener&& result_listener);
+                   ResultListener result_listener);
   // @AnyThread
   void StartClient(ClientProxy* client, const std::string& endpoint_id,
                    EndpointChannel* endpoint_channel,
-                   ResultListener&& result_listener);
+                   ResultListener result_listener);
 
  private:
   ScheduledExecutor alarm_executor_;
@@ -81,6 +86,5 @@ class EncryptionRunner {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_ENCRYPTION_RUNNER_H_

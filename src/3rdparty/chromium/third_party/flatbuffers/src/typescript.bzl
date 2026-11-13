@@ -2,9 +2,8 @@
 Rules for building typescript flatbuffers with Bazel.
 """
 
-load("@build_bazel_rules_nodejs//:index.bzl", "js_library")
-load("@npm//@bazel/typescript:index.bzl", "ts_project")
-load(":build_defs.bzl", "DEFAULT_INCLUDE_PATHS", "flatbuffer_library_public")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load(":build_defs.bzl", "flatbuffer_library_public")
 
 DEFAULT_FLATC_TS_ARGS = [
     "--gen-object-api",
@@ -21,11 +20,11 @@ def flatbuffer_ts_library(
         compatible_with = None,
         target_compatible_with = None,
         deps = [],
-        include_paths = DEFAULT_INCLUDE_PATHS,
+        include_paths = None,
         flatc_args = DEFAULT_FLATC_TS_ARGS,
         visibility = None,
         restricted_to = None,
-        include_reflection = True):
+        gen_reflections = False):
     """Generates a ts_library rule for a given flatbuffer definition.
 
     Args:
@@ -44,13 +43,18 @@ def flatbuffer_ts_library(
         for, instead of default-supported environments.
       target_compatible_with: Optional, The list of target platform constraints
         to use.
-      include_reflection: Optional, Whether to depend on the flatbuffer
-        reflection library automatically. Only really relevant for the
-        target that builds the reflection library itself.
+      gen_reflections: Optional, if true this will generate the flatbuffer
+        reflection binaries for the schemas.
     """
     srcs_lib = "%s_srcs" % (name)
-    outs = ["%s_generated.ts" % (s.replace(".fbs", "").split("/")[-1]) for s in srcs]
+    out_base = [s.replace(".fbs", "").split("/")[-1].split(":")[-1] for s in srcs]
+
+    if len(srcs) != 1:
+        fail("flatbuffer_ts_library only supports one .fbs file per target currently.")
+
+    outs = ["%s_generated.cjs" % s for s in out_base]
     includes = [d + "_includes" for d in deps]
+    reflection_name = "%s_reflection" % name if gen_reflections else ""
     flatbuffer_library_public(
         name = srcs_lib,
         srcs = srcs,
@@ -58,34 +62,16 @@ def flatbuffer_ts_library(
         language_flag = "--ts",
         includes = includes,
         include_paths = include_paths,
-        flatc_args = flatc_args,
+        extra_env = "ESBUILD_BIN=$(ESBUILD_BIN)",
+        flatc_args = flatc_args + ["--filename-suffix _generated"],
         compatible_with = compatible_with,
         restricted_to = restricted_to,
+        reflection_name = reflection_name,
+        reflection_visibility = visibility,
         target_compatible_with = target_compatible_with,
-    )
-    ts_project(
-        name = name + "_ts",
-        srcs = outs,
-        declaration = True,
-        visibility = visibility,
-        compatible_with = compatible_with,
-        restricted_to = restricted_to,
-        target_compatible_with = target_compatible_with,
-        tsconfig = {
-            "compilerOptions": {
-                "declaration": True,
-                "lib": [
-                    "ES2015",
-                    "ES2020.BigInt",
-                    "DOM",
-                ],
-                "module": "commonjs",
-                "moduleResolution": "node",
-                "strict": True,
-                "types": ["node"],
-            },
-        },
-        deps = deps + ["//ts:flatbuffers"] + (["//reflection:reflection_ts_fbs"] if include_reflection else []),
+        flatc_path = "@com_github_google_flatbuffers//ts:compile_flat_file",
+        toolchains = ["@aspect_rules_esbuild//esbuild:resolved_toolchain"],
+        tools = ["@aspect_rules_esbuild//esbuild:resolved_toolchain"],
     )
     js_library(
         name = name,
@@ -93,7 +79,7 @@ def flatbuffer_ts_library(
         compatible_with = compatible_with,
         restricted_to = restricted_to,
         target_compatible_with = target_compatible_with,
-        deps = [name + "_ts"],
+        srcs = outs,
     )
     native.filegroup(
         name = "%s_includes" % (name),

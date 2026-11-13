@@ -23,10 +23,6 @@
 #include "src/trap-handler/trap-handler.h"
 #endif  // V8_ENABLE_WEBASSEMBLY
 
-namespace v8::internal::wasm {
-class AssemblerBufferCache;
-}
-
 namespace v8::internal::compiler {
 
 // Forward declarations.
@@ -146,14 +142,16 @@ struct TurbolizerInstructionStartInfo {
 // Generates native code for a sequence of instructions.
 class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
  public:
-  explicit CodeGenerator(
-      Zone* codegen_zone, Frame* frame, Linkage* linkage,
-      InstructionSequence* instructions, OptimizedCompilationInfo* info,
-      Isolate* isolate, base::Optional<OsrHelper> osr_helper,
-      int start_source_position, JumpOptimizationInfo* jump_opt,
-      const AssemblerOptions& options, wasm::AssemblerBufferCache* buffer_cache,
-      Builtin builtin, size_t max_unoptimized_frame_height,
-      size_t max_pushed_argument_count, const char* debug_name = nullptr);
+  explicit CodeGenerator(Zone* codegen_zone, Frame* frame, Linkage* linkage,
+                         InstructionSequence* instructions,
+                         OptimizedCompilationInfo* info, Isolate* isolate,
+                         base::Optional<OsrHelper> osr_helper,
+                         int start_source_position,
+                         JumpOptimizationInfo* jump_opt,
+                         const AssemblerOptions& options, Builtin builtin,
+                         size_t max_unoptimized_frame_height,
+                         size_t max_pushed_argument_count,
+                         const char* debug_name = nullptr);
 
   // Generate native code. After calling AssembleCode, call FinalizeCode to
   // produce the actual code object. If an error occurs during either phase,
@@ -161,8 +159,8 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
   void AssembleCode();  // Does not need to run on main thread.
   MaybeHandle<Code> FinalizeCode();
 
-  base::OwnedVector<byte> GetSourcePositionTable();
-  base::OwnedVector<byte> GetProtectedInstructionsData();
+  base::OwnedVector<uint8_t> GetSourcePositionTable();
+  base::OwnedVector<uint8_t> GetProtectedInstructionsData();
 
   InstructionSequence* instructions() const { return instructions_; }
   FrameAccessState* frame_access_state() const { return frame_access_state_; }
@@ -172,10 +170,7 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
 
   Label* GetLabel(RpoNumber rpo) { return &labels_[rpo.ToSize()]; }
 
-  void AddProtectedInstructionLanding(uint32_t instr_offset,
-                                      uint32_t landing_offset);
-
-  bool wasm_runtime_exception_support() const;
+  void RecordProtectedInstruction(uint32_t instr_offset);
 
   SourcePosition start_source_position() const {
     return start_source_position_;
@@ -184,11 +179,13 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
   void AssembleSourcePosition(Instruction* instr);
   void AssembleSourcePosition(SourcePosition source_position);
 
-  // Record a safepoint with the given pointer map.
-  void RecordSafepoint(ReferenceMap* references);
+  // Record a safepoint with the given pointer map. When pc_offset is 0, then
+  // the current pc is used to define the safepoint. Otherwise the provided
+  // pc_offset is used.
+  void RecordSafepoint(ReferenceMap* references, int pc_offset = 0);
 
   Zone* zone() const { return zone_; }
-  TurboAssembler* tasm() { return &tasm_; }
+  MacroAssembler* masm() { return &masm_; }
   SafepointTableBuilder* safepoint_table_builder() { return &safepoints_; }
   size_t handler_table_offset() const { return handler_table_offset_; }
 
@@ -200,6 +197,10 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
   const TurbolizerCodeOffsetsInfo& offsets_info() const {
     return offsets_info_;
   }
+
+#if V8_ENABLE_WEBASSEMBLY
+  bool IsWasm() const { return info()->IsWasm(); }
+#endif
 
   static constexpr int kBinarySearchSwitchMinimalCases = 4;
 
@@ -261,6 +262,11 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
 
   CodeGenResult AssembleDeoptimizerCall(DeoptimizationExit* exit);
 
+  DeoptimizationExit* BuildTranslation(Instruction* instr, int pc_offset,
+                                       size_t frame_state_offset,
+                                       size_t immediate_args_count,
+                                       OutputFrameStateCombine state_combine);
+
   // ===========================================================================
   // ============= Architecture-specific code generation methods. ==============
   // ===========================================================================
@@ -278,9 +284,15 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
 #if V8_ENABLE_WEBASSEMBLY
   void AssembleArchTrap(Instruction* instr, FlagsCondition condition);
 #endif  // V8_ENABLE_WEBASSEMBLY
+#if V8_TARGET_ARCH_X64
+  void AssembleArchBinarySearchSwitchRange(
+      Register input, RpoNumber def_block, std::pair<int32_t, Label*>* begin,
+      std::pair<int32_t, Label*>* end, base::Optional<int32_t>& last_cmp_value);
+#else
   void AssembleArchBinarySearchSwitchRange(Register input, RpoNumber def_block,
                                            std::pair<int32_t, Label*>* begin,
                                            std::pair<int32_t, Label*>* end);
+#endif  // V8_TARGET_ARCH_X64
   void AssembleArchBinarySearchSwitch(Instruction* instr);
   void AssembleArchTableSwitch(Instruction* instr);
 
@@ -375,7 +387,11 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
                     InstructionOperand* destination) final;
   void AssembleSwap(InstructionOperand* source,
                     InstructionOperand* destination) final;
-  void MoveToTempLocation(InstructionOperand* src) final;
+  AllocatedOperand Push(InstructionOperand* src) final;
+  void Pop(InstructionOperand* src, MachineRepresentation rep) final;
+  void PopTempStackSlots() final;
+  void MoveToTempLocation(InstructionOperand* src,
+                          MachineRepresentation rep) final;
   void MoveTempLocationTo(InstructionOperand* dst,
                           MachineRepresentation rep) final;
   void SetPendingMove(MoveOperands* move) final;
@@ -401,10 +417,7 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
   int DefineDeoptimizationLiteral(DeoptimizationLiteral literal);
   DeoptimizationEntry const& GetDeoptimizationEntry(Instruction* instr,
                                                     size_t frame_state_offset);
-  DeoptimizationExit* BuildTranslation(Instruction* instr, int pc_offset,
-                                       size_t frame_state_offset,
-                                       size_t immediate_args_count,
-                                       OutputFrameStateCombine state_combine);
+
   void BuildTranslationForFrameStateDescriptor(
       FrameStateDescriptor* descriptor, InstructionOperandIterator* iter,
       OutputFrameStateCombine state_combine);
@@ -415,7 +428,6 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
                                              InstructionOperandIterator* iter);
   void AddTranslationForOperand(Instruction* instr, InstructionOperand* op,
                                 MachineType type);
-  void MarkLazyDeoptSite();
 
   void PrepareForDeoptimizationExits(ZoneDeque<DeoptimizationExit*>* exits);
   DeoptimizationExit* AddDeoptimizationExit(Instruction* instr,
@@ -444,7 +456,7 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
   RpoNumber current_block_;
   SourcePosition start_source_position_;
   SourcePosition current_source_position_;
-  TurboAssembler tasm_;
+  MacroAssembler masm_;
   GapResolver resolver_;
   SafepointTableBuilder safepoints_;
   ZoneVector<HandlerInfo> handlers_;
@@ -455,16 +467,15 @@ class V8_EXPORT_PRIVATE CodeGenerator final : public GapResolver::Assembler {
   ZoneDeque<DeoptimizationExit*> deoptimization_exits_;
   ZoneDeque<DeoptimizationLiteral> deoptimization_literals_;
   size_t inlined_function_count_ = 0;
-  TranslationArrayBuilder translations_;
+  FrameTranslationBuilder translations_;
   int handler_table_offset_ = 0;
-  int last_lazy_deopt_pc_ = 0;
 
   // Deoptimization exits must be as small as possible, since their count grows
   // with function size. {jump_deoptimization_entry_labels_} is an optimization
   // to that effect, which extracts the (potentially large) instruction
   // sequence for the final jump to the deoptimization entry into a single spot
-  // per Code object. All deopt exits can then near-call to this label. Note:
-  // not used on all architectures.
+  // per InstructionStream object. All deopt exits can then near-call to this
+  // label. Note: not used on all architectures.
   Label jump_deoptimization_entry_labels_[kDeoptimizeKindCount];
 
   // The maximal combined height of all frames produced upon deoptimization, and

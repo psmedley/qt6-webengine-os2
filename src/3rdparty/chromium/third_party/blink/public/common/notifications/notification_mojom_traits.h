@@ -68,7 +68,7 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::NotificationDataDataView,
   }
 
   static double timestamp(const blink::PlatformNotificationData& data) {
-    return data.timestamp.ToJsTime();
+    return data.timestamp.InMillisecondsFSinceUnixEpoch();
   }
 
   static bool renotify(const blink::PlatformNotificationData& data) {
@@ -86,8 +86,7 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::NotificationDataDataView,
   static const base::span<const uint8_t> data(
       const blink::PlatformNotificationData& data) {
     // TODO(https://crbug.com/798466): Align data types to avoid this cast.
-    return base::make_span(reinterpret_cast<const uint8_t*>(data.data.data()),
-                           data.data.size());
+    return base::as_byte_span(data.data);
   }
 
   static const std::vector<blink::mojom::NotificationActionPtr>& actions(
@@ -98,6 +97,11 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::NotificationDataDataView,
   static absl::optional<base::Time> show_trigger_timestamp(
       const blink::PlatformNotificationData& data) {
     return data.show_trigger_timestamp;
+  }
+
+  static blink::mojom::NotificationScenario scenario(
+      const blink::PlatformNotificationData& data) {
+    return data.scenario;
   }
 
   static bool Read(blink::mojom::NotificationDataDataView notification_data,

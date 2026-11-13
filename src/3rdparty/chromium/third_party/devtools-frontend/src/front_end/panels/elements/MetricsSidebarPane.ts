@@ -34,6 +34,7 @@ import * as Common from '../../core/common/common.js';
 import * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import {ElementsSidebarPane} from './ElementsSidebarPane.js';
 import metricsSidebarPaneStyles from './metricsSidebarPane.css.js';
@@ -58,9 +59,10 @@ export class MetricsSidebarPane extends ElementsSidebarPane {
     this.inlineStyle = null;
     this.highlightMode = '';
     this.boxElements = [];
+    this.contentElement.setAttribute('jslog', `${VisualLogging.pane().context('styles-metrics')}`);
   }
 
-  doUpdate(): Promise<void> {
+  override doUpdate(): Promise<void> {
     // "style" attribute might have changed. Update metrics unless they are being edited
     // (if a CSS property is added, a StyleSheetChanged event is dispatched).
     if (this.isEditingMetrics) {
@@ -182,6 +184,8 @@ export class MetricsSidebarPane extends ElementsSidebarPane {
       value = Platform.NumberUtilities.toFixedIfFloating(value);
 
       element.textContent = value;
+      element.setAttribute(
+          'jslog', `${VisualLogging.value().track({dblclick: true}).context('element-value-modification')}`);
       element.addEventListener('dblclick', this.startEditing.bind(this, element, name, propertyName, style), false);
       return element;
     }
@@ -250,7 +254,7 @@ export class MetricsSidebarPane extends ElementsSidebarPane {
       Common.Color.PageHighlight.Padding,
       Common.Color.PageHighlight.Border,
       Common.Color.PageHighlight.Margin,
-      Common.Color.Color.fromRGBA([0, 0, 0, 0]),
+      Common.Color.Legacy.fromRGBA([0, 0, 0, 0]),
     ];
     const boxLabels = ['content', 'padding', 'border', 'margin', 'position'];
     let previousBox: HTMLDivElement|null = null;
@@ -276,6 +280,7 @@ export class MetricsSidebarPane extends ElementsSidebarPane {
       boxElement.className = `${name} highlighted`;
       const backgroundColor = boxColors[i].asString(Common.Color.Format.RGBA) || '';
       boxElement.style.backgroundColor = backgroundColor;
+      boxElement.setAttribute('jslog', `${VisualLogging.metricsBox().context(name).track({hover: true})}`);
       boxElement.addEventListener(
           'mouseover', this.highlightDOMNode.bind(this, true, name === 'position' ? 'all' : name), false);
       this.boxElements.push({element: boxElement, name, backgroundColor});
@@ -285,11 +290,15 @@ export class MetricsSidebarPane extends ElementsSidebarPane {
         widthElement.textContent = getContentAreaWidthPx(style);
         widthElement.addEventListener(
             'dblclick', this.startEditing.bind(this, widthElement, 'width', 'width', style), false);
+        widthElement.setAttribute(
+            'jslog', `${VisualLogging.value().track({'dblclick': true}).context('element-value-modification')}`);
 
         const heightElement = document.createElement('span');
         heightElement.textContent = getContentAreaHeightPx(style);
         heightElement.addEventListener(
             'dblclick', this.startEditing.bind(this, heightElement, 'height', 'height', style), false);
+        heightElement.setAttribute(
+            'jslog', `${VisualLogging.value().track({'dblclick': true}).context('element-value-modification')}`);
 
         const timesElement = document.createElement('span');
         timesElement.textContent = ' × ';
@@ -510,7 +519,7 @@ export class MetricsSidebarPane extends ElementsSidebarPane {
     this.editingEnded(element, context);
     this.applyUserInput(element, userInput, previousContent, context, true);
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([metricsSidebarPaneStyles]);
   }

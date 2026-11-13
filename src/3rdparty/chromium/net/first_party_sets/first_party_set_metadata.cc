@@ -13,11 +13,9 @@ namespace net {
 
 FirstPartySetMetadata::FirstPartySetMetadata() = default;
 FirstPartySetMetadata::FirstPartySetMetadata(
-    const SamePartyContext& context,
     const FirstPartySetEntry* frame_entry,
     const FirstPartySetEntry* top_frame_entry)
-    : context_(context),
-      frame_entry_(base::OptionalFromPtr(frame_entry)),
+    : frame_entry_(base::OptionalFromPtr(frame_entry)),
       top_frame_entry_(base::OptionalFromPtr(top_frame_entry)) {}
 
 FirstPartySetMetadata::FirstPartySetMetadata(FirstPartySetMetadata&&) = default;
@@ -26,21 +24,17 @@ FirstPartySetMetadata& FirstPartySetMetadata::operator=(
 
 FirstPartySetMetadata::~FirstPartySetMetadata() = default;
 
+#if !BUILDFLAG(IS_MAC_13)
 bool FirstPartySetMetadata::operator==(
-    const FirstPartySetMetadata& other) const {
-  return std::tie(context_, frame_entry_, top_frame_entry_) ==
-         std::tie(other.context_, other.frame_entry_, other.top_frame_entry_);
-}
+    const FirstPartySetMetadata& other) const = default;
 
 bool FirstPartySetMetadata::operator!=(
-    const FirstPartySetMetadata& other) const {
-  return !(*this == other);
-}
+    const FirstPartySetMetadata& other) const = default;
+#endif
 
 std::ostream& operator<<(std::ostream& os,
                          const FirstPartySetMetadata& metadata) {
-  os << "{" << metadata.context() << ", "
-     << base::OptionalToPtr(metadata.frame_entry()) << ", "
+  os << "{" << base::OptionalToPtr(metadata.frame_entry()) << ", "
      << base::OptionalToPtr(metadata.top_frame_entry()) << "}";
   return os;
 }

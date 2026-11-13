@@ -53,12 +53,17 @@ class ContextDevice final : public WrappedObject<id<MTLDevice>>, angle::NonCopya
                                                      MTLCompileOptions *options,
                                                      __autoreleasing NSError **error) const;
 
+    AutoObjCPtr<id<MTLLibrary>> newLibraryWithData(dispatch_data_t data,
+                                                   __autoreleasing NSError **error) const;
+
     AutoObjCPtr<id<MTLDepthStencilState>> newDepthStencilStateWithDescriptor(
         MTLDepthStencilDescriptor *descriptor) const;
 
     AutoObjCPtr<id<MTLSharedEvent>> newSharedEvent() const;
+    AutoObjCPtr<id<MTLEvent>> newEvent() const;
 
     void setOwnerWithIdentity(id<MTLResource> resource) const;
+    bool hasUnifiedMemory() const;
 
   private:
     using ParentClass = WrappedObject<id<MTLDevice>>;

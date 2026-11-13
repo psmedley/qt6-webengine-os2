@@ -1,5 +1,5 @@
 // Copyright (C) 2022 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 import QtQuick
 import QtQuick.Controls
@@ -105,10 +105,13 @@ TestWebEngineView {
             keyClick(Qt.Key_Escape);
             tryVerify(function() { return listView() == null; });
 
-            // Key Down should open the popup and select the first suggestion.
+            // The first Key Down opens the popup.
             keyClick(Qt.Key_Down);
             tryVerify(function() { return listView() != null; });
-            compare(listView().currentIndex, 0);
+
+            // The second Key Down selects the first suggestion.
+            keyClick(Qt.Key_Down);
+            tryCompare(listView(), "currentIndex", 0);
             verify(listView().currentItem);
         }
 
@@ -120,10 +123,13 @@ TestWebEngineView {
             // Make sure there is no open popup yet.
             verify(!listView());
 
-            // Key Down should open the popup and select the first suggestion.
+            // The first Key Down opens the popup.
             keyClick(Qt.Key_Down);
             tryVerify(function() { return listView() != null; });
-            compare(listView().currentIndex, 0);
+
+            // The second Key Down selects the first suggestion.
+            keyClick(Qt.Key_Down);
+            tryCompare(listView(), "currentIndex", 0);
 
             // Test keyboard navigation in list.
             keyClick(Qt.Key_Up);

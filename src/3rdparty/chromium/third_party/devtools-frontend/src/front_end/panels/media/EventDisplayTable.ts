@@ -6,28 +6,28 @@ import * as i18n from '../../core/i18n/i18n.js';
 import * as DataGrid from '../../ui/legacy/components/data_grid/data_grid.js';
 import * as SourceFrame from '../../ui/legacy/components/source_frame/source_frame.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import eventDisplayTableStyles from './eventDisplayTable.css.js';
-
 import {type PlayerEvent} from './MediaModel.js';
 
 const UIStrings = {
   /**
-  *@description Text for timestamps of items
-  */
+   *@description Text for timestamps of items
+   */
   timestamp: 'Timestamp',
   /**
-  *@description The column header for event names.
-  */
+   *@description The column header for event names.
+   */
   eventName: 'Event name',
   /**
-  *@description Text for the value of something
-  */
+   *@description Text for the value of something
+   */
   value: 'Value',
   /**
-  *@description The accessible name of a table that displays information about events that occurred
-  * while a video/media player was present on the page.
-  */
+   *@description The accessible name of a table that displays information about events that occurred
+   * while a video/media player was present on the page.
+   */
   eventDisplay: 'Event display',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/media/EventDisplayTable.ts', UIStrings);
@@ -40,7 +40,7 @@ export interface EventDisplayColumnConfig {
 }
 
 export const enum MediaEventColumnKeys {
-  Timestamp = 'displayTimestamp',
+  Timestamp = 'display-timestamp',
   Event = 'event',
   Value = 'value',
 }
@@ -53,7 +53,7 @@ export class EventNode extends DataGrid.DataGrid.DataGridNode<EventNode> {
     this.expandableElement = null;
   }
 
-  createCell(columnId: string): HTMLElement {
+  override createCell(columnId: string): HTMLElement {
     const cell = this.createTD(columnId);
     const cellData = this.data[columnId] as string;
     if (columnId === MediaEventColumnKeys.Value) {
@@ -76,6 +76,8 @@ export class PlayerEventsView extends UI.Widget.VBox {
 
   constructor() {
     super();
+
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('events')}`);
 
     // Set up element styles.
 
@@ -163,7 +165,7 @@ export class PlayerEventsView extends UI.Widget.VBox {
       sort: DataGrid.DataGrid.Order.Ascending,
     } as DataGrid.DataGrid.ColumnDescriptor;
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([eventDisplayTableStyles]);
   }

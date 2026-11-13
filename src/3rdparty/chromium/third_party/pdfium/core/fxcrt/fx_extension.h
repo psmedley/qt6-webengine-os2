@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #include <math.h>
 #include <time.h>
 #include <wctype.h>
+
+#include "build/build_config.h"
 
 #if defined(USE_SYSTEM_ICUUC)
 #include <unicode/uchar.h>

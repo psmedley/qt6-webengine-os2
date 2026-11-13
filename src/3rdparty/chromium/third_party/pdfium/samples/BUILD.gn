@@ -1,4 +1,4 @@
-# Copyright 2014 PDFium Authors. All rights reserved.
+# Copyright 2014 The PDFium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,35 +13,37 @@ group("samples") {
 config("pdfium_samples_config") {
   cflags = []
   ldflags = []
-  defines = [
-    "PNG_PREFIX",
-    "PNG_USE_READ_MACROS",
-  ]
+  defines = []
   include_dirs = [ ".." ]
   if (pdf_use_skia) {
     defines += [ "PDF_ENABLE_SKIA" ]
-  } else if (pdf_use_skia_paths) {
-    defines += [ "PDF_ENABLE_SKIA_PATHS" ]
   }
   if (is_asan) {
     defines += [ "PDF_ENABLE_ASAN" ]
   }
-
+  if (pdf_use_partition_alloc) {
+    defines += [ "PDF_USE_PARTITION_ALLOC" ]
+  }
   if (enable_callgrind) {
     defines += [ "ENABLE_CALLGRIND" ]
+  }
+  if (build_with_chromium) {
+    defines += [ "BUILD_WITH_CHROMIUM" ]
   }
 }
 
 executable("pdfium_test") {
   testonly = true
   sources = [
+    "helpers/dump.cc",
+    "helpers/dump.h",
+    "helpers/event.cc",
+    "helpers/event.h",
+    "helpers/page_renderer.cc",
+    "helpers/page_renderer.h",
+    "helpers/write.cc",
+    "helpers/write.h",
     "pdfium_test.cc",
-    "pdfium_test_dump_helper.cc",
-    "pdfium_test_dump_helper.h",
-    "pdfium_test_event_helper.cc",
-    "pdfium_test_event_helper.h",
-    "pdfium_test_write_helper.cc",
-    "pdfium_test_write_helper.h",
   ]
 
   # Note: One should write programs that depend on ../:pdfium. Whereas this
@@ -57,6 +59,13 @@ executable("pdfium_test") {
   ]
   configs += [ ":pdfium_samples_config" ]
 
+  if (is_win) {
+    sources += [
+      "helpers/win32/com_factory.cc",
+      "helpers/win32/com_factory.h",
+    ]
+  }
+
   if (pdf_enable_v8) {
     deps += [
       "//v8:v8_headers",
@@ -65,7 +74,14 @@ executable("pdfium_test") {
     include_dirs = [ "//v8" ]
     configs += [ "//v8:external_startup_data" ]
   }
-  if (pdf_use_skia || pdf_use_skia_paths) {
+  if (pdf_use_skia) {
     deps += [ "//skia" ]
+    if (build_with_chromium) {
+      sources += [
+        "chromium_support/discardable_memory_allocator.cc",
+        "chromium_support/discardable_memory_allocator.h",
+      ]
+      deps += [ "//base/test:test_support" ]
+    }
   }
 }

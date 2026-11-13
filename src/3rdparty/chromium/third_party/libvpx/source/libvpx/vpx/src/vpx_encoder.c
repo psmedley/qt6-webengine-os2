@@ -54,6 +54,10 @@ vpx_codec_err_t vpx_codec_enc_init_ver(vpx_codec_ctx_t *ctx,
     res = ctx->iface->init(ctx, NULL);
 
     if (res) {
+      // IMPORTANT: ctx->priv->err_detail must be null or point to a string
+      // that remains valid after ctx->priv is destroyed, such as a C string
+      // literal. This makes it safe to call vpx_codec_error_detail() after
+      // vpx_codec_enc_init_ver() failed.
       ctx->err_detail = ctx->priv ? ctx->priv->err_detail : NULL;
       vpx_codec_destroy(ctx);
     }
@@ -109,6 +113,9 @@ vpx_codec_err_t vpx_codec_enc_init_multi_ver(
           ctx->priv = NULL;
           ctx->init_flags = flags;
           ctx->config.enc = cfg;
+          // ctx takes ownership of mr_cfg.mr_low_res_mode_info if and only if
+          // this call succeeds. The first ctx entry in the array is
+          // responsible for freeing the memory.
           res = ctx->iface->init(ctx, &mr_cfg);
         }
 
@@ -187,7 +194,7 @@ static void FLOATING_POINT_RESTORE() {}
 vpx_codec_err_t vpx_codec_encode(vpx_codec_ctx_t *ctx, const vpx_image_t *img,
                                  vpx_codec_pts_t pts, unsigned long duration,
                                  vpx_enc_frame_flags_t flags,
-                                 unsigned long deadline) {
+                                 vpx_enc_deadline_t deadline) {
   vpx_codec_err_t res = VPX_CODEC_OK;
 
   if (!ctx || (img && !duration))

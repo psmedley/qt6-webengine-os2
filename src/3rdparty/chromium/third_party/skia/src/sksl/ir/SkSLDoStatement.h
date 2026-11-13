@@ -8,9 +8,10 @@
 #ifndef SKSL_DOSTATEMENT
 #define SKSL_DOSTATEMENT
 
-#include "include/private/SkSLStatement.h"
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
+#include "src/sksl/ir/SkSLStatement.h"
 
 #include <memory>
 #include <string>
@@ -25,11 +26,11 @@ class Context;
  */
 class DoStatement final : public Statement {
 public:
-    inline static constexpr Kind kStatementKind = Kind::kDo;
+    inline static constexpr Kind kIRNodeKind = Kind::kDo;
 
     DoStatement(Position pos, std::unique_ptr<Statement> statement,
             std::unique_ptr<Expression> test)
-        : INHERITED(pos, kStatementKind)
+        : INHERITED(pos, kIRNodeKind)
         , fStatement(std::move(statement))
         , fTest(std::move(test)) {}
 
@@ -60,8 +61,6 @@ public:
     const std::unique_ptr<Expression>& test() const {
         return fTest;
     }
-
-    std::unique_ptr<Statement> clone() const override;
 
     std::string description() const override;
 

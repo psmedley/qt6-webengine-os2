@@ -7,26 +7,22 @@
 // PBufferSurfaceCGL.cpp: an implementation of PBuffers created from IOSurfaces using
 //                        EGL_ANGLE_iosurface_client_buffer
 
-#include "common/platform.h"
+#include "libANGLE/renderer/gl/cgl/IOSurfaceSurfaceCGL.h"
 
-#if defined(ANGLE_PLATFORM_MACOS) || defined(ANGLE_PLATFORM_MACCATALYST)
+#include <IOSurface/IOSurface.h>
+#include <OpenGL/CGLIOSurface.h>
+#include <OpenGL/OpenGL.h>
 
-#    include "libANGLE/renderer/gl/cgl/IOSurfaceSurfaceCGL.h"
-
-#    include <IOSurface/IOSurface.h>
-#    include <OpenGL/CGLIOSurface.h>
-#    include <OpenGL/OpenGL.h>
-
-#    include "common/debug.h"
-#    include "common/gl/cgl/FunctionsCGL.h"
-#    include "libANGLE/AttributeMap.h"
-#    include "libANGLE/renderer/gl/BlitGL.h"
-#    include "libANGLE/renderer/gl/FramebufferGL.h"
-#    include "libANGLE/renderer/gl/FunctionsGL.h"
-#    include "libANGLE/renderer/gl/RendererGL.h"
-#    include "libANGLE/renderer/gl/StateManagerGL.h"
-#    include "libANGLE/renderer/gl/TextureGL.h"
-#    include "libANGLE/renderer/gl/cgl/DisplayCGL.h"
+#include "common/debug.h"
+#include "common/gl/cgl/FunctionsCGL.h"
+#include "libANGLE/AttributeMap.h"
+#include "libANGLE/renderer/gl/BlitGL.h"
+#include "libANGLE/renderer/gl/FramebufferGL.h"
+#include "libANGLE/renderer/gl/FunctionsGL.h"
+#include "libANGLE/renderer/gl/RendererGL.h"
+#include "libANGLE/renderer/gl/StateManagerGL.h"
+#include "libANGLE/renderer/gl/TextureGL.h"
+#include "libANGLE/renderer/gl/cgl/DisplayCGL.h"
 
 namespace rx
 {
@@ -50,7 +46,6 @@ struct IOSurfaceFormatInfo
 static const IOSurfaceFormatInfo kIOSurfaceFormats[] = {
     {GL_RED,      GL_UNSIGNED_BYTE,                1, GL_RED,  GL_RED,  GL_UNSIGNED_BYTE              },
     {GL_RED,      GL_UNSIGNED_SHORT,               2, GL_RED,  GL_RED,  GL_UNSIGNED_SHORT             },
-    {GL_R16UI,    GL_UNSIGNED_SHORT,               2, GL_RED,  GL_RED,  GL_UNSIGNED_SHORT             },
     {GL_RG,       GL_UNSIGNED_BYTE,                2, GL_RG,   GL_RG,   GL_UNSIGNED_BYTE              },
     {GL_RG,       GL_UNSIGNED_SHORT,               4, GL_RG,   GL_RG,   GL_UNSIGNED_SHORT             },
     {GL_RGB,      GL_UNSIGNED_BYTE,                4, GL_RGBA, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV   },
@@ -177,8 +172,8 @@ egl::Error IOSurfaceSurfaceCGL::bindTexImage(const gl::Context *context,
 
     const auto &format = kIOSurfaceFormats[mFormatIndex];
     CGLError error     = CGLTexImageIOSurface2D(
-            mCGLContext, GL_TEXTURE_RECTANGLE, format.nativeInternalFormat, mWidth, mHeight,
-            format.nativeFormat, format.nativeType, mIOSurface, mPlane);
+        mCGLContext, GL_TEXTURE_RECTANGLE, format.nativeInternalFormat, mWidth, mHeight,
+        format.nativeFormat, format.nativeType, mIOSurface, mPlane);
 
     if (error != kCGLNoError)
     {
@@ -349,5 +344,3 @@ egl::Error IOSurfaceSurfaceCGL::detachFromFramebuffer(const gl::Context *context
 }
 
 }  // namespace rx
-
-#endif  // defined(ANGLE_PLATFORM_MACOS) || defined(ANGLE_PLATFORM_MACCATALYST)

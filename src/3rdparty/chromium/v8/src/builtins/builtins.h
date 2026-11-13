@@ -8,6 +8,7 @@
 #include "src/base/flags.h"
 #include "src/builtins/builtins-definitions.h"
 #include "src/common/globals.h"
+#include "src/objects/type-hints.h"
 
 namespace v8 {
 namespace internal {
@@ -15,9 +16,6 @@ namespace internal {
 class ByteArray;
 class CallInterfaceDescriptor;
 class Callable;
-template <typename T>
-class Handle;
-class Isolate;
 
 // Forward declarations.
 class BytecodeOffset;
@@ -71,6 +69,14 @@ class Builtins {
   // Disassembler support.
   const char* Lookup(Address pc);
 
+#if !defined(V8_SHORT_BUILTIN_CALLS) || \
+    defined(V8_COMPRESS_POINTERS_IN_SHARED_CAGE)
+  static constexpr bool kCodeObjectsAreInROSpace = true;
+#else
+  static constexpr bool kCodeObjectsAreInROSpace = false;
+#endif  // !defined(V8_SHORT_BUILTIN_CALLS) || \
+        // defined(V8_COMPRESS_POINTERS_IN_SHARED_CAGE)
+
 #define ADD_ONE(Name, ...) +1
   static constexpr int kBuiltinCount = 0 BUILTIN_LIST(
       ADD_ONE, ADD_ONE, ADD_ONE, ADD_ONE, ADD_ONE, ADD_ONE, ADD_ONE);
@@ -90,7 +96,9 @@ class Builtins {
       kFirstWideBytecodeHandler + kNumberOfWideBytecodeHandlers;
   static constexpr int kLastBytecodeHandlerPlusOne =
       kFirstExtraWideBytecodeHandler + kNumberOfWideBytecodeHandlers;
-  static_assert(kLastBytecodeHandlerPlusOne == kBuiltinCount);
+  static constexpr bool kBytecodeHandlersAreSortedLast =
+      kLastBytecodeHandlerPlusOne == kBuiltinCount;
+  static_assert(kBytecodeHandlersAreSortedLast);
 
   static constexpr bool IsBuiltinId(Builtin builtin) {
     return builtin != Builtin::kNoBuiltinId;
@@ -119,36 +127,49 @@ class Builtins {
   static BytecodeOffset GetContinuationBytecodeOffset(Builtin builtin);
   static Builtin GetBuiltinFromBytecodeOffset(BytecodeOffset);
 
-  static constexpr Builtin GetRecordWriteStub(SaveFPRegsMode fp_mode) {
-    switch (fp_mode) {
-      case SaveFPRegsMode::kIgnore:
-        return Builtin::kRecordWriteIgnoreFP;
-      case SaveFPRegsMode::kSave:
-        return Builtin::kRecordWriteSaveFP;
-    }
-  }
-
-  static constexpr Builtin GetEphemeronKeyBarrierStub(SaveFPRegsMode fp_mode) {
-    switch (fp_mode) {
-      case SaveFPRegsMode::kIgnore:
-        return Builtin::kEphemeronKeyBarrierIgnoreFP;
-      case SaveFPRegsMode::kSave:
-        return Builtin::kEphemeronKeyBarrierSaveFP;
-    }
-  }
-
+  //
   // Convenience wrappers.
-  Handle<CodeT> CallFunction(ConvertReceiverMode = ConvertReceiverMode::kAny);
-  Handle<CodeT> Call(ConvertReceiverMode = ConvertReceiverMode::kAny);
-  Handle<CodeT> NonPrimitiveToPrimitive(
+  //
+  static inline constexpr Builtin RecordWrite(SaveFPRegsMode fp_mode);
+  static inline constexpr Builtin IndirectPointerBarrier(
+      SaveFPRegsMode fp_mode);
+  static inline constexpr Builtin EphemeronKeyBarrier(SaveFPRegsMode fp_mode);
+
+  static inline constexpr Builtin CallFunction(
+      ConvertReceiverMode = ConvertReceiverMode::kAny);
+  static inline constexpr Builtin Call(
+      ConvertReceiverMode = ConvertReceiverMode::kAny);
+
+  static inline constexpr Builtin NonPrimitiveToPrimitive(
       ToPrimitiveHint hint = ToPrimitiveHint::kDefault);
-  Handle<CodeT> OrdinaryToPrimitive(OrdinaryToPrimitiveHint hint);
+  static inline constexpr Builtin OrdinaryToPrimitive(
+      OrdinaryToPrimitiveHint hint);
+
+  static inline constexpr Builtin StringAdd(
+      StringAddFlags flags = STRING_ADD_CHECK_NONE);
+
+  static inline constexpr Builtin LoadGlobalIC(TypeofMode typeof_mode);
+  static inline constexpr Builtin LoadGlobalICInOptimizedCode(
+      TypeofMode typeof_mode);
+
+  static inline constexpr Builtin CEntry(int result_size, ArgvMode argv_mode,
+                                         bool builtin_exit_frame = false,
+                                         bool switch_to_central_stack = false);
+
+  static inline constexpr Builtin RuntimeCEntry(
+      int result_size, bool switch_to_central_stack = false);
+
+  static inline constexpr Builtin InterpreterCEntry(int result_size);
+  static inline constexpr Builtin InterpreterPushArgsThenCall(
+      ConvertReceiverMode receiver_mode, InterpreterPushArgsMode mode);
+  static inline constexpr Builtin InterpreterPushArgsThenConstruct(
+      InterpreterPushArgsMode mode);
 
   // Used by CreateOffHeapTrampolines in isolate.cc.
-  void set_code(Builtin builtin, CodeT code);
+  void set_code(Builtin builtin, Tagged<Code> code);
 
-  V8_EXPORT_PRIVATE CodeT code(Builtin builtin);
-  V8_EXPORT_PRIVATE Handle<CodeT> code_handle(Builtin builtin);
+  V8_EXPORT_PRIVATE Tagged<Code> code(Builtin builtin);
+  V8_EXPORT_PRIVATE Handle<Code> code_handle(Builtin builtin);
 
   static CallInterfaceDescriptor CallInterfaceDescriptorFor(Builtin builtin);
   V8_EXPORT_PRIVATE static Callable CallableFor(Isolate* isolate,
@@ -158,6 +179,8 @@ class Builtins {
   static int GetStackParameterCount(Builtin builtin);
 
   V8_EXPORT_PRIVATE static const char* name(Builtin builtin);
+  V8_EXPORT_PRIVATE static const char* NameForStackTrace(Isolate* isolate,
+                                                         Builtin builtin);
 
   // Support for --print-builtin-size and --print-builtin-code.
   void PrintBuiltinCode();
@@ -173,8 +196,8 @@ class Builtins {
   static bool IsCpp(Builtin builtin);
 
   // True, iff the given code object is a builtin. Note that this does not
-  // necessarily mean that its kind is Code::BUILTIN.
-  static bool IsBuiltin(const Code code);
+  // necessarily mean that its kind is InstructionStream::BUILTIN.
+  static bool IsBuiltin(const Tagged<Code> code);
 
   // As above, but safe to access off the main thread since the check is done
   // by handle location. Similar to Heap::IsRootHandle.
@@ -192,12 +215,7 @@ class Builtins {
   }
 
   // True, iff the given code object is a builtin with off-heap embedded code.
-  template <typename CodeOrCodeT>
-  static bool IsIsolateIndependentBuiltin(CodeOrCodeT code) {
-    Builtin builtin = code.builtin_id();
-    return Builtins::IsBuiltinId(builtin) &&
-           Builtins::IsIsolateIndependent(builtin);
-  }
+  static bool IsIsolateIndependentBuiltin(Tagged<Code> code);
 
   static void InitializeIsolateDataTables(Isolate* isolate);
 
@@ -220,49 +238,26 @@ class Builtins {
   static void Generate_Adaptor(MacroAssembler* masm, Address builtin_address);
 
   static void Generate_CEntry(MacroAssembler* masm, int result_size,
-                              SaveFPRegsMode save_doubles, ArgvMode argv_mode,
-                              bool builtin_exit_frame);
+                              ArgvMode argv_mode, bool builtin_exit_frame,
+                              bool switch_to_central_stack);
 
   static bool AllowDynamicFunction(Isolate* isolate, Handle<JSFunction> target,
                                    Handle<JSObject> target_global_proxy);
-
-  // Creates a trampoline code object that jumps to the given off-heap entry.
-  // The result should not be used directly, but only from the related Factory
-  // function.
-  // TODO(delphick): Come up with a better name since it may not generate an
-  // executable trampoline.
-  static Handle<Code> GenerateOffHeapTrampolineFor(
-      Isolate* isolate, Address off_heap_entry, int32_t kind_specific_flags,
-      bool generate_jump_to_instruction_stream);
-
-  // Generate the RelocInfo ByteArray that would be generated for an offheap
-  // trampoline.
-  static Handle<ByteArray> GenerateOffHeapTrampolineRelocInfo(Isolate* isolate);
 
   // Creates a copy of InterpreterEntryTrampolineForProfiling in the code space.
   static Handle<Code> CreateInterpreterEntryTrampolineForProfiling(
       Isolate* isolate);
 
-  // Only builtins with JS linkage should ever need to be called via their
-  // trampoline Code object. The remaining builtins have non-executable Code
-  // objects.
-  static bool CodeObjectIsExecutable(Builtin builtin);
-
-  static bool IsJSEntryVariant(Builtin builtin) {
-    switch (builtin) {
-      case Builtin::kJSEntry:
-      case Builtin::kJSConstructEntry:
-      case Builtin::kJSRunMicrotasksEntry:
-        return true;
-      default:
-        return false;
-    }
-    UNREACHABLE();
-  }
+  static inline constexpr bool IsJSEntryVariant(Builtin builtin);
 
   int js_entry_handler_offset() const {
     DCHECK_NE(js_entry_handler_offset_, 0);
     return js_entry_handler_offset_;
+  }
+
+  int jspi_prompt_handler_offset() const {
+    DCHECK_NE(jspi_prompt_handler_offset_, 0);
+    return jspi_prompt_handler_offset_;
   }
 
   void SetJSEntryHandlerOffset(int offset) {
@@ -273,10 +268,18 @@ class Builtins {
     js_entry_handler_offset_ = offset;
   }
 
+  void SetJSPIPromptHandlerOffset(int offset) {
+    CHECK_EQ(jspi_prompt_handler_offset_, 0);
+    jspi_prompt_handler_offset_ = offset;
+  }
+
   // Returns given builtin's slot in the main builtin table.
   FullObjectSlot builtin_slot(Builtin builtin);
   // Returns given builtin's slot in the tier0 builtin table.
   FullObjectSlot builtin_tier0_slot(Builtin builtin);
+
+  // Public for ia32-specific helper.
+  enum class ForwardWhichFrame { kCurrentFrame, kParentFrame };
 
  private:
   static void Generate_CallFunction(MacroAssembler* masm,
@@ -286,12 +289,15 @@ class Builtins {
 
   static void Generate_Call(MacroAssembler* masm, ConvertReceiverMode mode);
 
-  enum class CallOrConstructMode { kCall, kConstruct };
   static void Generate_CallOrConstructVarargs(MacroAssembler* masm,
-                                              Handle<CodeT> code);
+                                              Builtin target_builtin);
+  enum class CallOrConstructMode { kCall, kConstruct };
   static void Generate_CallOrConstructForwardVarargs(MacroAssembler* masm,
                                                      CallOrConstructMode mode,
-                                                     Handle<CodeT> code);
+                                                     Builtin target_builtin);
+
+  static void Generate_MaglevFunctionEntryStackCheck(MacroAssembler* masm,
+                                                     bool save_new_target);
 
   enum class InterpreterEntryTrampolineMode {
     // The version of InterpreterEntryTrampoline used by default.
@@ -312,6 +318,12 @@ class Builtins {
   static void Generate_InterpreterPushArgsThenConstructImpl(
       MacroAssembler* masm, InterpreterPushArgsMode mode);
 
+  static void Generate_ConstructForwardAllArgsImpl(
+      MacroAssembler* masm, ForwardWhichFrame which_frame);
+
+  static void Generate_CallApiCallbackImpl(MacroAssembler* masm,
+                                           CallApiCallbackMode mode);
+
 #define DECLARE_ASM(Name, ...) \
   static void Generate_##Name(MacroAssembler* masm);
 #define DECLARE_TF(Name, ...) \
@@ -330,13 +342,16 @@ class Builtins {
   // label) in JSEntry and its variants. It's used to generate the handler table
   // during codegen (mksnapshot-only).
   int js_entry_handler_offset_ = 0;
+  // Do the same for the JSPI prompt, which catches uncaught exceptions and
+  // rejects the corresponding promise.
+  int jspi_prompt_handler_offset_ = 0;
 
   friend class SetupIsolateDelegate;
 };
 
 V8_INLINE constexpr bool IsInterpreterTrampolineBuiltin(Builtin builtin_id) {
-  // Check for kNoBuiltinId first to abort early when the current Code object
-  // is not a builtin.
+  // Check for kNoBuiltinId first to abort early when the current
+  // InstructionStream object is not a builtin.
   return builtin_id != Builtin::kNoBuiltinId &&
          (builtin_id == Builtin::kInterpreterEntryTrampoline ||
           builtin_id == Builtin::kInterpreterEnterAtBytecode ||
@@ -344,8 +359,8 @@ V8_INLINE constexpr bool IsInterpreterTrampolineBuiltin(Builtin builtin_id) {
 }
 
 V8_INLINE constexpr bool IsBaselineTrampolineBuiltin(Builtin builtin_id) {
-  // Check for kNoBuiltinId first to abort early when the current Code object
-  // is not a builtin.
+  // Check for kNoBuiltinId first to abort early when the current
+  // InstructionStream object is not a builtin.
   return builtin_id != Builtin::kNoBuiltinId &&
          (builtin_id == Builtin::kBaselineOutOfLinePrologue ||
           builtin_id == Builtin::kBaselineOutOfLinePrologueDeopt ||
@@ -358,5 +373,18 @@ Builtin ExampleBuiltinForTorqueFunctionPointerType(
 
 }  // namespace internal
 }  // namespace v8
+
+// Helper while transitioning some functions to libm.
+#if defined(V8_USE_LIBM_TRIG_FUNCTIONS)
+#define SIN_IMPL(X)                                             \
+  v8_flags.use_libm_trig_functions ? base::ieee754::libm_sin(X) \
+                                   : base::ieee754::fdlibm_sin(X)
+#define COS_IMPL(X)                                             \
+  v8_flags.use_libm_trig_functions ? base::ieee754::libm_cos(X) \
+                                   : base::ieee754::fdlibm_cos(X)
+#else
+#define SIN_IMPL(X) base::ieee754::sin(X)
+#define COS_IMPL(X) base::ieee754::cos(X)
+#endif
 
 #endif  // V8_BUILTINS_BUILTINS_H_

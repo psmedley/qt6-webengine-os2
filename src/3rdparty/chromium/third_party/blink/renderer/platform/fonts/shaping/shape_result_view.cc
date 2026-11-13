@@ -4,10 +4,11 @@
 
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_result_view.h"
 
-#include <algorithm>
 #include <iterator>
 #include <numeric>
+
 #include "base/containers/adapters.h"
+#include "base/ranges/algorithm.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/glyph_bounds_accumulator.h"
@@ -180,7 +181,7 @@ struct ShapeResultView::InitData {
 
   // Uses for fast path of constructing |ShapeResultView| from |ShapeResult|.
   void Populate(const ShapeResult& result) {
-    PopulateFromShpaeResult(result);
+    PopulateFromShapeResult(result);
     has_vertical_offsets = result.has_vertical_offsets_;
     num_parts = result.RunsOrParts().size();
   }
@@ -191,10 +192,10 @@ struct ShapeResultView::InitData {
 
     if (first_segment.result) {
       DCHECK(!first_segment.view);
-      PopulateFromShpaeResult(*first_segment.result);
+      PopulateFromShapeResult(*first_segment.result);
     } else if (first_segment.view) {
       DCHECK(!first_segment.result);
-      PopulateFromShpaeResult(*first_segment.view);
+      PopulateFromShapeResult(*first_segment.view);
     } else {
       NOTREACHED();
     }
@@ -235,7 +236,7 @@ struct ShapeResultView::InitData {
   bool IsRtl() const { return blink::IsRtl(Direction()); }
 
   template <typename ShapeResultType>
-  void PopulateFromShpaeResult(const ShapeResultType& result) {
+  void PopulateFromShapeResult(const ShapeResultType& result) {
     primary_font = result.primary_font_;
     direction = result.Direction();
     if (IsLtr()) {
@@ -259,12 +260,11 @@ struct ShapeResultView::InitData {
   template <typename ShapeResultType>
   static unsigned CountRunInfoParts(const ShapeResultType& result,
                                     const Segment& segment) {
-    return static_cast<unsigned>(
-        std::count_if(result.RunsOrParts().begin(), result.RunsOrParts().end(),
-                      [&result, &segment](const auto& run_or_part) {
-                        return RunInfoPart::ComputeStartEnd(*run_or_part.get(),
-                                                            result, segment);
-                      }));
+    return static_cast<unsigned>(base::ranges::count_if(
+        result.RunsOrParts(), [&result, &segment](const auto& run_or_part) {
+          return !!RunInfoPart::ComputeStartEnd(*run_or_part.get(), result,
+                                                segment);
+        }));
   }
 };
 
@@ -405,22 +405,19 @@ base::span<const ShapeResultView::RunInfoPart> ShapeResultView::Parts() const {
 }
 
 // static
-constexpr size_t ShapeResultView::ByteSize(wtf_size_t num_parts) {
+constexpr size_t ShapeResultView::AdditionalByteSize(wtf_size_t num_parts) {
   static_assert(sizeof(ShapeResultView) % alignof(RunInfoPart) == 0,
                 "We have RunInfoPart as flexible array in ShapeResultView");
-  return sizeof(ShapeResultView) + sizeof(RunInfoPart) * num_parts;
+  return sizeof(RunInfoPart) * num_parts;
 }
 
-scoped_refptr<ShapeResultView> ShapeResultView::Create(
-    base::span<const Segment> segments) {
+ShapeResultView* ShapeResultView::Create(base::span<const Segment> segments) {
   DCHECK(!segments.empty());
   InitData data;
   data.Populate(segments);
 
-  void* const buffer = ::WTF::Partitions::FastMalloc(
-      ByteSize(data.num_parts),
-      ::WTF::GetStringWithTypeName<ShapeResultView>());
-  ShapeResultView* const out = new (buffer) ShapeResultView(data);
+  ShapeResultView* out = MakeGarbageCollected<ShapeResultView>(
+      AdditionalBytes(AdditionalByteSize(data.num_parts)), data);
   DCHECK_EQ(out->num_characters_, 0u);
   DCHECK_EQ(out->num_glyphs_, 0u);
   DCHECK_EQ(out->width_, 0);
@@ -437,36 +434,31 @@ scoped_refptr<ShapeResultView> ShapeResultView::Create(
   }
   CHECK_EQ(part, out->Parts().data() + out->num_parts_);
 
-  return base::AdoptRef(out);
+  return out;
 }
 
-scoped_refptr<ShapeResultView> ShapeResultView::Create(
-    const ShapeResult* result,
-    unsigned start_index,
-    unsigned end_index) {
+ShapeResultView* ShapeResultView::Create(const ShapeResult* result,
+                                         unsigned start_index,
+                                         unsigned end_index) {
   const Segment segments[] = {{result, start_index, end_index}};
   return Create(segments);
 }
 
-scoped_refptr<ShapeResultView> ShapeResultView::Create(
-    const ShapeResultView* result,
-    unsigned start_index,
-    unsigned end_index) {
+ShapeResultView* ShapeResultView::Create(const ShapeResultView* result,
+                                         unsigned start_index,
+                                         unsigned end_index) {
   const Segment segments[] = {{result, start_index, end_index}};
   return Create(segments);
 }
 
-scoped_refptr<ShapeResultView> ShapeResultView::Create(
-    const ShapeResult* result) {
+ShapeResultView* ShapeResultView::Create(const ShapeResult* result) {
   // This specialization is an optimization to allow the bounding box to be
   // re-used.
   InitData data;
   data.Populate(*result);
 
-  void* const buffer = ::WTF::Partitions::FastMalloc(
-      ByteSize(data.num_parts),
-      ::WTF::GetStringWithTypeName<ShapeResultView>());
-  ShapeResultView* const out = new (buffer) ShapeResultView(data);
+  ShapeResultView* out = MakeGarbageCollected<ShapeResultView>(
+      AdditionalBytes(AdditionalByteSize(data.num_parts)), data);
   DCHECK_EQ(out->num_characters_, 0u);
   DCHECK_EQ(out->num_glyphs_, 0u);
   DCHECK_EQ(out->width_, 0);
@@ -475,7 +467,7 @@ scoped_refptr<ShapeResultView> ShapeResultView::Create(
   RunInfoPart* const part =
       out->PopulateRunInfoParts(segment, out->Parts().data());
   CHECK_EQ(part, out->Parts().data() + out->num_parts_);
-  return base::AdoptRef(out);
+  return out;
 }
 
 unsigned ShapeResultView::PreviousSafeToBreakOffset(unsigned index) const {
@@ -729,7 +721,7 @@ void ShapeResultView::ComputePartInkBounds(
   auto glyph_offsets = part.GetGlyphOffsets<has_non_zero_glyph_offsets>();
   const SimpleFontData& current_font_data = *part.run_->font_data_;
   unsigned num_glyphs = part.NumGlyphs();
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_APPLE)
   Vector<Glyph, 256> glyphs(num_glyphs);
   unsigned i = 0;
   for (const auto& glyph_data : part)
@@ -741,7 +733,7 @@ void ShapeResultView::ComputePartInkBounds(
   GlyphBoundsAccumulator bounds(run_advance);
   for (unsigned j = 0; j < num_glyphs; ++j) {
     const HarfBuzzRunGlyphData& glyph_data = part.GlyphAt(j);
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
     gfx::RectF glyph_bounds =
         current_font_data.BoundsForGlyph(glyph_data.glyph);
 #else

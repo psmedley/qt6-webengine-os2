@@ -7,8 +7,8 @@
 
 #include "base/memory/raw_ptr.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
-#include "content/browser/renderer_host/input/fling_scheduler_base.h"
 #include "content/common/content_export.h"
+#include "content/common/input/fling_scheduler_base.h"
 #include "ui/android/view_android_observer.h"
 #include "ui/android/window_android.h"
 #include "ui/android/window_android_observer.h"
@@ -50,7 +50,6 @@ class CONTENT_EXPORT FlingSchedulerAndroid
   void RemoveCompositorTick();
 
   // ui::WindowAndroidObserver implementation.
-  void OnCompositingDidCommit() override {}
   void OnRootWindowVisibilityChanged(bool visible) override {}
   void OnAttachCompositor() override;
   void OnDetachCompositor() override;

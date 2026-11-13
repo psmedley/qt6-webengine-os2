@@ -3,12 +3,11 @@
 
 #include "qpdfdocument_p.h"
 #include "qpdflink.h"
-#include "qpdflink_p.h"
 #include "qpdfsearchmodel.h"
 #include "qpdfsearchmodel_p.h"
 
-#include "third_party/pdfium/public/fpdf_doc.h"
 #include "third_party/pdfium/public/fpdf_text.h"
+#include "third_party/pdfium/public/fpdfview.h"
 
 #include <QtCore/qelapsedtimer.h>
 #include <QtCore/qloggingcategory.h>
@@ -65,6 +64,10 @@ QPdfSearchModel::QPdfSearchModel(QObject *parent)
         roleName[0] = QChar::toLower(roleName[0]);
         m_roleNames.insert(r, roleName);
     }
+    connect(this, &QAbstractListModel::dataChanged, this, &QPdfSearchModel::countChanged);
+    connect(this, &QAbstractListModel::modelReset, this, &QPdfSearchModel::countChanged);
+    connect(this, &QAbstractListModel::rowsRemoved, this, &QPdfSearchModel::countChanged);
+    connect(this, &QAbstractListModel::rowsInserted, this, &QPdfSearchModel::countChanged);
 }
 
 /*!
@@ -124,6 +127,16 @@ QVariant QPdfSearchModel::data(const QModelIndex &index, int role) const
     return QVariant();
 }
 
+/*!
+    \since 6.8
+    \property QPdfSearchModel::count
+    \brief the number of search results found
+*/
+int QPdfSearchModel::count() const
+{
+    return rowCount(QModelIndex());
+}
+
 void QPdfSearchModel::updatePage(int page)
 {
     Q_D(QPdfSearchModel);
@@ -173,7 +186,7 @@ QPdfLink QPdfSearchModel::resultAtIndex(int index) const
 {
     Q_D(const QPdfSearchModel);
     const auto pi = const_cast<QPdfSearchModelPrivate*>(d)->pageAndIndexForResult(index);
-    if (pi.page < 0)
+    if (pi.page < 0 || index < 0)
         return {};
     return d->searchResults[pi.page][pi.index];
 }
@@ -251,7 +264,6 @@ bool QPdfSearchModelPrivate::doSearch(int page)
         qWarning() << "failed to load page" << page;
         return false;
     }
-    double pageHeight = FPDF_GetPageHeight(pdfPage);
     FPDF_TEXTPAGE textPage = FPDFText_LoadPage(pdfPage);
     if (!textPage) {
         qWarning() << "failed to load text of page" << page;
@@ -269,9 +281,12 @@ bool QPdfSearchModelPrivate::doSearch(int page)
         int startIndex = -1;
         int endIndex = -1;
         for (int r = 0; r < rectCount; ++r) {
+            // get bounding box of search result in page coordinates
             double left, top, right, bottom;
             FPDFText_GetRect(textPage, r, &left, &top, &right, &bottom);
-            rects << QRectF(left, pageHeight - top, right - left, top - bottom);
+            // deal with any internal PDF transforms and
+            // convert to the 1x (pixels = points) 4th-quadrant coordinate system
+            rects << document->d->mapPageToView(pdfPage, left, top, right, bottom);
             if (r == 0) {
                 startIndex = FPDFText_GetCharIndexAtPos(textPage, left, top,
                         CharacterHitTolerance, CharacterHitTolerance);
@@ -280,7 +295,8 @@ bool QPdfSearchModelPrivate::doSearch(int page)
                 endIndex = FPDFText_GetCharIndexAtPos(textPage, right, top,
                         CharacterHitTolerance, CharacterHitTolerance);
             }
-            qCDebug(qLcS) << rects.last() << "char idx" << startIndex << "->" << endIndex;
+            qCDebug(qLcS) << rects.last() << "char idx" << startIndex << "->" << endIndex
+                          << "from page rect" << left << top << right << bottom;
         }
         QString contextBefore, contextAfter;
         if (startIndex >= 0 || endIndex >= 0) {

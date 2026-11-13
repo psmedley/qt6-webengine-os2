@@ -34,9 +34,6 @@
 #include "base/logging.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_export.h"
 
-// New code shouldn't use this function. This function will be deprecated.
-void vprintf_stderr_common(const char* format, va_list args);
-
 #define DCHECK_AT(assertion, file, line)                            \
   LAZY_STREAM(logging::LogMessage(file, line, #assertion).stream(), \
               DCHECK_IS_ON() ? !(assertion) : false)
@@ -57,7 +54,7 @@ void vprintf_stderr_common(const char* format, va_list args);
 //    https://bugs.chromium.org/p/chromium/issues/entry?template=Security%20Bug
 #if ENABLE_SECURITY_ASSERT
 #define SECURITY_DCHECK(condition) \
-  LOG_IF(DCHECK, !(condition)) << "Security DCHECK failed: " #condition ". "
+  LOG_IF(FATAL, !(condition)) << "Security DCHECK failed: " #condition ". "
 // A SECURITY_CHECK failure is actually not vulnerable.
 #define SECURITY_CHECK(condition) \
   LOG_IF(FATAL, !(condition)) << "Security CHECK failed: " #condition ". "

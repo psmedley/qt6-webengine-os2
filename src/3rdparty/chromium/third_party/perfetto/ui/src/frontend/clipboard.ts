@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {copyToClipboard} from '../base/clipboard';
 import {Actions} from '../common/actions';
 import {QueryResponse} from '../common/queries';
 
@@ -26,15 +27,6 @@ export function onClickCopy(url: string) {
   };
 }
 
-export async function copyToClipboard(text: string): Promise<void> {
-  try {
-    // TODO(hjd): Fix typescript type for navigator.
-    await(navigator as any).clipboard.writeText(text);
-  } catch (err) {
-    console.error(`Failed to copy "${text}" to clipboard: ${err}`);
-  }
-}
-
 export async function queryResponseToClipboard(resp: QueryResponse):
     Promise<void> {
   const lines: string[][] = [];
@@ -43,22 +35,9 @@ export async function queryResponseToClipboard(resp: QueryResponse):
     const line = [];
     for (const col of resp.columns) {
       const value = row[col];
-      line.push(value === null ? 'NULL' : value.toString());
+      line.push(value === null ? 'NULL' : `${value}`);
     }
     lines.push(line);
   }
   copyToClipboard(lines.map((line) => line.join('\t')).join('\n'));
 }
-
-export function download(file: File, name?: string): void {
-  const url = URL.createObjectURL(file);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name === undefined ? file.name : name;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-

@@ -9,7 +9,9 @@
 #include <memory>
 #include <string>
 
-#include "base/callback.h"
+#include "base/callback_list.h"
+#include "base/functional/callback.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/time/time.h"
 #include "components/metrics/metrics_log_store.h"
 #include "components/metrics/metrics_log_uploader.h"
@@ -34,6 +36,10 @@ namespace metrics {
 class MetricsLogUploader;
 class MetricsService;
 
+namespace structured {
+class StructuredMetricsService;
+}
+
 // An abstraction of operations that depend on the embedder's (e.g. Chrome)
 // environment.
 class MetricsServiceClient {
@@ -57,6 +63,10 @@ class MetricsServiceClient {
 
   // Returns the UkmService instance that this client is associated with.
   virtual ukm::UkmService* GetUkmService();
+
+  // Returns the StructuredMetricsService instance that this client is
+  // associated with.
+  virtual structured::StructuredMetricsService* GetStructuredMetricsService();
 
   // Returns true if metrics should be uploaded for the given |user_id|, which
   // corresponds to the |user_id| field in ChromeUserMetricsExtension.
@@ -96,6 +106,11 @@ class MetricsServiceClient {
   // ownership.
   virtual void OnEnvironmentUpdate(std::string* serialized_environment) {}
 
+  // Collects child process histograms and merges them into StatisticsRecorder.
+  // Called when child process histograms need to be merged ASAP. For example,
+  // on Android, when the browser was backgrounded.
+  virtual void MergeSubprocessHistograms() {}
+
   // Called prior to a metrics log being closed, allowing the client to collect
   // extra histograms that will go in that log. Asynchronous API - the client
   // implementation should call |done_callback| when complete.
@@ -133,11 +148,6 @@ class MetricsServiceClient {
   // Called when loading state changed, e.g. start/stop loading.
   virtual void LoadingStateChanged(bool is_loading) {}
 
-  // Called on renderer crashes in some embedders (e.g., those that do not use
-  // //content and thus do not have //content's notification system available
-  // as a mechanism for observing renderer crashes).
-  virtual void OnRendererProcessCrash() {}
-
   // Returns whether metrics reporting is managed by policy.
   virtual bool IsReportingPolicyManaged();
 
@@ -145,8 +155,8 @@ class MetricsServiceClient {
   // shown during first-run.
   virtual EnableMetricsDefault GetMetricsReportingDefaultState();
 
-  // Returns whether cellular logic is enabled for metrics reporting.
-  virtual bool IsUMACellularUploadLogicEnabled();
+  // Return true iff the system is currently on a cellular connection.
+  virtual bool IsOnCellularConnection();
 
   // Returns whether the allowlist for external experiment ids is enabled. Some
   // embedders like WebLayer disable it. For Chrome, it should be enabled.
@@ -155,10 +165,6 @@ class MetricsServiceClient {
   // Returns true iff UKM is allowed for all profiles.
   // See //components/ukm/observers/ukm_consent_state_observer.h for details.
   virtual bool IsUkmAllowedForAllProfiles();
-
-  // Returns true iff UKM is allowed to capture extensions for all profiles.
-  // See //components/ukm/observers/ukm_consent_state_observer.h for details.
-  virtual bool IsUkmAllowedWithExtensionsForAllProfiles();
 
   // Returns whether UKM notification listeners were attached to all profiles.
   virtual bool AreNotificationListenersEnabledOnAllProfiles();
@@ -176,6 +182,9 @@ class MetricsServiceClient {
 
   // Checks if the cloned install detector says that client ids should be reset.
   virtual bool ShouldResetClientIdsOnClonedInstall();
+
+  virtual base::CallbackListSubscription AddOnClonedInstallDetectedCallback(
+      base::OnceClosure callback);
 
   // Specifies local log storage requirements and restrictions.
   virtual MetricsLogStore::StorageLimits GetStorageLimits() const;

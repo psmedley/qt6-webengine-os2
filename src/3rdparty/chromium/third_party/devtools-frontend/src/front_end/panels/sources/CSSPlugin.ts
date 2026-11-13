@@ -3,18 +3,21 @@
 // found in the LICENSE file.
 
 import * as Common from '../../core/common/common.js';
+import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
+import {assertNotNullOrUndefined} from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import type * as Protocol from '../../generated/protocol.js';
-import type * as Workspace from '../../models/workspace/workspace.js';
+import * as Bindings from '../../models/bindings/bindings.js';
+import * as Workspace from '../../models/workspace/workspace.js';
+import * as CodeMirror from '../../third_party/codemirror.next/codemirror.next.js';
 import * as ColorPicker from '../../ui/legacy/components/color_picker/color_picker.js';
 import * as InlineEditor from '../../ui/legacy/components/inline_editor/inline_editor.js';
-import * as CodeMirror from '../../third_party/codemirror.next/codemirror.next.js';
 import type * as SourceFrame from '../../ui/legacy/components/source_frame/source_frame.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
-import {assertNotNullOrUndefined} from '../../core/platform/platform.js';
+import {AddDebugInfoURLDialog} from './AddSourceMapURLDialog.js';
 import {Plugin} from './Plugin.js';
 
 // Plugin to add CSS completion, shortcuts, and color/curve swatches
@@ -22,13 +25,17 @@ import {Plugin} from './Plugin.js';
 
 const UIStrings = {
   /**
-  *@description Swatch icon element title in CSSPlugin of the Sources panel
-  */
+   *@description Swatch icon element title in CSSPlugin of the Sources panel
+   */
   openColorPicker: 'Open color picker.',
   /**
-  *@description Text to open the cubic bezier editor
-  */
+   *@description Text to open the cubic bezier editor
+   */
   openCubicBezierEditor: 'Open cubic bezier editor.',
+  /**
+   *@description Text for a context menu item for attaching a sourcemap to the currently open css file
+   */
+  addSourceMap: 'Add source map…',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/sources/CSSPlugin.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -40,7 +47,7 @@ function findPropertyAt(node: CodeMirror.SyntaxNode, pos: number): CodeMirror.Sy
     return null;
   }
   for (let cur: CodeMirror.SyntaxNode|null = node; cur; cur = cur.parent) {
-    if (cur.name === 'StyleSheet') {
+    if (cur.name === 'StyleSheet' || cur.name === 'Styles' || cur.name === 'CallExpression') {
       break;
     } else if (cur.name === 'Declaration') {
       const name = cur.getChild('PropertyName'), colon = cur.getChild(':');
@@ -93,7 +100,7 @@ function findColorsAndCurves(
     state: CodeMirror.EditorState,
     from: number,
     to: number,
-    onColor: (pos: number, color: Common.Color.Color, text: string) => void,
+    onColor: (pos: number, parsedColor: Common.Color.Color, text: string) => void,
     onCurve: (pos: number, curve: UI.Geometry.CubicBezier, text: string) => void,
     ): void {
   let line = state.doc.lineAt(from);
@@ -115,11 +122,13 @@ function findColorsAndCurves(
       let content;
       if (node.name === 'ValueName' || node.name === 'ColorLiteral') {
         content = getToken(node.from, node.to);
-      } else if (node.name === 'Callee' && /^(?:(?:rgb|hsl)a?|cubic-bezier)$/.test(getToken(node.from, node.to))) {
+      } else if (
+          node.name === 'Callee' &&
+          /^(?:(?:rgba?|hsla?|hwba?|lch|oklch|lab|oklab|color)|cubic-bezier)$/.test(getToken(node.from, node.to))) {
         content = state.sliceDoc(node.from, (node.node.parent as CodeMirror.SyntaxNode).to);
       }
       if (content) {
-        const parsedColor = Common.Color.Color.parse(content);
+        const parsedColor = Common.Color.parse(content);
         if (parsedColor) {
           onColor(node.from, parsedColor, content);
         } else {
@@ -134,36 +143,50 @@ function findColorsAndCurves(
 }
 
 class ColorSwatchWidget extends CodeMirror.WidgetType {
-  constructor(readonly color: Common.Color.Color, readonly text: string) {
+  #text: string;
+  #color: Common.Color.Color;
+  readonly #from: number;
+
+  constructor(color: Common.Color.Color, text: string, from: number) {
     super();
+    this.#color = color;
+    this.#text = text;
+    this.#from = from;
   }
 
-  eq(other: ColorSwatchWidget): boolean {
-    return this.color.equal(other.color) && this.text === other.text;
+  override eq(other: ColorSwatchWidget): boolean {
+    return this.#color.equal(other.#color) && this.#text === other.#text && this.#from === other.#from;
   }
 
   toDOM(view: CodeMirror.EditorView): HTMLElement {
     const swatch = new InlineEditor.ColorSwatch.ColorSwatch();
-    swatch.renderColor(this.color, false, i18nString(UIStrings.openColorPicker));
+    swatch.renderColor(this.#color, false, i18nString(UIStrings.openColorPicker));
     const value = swatch.createChild('span');
-    value.textContent = this.text;
+    value.textContent = this.#text;
     value.setAttribute('hidden', 'true');
+    swatch.addEventListener(InlineEditor.ColorSwatch.ColorChangedEvent.eventName, event => {
+      view.dispatch({
+        changes: {from: this.#from, to: this.#from + this.#text.length, insert: event.data.text},
+      });
+      this.#text = event.data.text;
+      this.#color = swatch.getColor() as Common.Color.Color;
+    });
     swatch.addEventListener(InlineEditor.ColorSwatch.ClickEvent.eventName, event => {
       event.consume(true);
       view.dispatch({
         effects: setTooltip.of({
           type: TooltipType.Color,
           pos: view.posAtDOM(swatch),
-          text: this.text,
+          text: this.#text,
           swatch,
-          color: this.color,
+          color: this.#color,
         }),
       });
     });
     return swatch;
   }
 
-  ignoreEvent(): boolean {
+  override ignoreEvent(): boolean {
     return true;
   }
 }
@@ -173,7 +196,7 @@ class CurveSwatchWidget extends CodeMirror.WidgetType {
     super();
   }
 
-  eq(other: CurveSwatchWidget): boolean {
+  override eq(other: CurveSwatchWidget): boolean {
     return this.curve.asCSSText() === other.curve.asCSSText() && this.text === other.text;
   }
 
@@ -197,7 +220,7 @@ class CurveSwatchWidget extends CodeMirror.WidgetType {
     return swatch;
   }
 
-  ignoreEvent(): boolean {
+  override ignoreEvent(): boolean {
     return true;
   }
 }
@@ -236,6 +259,7 @@ function createCSSTooltip(active: ActiveTooltip): CodeMirror.Tooltip {
         spectrum.addEventListener(ColorPicker.Spectrum.Events.SizeChanged, () => view.requestMeasure());
         spectrum.setColor(active.color, active.color.format());
         widget = spectrum;
+        Host.userMetrics.colorPickerOpenedFrom(Host.UserMetrics.ColorPickerOpenedFrom.SourcesPanel);
       } else {
         const spectrum = new InlineEditor.BezierEditor.BezierEditor(active.curve);
         widget = spectrum;
@@ -269,6 +293,7 @@ function createCSSTooltip(active: ActiveTooltip): CodeMirror.Tooltip {
       widget.element.addEventListener('mousedown', event => event.consume());
       return {
         dom,
+        resize: false,
         offset: {x: -8, y: 0},
         mount: (): void => {
           widget.focus();
@@ -315,8 +340,9 @@ function computeSwatchDeco(state: CodeMirror.EditorState, from: number, to: numb
   const builder = new CodeMirror.RangeSetBuilder<CodeMirror.Decoration>();
   findColorsAndCurves(
       state, from, to,
-      (pos, color, text) => {
-        builder.add(pos, pos, CodeMirror.Decoration.widget({widget: new ColorSwatchWidget(color, text)}));
+      (pos, parsedColor, colorText) => {
+        builder.add(
+            pos, pos, CodeMirror.Decoration.widget({widget: new ColorSwatchWidget(parsedColor, colorText, pos)}));
       },
       (pos, curve, text) => {
         builder.add(pos, pos, CodeMirror.Decoration.widget({widget: new CurveSwatchWidget(curve, text)}));
@@ -406,12 +432,12 @@ export class CSSPlugin extends Plugin implements SDK.TargetManager.SDKModelObser
     SDK.TargetManager.TargetManager.instance().observeModels(SDK.CSSModel.CSSModel, this);
   }
 
-  static accepts(uiSourceCode: Workspace.UISourceCode.UISourceCode): boolean {
-    return uiSourceCode.contentType().isStyleSheet();
+  static override accepts(uiSourceCode: Workspace.UISourceCode.UISourceCode): boolean {
+    return uiSourceCode.contentType().hasStyleSheets();
   }
 
   modelAdded(cssModel: SDK.CSSModel.CSSModel): void {
-    if (this.#cssModel) {
+    if (cssModel.target() !== SDK.TargetManager.TargetManager.instance().primaryPageTarget()) {
       return;
     }
     this.#cssModel = cssModel;
@@ -422,7 +448,7 @@ export class CSSPlugin extends Plugin implements SDK.TargetManager.SDKModelObser
     }
   }
 
-  editorExtension(): CodeMirror.Extension {
+  override editorExtension(): CodeMirror.Extension {
     return [cssBindings(), this.#cssCompletion(), cssSwatches()];
   }
 
@@ -442,5 +468,23 @@ export class CSSPlugin extends Plugin implements SDK.TargetManager.SDKModelObser
                  return (await specificCssCompletion(cx, uiSourceCode, cssModel)) || cssCompletionSource(cx);
                }],
     });
+  }
+
+  override populateTextAreaContextMenu(contextMenu: UI.ContextMenu.ContextMenu): void {
+    function addSourceMapURL(cssModel: SDK.CSSModel.CSSModel, sourceUrl: Platform.DevToolsPath.UrlString): void {
+      const dialog = AddDebugInfoURLDialog.createAddSourceMapURLDialog(sourceMapUrl => {
+        Bindings.CSSWorkspaceBinding.CSSWorkspaceBinding.instance().modelToInfo.get(cssModel)?.addSourceMap(
+            sourceUrl, sourceMapUrl);
+      });
+      dialog.show();
+    }
+
+    const cssModel = this.#cssModel;
+    const url = this.uiSourceCode.url();
+    if (this.uiSourceCode.project().type() === Workspace.Workspace.projectTypes.Network && cssModel &&
+        !Bindings.IgnoreListManager.IgnoreListManager.instance().isUserIgnoreListedURL(url)) {
+      const addSourceMapURLLabel = i18nString(UIStrings.addSourceMap);
+      contextMenu.debugSection().appendItem(addSourceMapURLLabel, () => addSourceMapURL(cssModel, url));
+    }
   }
 }

@@ -8,12 +8,15 @@ TODO:
 
 import { makeTestGroup } from '../../../common/framework/test_group.js';
 import { assert } from '../../../common/util/util.js';
+import { kCanvasTextureFormats, kTextureUsages } from '../../capability_info.js';
+import { GPUConst } from '../../constants.js';
 import {
   kAllTextureFormats,
-  kCanvasTextureFormats,
-  kTextureUsages,
-} from '../../capability_info.js';
-import { GPUConst } from '../../constants.js';
+  kFeaturesForFormats,
+  kTextureFormats,
+  filterFormatsByFeature,
+  viewCompatible,
+} from '../../format_info.js';
 import { GPUTest } from '../../gpu_test.js';
 import { kAllCanvasTypes, createCanvas } from '../../util/create_elements.js';
 
@@ -29,7 +32,7 @@ g.test('defaults')
     u //
       .combine('canvasType', kAllCanvasTypes)
   )
-  .fn(async t => {
+  .fn(t => {
     const { canvasType } = t.params;
     const canvas = createCanvas(t, canvasType, 2, 2);
     const ctx = canvas.getContext('webgpu');
@@ -61,21 +64,21 @@ g.test('device')
     u //
       .combine('canvasType', kAllCanvasTypes)
   )
-  .fn(async t => {
+  .fn(t => {
     const { canvasType } = t.params;
     const canvas = createCanvas(t, canvasType, 2, 2);
     const ctx = canvas.getContext('webgpu');
     assert(ctx instanceof GPUCanvasContext, 'Failed to get WebGPU context from canvas');
 
-    // Calling configure without a device should throw.
-    t.shouldThrow(true, () => {
+    // Calling configure without a device should throw a TypeError.
+    t.shouldThrow('TypeError', () => {
       ctx.configure({
         format: 'rgba8unorm',
       } as GPUCanvasConfiguration);
     });
 
-    // Device is not configured, so getCurrentTexture will throw.
-    t.shouldThrow(true, () => {
+    // Device is not configured, so getCurrentTexture will throw an InvalidStateError.
+    t.shouldThrow('InvalidStateError', () => {
       ctx.getCurrentTexture();
     });
 
@@ -90,7 +93,7 @@ g.test('device')
 
     // Unconfiguring should cause the device to be cleared.
     ctx.unconfigure();
-    t.shouldThrow(true, () => {
+    t.shouldThrow('InvalidStateError', () => {
       ctx.getCurrentTexture();
     });
 
@@ -116,7 +119,7 @@ g.test('format')
   .beforeAllSubcases(t => {
     t.selectDeviceForTextureFormatOrSkipTestCase(t.params.format);
   })
-  .fn(async t => {
+  .fn(t => {
     const { canvasType, format } = t.params;
     const canvas = createCanvas(t, canvasType, 2, 2);
     const ctx = canvas.getContext('webgpu');
@@ -155,7 +158,7 @@ g.test('usage')
     u //
       .combine('canvasType', kAllCanvasTypes)
       .beginSubcases()
-      .expand('usage', p => {
+      .expand('usage', () => {
         const usageSet = new Set<number>();
         for (const usage0 of kTextureUsages) {
           for (const usage1 of kTextureUsages) {
@@ -165,7 +168,7 @@ g.test('usage')
         return usageSet;
       })
   )
-  .fn(async t => {
+  .fn(t => {
     const { canvasType, usage } = t.params;
     const canvas = createCanvas(t, canvasType, 2, 2);
     const ctx = canvas.getContext('webgpu');
@@ -275,7 +278,7 @@ g.test('alpha_mode')
       .beginSubcases()
       .combine('alphaMode', ['opaque', 'premultiplied'] as const)
   )
-  .fn(async t => {
+  .fn(t => {
     const { canvasType, alphaMode } = t.params;
     const canvas = createCanvas(t, canvasType, 2, 2);
     const ctx = canvas.getContext('webgpu');
@@ -289,4 +292,135 @@ g.test('alpha_mode')
 
     const currentTexture = ctx.getCurrentTexture();
     t.expect(currentTexture instanceof GPUTexture);
+  });
+
+g.test('size_zero_before_configure')
+  .desc(`Ensure a validation error is raised in configure() if the size of the canvas is zero.`)
+  .params(u =>
+    u //
+      .combine('canvasType', kAllCanvasTypes)
+      .combine('zeroDimension', ['width', 'height'] as const)
+  )
+  .fn(t => {
+    const { canvasType, zeroDimension } = t.params;
+    const canvas = createCanvas(t, canvasType, 1, 1);
+    canvas[zeroDimension] = 0;
+    const ctx = canvas.getContext('webgpu');
+    assert(ctx instanceof GPUCanvasContext, 'Failed to get WebGPU context from canvas');
+
+    // Validation error, the canvas size is 0 which doesn't make a valid GPUTextureDescriptor.
+    t.expectValidationError(() => {
+      ctx.configure({
+        device: t.device,
+        format: 'bgra8unorm',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT,
+      });
+    });
+
+    canvas[zeroDimension] = 1;
+
+    // The size being incorrect doesn't make for an invalid configuration. Now that it is fixed
+    // getting textures from the canvas should work.
+    const currentTexture = ctx.getCurrentTexture();
+
+    // Try rendering to it even!
+    const encoder = t.device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: currentTexture.createView(),
+          clearValue: [1.0, 0.0, 0.0, 1.0],
+          loadOp: 'clear',
+          storeOp: 'store',
+        },
+      ],
+    });
+    pass.end();
+    t.device.queue.submit([encoder.finish()]);
+  });
+
+g.test('size_zero_after_configure')
+  .desc(
+    `Ensure a validation error is raised after configure() if the size of the canvas becomes zero.`
+  )
+  .params(u =>
+    u //
+      .combine('canvasType', kAllCanvasTypes)
+      .combine('zeroDimension', ['width', 'height'] as const)
+  )
+  .fn(t => {
+    const { canvasType, zeroDimension } = t.params;
+    const canvas = createCanvas(t, canvasType, 1, 1);
+    const ctx = canvas.getContext('webgpu');
+    assert(ctx instanceof GPUCanvasContext, 'Failed to get WebGPU context from canvas');
+
+    ctx.configure({
+      device: t.device,
+      format: 'bgra8unorm',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+
+    canvas[zeroDimension] = 0;
+
+    // The size is incorrect, we should be getting an error texture and a validation error.
+    let currentTexture: GPUTexture;
+    t.expectValidationError(() => {
+      currentTexture = ctx.getCurrentTexture();
+    });
+
+    t.expect(currentTexture![zeroDimension] === 0);
+
+    // Using the texture should produce a validation error.
+    t.expectValidationError(() => {
+      currentTexture.createView();
+    });
+  });
+
+g.test('viewFormats')
+  .desc(
+    `Test the validation that viewFormats are compatible with the format (for all canvas format / view formats)`
+  )
+  .params(u =>
+    u
+      .combine('canvasType', kAllCanvasTypes)
+      .combine('format', kCanvasTextureFormats)
+      .combine('viewFormatFeature', kFeaturesForFormats)
+      .beginSubcases()
+      .expand('viewFormat', ({ viewFormatFeature }) =>
+        filterFormatsByFeature(viewFormatFeature, kTextureFormats)
+      )
+  )
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase([t.params.viewFormatFeature]);
+  })
+  .fn(t => {
+    const { canvasType, format, viewFormat } = t.params;
+
+    t.skipIfTextureFormatNotSupported(viewFormat);
+
+    const canvas = createCanvas(t, canvasType, 1, 1);
+    const ctx = canvas.getContext('webgpu');
+    assert(ctx instanceof GPUCanvasContext, 'Failed to get WebGPU context from canvas');
+
+    const compatible = viewCompatible(format, viewFormat);
+
+    // Test configure() produces an error if the formats aren't compatible.
+    t.expectValidationError(() => {
+      ctx.configure({
+        device: t.device,
+        format,
+        viewFormats: [viewFormat],
+      });
+    }, !compatible);
+
+    // Likewise for getCurrentTexture().
+    let currentTexture: GPUTexture;
+    t.expectValidationError(() => {
+      currentTexture = ctx.getCurrentTexture();
+    }, !compatible);
+
+    // The returned texture is an error texture.
+    t.expectValidationError(() => {
+      currentTexture.createView();
+    }, !compatible);
   });

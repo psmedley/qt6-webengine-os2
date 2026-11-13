@@ -1,4 +1,4 @@
-// Copyright 2015 PDFium Authors. All rights reserved.
+// Copyright 2015 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -179,6 +179,7 @@ int CheckPDFiumCApi() {
     CHK(FPDFImageObj_GetImageFilter);
     CHK(FPDFImageObj_GetImageFilterCount);
     CHK(FPDFImageObj_GetImageMetadata);
+    CHK(FPDFImageObj_GetImagePixelSize);
     CHK(FPDFImageObj_GetRenderedBitmap);
     CHK(FPDFImageObj_LoadJpegFile);
     CHK(FPDFImageObj_LoadJpegFileInline);
@@ -261,6 +262,7 @@ int CheckPDFiumCApi() {
     CHK(FPDFText_SetCharcodes);
     CHK(FPDFText_SetText);
     CHK(FPDF_CreateNewDocument);
+    CHK(FPDF_MovePages);
 
     // fpdf_ext.h
     CHK(FPDFDoc_GetPageMode);
@@ -299,6 +301,7 @@ int CheckPDFiumCApi() {
     CHK(FORM_OnRButtonDown);
     CHK(FORM_OnRButtonUp);
     CHK(FORM_Redo);
+    CHK(FORM_ReplaceAndKeepSelection);
     CHK(FORM_ReplaceSelection);
     CHK(FORM_SelectAllText);
     CHK(FORM_SetFocusedAnnot);
@@ -309,8 +312,8 @@ int CheckPDFiumCApi() {
     CHK(FPDFPage_FormFieldZOrderAtPoint);
     CHK(FPDFPage_HasFormFieldAtPoint);
     CHK(FPDF_FFLDraw);
-#if defined(_SKIA_SUPPORT_)
-    CHK(FPDF_FFLRecord);
+#if defined(PDF_USE_SKIA)
+    CHK(FPDF_FFLDrawSkia);
 #endif
     CHK(FPDF_GetFormType);
     CHK(FPDF_LoadXFA);
@@ -372,6 +375,7 @@ int CheckPDFiumCApi() {
     CHK(FPDF_StructElement_GetAttributeAtIndex);
     CHK(FPDF_StructElement_GetAttributeCount);
     CHK(FPDF_StructElement_GetChildAtIndex);
+    CHK(FPDF_StructElement_GetChildMarkedContentID);
     CHK(FPDF_StructElement_GetID);
     CHK(FPDF_StructElement_GetLang);
     CHK(FPDF_StructElement_GetMarkedContentID);
@@ -427,6 +431,9 @@ int CheckPDFiumCApi() {
     CHK(FPDFText_GetText);
     CHK(FPDFText_GetTextRenderMode);
     CHK(FPDFText_GetUnicode);
+    CHK(FPDFText_HasUnicodeMapError);
+    CHK(FPDFText_IsGenerated);
+    CHK(FPDFText_IsHyphen);
     CHK(FPDFText_LoadPage);
 
     // fpdf_thumbnail.h
@@ -480,6 +487,7 @@ int CheckPDFiumCApi() {
     CHK(FPDF_GetArrayBufferAllocatorSharedInstance);
 #endif
     CHK(FPDF_GetDocPermissions);
+    CHK(FPDF_GetDocUserPermissions);
     CHK(FPDF_GetFileVersion);
     CHK(FPDF_GetLastError);
     CHK(FPDF_GetNamedDest);
@@ -513,8 +521,8 @@ int CheckPDFiumCApi() {
 #endif
     CHK(FPDF_RenderPageBitmap);
     CHK(FPDF_RenderPageBitmapWithMatrix);
-#if defined(_SKIA_SUPPORT_)
-    CHK(FPDF_RenderPageSkp);
+#if defined(PDF_USE_SKIA)
+    CHK(FPDF_RenderPageSkia);
 #endif
 #if defined(_WIN32)
     CHK(FPDF_SetPrintMode);

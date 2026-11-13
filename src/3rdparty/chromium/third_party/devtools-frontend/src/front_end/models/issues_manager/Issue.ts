@@ -40,15 +40,13 @@ const UIStrings = {
 const str_ = i18n.i18n.registerUIStrings('models/issues_manager/Issue.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
-// eslint-disable-next-line rulesdir/const_enum
-export enum IssueCategory {
+export const enum IssueCategory {
   CrossOriginEmbedderPolicy = 'CrossOriginEmbedderPolicy',
   Generic = 'Generic',
   MixedContent = 'MixedContent',
   Cookie = 'Cookie',
   HeavyAd = 'HeavyAd',
   ContentSecurityPolicy = 'ContentSecurityPolicy',
-  TrustedWebActivity = 'TrustedWebActivity',
   LowTextContrast = 'LowTextContrast',
   Cors = 'Cors',
   AttributionReporting = 'AttributionReporting',
@@ -56,8 +54,7 @@ export enum IssueCategory {
   Other = 'Other',
 }
 
-// eslint-disable-next-line rulesdir/const_enum
-export enum IssueKind {
+export const enum IssueKind {
   /**
    * Something is not working in the page right now. Issues of this kind need
    * usually be fixed right away. They usually indicate that a Web API is being
@@ -114,7 +111,7 @@ export function unionIssueKind(a: IssueKind, b: IssueKind): IssueKind {
 }
 
 export function getShowThirdPartyIssuesSetting(): Common.Settings.Setting<boolean> {
-  return Common.Settings.Settings.instance().createSetting('showThirdPartyIssues', false);
+  return Common.Settings.Settings.instance().createSetting('showThirdPartyIssues', true);
 }
 
 export interface AffectedElement {
@@ -172,6 +169,14 @@ export abstract class Issue<IssueCode extends string = string> {
     return [];
   }
 
+  trackingSites(): Iterable<string> {
+    return [];
+  }
+
+  metadataAllowedSites(): Iterable<string> {
+    return [];
+  }
+
   isAssociatedWithRequestId(requestId: string): boolean {
     for (const request of this.requests()) {
       if (request.requestId === requestId) {
@@ -202,6 +207,10 @@ export abstract class Issue<IssueCode extends string = string> {
 
   setHidden(hidden: boolean): void {
     this.#hidden = hidden;
+  }
+
+  maybeCreateConsoleMessage(): SDK.ConsoleModel.ConsoleMessage|undefined {
+    return;
   }
 }
 

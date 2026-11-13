@@ -55,23 +55,25 @@
 #include <algorithm>
 #include <initializer_list>
 #include <set>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "quiche/quic/core/quic_interval.h"
-#include "quiche/quic/platform/api/quic_logging.h"
+#include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/common/platform/api/quiche_containers.h"
+#include "quiche/common/platform/api/quiche_logging.h"
 
 namespace quic {
 
 template <typename T>
-class QUIC_NO_EXPORT QuicIntervalSet {
+class QUICHE_NO_EXPORT QuicIntervalSet {
  public:
   using value_type = QuicInterval<T>;
 
  private:
-  struct QUIC_NO_EXPORT IntervalLess {
+  struct QUICHE_NO_EXPORT IntervalLess {
     using is_transparent = void;
     bool operator()(const value_type& a, const value_type& b) const;
     // These transparent overloads are used when we do all of our searches (via
@@ -126,7 +128,7 @@ class QUIC_NO_EXPORT QuicIntervalSet {
   // Same semantics as Add(const value_type&), but optimized for the case where
   // rbegin()->min() <= |interval|.min() <= rbegin()->max().
   void AddOptimizedForAppend(const value_type& interval) {
-    if (Empty()) {
+    if (Empty() || !GetQuicFlag(quic_interval_set_enable_add_optimization)) {
       Add(interval);
       return;
     }
@@ -384,7 +386,7 @@ class QUIC_NO_EXPORT QuicIntervalSet {
 
  private:
   // Simple member-wise equality, since all intervals are non-empty.
-  struct QUIC_NO_EXPORT NonemptyIntervalEq {
+  struct QUICHE_NO_EXPORT NonemptyIntervalEq {
     bool operator()(const value_type& a, const value_type& b) const {
       return a.min() == b.min() && a.max() == b.max();
     }

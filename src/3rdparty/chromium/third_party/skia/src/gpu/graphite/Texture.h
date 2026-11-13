@@ -13,6 +13,12 @@
 #include "src/gpu/graphite/Resource.h"
 #include "src/gpu/graphite/ResourceTypes.h"
 
+namespace skgpu {
+class MutableTextureState;
+class RefCntedCallback;
+enum class Budgeted : bool;
+};
+
 namespace skgpu::graphite {
 
 class Texture : public Resource {
@@ -20,20 +26,36 @@ public:
     ~Texture() override;
 
     int numSamples() const { return fInfo.numSamples(); }
-    Mipmapped mipmapped() const { return Mipmapped(fInfo.numMipLevels() > 1); }
+    Mipmapped mipmapped() const { return fInfo.mipmapped(); }
 
     SkISize dimensions() const { return fDimensions; }
     const TextureInfo& textureInfo() const { return fInfo; }
+
+    void setReleaseCallback(sk_sp<RefCntedCallback>);
+
+    const char* getResourceType() const override { return "Texture"; }
+
+#if defined(GRAPHITE_TEST_UTILS)
+    const Texture* asTexture() const override { return this; }
+#endif
 
 protected:
     Texture(const SharedContext*,
             SkISize dimensions,
             const TextureInfo& info,
-            Ownership, SkBudgeted);
+            sk_sp<MutableTextureState> mutableState,
+            Ownership,
+            skgpu::Budgeted);
+
+    MutableTextureState* mutableState() const;
+
+    void invokeReleaseProc() override;
 
 private:
     SkISize fDimensions;
     TextureInfo fInfo;
+    sk_sp<MutableTextureState> fMutableState;
+    sk_sp<RefCntedCallback> fReleaseCallback;
 };
 
 } // namepsace skgpu::graphite

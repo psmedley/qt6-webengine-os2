@@ -44,7 +44,7 @@ const UIStrings = {
 const str_ = i18n.i18n.registerUIStrings('models/logs/NetworkLog.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
-let networkLogInstance: NetworkLog;
+let networkLogInstance: NetworkLog|undefined;
 
 export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> implements
     SDK.TargetManager.SDKModelObserver<SDK.NetworkManager.NetworkManager> {
@@ -90,6 +90,10 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
     return networkLogInstance;
   }
 
+  static removeInstance(): void {
+    networkLogInstance = undefined;
+  }
+
   modelAdded(networkManager: SDK.NetworkManager.NetworkManager): void {
     const eventListeners = [];
     eventListeners.push(
@@ -110,7 +114,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
       eventListeners.push(
           resourceTreeModel.addEventListener(SDK.ResourceTreeModel.Events.WillReloadPage, this.willReloadPage, this));
       eventListeners.push(resourceTreeModel.addEventListener(
-          SDK.ResourceTreeModel.Events.MainFrameNavigated, this.onMainFrameNavigated, this));
+          SDK.ResourceTreeModel.Events.PrimaryPageChanged, this.onPrimaryPageChanged, this));
       eventListeners.push(resourceTreeModel.addEventListener(SDK.ResourceTreeModel.Events.Load, this.onLoad, this));
       eventListeners.push(resourceTreeModel.addEventListener(
           SDK.ResourceTreeModel.Events.DOMContentLoaded, this.onDOMContentLoaded.bind(this, resourceTreeModel)));
@@ -206,11 +210,11 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
 
     let type = SDK.NetworkRequest.InitiatorType.Other;
     let url = Platform.DevToolsPath.EmptyUrlString;
-    let lineNumber: number = -Infinity;
-    let columnNumber: number = -Infinity;
+    let lineNumber: number|undefined = undefined;
+    let columnNumber: number|undefined = undefined;
     let scriptId: Protocol.Runtime.ScriptId|null = null;
     let initiatorStack: Protocol.Runtime.StackTrace|null = null;
-    let initiatorRequest: (SDK.NetworkRequest.NetworkRequest|null)|null = null;
+    let initiatorRequest: SDK.NetworkRequest.NetworkRequest|null = null;
     const initiator = request.initiator();
 
     const redirectSource = request.redirectSource();
@@ -221,8 +225,8 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
       if (initiator.type === Protocol.Network.InitiatorType.Parser) {
         type = SDK.NetworkRequest.InitiatorType.Parser;
         url = initiator.url ? initiator.url as Platform.DevToolsPath.UrlString : url;
-        lineNumber = typeof initiator.lineNumber === 'number' ? initiator.lineNumber : lineNumber;
-        columnNumber = typeof initiator.columnNumber === 'number' ? initiator.columnNumber : columnNumber;
+        lineNumber = initiator.lineNumber;
+        columnNumber = initiator.columnNumber;
       } else if (initiator.type === Protocol.Network.InitiatorType.Script) {
         for (let stack: (Protocol.Runtime.StackTrace|undefined) = initiator.stack; stack;) {
           const topFrame = stack.callFrames.length ? stack.callFrames[0] : null;
@@ -240,10 +244,10 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
         if (!initiator.stack && initiator.url) {
           type = SDK.NetworkRequest.InitiatorType.Script;
           url = initiator.url as Platform.DevToolsPath.UrlString;
-          lineNumber = initiator.lineNumber || 0;
+          lineNumber = initiator.lineNumber;
         }
-        if (initiator.stack && initiator.stack.callFrames && initiator.stack.callFrames.length) {
-          initiatorStack = initiator.stack || null;
+        if (initiator.stack?.callFrames?.length) {
+          initiatorStack = initiator.stack;
         }
       } else if (initiator.type === Protocol.Network.InitiatorType.Preload) {
         type = SDK.NetworkRequest.InitiatorType.Preload;
@@ -327,9 +331,10 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
     }
   }
 
-  private onMainFrameNavigated(event: Common.EventTarget.EventTargetEvent<SDK.ResourceTreeModel.ResourceTreeFrame>):
-      void {
-    const mainFrame = event.data;
+  private onPrimaryPageChanged(
+      event: Common.EventTarget.EventTargetEvent<
+          {frame: SDK.ResourceTreeModel.ResourceTreeFrame, type: SDK.ResourceTreeModel.PrimaryPageChangeType}>): void {
+    const mainFrame = event.data.frame;
     const manager = mainFrame.resourceTreeModel().target().model(SDK.NetworkManager.NetworkManager);
     if (!manager || mainFrame.resourceTreeModel().target().parentTarget()?.type() === SDK.Target.Type.Frame) {
       return;
@@ -338,7 +343,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
     // If a page resulted in an error, the browser will navigate to an internal error page
     // hosted at 'chrome-error://...'. In this case, skip the frame navigated event to preserve
     // the network log.
-    if (mainFrame.url !== mainFrame.unreachableUrl() && mainFrame.url.startsWith('chrome-error://')) {
+    if (mainFrame.url !== mainFrame.unreachableUrl() && Common.ParsedURL.schemeIs(mainFrame.url, 'chrome-error:')) {
       return;
     }
 
@@ -360,7 +365,8 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
     let currentPageLoad: SDK.PageLoad.PageLoad|null = null;
     const requestsToAdd = [];
     for (const request of oldManagerRequests) {
-      if (request.loaderId !== mainFrame.loaderId) {
+      if (event.data.type !== SDK.ResourceTreeModel.PrimaryPageChangeType.Activation &&
+          request.loaderId !== mainFrame.loaderId) {
         continue;
       }
       if (!currentPageLoad) {
@@ -398,7 +404,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
 
     if (preserveLog) {
       for (const request of oldRequestsSet) {
-        this.addRequest(request);
+        this.addRequest(request, true);
         request.preserved = true;
       }
     }
@@ -408,7 +414,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
     }
   }
 
-  private addRequest(request: SDK.NetworkRequest.NetworkRequest): void {
+  private addRequest(request: SDK.NetworkRequest.NetworkRequest, preserveLog?: boolean): void {
     this.requestsInternal.push(request);
     this.requestsSet.add(request);
     const requestList = this.requestsMap.get(request.requestId());
@@ -418,7 +424,17 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
       requestList.push(request);
     }
     this.tryResolvePreflightRequests(request);
-    this.dispatchEventToListeners(Events.RequestAdded, request);
+    this.dispatchEventToListeners(Events.RequestAdded, {request, preserveLog});
+  }
+
+  private removeRequest(request: SDK.NetworkRequest.NetworkRequest): void {
+    const index = this.requestsInternal.indexOf(request);
+    if (index > -1) {
+      this.requestsInternal.splice(index, 1);
+    }
+    this.requestsSet.delete(request);
+    this.requestsMap.delete(request.requestId());
+    this.dispatchEventToListeners(Events.RequestRemoved, {request});
   }
 
   private tryResolvePreflightRequests(request: SDK.NetworkRequest.NetworkRequest): void {
@@ -444,7 +460,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
         if (data) {
           data.info = null;
         }
-        this.dispatchEventToListeners(Events.RequestUpdated, preflightRequest);
+        this.dispatchEventToListeners(Events.RequestUpdated, {request: preflightRequest});
       }
     }
   }
@@ -487,7 +503,17 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
     if (!this.requestsSet.has(request)) {
       return;
     }
-    this.dispatchEventToListeners(Events.RequestUpdated, request);
+
+    // This is only triggered in an edge case in which Chrome reports 2 preflight requests. The
+    // first preflight gets aborted and should not be shown in DevTools.
+    // (see https://crbug.com/1290390 for details)
+    if (request.isPreflightRequest() &&
+        request.corsErrorStatus()?.corsError === Protocol.Network.CorsError.UnexpectedPrivateNetworkAccess) {
+      this.removeRequest(request);
+      return;
+    }
+
+    this.dispatchEventToListeners(Events.RequestUpdated, {request});
   }
 
   private onRequestRedirect(event: Common.EventTarget.EventTargetEvent<SDK.NetworkRequest.NetworkRequest>): void {
@@ -540,7 +566,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
         networkManager.target().model(SDK.RuntimeModel.RuntimeModel), Protocol.Log.LogEntrySource.Network,
         warning ? Protocol.Log.LogEntryLevel.Warning : Protocol.Log.LogEntryLevel.Info, message);
     this.associateConsoleMessageWithRequest(consoleMessage, requestId);
-    SDK.ConsoleModel.ConsoleModel.instance().addMessage(consoleMessage);
+    networkManager.target().model(SDK.ConsoleModel.ConsoleModel)?.addMessage(consoleMessage);
   }
 
   associateConsoleMessageWithRequest(consoleMessage: SDK.ConsoleModel.ConsoleMessage, requestId: string): void {
@@ -576,12 +602,11 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> i
 
 const consoleMessageToRequest = new WeakMap<SDK.ConsoleModel.ConsoleMessage, SDK.NetworkRequest.NetworkRequest>();
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
 export enum Events {
   Reset = 'Reset',
   RequestAdded = 'RequestAdded',
   RequestUpdated = 'RequestUpdated',
+  RequestRemoved = 'RequestRemoved',
 }
 
 export interface ResetEvent {
@@ -590,8 +615,9 @@ export interface ResetEvent {
 
 export type EventTypes = {
   [Events.Reset]: ResetEvent,
-  [Events.RequestAdded]: SDK.NetworkRequest.NetworkRequest,
-  [Events.RequestUpdated]: SDK.NetworkRequest.NetworkRequest,
+  [Events.RequestAdded]: {request: SDK.NetworkRequest.NetworkRequest, preserveLog?: boolean},
+  [Events.RequestUpdated]: {request: SDK.NetworkRequest.NetworkRequest},
+  [Events.RequestRemoved]: {request: SDK.NetworkRequest.NetworkRequest},
 };
 
 export interface InitiatorData {
@@ -609,8 +635,8 @@ export interface InitiatorInfo {
   type: SDK.NetworkRequest.InitiatorType;
   // generally this is a url but can also contain "<anonymous>"
   url: Platform.DevToolsPath.UrlString;
-  lineNumber: number;
-  columnNumber: number;
+  lineNumber: number|undefined;
+  columnNumber: number|undefined;
   scriptId: Protocol.Runtime.ScriptId|null;
   stack: Protocol.Runtime.StackTrace|null;
   initiatorRequest: SDK.NetworkRequest.NetworkRequest|null;

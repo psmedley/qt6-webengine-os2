@@ -27,7 +27,6 @@
 #include "internal/platform/mutex.h"
 #include "internal/platform/mutex_lock.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -50,36 +49,13 @@ ByteArray IntToBytes(std::int32_t value) {
   int_bytes[0] = static_cast<char>((value >> 24) & 0x0FF);
   int_bytes[1] = static_cast<char>((value >> 16) & 0x0FF);
   int_bytes[2] = static_cast<char>((value >> 8) & 0x0FF);
-  int_bytes[3] = static_cast<char>((value)&0x0FF);
+  int_bytes[3] = static_cast<char>((value) & 0x0FF);
 
   return ByteArray(int_bytes, sizeof(int_bytes));
 }
 
-ExceptionOr<ByteArray> ReadExactly(InputStream* reader, std::int64_t size) {
-  ByteArray buffer(size);
-  std::int64_t current_pos = 0;
-
-  while (current_pos < size) {
-    ExceptionOr<ByteArray> read_bytes = reader->Read(size - current_pos);
-    if (!read_bytes.ok()) {
-      return read_bytes;
-    }
-    ByteArray result = read_bytes.result();
-
-    if (result.Empty()) {
-      NEARBY_LOGS(WARNING) << __func__ << ": Empty result when reading bytes.";
-      return ExceptionOr<ByteArray>(Exception::kIo);
-    }
-
-    buffer.CopyAt(current_pos, result);
-    current_pos += result.size();
-  }
-
-  return ExceptionOr<ByteArray>(std::move(buffer));
-}
-
 ExceptionOr<std::int32_t> ReadInt(InputStream* reader) {
-  ExceptionOr<ByteArray> read_bytes = ReadExactly(reader, sizeof(std::int32_t));
+  ExceptionOr<ByteArray> read_bytes = reader->ReadExactly(sizeof(std::int32_t));
   if (!read_bytes.ok()) {
     return ExceptionOr<std::int32_t>(read_bytes.exception());
   }
@@ -103,16 +79,19 @@ BaseEndpointChannel::BaseEndpointChannel(const std::string& service_id,
           // derived medium sockets should dervied, and implement the supported
           // values and leave the default values in base #MediumSocket.
           /*ConnectionTechnology*/
-          proto::connections::CONNECTION_TECHNOLOGY_UNKNOWN_TECHNOLOGY,
-          /*ConnectionBand*/ proto::connections::CONNECTION_BAND_UNKNOWN_BAND,
+          location::nearby::proto::connections::
+              CONNECTION_TECHNOLOGY_UNKNOWN_TECHNOLOGY,
+          /*ConnectionBand*/
+          location::nearby::proto::connections::CONNECTION_BAND_UNKNOWN_BAND,
           /*frequency*/ -1,
           /*try_count*/ 0) {}
 
 BaseEndpointChannel::BaseEndpointChannel(
     const std::string& service_id, const std::string& channel_name,
     InputStream* reader, OutputStream* writer,
-    proto::connections::ConnectionTechnology technology,
-    proto::connections::ConnectionBand band, int frequency, int try_count)
+    location::nearby::proto::connections::ConnectionTechnology technology,
+    location::nearby::proto::connections::ConnectionBand band, int frequency,
+    int try_count)
     : service_id_(service_id),
       channel_name_(channel_name),
       reader_(reader),
@@ -145,7 +124,7 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read(
       return ExceptionOr<ByteArray>(Exception::kIo);
     }
 
-    ExceptionOr<ByteArray> read_bytes = ReadExactly(reader_, read_int.result());
+    ExceptionOr<ByteArray> read_bytes = reader_->ReadExactly(read_int.result());
     if (!read_bytes.ok()) {
       return read_bytes;
     }
@@ -174,7 +153,8 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read(
         result = {};
         auto parsed = parser::FromBytes(ByteArray(input));
         if (parsed.ok()) {
-          if (parser::GetFrameType(parsed.result()) == V1Frame::KEEP_ALIVE) {
+          if (parser::GetFrameType(parsed.result()) ==
+              location::nearby::connections::V1Frame::KEEP_ALIVE) {
             NEARBY_LOGS(INFO)
                 << __func__
                 << ": Read unencrypted KEEP_ALIVE on encrypted channel.";
@@ -285,6 +265,11 @@ void BaseEndpointChannel::Close() {
   {
     // In case channel is paused, resume it first thing.
     MutexLock lock(&is_paused_mutex_);
+    if (is_closed_) {
+      NEARBY_LOGS(VERBOSE) << "EndpointChannel already closed";
+      return;
+    }
+    is_closed_ = true;
     UnblockPausedWriter();
   }
   CloseIo();
@@ -323,7 +308,7 @@ void BaseEndpointChannel::SetAnalyticsRecorder(
 }
 
 void BaseEndpointChannel::Close(
-    proto::connections::DisconnectionReason reason) {
+    location::nearby::proto::connections::DisconnectionReason reason) {
   NEARBY_LOGS(INFO) << __func__
                     << ": Closing endpoint channel, reason: " << reason;
   Close();
@@ -336,12 +321,14 @@ void BaseEndpointChannel::Close(
 std::string BaseEndpointChannel::GetType() const {
   MutexLock crypto_lock(&crypto_mutex_);
   std::string subtype = IsEncryptionEnabledLocked() ? "ENCRYPTED_" : "";
-  std::string medium = proto::connections::Medium_Name(
-      proto::connections::Medium::UNKNOWN_MEDIUM);
+  std::string medium = location::nearby::proto::connections::Medium_Name(
+      location::nearby::proto::connections::Medium::UNKNOWN_MEDIUM);
 
-  if (GetMedium() != proto::connections::Medium::UNKNOWN_MEDIUM) {
-    medium =
-        absl::StrCat(subtype, proto::connections::Medium_Name(GetMedium()));
+  if (GetMedium() !=
+      location::nearby::proto::connections::Medium::UNKNOWN_MEDIUM) {
+    medium = absl::StrCat(
+        subtype,
+        location::nearby::proto::connections::Medium_Name(GetMedium()));
   }
   return medium;
 }
@@ -364,6 +351,24 @@ void BaseEndpointChannel::EnableEncryption(
 void BaseEndpointChannel::DisableEncryption() {
   MutexLock crypto_lock(&crypto_mutex_);
   crypto_context_.reset();
+}
+
+bool BaseEndpointChannel::IsEncrypted() {
+  MutexLock crypto_lock(&crypto_mutex_);
+  return IsEncryptionEnabledLocked();
+}
+
+ExceptionOr<ByteArray> BaseEndpointChannel::TryDecrypt(const ByteArray& data) {
+  MutexLock crypto_lock(&crypto_mutex_);
+  if (!IsEncryptionEnabledLocked()) {
+    return Exception::kFailed;
+  }
+  std::unique_ptr<std::string> decrypted_data =
+      crypto_context_->DecodeMessageFromPeer(data.string_data());
+  if (decrypted_data) {
+    return ExceptionOr<ByteArray>(ByteArray(std::move(*decrypted_data)));
+  }
+  return Exception::kExecution;
 }
 
 bool BaseEndpointChannel::IsPaused() const {
@@ -392,13 +397,14 @@ absl::Time BaseEndpointChannel::GetLastWriteTimestamp() const {
   return last_write_timestamp_;
 }
 
-proto::connections::ConnectionTechnology BaseEndpointChannel::GetTechnology()
-    const {
+location::nearby::proto::connections::ConnectionTechnology
+BaseEndpointChannel::GetTechnology() const {
   return technology_;
 }
 
 // Returns the used wifi band of this EndpointChannel.
-proto::connections::ConnectionBand BaseEndpointChannel::GetBand() const {
+location::nearby::proto::connections::ConnectionBand
+BaseEndpointChannel::GetBand() const {
   return band_;
 }
 
@@ -432,6 +438,12 @@ void BaseEndpointChannel::UnblockPausedWriter() {
   is_paused_cond_.Notify();
 }
 
+std::unique_ptr<std::string> BaseEndpointChannel::EncodeMessageForTests(
+    absl::string_view data) {
+  MutexLock lock(&crypto_mutex_);
+  DCHECK(IsEncryptionEnabledLocked());
+  return crypto_context_->EncodeMessageToPeer(std::string(data));
+}
+
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

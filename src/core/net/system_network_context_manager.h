@@ -1,5 +1,6 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // based on chrome/browser/net/system_network_context_manager.h:
 // Copyright 2017 The Chromium Authors. All rights reserved.
@@ -27,6 +28,8 @@ class URLLoaderFactory;
 }
 class SharedURLLoaderFactory;
 } // namespace network
+
+namespace QtWebEngineCore {
 
 // Responsible for creating and managing access to the system NetworkContext.
 // Lives on the UI thread. The NetworkContext this owns is intended for requests
@@ -113,5 +116,7 @@ private:
 
     ProxyConfigMonitor proxy_config_monitor_;
 };
+
+} // namespace QtWebEngineCore
 
 #endif // SYSTEM_NETWORK_CONTEXT_MANAGER_H_

@@ -10,7 +10,7 @@
 
 #ifndef SK_ENABLE_OPTIMIZE_SIZE
 
-#include "include/private/SkTHash.h"
+#include "src/core/SkTHash.h"
 #include "src/sksl/SkSLContext.h"
 #include "src/sksl/SkSLMangler.h"
 #include "src/sksl/SkSLProgramSettings.h"
@@ -33,6 +33,7 @@ class SymbolTable;
 class Variable;
 struct InlineCandidate;
 struct InlineCandidateList;
+namespace Analysis { enum class ReturnComplexity; }
 
 /**
  * Converts a FunctionCall in the IR to a set of statements to be injected ahead of the function
@@ -46,22 +47,17 @@ public:
 
     /** Inlines any eligible functions that are found. Returns true if any changes are made. */
     bool analyze(const std::vector<std::unique_ptr<ProgramElement>>& elements,
-                 std::shared_ptr<SymbolTable> symbols,
+                 SymbolTable* symbols,
                  ProgramUsage* usage);
 
 private:
-    using VariableRewriteMap = SkTHashMap<const Variable*, std::unique_ptr<Expression>>;
-
-    enum class ReturnComplexity {
-        kSingleSafeReturn,
-        kScopedReturns,
-        kEarlyReturns,
-    };
+    using VariableRewriteMap = skia_private::THashMap<const Variable*, std::unique_ptr<Expression>>;
 
     const ProgramSettings& settings() const { return fContext->fConfig->fSettings; }
 
     void buildCandidateList(const std::vector<std::unique_ptr<ProgramElement>>& elements,
-                            std::shared_ptr<SymbolTable> symbols, ProgramUsage* usage,
+                            SymbolTable* symbols,
+                            ProgramUsage* usage,
                             InlineCandidateList* candidateList);
 
     std::unique_ptr<Expression> inlineExpression(Position pos,
@@ -72,7 +68,7 @@ private:
                                                VariableRewriteMap* varMap,
                                                SymbolTable* symbolTableForStatement,
                                                std::unique_ptr<Expression>* resultExpr,
-                                               ReturnComplexity returnComplexity,
+                                               Analysis::ReturnComplexity returnComplexity,
                                                const Statement& statement,
                                                const ProgramUsage& usage,
                                                bool isBuiltinCode);
@@ -84,15 +80,16 @@ private:
     static const Variable* RemapVariable(const Variable* variable,
                                          const VariableRewriteMap* varMap);
 
-    /** Determines if a given function has multiple and/or early returns. */
-    static ReturnComplexity GetReturnComplexity(const FunctionDefinition& funcDef);
-
-    using InlinabilityCache = SkTHashMap<const FunctionDeclaration*, bool>;
+    using InlinabilityCache = skia_private::THashMap<const FunctionDeclaration*, bool>;
     bool candidateCanBeInlined(const InlineCandidate& candidate,
                                const ProgramUsage& usage,
                                InlinabilityCache* cache);
 
-    using FunctionSizeCache = SkTHashMap<const FunctionDeclaration*, int>;
+    bool functionCanBeInlined(const FunctionDeclaration& funcDecl,
+                              const ProgramUsage& usage,
+                              InlinabilityCache* cache);
+
+    using FunctionSizeCache = skia_private::THashMap<const FunctionDeclaration*, int>;
     int getFunctionSize(const FunctionDeclaration& fnDecl, FunctionSizeCache* cache);
 
     /**
@@ -104,8 +101,8 @@ private:
         std::unique_ptr<Block> fInlinedBody;
         std::unique_ptr<Expression> fReplacementExpr;
     };
-    InlinedCall inlineCall(FunctionCall*,
-                           std::shared_ptr<SymbolTable>,
+    InlinedCall inlineCall(const FunctionCall&,
+                           SymbolTable*,
                            const ProgramUsage&,
                            const FunctionDeclaration* caller);
 

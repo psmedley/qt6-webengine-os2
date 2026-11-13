@@ -34,82 +34,75 @@
 
 import * as TextUtils from '../../models/text_utils/text_utils.js';
 import * as Common from '../common/common.js';
-import * as i18n from '../i18n/i18n.js';
 import * as Platform from '../platform/platform.js';
+import * as Root from '../root/root.js';
 
-import {CompilerSourceMappingContentProvider} from './CompilerSourceMappingContentProvider.js';
-
-import {PageResourceLoader, type PageResourceLoadInitiator} from './PageResourceLoader.js';
-
-const UIStrings = {
-  /**
-  *@description Error message when failing to load a source map text via the network
-  *@example {https://example.com/sourcemap.map} PH1
-  *@example {A certificate error occurred} PH2
-  */
-  couldNotLoadContentForSS: 'Could not load content for {PH1}: {PH2}',
-  /**
-  *@description Error message when failing to load a script source text via the network
-  *@example {https://example.com} PH1
-  *@example {Unexpected token} PH2
-  */
-  couldNotParseContentForSS: 'Could not parse content for {PH1}: {PH2}',
-};
-const str_ = i18n.i18n.registerUIStrings('core/sdk/SourceMap.ts', UIStrings);
-const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
-
-export interface SourceMap {
-  compiledURL(): Platform.DevToolsPath.UrlString;
-  url(): Platform.DevToolsPath.UrlString;
-  sourceURLs(): Platform.DevToolsPath.UrlString[];
-  sourceContentProvider(sourceURL: Platform.DevToolsPath.UrlString, contentType: Common.ResourceType.ResourceType):
-      TextUtils.ContentProvider.ContentProvider;
-  embeddedContentByURL(sourceURL: Platform.DevToolsPath.UrlString): string|null;
-  findEntry(lineNumber: number, columnNumber: number): SourceMapEntry|null;
-  findEntryRanges(lineNumber: number, columnNumber: number): {
-    range: TextUtils.TextRange.TextRange,
-    sourceRange: TextUtils.TextRange.TextRange,
-    sourceURL: Platform.DevToolsPath.UrlString,
-  }|null;
-  findReverseRanges(sourceURL: Platform.DevToolsPath.UrlString, lineNumber: number, columnNumber: number):
-      TextUtils.TextRange.TextRange[];
-  sourceLineMapping(sourceURL: Platform.DevToolsPath.UrlString, lineNumber: number, columnNumber: number):
-      SourceMapEntry|null;
-  mappings(): SourceMapEntry[];
-  mapsOrigin(): boolean;
-  hasIgnoreListHint(sourceURL: Platform.DevToolsPath.UrlString): boolean;
-  findRanges(predicate: (sourceURL: Platform.DevToolsPath.UrlString) => boolean, options: {isStartMatching: boolean}):
-      TextUtils.TextRange.TextRange[];
-}
-
-export class SourceMapV3 {
-  version!: number;
-  file!: string|undefined;
-  sources!: Platform.DevToolsPath.UrlString[];
-  sections!: Section[]|undefined;
-  mappings!: string;
-  sourceRoot!: Platform.DevToolsPath.UrlString|undefined;
-  names!: string[]|undefined;
-  sourcesContent!: string|undefined;
+/**
+ * Type of the base source map JSON object, which contains the sources and the mappings at the very least, plus
+ * some additional fields.
+ *
+ * @see {@link SourceMapV3}
+ * @see {@link https://docs.google.com/document/d/1U1RGAehQwRypUTovF1KRlpiOFze0b-_2gc6fAH0KY0k Source Map Revision 3 Proposal}
+ */
+export type SourceMapV3Object = {
+  // clang-format off
+  'version': number,
+  'file'?: string,
+  'sourceRoot'?: string,
+  'sources': string[],
+  'sourcesContent'?: (string|null)[],
+  'names'?: string[],
+  'mappings': string,
+  'ignoreList'?: number[],
   // eslint-disable-next-line @typescript-eslint/naming-convention
-  x_google_ignoreList!: number[]|undefined;
-  constructor() {
-  }
-}
+  'x_google_linecount'?: number,
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  'x_google_ignoreList'?: number[],
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  'x_com_bloomberg_sourcesFunctionMappings'?: string[],
+  // clang-format on
+};
 
-export class Section {
-  map!: SourceMapV3;
-  offset!: Offset;
-  url!: Platform.DevToolsPath.UrlString|undefined;
-  constructor() {
-  }
-}
+/**
+ * Type of JSON objects that classify as valid sourcemaps per version 3 of the specification.
+ *
+ * We support both possible formats, the traditional source map object (represented by the {@link SourceMapV3Object} type),
+ * as well as the index map format, which consists of a sequence of sections that each hold source maps objects themselves
+ * or URLs to external source map files.
+ *
+ * @see {@link SourceMapV3Object}
+ * @see {@link https://docs.google.com/document/d/1U1RGAehQwRypUTovF1KRlpiOFze0b-_2gc6fAH0KY0k Source Map Revision 3 Proposal}
+ */
+export type SourceMapV3 = SourceMapV3Object|{
+  // clang-format off
+  'version': number,
+  'file'?: string,
+  'sections': ({
+    'offset': {line: number, column: number},
+    'map': SourceMapV3Object,
+  } | {
+    'offset': {line: number, column: number},
+    'url': string,
+  })[],
+  // clang-format on
+};
 
-export class Offset {
-  line!: number;
-  column!: number;
-  constructor() {
+/**
+ * Parses the {@link content} as JSON, ignoring BOM markers in the beginning, and
+ * also handling the CORB bypass prefix correctly.
+ *
+ * @param content the string representation of a sourcemap.
+ * @returns the {@link SourceMapV3} representation of the {@link content}.
+ */
+export function parseSourceMap(content: string): SourceMapV3 {
+  if (content.startsWith(')]}')) {
+    content = content.substring(content.indexOf('\n'));
   }
+  if (content.charCodeAt(0) === 0xFEFF) {
+    // Strip BOM at the beginning before parsing the JSON.
+    content = content.slice(1);
+  }
+  return JSON.parse(content) as SourceMapV3;
 }
 
 export class SourceMapEntry {
@@ -139,6 +132,42 @@ export class SourceMapEntry {
   }
 }
 
+interface Position {
+  lineNumber: number;
+  columnNumber: number;
+}
+
+function comparePositions(a: Position, b: Position): number {
+  return a.lineNumber - b.lineNumber || a.columnNumber - b.columnNumber;
+}
+
+export interface ScopeEntry {
+  scopeName(): string;
+  start(): Position;
+  end(): Position;
+}
+
+class ScopeTreeEntry implements ScopeEntry {
+  children: ScopeTreeEntry[] = [];
+
+  constructor(
+      readonly startLineNumber: number, readonly startColumnNumber: number, readonly endLineNumber: number,
+      readonly endColumnNumber: number, readonly name: string) {
+  }
+
+  scopeName(): string {
+    return this.name;
+  }
+
+  start(): Position {
+    return {lineNumber: this.startLineNumber, columnNumber: this.startColumnNumber};
+  }
+
+  end(): Position {
+    return {lineNumber: this.endLineNumber, columnNumber: this.endColumnNumber};
+  }
+}
+
 const base64Digits = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const base64Map = new Map<string, number>();
 
@@ -148,14 +177,20 @@ for (let i = 0; i < base64Digits.length; ++i) {
 
 const sourceMapToSourceList = new WeakMap<SourceMapV3, Platform.DevToolsPath.UrlString[]>();
 
-export class TextSourceMap implements SourceMap {
-  readonly #initiator: PageResourceLoadInitiator;
+interface SourceInfo {
+  content: string|null;
+  ignoreListHint: boolean;
+  reverseMappings: number[]|null;
+  scopeTree: ScopeTreeEntry[]|null;
+}
+
+export class SourceMap {
   #json: SourceMapV3|null;
   readonly #compiledURLInternal: Platform.DevToolsPath.UrlString;
   readonly #sourceMappingURL: Platform.DevToolsPath.UrlString;
   readonly #baseURL: Platform.DevToolsPath.UrlString;
   #mappingsInternal: SourceMapEntry[]|null;
-  readonly #sourceInfos: Map<Platform.DevToolsPath.UrlString, TextSourceMap.SourceInfo>;
+  readonly #sourceInfos: Map<Platform.DevToolsPath.UrlString, SourceInfo>;
 
   /**
    * Implements Source Map V3 model. See https://github.com/google/closure-compiler/wiki/Source-Maps
@@ -163,52 +198,21 @@ export class TextSourceMap implements SourceMap {
    */
   constructor(
       compiledURL: Platform.DevToolsPath.UrlString, sourceMappingURL: Platform.DevToolsPath.UrlString,
-      payload: SourceMapV3, initiator: PageResourceLoadInitiator) {
-    this.#initiator = initiator;
+      payload: SourceMapV3) {
     this.#json = payload;
     this.#compiledURLInternal = compiledURL;
     this.#sourceMappingURL = sourceMappingURL;
-    this.#baseURL = (sourceMappingURL.startsWith('data:') ? compiledURL : sourceMappingURL);
+    this.#baseURL = (Common.ParsedURL.schemeIs(sourceMappingURL, 'data:')) ? compiledURL : sourceMappingURL;
 
     this.#mappingsInternal = null;
     this.#sourceInfos = new Map();
-    if (this.#json.sections) {
-      const sectionWithURL = Boolean(this.#json.sections.find(section => Boolean(section.url)));
-      if (sectionWithURL) {
+    if ('sections' in this.#json) {
+      if (this.#json.sections.find(section => 'url' in section)) {
         Common.Console.Console.instance().warn(
             `SourceMap "${sourceMappingURL}" contains unsupported "URL" field in one of its sections.`);
       }
     }
     this.eachSection(this.parseSources.bind(this));
-  }
-
-  /**
-   * @throws {!Error}
-   */
-  static async load(
-      sourceMapURL: Platform.DevToolsPath.UrlString, compiledURL: Platform.DevToolsPath.UrlString,
-      initiator: PageResourceLoadInitiator): Promise<TextSourceMap> {
-    let updatedContent;
-    try {
-      const {content} = await PageResourceLoader.instance().loadResource(sourceMapURL, initiator);
-      updatedContent = content;
-      if (content.slice(0, 3) === ')]}') {
-        updatedContent = content.substring(content.indexOf('\n'));
-      }
-      if (updatedContent.charCodeAt(0) === 0xFEFF) {
-        // Strip BOM at the beginning before parsing the JSON.
-        updatedContent = updatedContent.slice(1);
-      }
-    } catch (error) {
-      throw new Error(i18nString(UIStrings.couldNotLoadContentForSS, {PH1: sourceMapURL, PH2: error.message}));
-    }
-
-    try {
-      const payload = (JSON.parse(updatedContent) as SourceMapV3);
-      return new TextSourceMap(compiledURL, sourceMapURL, payload, initiator);
-    } catch (error) {
-      throw new Error(i18nString(UIStrings.couldNotParseContentForSS, {PH1: sourceMapURL, PH2: error.message}));
-    }
   }
 
   compiledURL(): Platform.DevToolsPath.UrlString {
@@ -221,15 +225,6 @@ export class TextSourceMap implements SourceMap {
 
   sourceURLs(): Platform.DevToolsPath.UrlString[] {
     return [...this.#sourceInfos.keys()];
-  }
-
-  sourceContentProvider(sourceURL: Platform.DevToolsPath.UrlString, contentType: Common.ResourceType.ResourceType):
-      TextUtils.ContentProvider.ContentProvider {
-    const info = this.#sourceInfos.get(sourceURL);
-    if (info && info.content) {
-      return TextUtils.StaticContentProvider.StaticContentProvider.fromString(sourceURL, contentType, info.content);
-    }
-    return new CompilerSourceMappingContentProvider(sourceURL, contentType, this.#initiator);
   }
 
   embeddedContentByURL(sourceURL: Platform.DevToolsPath.UrlString): string|null {
@@ -390,6 +385,10 @@ export class TextSourceMap implements SourceMap {
     if (this.#mappingsInternal === null) {
       this.#mappingsInternal = [];
       this.eachSection(this.parseMap.bind(this));
+
+      // As per spec, mappings are not necessarily sorted.
+      this.mappings().sort(SourceMapEntry.compare);
+
       this.#computeReverseMappings(this.#mappingsInternal);
       this.#json = null;
     }
@@ -427,53 +426,53 @@ export class TextSourceMap implements SourceMap {
     }
   }
 
-  private eachSection(callback: (arg0: SourceMapV3, arg1: number, arg2: number) => void): void {
+  private eachSection(callback: (arg0: SourceMapV3Object, arg1: number, arg2: number) => void): void {
     if (!this.#json) {
       return;
     }
-    if (!this.#json.sections) {
+    if ('sections' in this.#json) {
+      for (const section of this.#json.sections) {
+        if ('map' in section) {
+          callback(section.map, section.offset.line, section.offset.column);
+        }
+      }
+    } else {
       callback(this.#json, 0, 0);
-      return;
-    }
-    for (const section of this.#json.sections) {
-      callback(section.map, section.offset.line, section.offset.column);
     }
   }
 
-  private parseSources(sourceMap: SourceMapV3): void {
+  private parseSources(sourceMap: SourceMapV3Object): void {
     const sourcesList = [];
-    const sourceRoot = sourceMap.sourceRoot || Platform.DevToolsPath.EmptyUrlString;
-    const ignoreList = new Set(sourceMap.x_google_ignoreList);
+    const sourceRoot = sourceMap.sourceRoot ?? '';
+    const ignoreList = new Set(sourceMap.ignoreList ?? sourceMap.x_google_ignoreList);
     for (let i = 0; i < sourceMap.sources.length; ++i) {
       let href = sourceMap.sources[i];
       // The source map v3 proposal says to prepend the sourceRoot to the source URL
       // and if the resulting URL is not absolute, then resolve the source URL against
-      // the source map URL. Appending the sourceRoot (if one exists) is not likely to
+      // the source map URL. Prepending the sourceRoot (if one exists) is not likely to
       // be meaningful or useful if the source URL is already absolute though. In this
       // case, use the source URL as is without prepending the sourceRoot.
       if (Common.ParsedURL.ParsedURL.isRelativeURL(href)) {
         if (sourceRoot && !sourceRoot.endsWith('/') && href && !href.startsWith('/')) {
-          href = Common.ParsedURL.ParsedURL.concatenate(sourceRoot, '/', href);
+          href = sourceRoot.concat('/', href);
         } else {
-          href = Common.ParsedURL.ParsedURL.concatenate(sourceRoot, href);
+          href = sourceRoot.concat(href);
         }
       }
-      let url = Common.ParsedURL.ParsedURL.completeURL(this.#baseURL, href) || href;
+      const url =
+          Common.ParsedURL.ParsedURL.completeURL(this.#baseURL, href) || (href as Platform.DevToolsPath.UrlString);
       const source = sourceMap.sourcesContent && sourceMap.sourcesContent[i];
-      if (url === this.#compiledURLInternal && source) {
-        url = Common.ParsedURL.ParsedURL.concatenate(url, '? [sm]');
-      }
       sourcesList.push(url);
       if (!this.#sourceInfos.has(url)) {
         const content = source ?? null;
         const ignoreListHint = ignoreList.has(i);
-        this.#sourceInfos.set(url, new TextSourceMap.SourceInfo(content, ignoreListHint));
+        this.#sourceInfos.set(url, {content, ignoreListHint, reverseMappings: null, scopeTree: null});
       }
     }
     sourceMapToSourceList.set(sourceMap, sourcesList);
   }
 
-  private parseMap(map: SourceMapV3, lineNumber: number, columnNumber: number): void {
+  private parseMap(map: SourceMapV3Object, lineNumber: number, columnNumber: number): void {
     let sourceIndex = 0;
     let sourceLineNumber = 0;
     let sourceColumnNumber = 0;
@@ -485,8 +484,8 @@ export class TextSourceMap implements SourceMap {
     // only reach this point when we are certain
     // we have the list available.
     const sources = sourceMapToSourceList.get(map);
-    const names = map.names || [];
-    const stringCharIterator = new TextSourceMap.StringCharIterator(map.mappings);
+    const names = map.names ?? [];
+    const stringCharIterator = new SourceMap.StringCharIterator(map.mappings);
     let sourceURL: Platform.DevToolsPath.UrlString|undefined = sources && sources[sourceIndex];
 
     while (true) {
@@ -530,23 +529,123 @@ export class TextSourceMap implements SourceMap {
           lineNumber, columnNumber, sourceURL, sourceLineNumber, sourceColumnNumber, names[nameIndex]));
     }
 
-    // As per spec, mappings are not necessarily sorted.
-    this.mappings().sort(SourceMapEntry.compare);
+    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.USE_SOURCE_MAP_SCOPES)) {
+      this.parseScopes(map);
+    }
+  }
+
+  private parseScopes(map: SourceMapV3Object): void {
+    if (!map.x_com_bloomberg_sourcesFunctionMappings) {
+      return;
+    }
+    const sources = sourceMapToSourceList.get(map);
+    if (!sources) {
+      return;
+    }
+    const names = map.names ?? [];
+    const scopeList = map.x_com_bloomberg_sourcesFunctionMappings;
+
+    for (let i = 0; i < sources?.length; i++) {
+      if (!scopeList[i] || !sources[i]) {
+        continue;
+      }
+      const sourceInfo = this.#sourceInfos.get(sources[i]);
+      if (!sourceInfo) {
+        continue;
+      }
+      const scopes = scopeList[i];
+
+      let nameIndex = 0;
+      let startLineNumber = 0;
+      let startColumnNumber = 0;
+      let endLineNumber = 0;
+      let endColumnNumber = 0;
+
+      const stringCharIterator = new SourceMap.StringCharIterator(scopes);
+      const entries: ScopeTreeEntry[] = [];
+      let atStart = true;
+      while (stringCharIterator.hasNext()) {
+        if (atStart) {
+          atStart = false;
+        } else if (stringCharIterator.peek() === ',') {
+          stringCharIterator.next();
+        } else {
+          // Unexpected character.
+          return;
+        }
+        nameIndex += this.decodeVLQ(stringCharIterator);
+        startLineNumber += this.decodeVLQ(stringCharIterator);
+        startColumnNumber += this.decodeVLQ(stringCharIterator);
+        endLineNumber += this.decodeVLQ(stringCharIterator);
+        endColumnNumber += this.decodeVLQ(stringCharIterator);
+        entries.push(new ScopeTreeEntry(
+            startLineNumber, startColumnNumber, endLineNumber, endColumnNumber, names[nameIndex] ?? '<invalid>'));
+      }
+      sourceInfo.scopeTree = this.buildScopeTree(entries);
+    }
+  }
+
+  private buildScopeTree(entries: ScopeTreeEntry[]): ScopeTreeEntry[] {
+    const toplevel: ScopeTreeEntry[] = [];
+    entries.sort((l, r) => comparePositions(l.start(), r.start()));
+
+    const stack: ScopeTreeEntry[] = [];
+
+    for (const entry of entries) {
+      const start = entry.start();
+      // Pop all the scopes that precede the current entry.
+      while (stack.length > 0) {
+        const top = stack[stack.length - 1];
+        if (comparePositions(top.end(), start) < 0) {
+          stack.pop();
+        } else {
+          break;
+        }
+      }
+
+      if (stack.length > 0) {
+        stack[stack.length - 1].children.push(entry);
+      } else {
+        toplevel.push(entry);
+      }
+      stack.push(entry);
+    }
+    return toplevel;
+  }
+
+  findScopeEntry(sourceURL: Platform.DevToolsPath.UrlString, sourceLineNumber: number, sourceColumnNumber: number):
+      ScopeEntry|null {
+    const sourceInfo = this.#sourceInfos.get(sourceURL);
+    if (!sourceInfo || !sourceInfo.scopeTree) {
+      return null;
+    }
+    const position: Position = {lineNumber: sourceLineNumber, columnNumber: sourceColumnNumber};
+
+    let current: ScopeTreeEntry|null = null;
+    while (true) {
+      const children: ScopeTreeEntry[] = current?.children ?? sourceInfo.scopeTree;
+      const match = children.find(
+          child => comparePositions(child.start(), position) <= 0 && comparePositions(position, child.end()) <= 0);
+      if (!match) {
+        return current;
+      }
+      current = match;
+    }
   }
 
   private isSeparator(char: string): boolean {
     return char === ',' || char === ';';
   }
 
-  private decodeVLQ(stringCharIterator: TextSourceMap.StringCharIterator): number {
+  private decodeVLQ(stringCharIterator: SourceMap.StringCharIterator): number {
     // Read unsigned value.
     let result = 0;
     let shift = 0;
-    let digit: number = TextSourceMap._VLQ_CONTINUATION_MASK;
-    while (digit & TextSourceMap._VLQ_CONTINUATION_MASK) {
+    let digit: number = SourceMap._VLQ_CONTINUATION_MASK;
+    while (digit & SourceMap._VLQ_CONTINUATION_MASK) {
       digit = base64Map.get(stringCharIterator.next()) || 0;
-      result += (digit & TextSourceMap._VLQ_BASE_MASK) << shift;
-      shift += TextSourceMap._VLQ_BASE_SHIFT;
+      result += (digit & SourceMap._VLQ_BASE_MASK) << shift;
+      shift += SourceMap._VLQ_BASE_SHIFT;
     }
 
     // Fix the sign.
@@ -555,39 +654,82 @@ export class TextSourceMap implements SourceMap {
     return negative ? -result : result;
   }
 
-  reverseMapTextRange(url: Platform.DevToolsPath.UrlString, textRange: TextUtils.TextRange.TextRange):
-      TextUtils.TextRange.TextRange|null {
-    function comparator(
-        position: {
-          lineNumber: number,
-          columnNumber: number,
-        },
-        mappingIndex: number): number {
-      if (position.lineNumber !== mappings[mappingIndex].sourceLineNumber) {
-        return position.lineNumber - mappings[mappingIndex].sourceLineNumber;
-      }
-
-      return position.columnNumber - mappings[mappingIndex].sourceColumnNumber;
-    }
-
+  /**
+   * Finds all the reverse mappings that intersect with the given `textRange` within the
+   * source entity identified by the `url`. If the `url` does not have any reverse mappings
+   * within this source map, an empty array is returned.
+   *
+   * @param url the URL of the source entity to query.
+   * @param textRange the range of text within the entity to check, considered `[start,end[`.
+   * @returns the list of ranges in the generated file that map to locations overlapping the
+   *          {@link textRange} in the source file identified by the {@link url}, or `[]`
+   *          if the {@link url} does not identify an entity in this source map.
+   */
+  reverseMapTextRanges(url: Platform.DevToolsPath.UrlString, textRange: TextUtils.TextRange.TextRange):
+      TextUtils.TextRange.TextRange[] {
     const reverseMappings = this.reversedMappings(url);
     const mappings = this.mappings();
-    if (!reverseMappings.length) {
-      return null;
-    }
-    const startIndex = Platform.ArrayUtilities.lowerBound(
-        reverseMappings, {lineNumber: textRange.startLine, columnNumber: textRange.startColumn}, comparator);
-    const endIndex = Platform.ArrayUtilities.upperBound(
-        reverseMappings, {lineNumber: textRange.endLine, columnNumber: textRange.endColumn}, comparator);
-
-    if (endIndex >= reverseMappings.length) {
-      return null;
+    if (reverseMappings.length === 0) {
+      return [];
     }
 
-    const startMapping = mappings[reverseMappings[startIndex]];
-    const endMapping = mappings[reverseMappings[endIndex]];
-    return new TextUtils.TextRange.TextRange(
-        startMapping.lineNumber, startMapping.columnNumber, endMapping.lineNumber, endMapping.columnNumber);
+    // Determine the first reverse mapping that contains the starting point of the `textRange`.
+    let startReverseIndex =
+        Platform.ArrayUtilities.lowerBound(reverseMappings, textRange, ({startLine, startColumn}, index) => {
+          const {sourceLineNumber, sourceColumnNumber} = mappings[index];
+          return startLine - sourceLineNumber || startColumn - sourceColumnNumber;
+        });
+
+    // Check if the current mapping does not start on the exact start of the `textRange`, and if
+    // so we know that a previous mapping entry (if any) would also overlap. If we reach the end
+    // of the reverse mappings table, we just take the last entry and report that.
+    while (startReverseIndex === reverseMappings.length ||
+           startReverseIndex > 0 &&
+               (mappings[reverseMappings[startReverseIndex]].sourceLineNumber > textRange.startLine ||
+                mappings[reverseMappings[startReverseIndex]].sourceColumnNumber > textRange.startColumn)) {
+      startReverseIndex--;
+    }
+
+    // Determine the last reverse mapping that contains the end point of the `textRange`.
+    let endReverseIndex = startReverseIndex + 1;
+    for (; endReverseIndex < reverseMappings.length; ++endReverseIndex) {
+      const {sourceLineNumber, sourceColumnNumber} = mappings[reverseMappings[endReverseIndex]];
+      if (sourceLineNumber < textRange.endLine ||
+          (sourceLineNumber === textRange.endLine && sourceColumnNumber < textRange.endColumn)) {
+        continue;
+      }
+      break;
+    }
+
+    // Create the ranges...
+    const ranges = [];
+    for (let reverseIndex = startReverseIndex; reverseIndex < endReverseIndex; ++reverseIndex) {
+      const startIndex = reverseMappings[reverseIndex], endIndex = startIndex + 1;
+      const range = TextUtils.TextRange.TextRange.createUnboundedFromLocation(
+          mappings[startIndex].lineNumber, mappings[startIndex].columnNumber);
+      if (endIndex < mappings.length) {
+        range.endLine = mappings[endIndex].lineNumber;
+        range.endColumn = mappings[endIndex].columnNumber;
+      }
+      ranges.push(range);
+    }
+
+    // ...sort them...
+    ranges.sort(TextUtils.TextRange.TextRange.comparator);
+
+    // ...and ensure they are maximally merged.
+    let j = 0;
+    for (let i = 1; i < ranges.length; ++i) {
+      if (ranges[j].immediatelyPrecedes(ranges[i])) {
+        ranges[j].endLine = ranges[i].endLine;
+        ranges[j].endColumn = ranges[i].endColumn;
+      } else {
+        ranges[++j] = ranges[i];
+      }
+    }
+    ranges.length = j + 1;
+
+    return ranges;
   }
 
   mapsOrigin(): boolean {
@@ -645,9 +787,25 @@ export class TextSourceMap implements SourceMap {
 
     return ranges;
   }
+
+  /**
+   * Determines whether this and the {@link other} `SourceMap` agree on content and ignore-list hint
+   * with respect to the {@link sourceURL}.
+   *
+   * @param sourceURL the URL to test for (might not be provided by either of the sourcemaps).
+   * @param other the other `SourceMap` to check.
+   * @returns `true` if both this and the {@link other} `SourceMap` either both have the ignore-list
+   *          hint for {@link sourceURL} or neither, and if both of them either provide the same
+   *          content for the {@link sourceURL} inline or both provide no `sourcesContent` entry
+   *          for it.
+   */
+  compatibleForURL(sourceURL: Platform.DevToolsPath.UrlString, other: SourceMap): boolean {
+    return this.embeddedContentByURL(sourceURL) === other.embeddedContentByURL(sourceURL) &&
+        this.hasIgnoreListHint(sourceURL) === other.hasIgnoreListHint(sourceURL);
+  }
 }
 
-export namespace TextSourceMap {
+export namespace SourceMap {
   // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration
   // eslint-disable-next-line @typescript-eslint/naming-convention
   export const _VLQ_BASE_SHIFT = 5;
@@ -677,13 +835,6 @@ export namespace TextSourceMap {
 
     hasNext(): boolean {
       return this.position < this.string.length;
-    }
-  }
-
-  export class SourceInfo {
-    reverseMappings: number[]|null = null;
-
-    constructor(public content: string|null, public ignoreListHint: boolean) {
     }
   }
 }

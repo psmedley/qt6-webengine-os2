@@ -14,53 +14,53 @@ import developerResourcesListViewStyles from './developerResourcesListView.css.j
 
 const UIStrings = {
   /**
-  *@description Text for the status of something
-  */
+   *@description Text for the status of something
+   */
   status: 'Status',
   /**
-  *@description Text for web URLs
-  */
+   *@description Text for web URLs
+   */
   url: 'URL',
   /**
-  *@description Text for the initiator of something
-  */
+   *@description Text for the initiator of something
+   */
   initiator: 'Initiator',
   /**
-  *@description Text in Coverage List View of the Coverage tab
-  */
+   *@description Text in Coverage List View of the Coverage tab
+   */
   totalBytes: 'Total Bytes',
   /**
-  *@description Text for errors
-  */
+   *@description Text for errors
+   */
   error: 'Error',
   /**
-  *@description Title for the developer resources tab
-  */
-  developerResources: 'Developer Resources',
+   *@description Title for the Developer resources tab
+   */
+  developerResources: 'Developer resources',
   /**
-  *@description Text for a context menu entry
-  */
+   *@description Text for a context menu entry
+   */
   copyUrl: 'Copy URL',
   /**
-  * @description Text for a context menu entry. Command to copy a URL to the clipboard. The initiator
-  * of a request is the entity that caused this request to be sent.
-  */
+   * @description Text for a context menu entry. Command to copy a URL to the clipboard. The initiator
+   * of a request is the entity that caused this request to be sent.
+   */
   copyInitiatorUrl: 'Copy initiator URL',
   /**
-  *@description Text for the status column of a list view
-  */
+   *@description Text for the status column of a list view
+   */
   pending: 'pending',
   /**
-  *@description Text for the status column of a list view
-  */
+   *@description Text for the status column of a list view
+   */
   success: 'success',
   /**
-  *@description Text for the status column of a list view
-  */
+   *@description Text for the status column of a list view
+   */
   failure: 'failure',
   /**
-  *@description Accessible text for the value in bytes in memory allocation.
-  */
+   *@description Accessible text for the value in bytes in memory allocation.
+   */
   sBytes: '{n, plural, =1 {# byte} other {# bytes}}',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/developer_resources/DeveloperResourcesListView.ts', UIStrings);
@@ -77,12 +77,13 @@ export class DeveloperResourcesListView extends UI.Widget.VBox {
     this.isVisibleFilter = isVisibleFilter;
     this.highlightRegExp = null;
 
+    const k = Platform.StringUtilities.kebab;
     const columns = [
-      {id: 'status', title: i18nString(UIStrings.status), width: '60px', fixedWidth: true, sortable: true},
-      {id: 'url', title: i18nString(UIStrings.url), width: '250px', fixedWidth: false, sortable: true},
-      {id: 'initiator', title: i18nString(UIStrings.initiator), width: '80px', fixedWidth: false, sortable: true},
+      {id: k('status'), title: i18nString(UIStrings.status), width: '60px', fixedWidth: true, sortable: true},
+      {id: k('url'), title: i18nString(UIStrings.url), width: '250px', fixedWidth: false, sortable: true},
+      {id: k('initiator'), title: i18nString(UIStrings.initiator), width: '80px', fixedWidth: false, sortable: true},
       {
-        id: 'size',
+        id: k('size'),
         title: i18nString(UIStrings.totalBytes),
         width: '80px',
         fixedWidth: true,
@@ -90,13 +91,13 @@ export class DeveloperResourcesListView extends UI.Widget.VBox {
         align: DataGrid.DataGrid.Align.Right,
       },
       {
-        id: 'errorMessage',
+        id: k('error-message'),
         title: i18nString(UIStrings.error),
         width: '200px',
         fixedWidth: false,
         sortable: true,
       },
-    ] as DataGrid.DataGrid.ColumnDescriptor[];
+    ];
     this.dataGrid = new DataGrid.SortableDataGrid.SortableDataGrid({
       displayName: i18nString(UIStrings.developerResources),
       columns,
@@ -105,6 +106,7 @@ export class DeveloperResourcesListView extends UI.Widget.VBox {
       deleteCallback: undefined,
     });
     this.dataGrid.setResizeMethod(DataGrid.DataGrid.ResizeMethod.Last);
+    this.dataGrid.setStriped(true);
     this.dataGrid.element.classList.add('flex-auto');
     this.dataGrid.addEventListener(DataGrid.DataGrid.Events.SortingChanged, this.sortingChanged, this);
     this.dataGrid.setRowContextMenuCallback(this.populateContextMenu.bind(this));
@@ -122,11 +124,11 @@ export class DeveloperResourcesListView extends UI.Widget.VBox {
     const item = (gridNode as GridNode).item;
     contextMenu.clipboardSection().appendItem(i18nString(UIStrings.copyUrl), () => {
       Host.InspectorFrontendHost.InspectorFrontendHostInstance.copyText(item.url);
-    });
+    }, {jslogContext: 'copyURL'});
     if (item.initiator.initiatorUrl) {
       contextMenu.clipboardSection().appendItem(i18nString(UIStrings.copyInitiatorUrl), () => {
         Host.InspectorFrontendHost.InspectorFrontendHostInstance.copyText(item.initiator.initiatorUrl);
-      });
+      }, {jslogContext: 'copyInitiatorURL'});
     }
   }
 
@@ -196,7 +198,7 @@ export class DeveloperResourcesListView extends UI.Widget.VBox {
       this.dataGrid.sortNodes(sortFunction, !this.dataGrid.isSortOrderAscending());
     }
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([developerResourcesListViewStyles]);
   }
@@ -224,7 +226,7 @@ class GridNode extends DataGrid.SortableDataGrid.SortableDataGridNode<GridNode> 
     return true;
   }
 
-  createCell(columnId: string): HTMLElement {
+  override createCell(columnId: string): HTMLElement {
     const cell = this.createTD(columnId) as HTMLElement;
     switch (columnId) {
       case 'url': {
@@ -274,7 +276,7 @@ class GridNode extends DataGrid.SortableDataGrid.SortableDataGridNode<GridNode> 
         }
         break;
       }
-      case 'errorMessage': {
+      case 'error-message': {
         cell.classList.add('error-message');
         if (this.item.errorMessage) {
           cell.textContent = this.item.errorMessage;
@@ -314,7 +316,7 @@ class GridNode extends DataGrid.SortableDataGrid.SortableDataGridNode<GridNode> 
       case 'initiator':
         return (a: GridNode, b: GridNode): number =>
                    (a.item.initiator.initiatorUrl || '').localeCompare(b.item.initiator.initiatorUrl || '');
-      case 'errorMessage':
+      case 'error-message':
         return (a: GridNode, b: GridNode): number =>
                    (a.item.errorMessage || '').localeCompare(b.item.errorMessage || '');
       default:

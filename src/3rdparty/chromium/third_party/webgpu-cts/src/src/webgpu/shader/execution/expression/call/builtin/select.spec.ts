@@ -17,9 +17,11 @@ import {
   TypeVec,
   TypeBool,
   TypeF32,
+  TypeF16,
   TypeI32,
   TypeU32,
   f32,
+  f16,
   i32,
   u32,
   False,
@@ -28,10 +30,13 @@ import {
   vec2,
   vec3,
   vec4,
+  abstractFloat,
+  TypeAbstractFloat,
 } from '../../../../../util/conversion.js';
-import { run, CaseList, allInputSources } from '../../expression.js';
+import { CaseList } from '../../case.js';
+import { run, allInputSources } from '../../expression.js';
 
-import { builtin } from './builtin.js';
+import { abstractBuiltin, builtin } from './builtin.js';
 
 export const g = makeTestGroup(GPUTest);
 
@@ -39,16 +44,24 @@ function makeBool(n: number) {
   return bool((n & 1) === 1);
 }
 
-type scalarKind = 'b' | 'f' | 'i' | 'u';
+type scalarKind = 'b' | 'af' | 'f' | 'h' | 'i' | 'u';
 
 const dataType = {
   b: {
     type: TypeBool,
     constructor: makeBool,
   },
+  af: {
+    type: TypeAbstractFloat,
+    constructor: abstractFloat,
+  },
   f: {
     type: TypeF32,
     constructor: f32,
+  },
+  h: {
+    type: TypeF16,
+    constructor: f16,
   },
   i: {
     type: TypeI32,
@@ -66,9 +79,15 @@ g.test('scalar')
   .params(u =>
     u
       .combine('inputSource', allInputSources)
-      .combine('component', ['b', 'f', 'i', 'u'] as const)
+      .combine('component', ['b', 'af', 'f', 'h', 'i', 'u'] as const)
       .combine('overload', ['scalar', 'vec2', 'vec3', 'vec4'] as const)
   )
+  .beforeAllSubcases(t => {
+    if (t.params.component === 'h') {
+      t.selectDeviceOrSkipTestCase({ requiredFeatures: ['shader-f16'] });
+    }
+    t.skipIf(t.params.component === 'af' && t.params.inputSource !== 'const');
+  })
   .fn(async t => {
     const componentType = dataType[t.params.component as scalarKind].type;
     const cons = dataType[t.params.component as scalarKind].constructor;
@@ -122,7 +141,7 @@ g.test('scalar')
 
     await run(
       t,
-      builtin('select'),
+      t.params.component === 'af' ? abstractBuiltin('select') : builtin('select'),
       [overload.type, overload.type, TypeBool],
       overload.type,
       t.params,
@@ -136,9 +155,15 @@ g.test('vector')
   .params(u =>
     u
       .combine('inputSource', allInputSources)
-      .combine('component', ['b', 'f', 'i', 'u'] as const)
+      .combine('component', ['b', 'af', 'f', 'h', 'i', 'u'] as const)
       .combine('overload', ['vec2', 'vec3', 'vec4'] as const)
   )
+  .beforeAllSubcases(t => {
+    if (t.params.component === 'h') {
+      t.selectDeviceOrSkipTestCase({ requiredFeatures: ['shader-f16'] });
+    }
+    t.skipIf(t.params.component === 'af' && t.params.inputSource !== 'const');
+  })
   .fn(async t => {
     const componentType = dataType[t.params.component as scalarKind].type;
     const cons = dataType[t.params.component as scalarKind].constructor;
@@ -220,7 +245,7 @@ g.test('vector')
 
     await run(
       t,
-      builtin('select'),
+      t.params.component === 'af' ? abstractBuiltin('select') : builtin('select'),
       [tests.dataType, tests.dataType, tests.boolType],
       tests.dataType,
       t.params,

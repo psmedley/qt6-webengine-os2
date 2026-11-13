@@ -43,40 +43,39 @@ struct V8ReturnValue {
   // Main world or not
   enum MainWorld { kMainWorld };
 
-  // The return value can be a cross origin window.
-  enum MaybeCrossOriginWindow { kMaybeCrossOriginWindow };
+  // The return value can be a cross origin object.
+  enum MaybeCrossOrigin { kMaybeCrossOrigin };
 
   // Returns the exposed object of the given type.
   enum InterfaceObject { kInterfaceObject };
   enum NamespaceObject { kNamespaceObject };
 
-  // Selects the appropriate creation context.
-  static v8::Local<v8::Object> CreationContext(
+  // Selects the appropriate receiver from which e.g. the creation context can
+  // be retrieved.
+  static v8::Local<v8::Object> GetReceiver(
       const v8::FunctionCallbackInfo<v8::Value>& info) {
     return info.This();
   }
-  static v8::Local<v8::Object> CreationContext(
+  static v8::Local<v8::Object> GetReceiver(
       const v8::PropertyCallbackInfo<v8::Value>& info) {
     return info.Holder();
   }
-
   // Helper function for ScriptWrappable
   template <typename CallbackInfo>
   static void SetWrapper(const CallbackInfo& info,
                          ScriptWrappable* wrappable,
                          v8::Local<v8::Context> creation_context) {
-    v8::Local<v8::Value> wrapper;
-    if (!wrappable->Wrap(ScriptState::From(creation_context))
-             .ToLocal(&wrapper)) {
-      return;
-    }
-    info.GetReturnValue().Set(wrapper);
+    v8::Local<v8::Value> wrapper =
+        wrappable->Wrap(ScriptState::From(creation_context));
+    info.GetReturnValue().SetNonEmpty(wrapper);
   }
 };
 
 // V8 handle types
-template <typename CallbackInfo, typename S>
-void V8SetReturnValue(const CallbackInfo& info, const v8::Local<S> value) {
+template <typename CallbackInfo, typename S, typename... ExtraArgs>
+void V8SetReturnValue(const CallbackInfo& info,
+                      const v8::Local<S> value,
+                      ExtraArgs... extra_args) {
   info.GetReturnValue().Set(value);
 }
 
@@ -153,6 +152,16 @@ void V8SetReturnValue(const CallbackInfo& info, std::nullptr_t) {
 // Primitive types
 template <typename CallbackInfo>
 void V8SetReturnValue(const CallbackInfo& info, bool value) {
+  info.GetReturnValue().Set(value);
+}
+
+template <typename CallbackInfo>
+void V8SetReturnValue(const CallbackInfo& info, int16_t value) {
+  info.GetReturnValue().Set(value);
+}
+
+template <typename CallbackInfo>
+void V8SetReturnValue(const CallbackInfo& info, uint16_t value) {
   info.GetReturnValue().Set(value);
 }
 
@@ -281,12 +290,13 @@ void V8SetReturnValue(const CallbackInfo& info,
   if (UNLIKELY(!value))
     return info.GetReturnValue().SetNull();
   ScriptWrappable* wrappable = const_cast<ScriptWrappable*>(value);
-  if (DOMDataStore::SetReturnValueForMainWorld(info.GetReturnValue(),
-                                               wrappable))
+  if (DOMDataStore::SetReturnValueFromInlineStorage(info.GetReturnValue(),
+                                                    wrappable)) {
     return;
+  }
   V8ReturnValue::SetWrapper(
       info, wrappable,
-      V8ReturnValue::CreationContext(info)->GetCreationContextChecked());
+      V8ReturnValue::GetReceiver(info)->GetCreationContextChecked());
 }
 
 template <typename CallbackInfo>
@@ -295,12 +305,13 @@ void V8SetReturnValue(const CallbackInfo& info,
                       V8ReturnValue::MainWorld) {
   DCHECK(DOMWrapperWorld::Current(info.GetIsolate()).IsMainWorld());
   ScriptWrappable* wrappable = const_cast<ScriptWrappable*>(&value);
-  if (DOMDataStore::SetReturnValueForMainWorld(info.GetReturnValue(),
-                                               wrappable))
+  if (DOMDataStore::SetReturnValueFromInlineStorage(info.GetReturnValue(),
+                                                    wrappable)) {
     return;
+  }
   V8ReturnValue::SetWrapper(
       info, wrappable,
-      V8ReturnValue::CreationContext(info)->GetCreationContextChecked());
+      V8ReturnValue::GetReceiver(info)->GetCreationContextChecked());
 }
 
 template <typename CallbackInfo>
@@ -311,13 +322,13 @@ void V8SetReturnValue(const CallbackInfo& info,
     return info.GetReturnValue().SetNull();
   ScriptWrappable* wrappable = const_cast<ScriptWrappable*>(value);
   if (DOMDataStore::SetReturnValueFast(info.GetReturnValue(), wrappable,
-                                       V8ReturnValue::CreationContext(info),
+                                       V8ReturnValue::GetReceiver(info),
                                        receiver)) {
     return;
   }
   V8ReturnValue::SetWrapper(
       info, wrappable,
-      V8ReturnValue::CreationContext(info)->GetCreationContextChecked());
+      V8ReturnValue::GetReceiver(info)->GetCreationContextChecked());
 }
 
 template <typename CallbackInfo>
@@ -326,67 +337,75 @@ void V8SetReturnValue(const CallbackInfo& info,
                       const ScriptWrappable* receiver) {
   ScriptWrappable* wrappable = const_cast<ScriptWrappable*>(&value);
   if (DOMDataStore::SetReturnValueFast(info.GetReturnValue(), wrappable,
-                                       V8ReturnValue::CreationContext(info),
+                                       V8ReturnValue::GetReceiver(info),
                                        receiver)) {
     return;
   }
   V8ReturnValue::SetWrapper(
       info, wrappable,
-      V8ReturnValue::CreationContext(info)->GetCreationContextChecked());
+      V8ReturnValue::GetReceiver(info)->GetCreationContextChecked());
 }
 
 template <typename CallbackInfo>
 void V8SetReturnValue(const CallbackInfo& info,
                       const ScriptWrappable* value,
                       const ScriptWrappable* receiver,
-                      V8ReturnValue::MaybeCrossOriginWindow) {
+                      V8ReturnValue::MaybeCrossOrigin) {
   if (UNLIKELY(!value))
     return info.GetReturnValue().SetNull();
   ScriptWrappable* wrappable = const_cast<ScriptWrappable*>(value);
   if (DOMDataStore::SetReturnValueFast(info.GetReturnValue(), wrappable,
-                                       V8ReturnValue::CreationContext(info),
+                                       V8ReturnValue::GetReceiver(info),
                                        receiver)) {
     return;
   }
-  // Use the current context in case of the Window objects.
-  //
-  // Reasons are:
+  // Check whether the creation context is available, and if not, use the
+  // current context. When a cross-origin Window is associated with a
+  // v8::Context::NewRemoteContext(), there is no creation context in the usual
+  // sense. It's ok to use the current context in that case because:
   // 1) The Window objects must have their own creation context and must never
   //    need a creation context to be specified.
-  // 2) In the case that info.This() is an object created by
-  //    v8::Context::NewRemoteContext(), there is no associated context.
-  // 3) Despite that a v8::Context is not necessary in case
+  // 2) Even though a v8::Context is not necessary in case
   //    of Window objects, v8::Isolate and DOMWrapperWorld are still necessary
-  //    to create an appropriate wrapper object.  A ScriptState of the current
-  //    context best serves this purpose.
-  V8ReturnValue::SetWrapper(info, wrappable,
-                            info.GetIsolate()->GetCurrentContext());
+  //    to create an appropriate wrapper object, and the ScriptState associated
+  //    with the current context will still have the correct v8::Isolate and
+  //    DOMWrapperWorld.
+  v8::Local<v8::Context> context;
+  if (!V8ReturnValue::GetReceiver(info)->GetCreationContext().ToLocal(
+          &context)) {
+    context = info.GetIsolate()->GetCurrentContext();
+  }
+  V8ReturnValue::SetWrapper(info, wrappable, context);
 }
 
 template <typename CallbackInfo>
 void V8SetReturnValue(const CallbackInfo& info,
                       const ScriptWrappable& value,
                       const ScriptWrappable* receiver,
-                      V8ReturnValue::MaybeCrossOriginWindow) {
+                      V8ReturnValue::MaybeCrossOrigin) {
   ScriptWrappable* wrappable = const_cast<ScriptWrappable*>(&value);
   if (DOMDataStore::SetReturnValueFast(info.GetReturnValue(), wrappable,
-                                       V8ReturnValue::CreationContext(info),
+                                       V8ReturnValue::GetReceiver(info),
                                        receiver)) {
     return;
   }
-  // Use the current context in case of the Window objects.
-  //
-  // Reasons are:
+  // Check whether the creation context is available, and if not, use the
+  // current context. When a cross-origin Window is associated with a
+  // v8::Context::NewRemoteContext(), there is no creation context in the usual
+  // sense. It's ok to use the current context in that case because:
   // 1) The Window objects must have their own creation context and must never
   //    need a creation context to be specified.
-  // 2) In the case that info.This() is an object created by
-  //    v8::Context::NewRemoteContext(), there is no associated context.
-  // 3) Despite that a v8::Context is not necessary in case
+  // 2) Even though a v8::Context is not necessary in case
   //    of Window objects, v8::Isolate and DOMWrapperWorld are still necessary
-  //    to create an appropriate wrapper object.  A ScriptState of the current
-  //    context best serves this purpose.
-  V8ReturnValue::SetWrapper(info, wrappable,
-                            info.GetIsolate()->GetCurrentContext());
+  //    to create an appropriate wrapper object, and the ScriptState associated
+  //    with the current context will still have the correct v8::Isolate and
+  //    DOMWrapperWorld.
+  v8::Local<v8::Context> context;
+  if (!V8ReturnValue::GetReceiver(info)->GetCreationContext().ToLocal(
+          &context)) {
+    context = info.GetIsolate()->GetCurrentContext();
+  }
+  V8ReturnValue::SetWrapper(info, wrappable, context);
 }
 
 template <typename CallbackInfo>

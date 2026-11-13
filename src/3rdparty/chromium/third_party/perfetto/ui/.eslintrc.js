@@ -11,6 +11,7 @@ module.exports = {
   'parserOptions': {
     'ecmaVersion': 'latest',
     'sourceType': 'module',
+    'project': './tsconfig.json',
   },
   'plugins': [
     '@typescript-eslint',
@@ -47,7 +48,7 @@ module.exports = {
     // https://github.com/typescript-eslint/typescript-eslint/issues/2621
     'no-unused-vars': 'off',
     '@typescript-eslint/no-unused-vars':
-        ['error', {'argsIgnorePattern': '^_.*'}],
+        ['error', {'argsIgnorePattern': '^_.*', 'varsIgnorePattern': '^_.*'}],
 
     // new Array() is banned (use [] instead) but new Array<Foo>() is
     // allowed since it can be clearer to put the type by the
@@ -67,5 +68,22 @@ module.exports = {
     // There are also some properties like: foo.factory these should
     // stay.
     'new-cap': ['error', {'capIsNew': false, 'properties': false}],
+
+    // Don't allow new introduction of any it is most always a mistake.
+    '@typescript-eslint/no-explicit-any': 'error',
+
+    // Prohibit numbers and strings from being used in boolean expressions.
+    '@typescript-eslint/strict-boolean-expressions': [
+      'error',
+      {
+        // Eventually we probably want to enable all of these, for now this
+        // tackles numbers and keeps the error count manageable.
+        allowAny: true,
+        allowNullableBoolean: true,
+        allowNullableString: true,
+        allowNumber: true,
+        allowString: true,
+      },
+    ],
   },
 };

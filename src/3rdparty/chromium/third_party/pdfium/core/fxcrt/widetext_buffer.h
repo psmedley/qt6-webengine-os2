@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 #include "core/fxcrt/binary_buffer.h"
 #include "core/fxcrt/fx_string.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 namespace fxcrt {
 
@@ -35,6 +35,8 @@ class WideTextBuffer final : public BinaryBuffer {
   WideTextBuffer& operator<<(const WideTextBuffer& buf);
 
  private:
+  void AppendWideString(WideStringView str);
+
   // Returned span is the newly-expanded space.
   pdfium::span<wchar_t> ExpandWideBuf(size_t char_count);
 };

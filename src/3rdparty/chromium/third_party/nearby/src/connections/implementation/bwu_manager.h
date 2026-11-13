@@ -30,7 +30,6 @@
 #include "connections/implementation/mediums/mediums.h"
 #include "internal/platform/scheduled_executor.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -85,8 +84,9 @@ class BwuManager : public EndpointManager::FrameProcessor {
   // This is also an entry point for handling messages for both outbound and
   // inbound BWU protocol.
   // @EndpointManagerReaderThread
-  void OnIncomingFrame(OfflineFrame& frame, const std::string& endpoint_id,
-                       ClientProxy* client, Medium medium,
+  void OnIncomingFrame(location::nearby::connections::OfflineFrame& frame,
+                       const std::string& endpoint_id, ClientProxy* client,
+                       Medium medium,
                        PacketMetaData& packet_meta_data) override;
 
   // Cleans up in-progress upgrades after endpoint disconnection.
@@ -94,7 +94,8 @@ class BwuManager : public EndpointManager::FrameProcessor {
   void OnEndpointDisconnect(ClientProxy* client_proxy,
                             const std::string& service_id,
                             const std::string& endpoint_id,
-                            CountDownLatch barrier) override;
+                            CountDownLatch barrier,
+                            DisconnectionReason reason) override;
 
   void Shutdown();
 
@@ -114,13 +115,15 @@ class BwuManager : public EndpointManager::FrameProcessor {
   // ClientProxy objects are deleted.
   void ShutdownExecutors();
 
+  // Check if BWU is on going for a specific Endpoint
+  bool IsUpgradeOngoing(const std::string& endpoint_id);
+
  private:
   static constexpr absl::Duration kReadClientIntroductionFrameTimeout =
       absl::Seconds(5);
 
   void InitBwuHandlers();
-  void RunOnBwuManagerThread(const std::string& name,
-                             std::function<void()> runnable);
+  void RunOnBwuManagerThread(const std::string& name, Runnable runnable);
   std::vector<Medium> StripOutUnavailableMediums(
       const std::vector<Medium>& mediums) const;
   Medium ChooseBestUpgradeMedium(const std::string& endpoint_id,
@@ -146,7 +149,7 @@ class BwuManager : public EndpointManager::FrameProcessor {
   Medium GetBwuMediumForEndpoint(const std::string& endpoint_id) const;
   void SetBwuMediumForEndpoint(const std::string& endpoint_id, Medium medium);
 
-  BwuHandler* GetHandlerForMedium(Medium medium);
+  BwuHandler* GetHandlerForMedium(Medium medium) const;
 
   // Common functionality to take an incoming connection and go through the
   // upgrade process. This is a callback, invoked by concrete handlers, once
@@ -183,14 +186,16 @@ class BwuManager : public EndpointManager::FrameProcessor {
                                   const UpgradePathInfo& upgrade_info);
   void CancelRetryUpgradeAlarm(const std::string& endpoint_id);
   void CancelAllRetryUpgradeAlarms();
-  void RetryUpgradeMediums(ClientProxy* client, const std::string& endpoint_id,
-                           std::vector<Medium> upgrade_mediums);
+  void TryNextBestUpgradeMediums(ClientProxy* client,
+                                 const std::string& endpoint_id,
+                                 std::vector<Medium> upgrade_mediums);
   absl::Duration CalculateNextRetryDelay(const std::string& endpoint_id);
   void RetryUpgradesAfterDelay(ClientProxy* client,
                                const std::string& endpoint_id);
   void AttemptToRecordBandwidthUpgradeErrorForUnknownEndpoint(
-      proto::connections::BandwidthUpgradeResult result,
-      proto::connections::BandwidthUpgradeErrorStage error_stage);
+      location::nearby::proto::connections::BandwidthUpgradeResult result,
+      location::nearby::proto::connections::BandwidthUpgradeErrorStage
+          error_stage);
 
   bool is_single_threaded_for_testing_ = false;
 
@@ -235,6 +240,5 @@ class BwuManager : public EndpointManager::FrameProcessor {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_BWU_MANAGER_H_

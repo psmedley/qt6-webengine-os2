@@ -20,7 +20,9 @@ namespace proto {
 constexpr ConnectionsLog_ClientSession::ConnectionsLog_ClientSession(
   ::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized)
   : strategy_session_()
-  , duration_millis_(int64_t{0}){}
+  , connection_token_(&::PROTOBUF_NAMESPACE_ID::internal::fixed_address_empty_string)
+  , duration_millis_(int64_t{0})
+  , client_flow_id_(int64_t{0}){}
 struct ConnectionsLog_ClientSessionDefaultTypeInternal {
   constexpr ConnectionsLog_ClientSessionDefaultTypeInternal()
     : _instance(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized{}) {}
@@ -186,7 +188,11 @@ constexpr ConnectionsLog_EstablishedConnection::ConnectionsLog_EstablishedConnec
 
   , disconnection_reason_(0)
 
-  , client_flow_id_(int64_t{0}){}
+  , client_flow_id_(int64_t{0})
+  , type_(0)
+
+  , safe_disconnection_result_(0)
+{}
 struct ConnectionsLog_EstablishedConnectionDefaultTypeInternal {
   constexpr ConnectionsLog_EstablishedConnectionDefaultTypeInternal()
     : _instance(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized{}) {}
@@ -205,7 +211,8 @@ constexpr ConnectionsLog_Payload::ConnectionsLog_Payload(
   , num_chunks_(0)
   , num_bytes_transferred_(int64_t{0})
   , status_(0)
-{}
+
+  , num_successful_auto_resume_(0){}
 struct ConnectionsLog_PayloadDefaultTypeInternal {
   constexpr ConnectionsLog_PayloadDefaultTypeInternal()
     : _instance(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized{}) {}
@@ -267,7 +274,10 @@ constexpr ConnectionsLog_AdvertisingMetadata::ConnectionsLog_AdvertisingMetadata
   : connected_ap_frequency_(0)
   , supports_extended_ble_advertisements_(false)
   , supports_nfc_technology_(false)
-  , multiple_advertisement_supported_(false){}
+  , multiple_advertisement_supported_(false)
+  , supports_dual_band_(false)
+  , power_level_(-1)
+{}
 struct ConnectionsLog_AdvertisingMetadataDefaultTypeInternal {
   constexpr ConnectionsLog_AdvertisingMetadataDefaultTypeInternal()
     : _instance(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized{}) {}
@@ -281,7 +291,9 @@ constexpr ConnectionsLog_DiscoveryMetadata::ConnectionsLog_DiscoveryMetadata(
   ::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized)
   : connected_ap_frequency_(0)
   , supports_extended_ble_advertisements_(false)
-  , supports_nfc_technology_(false){}
+  , supports_nfc_technology_(false)
+  , power_level_(-1)
+{}
 struct ConnectionsLog_DiscoveryMetadataDefaultTypeInternal {
   constexpr ConnectionsLog_DiscoveryMetadataDefaultTypeInternal()
     : _instance(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized{}) {}
@@ -301,13 +313,15 @@ constexpr ConnectionsLog_ConnectionAttemptMetadata::ConnectionsLog_ConnectionAtt
 
   , frequency_(0)
   , try_counts_(0)
+  , max_tx_speed_(0)
   , is_tdls_used_(false)
   , wifi_hotspot_status_(false)
-  , max_tx_speed_(0)
+  , is_mcc_mode_(false)
   , max_rx_speed_(0)
   , wifi_channel_width_(0)
   , send_buffer_size_(0)
-  , receive_buffer_size_(0){}
+  , receive_buffer_size_(0)
+  , connected_ap_frequency_(0){}
 struct ConnectionsLog_ConnectionAttemptMetadataDefaultTypeInternal {
   constexpr ConnectionsLog_ConnectionAttemptMetadataDefaultTypeInternal()
     : _instance(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized{}) {}
@@ -344,6 +358,69 @@ namespace location {
 namespace nearby {
 namespace analytics {
 namespace proto {
+bool ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_strings[3] = {};
+
+static const char ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_names[] =
+  "SAFE_DISCONNECTION"
+  "UNKNOWN_SAFE_DISCONNECTION_RESULT"
+  "UNSAFE_DISCONNECTION";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_entries[] = {
+  { {ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_names + 0, 18}, 1 },
+  { {ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_names + 18, 33}, 0 },
+  { {ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_names + 51, 20}, 2 },
+};
+
+static const int ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_entries_by_number[] = {
+  1, // 0 -> UNKNOWN_SAFE_DISCONNECTION_RESULT
+  0, // 1 -> SAFE_DISCONNECTION
+  2, // 2 -> UNSAFE_DISCONNECTION
+};
+
+const std::string& ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_Name(
+    ConnectionsLog_EstablishedConnection_SafeDisconnectionResult value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_entries,
+          ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_entries_by_number,
+          3, ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_entries,
+      ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_entries_by_number,
+      3, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_strings[idx].get();
+}
+bool ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, ConnectionsLog_EstablishedConnection_SafeDisconnectionResult* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_entries, 3, name, &int_value);
+  if (success) {
+    *value = static_cast<ConnectionsLog_EstablishedConnection_SafeDisconnectionResult>(int_value);
+  }
+  return success;
+}
+#if (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
+constexpr ConnectionsLog_EstablishedConnection_SafeDisconnectionResult ConnectionsLog_EstablishedConnection::UNKNOWN_SAFE_DISCONNECTION_RESULT;
+constexpr ConnectionsLog_EstablishedConnection_SafeDisconnectionResult ConnectionsLog_EstablishedConnection::SAFE_DISCONNECTION;
+constexpr ConnectionsLog_EstablishedConnection_SafeDisconnectionResult ConnectionsLog_EstablishedConnection::UNSAFE_DISCONNECTION;
+constexpr ConnectionsLog_EstablishedConnection_SafeDisconnectionResult ConnectionsLog_EstablishedConnection::SafeDisconnectionResult_MIN;
+constexpr ConnectionsLog_EstablishedConnection_SafeDisconnectionResult ConnectionsLog_EstablishedConnection::SafeDisconnectionResult_MAX;
+constexpr int ConnectionsLog_EstablishedConnection::SafeDisconnectionResult_ARRAYSIZE;
+#endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
 
 // ===================================================================
 
@@ -351,6 +428,12 @@ class ConnectionsLog_ClientSession::_Internal {
  public:
   using HasBits = decltype(std::declval<ConnectionsLog_ClientSession>()._has_bits_);
   static void set_has_duration_millis(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static void set_has_client_flow_id(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+  static void set_has_connection_token(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
   }
 };
@@ -370,12 +453,29 @@ ConnectionsLog_ClientSession::ConnectionsLog_ClientSession(const ConnectionsLog_
       _has_bits_(from._has_bits_),
       strategy_session_(from.strategy_session_) {
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  duration_millis_ = from.duration_millis_;
+  connection_token_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    connection_token_.Set(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), "", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_connection_token()) {
+    connection_token_.Set(::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::EmptyDefault{}, from._internal_connection_token(), 
+      GetArenaForAllocation());
+  }
+  ::memcpy(&duration_millis_, &from.duration_millis_,
+    static_cast<size_t>(reinterpret_cast<char*>(&client_flow_id_) -
+    reinterpret_cast<char*>(&duration_millis_)) + sizeof(client_flow_id_));
   // @@protoc_insertion_point(copy_constructor:location.nearby.analytics.proto.ConnectionsLog.ClientSession)
 }
 
 inline void ConnectionsLog_ClientSession::SharedCtor() {
-duration_millis_ = int64_t{0};
+connection_token_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  connection_token_.Set(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), "", GetArenaForAllocation());
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+::memset(reinterpret_cast<char*>(this) + static_cast<size_t>(
+    reinterpret_cast<char*>(&duration_millis_) - reinterpret_cast<char*>(this)),
+    0, static_cast<size_t>(reinterpret_cast<char*>(&client_flow_id_) -
+    reinterpret_cast<char*>(&duration_millis_)) + sizeof(client_flow_id_));
 }
 
 ConnectionsLog_ClientSession::~ConnectionsLog_ClientSession() {
@@ -387,6 +487,7 @@ ConnectionsLog_ClientSession::~ConnectionsLog_ClientSession() {
 
 inline void ConnectionsLog_ClientSession::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  connection_token_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
 
 void ConnectionsLog_ClientSession::ArenaDtor(void* object) {
@@ -406,7 +507,15 @@ void ConnectionsLog_ClientSession::Clear() {
   (void) cached_has_bits;
 
   strategy_session_.Clear();
-  duration_millis_ = int64_t{0};
+  cached_has_bits = _has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    connection_token_.ClearNonDefaultToEmpty();
+  }
+  if (cached_has_bits & 0x00000006u) {
+    ::memset(&duration_millis_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&client_flow_id_) -
+        reinterpret_cast<char*>(&duration_millis_)) + sizeof(client_flow_id_));
+  }
   _has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
 }
@@ -437,6 +546,24 @@ const char* ConnectionsLog_ClientSession::_InternalParse(const char* ptr, ::PROT
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // optional int64 client_flow_id = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _Internal::set_has_client_flow_id(&has_bits);
+          client_flow_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional string connection_token = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_connection_token();
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
         } else
           goto handle_unusual;
         continue;
@@ -472,7 +599,7 @@ uint8_t* ConnectionsLog_ClientSession::_InternalSerialize(
 
   cached_has_bits = _has_bits_[0];
   // optional int64 duration_millis = 1;
-  if (cached_has_bits & 0x00000001u) {
+  if (cached_has_bits & 0x00000002u) {
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->_internal_duration_millis(), target);
   }
@@ -483,6 +610,18 @@ uint8_t* ConnectionsLog_ClientSession::_InternalSerialize(
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(2, this->_internal_strategy_session(i), target, stream);
+  }
+
+  // optional int64 client_flow_id = 3;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(3, this->_internal_client_flow_id(), target);
+  }
+
+  // optional string connection_token = 4;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteStringMaybeAliased(
+        4, this->_internal_connection_token(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -508,12 +647,26 @@ size_t ConnectionsLog_ClientSession::ByteSizeLong() const {
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
   }
 
-  // optional int64 duration_millis = 1;
   cached_has_bits = _has_bits_[0];
-  if (cached_has_bits & 0x00000001u) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64SizePlusOne(this->_internal_duration_millis());
-  }
+  if (cached_has_bits & 0x00000007u) {
+    // optional string connection_token = 4;
+    if (cached_has_bits & 0x00000001u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+          this->_internal_connection_token());
+    }
 
+    // optional int64 duration_millis = 1;
+    if (cached_has_bits & 0x00000002u) {
+      total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64SizePlusOne(this->_internal_duration_millis());
+    }
+
+    // optional int64 client_flow_id = 3;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64SizePlusOne(this->_internal_client_flow_id());
+    }
+
+  }
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -535,8 +688,18 @@ void ConnectionsLog_ClientSession::MergeFrom(const ConnectionsLog_ClientSession&
   (void) cached_has_bits;
 
   strategy_session_.MergeFrom(from.strategy_session_);
-  if (from._internal_has_duration_millis()) {
-    _internal_set_duration_millis(from._internal_duration_millis());
+  cached_has_bits = from._has_bits_[0];
+  if (cached_has_bits & 0x00000007u) {
+    if (cached_has_bits & 0x00000001u) {
+      _internal_set_connection_token(from._internal_connection_token());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      duration_millis_ = from.duration_millis_;
+    }
+    if (cached_has_bits & 0x00000004u) {
+      client_flow_id_ = from.client_flow_id_;
+    }
+    _has_bits_[0] |= cached_has_bits;
   }
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
@@ -554,10 +717,22 @@ bool ConnectionsLog_ClientSession::IsInitialized() const {
 
 void ConnectionsLog_ClientSession::InternalSwap(ConnectionsLog_ClientSession* other) {
   using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_has_bits_[0], other->_has_bits_[0]);
   strategy_session_.InternalSwap(&other->strategy_session_);
-  swap(duration_millis_, other->duration_millis_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      &connection_token_, lhs_arena,
+      &other->connection_token_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ConnectionsLog_ClientSession, client_flow_id_)
+      + sizeof(ConnectionsLog_ClientSession::client_flow_id_)
+      - PROTOBUF_FIELD_OFFSET(ConnectionsLog_ClientSession, duration_millis_)>(
+          reinterpret_cast<char*>(&duration_millis_),
+          reinterpret_cast<char*>(&other->duration_millis_));
 }
 
 std::string ConnectionsLog_ClientSession::GetTypeName() const {
@@ -3626,6 +3801,12 @@ class ConnectionsLog_EstablishedConnection::_Internal {
   static void set_has_connection_token(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
   }
+  static void set_has_type(HasBits* has_bits) {
+    (*has_bits)[0] |= 32u;
+  }
+  static void set_has_safe_disconnection_result(HasBits* has_bits) {
+    (*has_bits)[0] |= 64u;
+  }
 };
 
 ConnectionsLog_EstablishedConnection::ConnectionsLog_EstablishedConnection(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -3654,8 +3835,8 @@ ConnectionsLog_EstablishedConnection::ConnectionsLog_EstablishedConnection(const
       GetArenaForAllocation());
   }
   ::memcpy(&duration_millis_, &from.duration_millis_,
-    static_cast<size_t>(reinterpret_cast<char*>(&client_flow_id_) -
-    reinterpret_cast<char*>(&duration_millis_)) + sizeof(client_flow_id_));
+    static_cast<size_t>(reinterpret_cast<char*>(&safe_disconnection_result_) -
+    reinterpret_cast<char*>(&duration_millis_)) + sizeof(safe_disconnection_result_));
   // @@protoc_insertion_point(copy_constructor:location.nearby.analytics.proto.ConnectionsLog.EstablishedConnection)
 }
 
@@ -3666,8 +3847,8 @@ connection_token_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyS
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 ::memset(reinterpret_cast<char*>(this) + static_cast<size_t>(
     reinterpret_cast<char*>(&duration_millis_) - reinterpret_cast<char*>(this)),
-    0, static_cast<size_t>(reinterpret_cast<char*>(&client_flow_id_) -
-    reinterpret_cast<char*>(&duration_millis_)) + sizeof(client_flow_id_));
+    0, static_cast<size_t>(reinterpret_cast<char*>(&safe_disconnection_result_) -
+    reinterpret_cast<char*>(&duration_millis_)) + sizeof(safe_disconnection_result_));
 }
 
 ConnectionsLog_EstablishedConnection::~ConnectionsLog_EstablishedConnection() {
@@ -3704,10 +3885,10 @@ void ConnectionsLog_EstablishedConnection::Clear() {
   if (cached_has_bits & 0x00000001u) {
     connection_token_.ClearNonDefaultToEmpty();
   }
-  if (cached_has_bits & 0x0000001eu) {
+  if (cached_has_bits & 0x0000007eu) {
     ::memset(&duration_millis_, 0, static_cast<size_t>(
-        reinterpret_cast<char*>(&client_flow_id_) -
-        reinterpret_cast<char*>(&duration_millis_)) + sizeof(client_flow_id_));
+        reinterpret_cast<char*>(&safe_disconnection_result_) -
+        reinterpret_cast<char*>(&duration_millis_)) + sizeof(safe_disconnection_result_));
   }
   _has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -3799,6 +3980,32 @@ const char* ConnectionsLog_EstablishedConnection::_InternalParse(const char* ptr
         } else
           goto handle_unusual;
         continue;
+      // optional .location.nearby.proto.connections.ConnectionAttemptType type = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::proto::connections::ConnectionAttemptType_IsValid(val))) {
+            _internal_set_type(static_cast<::location::nearby::proto::connections::ConnectionAttemptType>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(8, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .location.nearby.analytics.proto.ConnectionsLog.EstablishedConnection.SafeDisconnectionResult safe_disconnection_result = 9;
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 72)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::analytics::proto::ConnectionsLog_EstablishedConnection_SafeDisconnectionResult_IsValid(val))) {
+            _internal_set_safe_disconnection_result(static_cast<::location::nearby::analytics::proto::ConnectionsLog_EstablishedConnection_SafeDisconnectionResult>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(9, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -3878,6 +4085,20 @@ uint8_t* ConnectionsLog_EstablishedConnection::_InternalSerialize(
         7, this->_internal_connection_token(), target);
   }
 
+  // optional .location.nearby.proto.connections.ConnectionAttemptType type = 8;
+  if (cached_has_bits & 0x00000020u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      8, this->_internal_type(), target);
+  }
+
+  // optional .location.nearby.analytics.proto.ConnectionsLog.EstablishedConnection.SafeDisconnectionResult safe_disconnection_result = 9;
+  if (cached_has_bits & 0x00000040u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      9, this->_internal_safe_disconnection_result(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -3909,7 +4130,7 @@ size_t ConnectionsLog_EstablishedConnection::ByteSizeLong() const {
   }
 
   cached_has_bits = _has_bits_[0];
-  if (cached_has_bits & 0x0000001fu) {
+  if (cached_has_bits & 0x0000007fu) {
     // optional string connection_token = 7;
     if (cached_has_bits & 0x00000001u) {
       total_size += 1 +
@@ -3939,6 +4160,18 @@ size_t ConnectionsLog_EstablishedConnection::ByteSizeLong() const {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64SizePlusOne(this->_internal_client_flow_id());
     }
 
+    // optional .location.nearby.proto.connections.ConnectionAttemptType type = 8;
+    if (cached_has_bits & 0x00000020u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_type());
+    }
+
+    // optional .location.nearby.analytics.proto.ConnectionsLog.EstablishedConnection.SafeDisconnectionResult safe_disconnection_result = 9;
+    if (cached_has_bits & 0x00000040u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_safe_disconnection_result());
+    }
+
   }
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
@@ -3963,7 +4196,7 @@ void ConnectionsLog_EstablishedConnection::MergeFrom(const ConnectionsLog_Establ
   sent_payload_.MergeFrom(from.sent_payload_);
   received_payload_.MergeFrom(from.received_payload_);
   cached_has_bits = from._has_bits_[0];
-  if (cached_has_bits & 0x0000001fu) {
+  if (cached_has_bits & 0x0000007fu) {
     if (cached_has_bits & 0x00000001u) {
       _internal_set_connection_token(from._internal_connection_token());
     }
@@ -3978,6 +4211,12 @@ void ConnectionsLog_EstablishedConnection::MergeFrom(const ConnectionsLog_Establ
     }
     if (cached_has_bits & 0x00000010u) {
       client_flow_id_ = from.client_flow_id_;
+    }
+    if (cached_has_bits & 0x00000020u) {
+      type_ = from.type_;
+    }
+    if (cached_has_bits & 0x00000040u) {
+      safe_disconnection_result_ = from.safe_disconnection_result_;
     }
     _has_bits_[0] |= cached_has_bits;
   }
@@ -4009,8 +4248,8 @@ void ConnectionsLog_EstablishedConnection::InternalSwap(ConnectionsLog_Establish
       &other->connection_token_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ConnectionsLog_EstablishedConnection, client_flow_id_)
-      + sizeof(ConnectionsLog_EstablishedConnection::client_flow_id_)
+      PROTOBUF_FIELD_OFFSET(ConnectionsLog_EstablishedConnection, safe_disconnection_result_)
+      + sizeof(ConnectionsLog_EstablishedConnection::safe_disconnection_result_)
       - PROTOBUF_FIELD_OFFSET(ConnectionsLog_EstablishedConnection, duration_millis_)>(
           reinterpret_cast<char*>(&duration_millis_),
           reinterpret_cast<char*>(&other->duration_millis_));
@@ -4044,6 +4283,9 @@ class ConnectionsLog_Payload::_Internal {
   static void set_has_status(HasBits* has_bits) {
     (*has_bits)[0] |= 32u;
   }
+  static void set_has_num_successful_auto_resume(HasBits* has_bits) {
+    (*has_bits)[0] |= 64u;
+  }
 };
 
 ConnectionsLog_Payload::ConnectionsLog_Payload(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -4060,16 +4302,16 @@ ConnectionsLog_Payload::ConnectionsLog_Payload(const ConnectionsLog_Payload& fro
       _has_bits_(from._has_bits_) {
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&duration_millis_, &from.duration_millis_,
-    static_cast<size_t>(reinterpret_cast<char*>(&status_) -
-    reinterpret_cast<char*>(&duration_millis_)) + sizeof(status_));
+    static_cast<size_t>(reinterpret_cast<char*>(&num_successful_auto_resume_) -
+    reinterpret_cast<char*>(&duration_millis_)) + sizeof(num_successful_auto_resume_));
   // @@protoc_insertion_point(copy_constructor:location.nearby.analytics.proto.ConnectionsLog.Payload)
 }
 
 inline void ConnectionsLog_Payload::SharedCtor() {
 ::memset(reinterpret_cast<char*>(this) + static_cast<size_t>(
     reinterpret_cast<char*>(&duration_millis_) - reinterpret_cast<char*>(this)),
-    0, static_cast<size_t>(reinterpret_cast<char*>(&status_) -
-    reinterpret_cast<char*>(&duration_millis_)) + sizeof(status_));
+    0, static_cast<size_t>(reinterpret_cast<char*>(&num_successful_auto_resume_) -
+    reinterpret_cast<char*>(&duration_millis_)) + sizeof(num_successful_auto_resume_));
 }
 
 ConnectionsLog_Payload::~ConnectionsLog_Payload() {
@@ -4100,10 +4342,10 @@ void ConnectionsLog_Payload::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _has_bits_[0];
-  if (cached_has_bits & 0x0000003fu) {
+  if (cached_has_bits & 0x0000007fu) {
     ::memset(&duration_millis_, 0, static_cast<size_t>(
-        reinterpret_cast<char*>(&status_) -
-        reinterpret_cast<char*>(&duration_millis_)) + sizeof(status_));
+        reinterpret_cast<char*>(&num_successful_auto_resume_) -
+        reinterpret_cast<char*>(&duration_millis_)) + sizeof(num_successful_auto_resume_));
   }
   _has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -4178,6 +4420,15 @@ const char* ConnectionsLog_Payload::_InternalParse(const char* ptr, ::PROTOBUF_N
         } else
           goto handle_unusual;
         continue;
+      // optional int32 num_successful_auto_resume = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _Internal::set_has_num_successful_auto_resume(&has_bits);
+          num_successful_auto_resume_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -4247,6 +4498,12 @@ uint8_t* ConnectionsLog_Payload::_InternalSerialize(
       6, this->_internal_status(), target);
   }
 
+  // optional int32 num_successful_auto_resume = 7;
+  if (cached_has_bits & 0x00000040u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(7, this->_internal_num_successful_auto_resume(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -4264,7 +4521,7 @@ size_t ConnectionsLog_Payload::ByteSizeLong() const {
   (void) cached_has_bits;
 
   cached_has_bits = _has_bits_[0];
-  if (cached_has_bits & 0x0000003fu) {
+  if (cached_has_bits & 0x0000007fu) {
     // optional int64 duration_millis = 1;
     if (cached_has_bits & 0x00000001u) {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64SizePlusOne(this->_internal_duration_millis());
@@ -4297,6 +4554,11 @@ size_t ConnectionsLog_Payload::ByteSizeLong() const {
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_status());
     }
 
+    // optional int32 num_successful_auto_resume = 7;
+    if (cached_has_bits & 0x00000040u) {
+      total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_num_successful_auto_resume());
+    }
+
   }
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
@@ -4319,7 +4581,7 @@ void ConnectionsLog_Payload::MergeFrom(const ConnectionsLog_Payload& from) {
   (void) cached_has_bits;
 
   cached_has_bits = from._has_bits_[0];
-  if (cached_has_bits & 0x0000003fu) {
+  if (cached_has_bits & 0x0000007fu) {
     if (cached_has_bits & 0x00000001u) {
       duration_millis_ = from.duration_millis_;
     }
@@ -4337,6 +4599,9 @@ void ConnectionsLog_Payload::MergeFrom(const ConnectionsLog_Payload& from) {
     }
     if (cached_has_bits & 0x00000020u) {
       status_ = from.status_;
+    }
+    if (cached_has_bits & 0x00000040u) {
+      num_successful_auto_resume_ = from.num_successful_auto_resume_;
     }
     _has_bits_[0] |= cached_has_bits;
   }
@@ -4359,8 +4624,8 @@ void ConnectionsLog_Payload::InternalSwap(ConnectionsLog_Payload* other) {
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_has_bits_[0], other->_has_bits_[0]);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ConnectionsLog_Payload, status_)
-      + sizeof(ConnectionsLog_Payload::status_)
+      PROTOBUF_FIELD_OFFSET(ConnectionsLog_Payload, num_successful_auto_resume_)
+      + sizeof(ConnectionsLog_Payload::num_successful_auto_resume_)
       - PROTOBUF_FIELD_OFFSET(ConnectionsLog_Payload, duration_millis_)>(
           reinterpret_cast<char*>(&duration_millis_),
           reinterpret_cast<char*>(&other->duration_millis_));
@@ -4914,6 +5179,26 @@ ConnectionsLog_ErrorCode::ConnectionsLog_ErrorCode(const ConnectionsLog_ErrorCod
       _internal_set_disconnect_error(from._internal_disconnect_error());
       break;
     }
+    case kSendPayloadError: {
+      _internal_set_send_payload_error(from._internal_send_payload_error());
+      break;
+    }
+    case kReceivePayloadError: {
+      _internal_set_receive_payload_error(from._internal_receive_payload_error());
+      break;
+    }
+    case kUpgradeError: {
+      _internal_set_upgrade_error(from._internal_upgrade_error());
+      break;
+    }
+    case kAcceptConnectionError: {
+      _internal_set_accept_connection_error(from._internal_accept_connection_error());
+      break;
+    }
+    case kRejectConnectionError: {
+      _internal_set_reject_connection_error(from._internal_reject_connection_error());
+      break;
+    }
     case ERRORCODEDETAIL_NOT_SET: {
       break;
     }
@@ -4999,6 +5284,26 @@ void ConnectionsLog_ErrorCode::clear_ErrorCodeDetail() {
       break;
     }
     case kDisconnectError: {
+      // No need to clear
+      break;
+    }
+    case kSendPayloadError: {
+      // No need to clear
+      break;
+    }
+    case kReceivePayloadError: {
+      // No need to clear
+      break;
+    }
+    case kUpgradeError: {
+      // No need to clear
+      break;
+    }
+    case kAcceptConnectionError: {
+      // No need to clear
+      break;
+    }
+    case kRejectConnectionError: {
       // No need to clear
       break;
     }
@@ -5238,6 +5543,71 @@ const char* ConnectionsLog_ErrorCode::_InternalParse(const char* ptr, ::PROTOBUF
         } else
           goto handle_unusual;
         continue;
+      // .location.nearby.errorcode.proto.SendPayloadError send_payload_error = 17;
+      case 17:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 136)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::errorcode::proto::SendPayloadError_IsValid(val))) {
+            _internal_set_send_payload_error(static_cast<::location::nearby::errorcode::proto::SendPayloadError>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(17, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // .location.nearby.errorcode.proto.ReceivePayloadError receive_payload_error = 18;
+      case 18:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 144)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::errorcode::proto::ReceivePayloadError_IsValid(val))) {
+            _internal_set_receive_payload_error(static_cast<::location::nearby::errorcode::proto::ReceivePayloadError>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(18, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // .location.nearby.errorcode.proto.UpgradeError upgrade_error = 19;
+      case 19:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 152)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::errorcode::proto::UpgradeError_IsValid(val))) {
+            _internal_set_upgrade_error(static_cast<::location::nearby::errorcode::proto::UpgradeError>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(19, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // .location.nearby.errorcode.proto.AcceptConnectionError accept_connection_error = 20;
+      case 20:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 160)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::errorcode::proto::AcceptConnectionError_IsValid(val))) {
+            _internal_set_accept_connection_error(static_cast<::location::nearby::errorcode::proto::AcceptConnectionError>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(20, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // .location.nearby.errorcode.proto.RejectConnectionError reject_connection_error = 21;
+      case 21:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 168)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::errorcode::proto::RejectConnectionError_IsValid(val))) {
+            _internal_set_reject_connection_error(static_cast<::location::nearby::errorcode::proto::RejectConnectionError>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(21, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -5372,6 +5742,39 @@ uint8_t* ConnectionsLog_ErrorCode::_InternalSerialize(
         16, this->_internal_connection_token(), target);
   }
 
+  switch (ErrorCodeDetail_case()) {
+    case kSendPayloadError: {
+      target = stream->EnsureSpace(target);
+      target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+        17, this->_internal_send_payload_error(), target);
+      break;
+    }
+    case kReceivePayloadError: {
+      target = stream->EnsureSpace(target);
+      target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+        18, this->_internal_receive_payload_error(), target);
+      break;
+    }
+    case kUpgradeError: {
+      target = stream->EnsureSpace(target);
+      target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+        19, this->_internal_upgrade_error(), target);
+      break;
+    }
+    case kAcceptConnectionError: {
+      target = stream->EnsureSpace(target);
+      target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+        20, this->_internal_accept_connection_error(), target);
+      break;
+    }
+    case kRejectConnectionError: {
+      target = stream->EnsureSpace(target);
+      target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+        21, this->_internal_reject_connection_error(), target);
+      break;
+    }
+    default: ;
+  }
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -5489,6 +5892,36 @@ size_t ConnectionsLog_ErrorCode::ByteSizeLong() const {
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_disconnect_error());
       break;
     }
+    // .location.nearby.errorcode.proto.SendPayloadError send_payload_error = 17;
+    case kSendPayloadError: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_send_payload_error());
+      break;
+    }
+    // .location.nearby.errorcode.proto.ReceivePayloadError receive_payload_error = 18;
+    case kReceivePayloadError: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_receive_payload_error());
+      break;
+    }
+    // .location.nearby.errorcode.proto.UpgradeError upgrade_error = 19;
+    case kUpgradeError: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_upgrade_error());
+      break;
+    }
+    // .location.nearby.errorcode.proto.AcceptConnectionError accept_connection_error = 20;
+    case kAcceptConnectionError: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_accept_connection_error());
+      break;
+    }
+    // .location.nearby.errorcode.proto.RejectConnectionError reject_connection_error = 21;
+    case kRejectConnectionError: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_reject_connection_error());
+      break;
+    }
     case ERRORCODEDETAIL_NOT_SET: {
       break;
     }
@@ -5575,6 +6008,26 @@ void ConnectionsLog_ErrorCode::MergeFrom(const ConnectionsLog_ErrorCode& from) {
       _internal_set_disconnect_error(from._internal_disconnect_error());
       break;
     }
+    case kSendPayloadError: {
+      _internal_set_send_payload_error(from._internal_send_payload_error());
+      break;
+    }
+    case kReceivePayloadError: {
+      _internal_set_receive_payload_error(from._internal_receive_payload_error());
+      break;
+    }
+    case kUpgradeError: {
+      _internal_set_upgrade_error(from._internal_upgrade_error());
+      break;
+    }
+    case kAcceptConnectionError: {
+      _internal_set_accept_connection_error(from._internal_accept_connection_error());
+      break;
+    }
+    case kRejectConnectionError: {
+      _internal_set_reject_connection_error(from._internal_reject_connection_error());
+      break;
+    }
     case ERRORCODEDETAIL_NOT_SET: {
       break;
     }
@@ -5641,6 +6094,12 @@ class ConnectionsLog_AdvertisingMetadata::_Internal {
   static void set_has_multiple_advertisement_supported(HasBits* has_bits) {
     (*has_bits)[0] |= 8u;
   }
+  static void set_has_power_level(HasBits* has_bits) {
+    (*has_bits)[0] |= 32u;
+  }
+  static void set_has_supports_dual_band(HasBits* has_bits) {
+    (*has_bits)[0] |= 16u;
+  }
 };
 
 ConnectionsLog_AdvertisingMetadata::ConnectionsLog_AdvertisingMetadata(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -5657,16 +6116,17 @@ ConnectionsLog_AdvertisingMetadata::ConnectionsLog_AdvertisingMetadata(const Con
       _has_bits_(from._has_bits_) {
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&connected_ap_frequency_, &from.connected_ap_frequency_,
-    static_cast<size_t>(reinterpret_cast<char*>(&multiple_advertisement_supported_) -
-    reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(multiple_advertisement_supported_));
+    static_cast<size_t>(reinterpret_cast<char*>(&power_level_) -
+    reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(power_level_));
   // @@protoc_insertion_point(copy_constructor:location.nearby.analytics.proto.ConnectionsLog.AdvertisingMetadata)
 }
 
 inline void ConnectionsLog_AdvertisingMetadata::SharedCtor() {
 ::memset(reinterpret_cast<char*>(this) + static_cast<size_t>(
     reinterpret_cast<char*>(&connected_ap_frequency_) - reinterpret_cast<char*>(this)),
-    0, static_cast<size_t>(reinterpret_cast<char*>(&multiple_advertisement_supported_) -
-    reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(multiple_advertisement_supported_));
+    0, static_cast<size_t>(reinterpret_cast<char*>(&supports_dual_band_) -
+    reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(supports_dual_band_));
+power_level_ = -1;
 }
 
 ConnectionsLog_AdvertisingMetadata::~ConnectionsLog_AdvertisingMetadata() {
@@ -5697,10 +6157,11 @@ void ConnectionsLog_AdvertisingMetadata::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _has_bits_[0];
-  if (cached_has_bits & 0x0000000fu) {
+  if (cached_has_bits & 0x0000003fu) {
     ::memset(&connected_ap_frequency_, 0, static_cast<size_t>(
-        reinterpret_cast<char*>(&multiple_advertisement_supported_) -
-        reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(multiple_advertisement_supported_));
+        reinterpret_cast<char*>(&supports_dual_band_) -
+        reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(supports_dual_band_));
+    power_level_ = -1;
   }
   _has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -5745,6 +6206,28 @@ const char* ConnectionsLog_AdvertisingMetadata::_InternalParse(const char* ptr, 
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
           _Internal::set_has_multiple_advertisement_supported(&has_bits);
           multiple_advertisement_supported_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .location.nearby.proto.connections.PowerLevel power_level = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::proto::connections::PowerLevel_IsValid(val))) {
+            _internal_set_power_level(static_cast<::location::nearby::proto::connections::PowerLevel>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(5, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // optional bool supports_dual_band = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
+          _Internal::set_has_supports_dual_band(&has_bits);
+          supports_dual_band_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -5804,6 +6287,19 @@ uint8_t* ConnectionsLog_AdvertisingMetadata::_InternalSerialize(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(4, this->_internal_multiple_advertisement_supported(), target);
   }
 
+  // optional .location.nearby.proto.connections.PowerLevel power_level = 5;
+  if (cached_has_bits & 0x00000020u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      5, this->_internal_power_level(), target);
+  }
+
+  // optional bool supports_dual_band = 6;
+  if (cached_has_bits & 0x00000010u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(6, this->_internal_supports_dual_band(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -5821,7 +6317,7 @@ size_t ConnectionsLog_AdvertisingMetadata::ByteSizeLong() const {
   (void) cached_has_bits;
 
   cached_has_bits = _has_bits_[0];
-  if (cached_has_bits & 0x0000000fu) {
+  if (cached_has_bits & 0x0000003fu) {
     // optional int32 connected_ap_frequency = 2;
     if (cached_has_bits & 0x00000001u) {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_connected_ap_frequency());
@@ -5840,6 +6336,17 @@ size_t ConnectionsLog_AdvertisingMetadata::ByteSizeLong() const {
     // optional bool multiple_advertisement_supported = 4;
     if (cached_has_bits & 0x00000008u) {
       total_size += 1 + 1;
+    }
+
+    // optional bool supports_dual_band = 6;
+    if (cached_has_bits & 0x00000010u) {
+      total_size += 1 + 1;
+    }
+
+    // optional .location.nearby.proto.connections.PowerLevel power_level = 5;
+    if (cached_has_bits & 0x00000020u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_power_level());
     }
 
   }
@@ -5864,7 +6371,7 @@ void ConnectionsLog_AdvertisingMetadata::MergeFrom(const ConnectionsLog_Advertis
   (void) cached_has_bits;
 
   cached_has_bits = from._has_bits_[0];
-  if (cached_has_bits & 0x0000000fu) {
+  if (cached_has_bits & 0x0000003fu) {
     if (cached_has_bits & 0x00000001u) {
       connected_ap_frequency_ = from.connected_ap_frequency_;
     }
@@ -5876,6 +6383,12 @@ void ConnectionsLog_AdvertisingMetadata::MergeFrom(const ConnectionsLog_Advertis
     }
     if (cached_has_bits & 0x00000008u) {
       multiple_advertisement_supported_ = from.multiple_advertisement_supported_;
+    }
+    if (cached_has_bits & 0x00000010u) {
+      supports_dual_band_ = from.supports_dual_band_;
+    }
+    if (cached_has_bits & 0x00000020u) {
+      power_level_ = from.power_level_;
     }
     _has_bits_[0] |= cached_has_bits;
   }
@@ -5898,11 +6411,12 @@ void ConnectionsLog_AdvertisingMetadata::InternalSwap(ConnectionsLog_Advertising
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_has_bits_[0], other->_has_bits_[0]);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ConnectionsLog_AdvertisingMetadata, multiple_advertisement_supported_)
-      + sizeof(ConnectionsLog_AdvertisingMetadata::multiple_advertisement_supported_)
+      PROTOBUF_FIELD_OFFSET(ConnectionsLog_AdvertisingMetadata, supports_dual_band_)
+      + sizeof(ConnectionsLog_AdvertisingMetadata::supports_dual_band_)
       - PROTOBUF_FIELD_OFFSET(ConnectionsLog_AdvertisingMetadata, connected_ap_frequency_)>(
           reinterpret_cast<char*>(&connected_ap_frequency_),
           reinterpret_cast<char*>(&other->connected_ap_frequency_));
+  swap(power_level_, other->power_level_);
 }
 
 std::string ConnectionsLog_AdvertisingMetadata::GetTypeName() const {
@@ -5924,6 +6438,9 @@ class ConnectionsLog_DiscoveryMetadata::_Internal {
   static void set_has_supports_nfc_technology(HasBits* has_bits) {
     (*has_bits)[0] |= 4u;
   }
+  static void set_has_power_level(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
+  }
 };
 
 ConnectionsLog_DiscoveryMetadata::ConnectionsLog_DiscoveryMetadata(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -5940,8 +6457,8 @@ ConnectionsLog_DiscoveryMetadata::ConnectionsLog_DiscoveryMetadata(const Connect
       _has_bits_(from._has_bits_) {
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&connected_ap_frequency_, &from.connected_ap_frequency_,
-    static_cast<size_t>(reinterpret_cast<char*>(&supports_nfc_technology_) -
-    reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(supports_nfc_technology_));
+    static_cast<size_t>(reinterpret_cast<char*>(&power_level_) -
+    reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(power_level_));
   // @@protoc_insertion_point(copy_constructor:location.nearby.analytics.proto.ConnectionsLog.DiscoveryMetadata)
 }
 
@@ -5950,6 +6467,7 @@ inline void ConnectionsLog_DiscoveryMetadata::SharedCtor() {
     reinterpret_cast<char*>(&connected_ap_frequency_) - reinterpret_cast<char*>(this)),
     0, static_cast<size_t>(reinterpret_cast<char*>(&supports_nfc_technology_) -
     reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(supports_nfc_technology_));
+power_level_ = -1;
 }
 
 ConnectionsLog_DiscoveryMetadata::~ConnectionsLog_DiscoveryMetadata() {
@@ -5980,10 +6498,11 @@ void ConnectionsLog_DiscoveryMetadata::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
+  if (cached_has_bits & 0x0000000fu) {
     ::memset(&connected_ap_frequency_, 0, static_cast<size_t>(
         reinterpret_cast<char*>(&supports_nfc_technology_) -
         reinterpret_cast<char*>(&connected_ap_frequency_)) + sizeof(supports_nfc_technology_));
+    power_level_ = -1;
   }
   _has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -6020,6 +6539,19 @@ const char* ConnectionsLog_DiscoveryMetadata::_InternalParse(const char* ptr, ::
           _Internal::set_has_supports_nfc_technology(&has_bits);
           supports_nfc_technology_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .location.nearby.proto.connections.PowerLevel power_level = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::location::nearby::proto::connections::PowerLevel_IsValid(val))) {
+            _internal_set_power_level(static_cast<::location::nearby::proto::connections::PowerLevel>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(4, val, mutable_unknown_fields());
+          }
         } else
           goto handle_unusual;
         continue;
@@ -6072,6 +6604,13 @@ uint8_t* ConnectionsLog_DiscoveryMetadata::_InternalSerialize(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(3, this->_internal_supports_nfc_technology(), target);
   }
 
+  // optional .location.nearby.proto.connections.PowerLevel power_level = 4;
+  if (cached_has_bits & 0x00000008u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      4, this->_internal_power_level(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -6089,7 +6628,7 @@ size_t ConnectionsLog_DiscoveryMetadata::ByteSizeLong() const {
   (void) cached_has_bits;
 
   cached_has_bits = _has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
+  if (cached_has_bits & 0x0000000fu) {
     // optional int32 connected_ap_frequency = 2;
     if (cached_has_bits & 0x00000001u) {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_connected_ap_frequency());
@@ -6103,6 +6642,12 @@ size_t ConnectionsLog_DiscoveryMetadata::ByteSizeLong() const {
     // optional bool supports_nfc_technology = 3;
     if (cached_has_bits & 0x00000004u) {
       total_size += 1 + 1;
+    }
+
+    // optional .location.nearby.proto.connections.PowerLevel power_level = 4;
+    if (cached_has_bits & 0x00000008u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->_internal_power_level());
     }
 
   }
@@ -6127,7 +6672,7 @@ void ConnectionsLog_DiscoveryMetadata::MergeFrom(const ConnectionsLog_DiscoveryM
   (void) cached_has_bits;
 
   cached_has_bits = from._has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
+  if (cached_has_bits & 0x0000000fu) {
     if (cached_has_bits & 0x00000001u) {
       connected_ap_frequency_ = from.connected_ap_frequency_;
     }
@@ -6136,6 +6681,9 @@ void ConnectionsLog_DiscoveryMetadata::MergeFrom(const ConnectionsLog_DiscoveryM
     }
     if (cached_has_bits & 0x00000004u) {
       supports_nfc_technology_ = from.supports_nfc_technology_;
+    }
+    if (cached_has_bits & 0x00000008u) {
+      power_level_ = from.power_level_;
     }
     _has_bits_[0] |= cached_has_bits;
   }
@@ -6163,6 +6711,7 @@ void ConnectionsLog_DiscoveryMetadata::InternalSwap(ConnectionsLog_DiscoveryMeta
       - PROTOBUF_FIELD_OFFSET(ConnectionsLog_DiscoveryMetadata, connected_ap_frequency_)>(
           reinterpret_cast<char*>(&connected_ap_frequency_),
           reinterpret_cast<char*>(&other->connected_ap_frequency_));
+  swap(power_level_, other->power_level_);
 }
 
 std::string ConnectionsLog_DiscoveryMetadata::GetTypeName() const {
@@ -6191,28 +6740,34 @@ class ConnectionsLog_ConnectionAttemptMetadata::_Internal {
     (*has_bits)[0] |= 2u;
   }
   static void set_has_is_tdls_used(HasBits* has_bits) {
-    (*has_bits)[0] |= 64u;
+    (*has_bits)[0] |= 128u;
   }
   static void set_has_try_counts(HasBits* has_bits) {
     (*has_bits)[0] |= 32u;
   }
   static void set_has_wifi_hotspot_status(HasBits* has_bits) {
-    (*has_bits)[0] |= 128u;
-  }
-  static void set_has_max_tx_speed(HasBits* has_bits) {
     (*has_bits)[0] |= 256u;
   }
-  static void set_has_max_rx_speed(HasBits* has_bits) {
-    (*has_bits)[0] |= 512u;
+  static void set_has_max_tx_speed(HasBits* has_bits) {
+    (*has_bits)[0] |= 64u;
   }
-  static void set_has_wifi_channel_width(HasBits* has_bits) {
+  static void set_has_max_rx_speed(HasBits* has_bits) {
     (*has_bits)[0] |= 1024u;
   }
-  static void set_has_send_buffer_size(HasBits* has_bits) {
+  static void set_has_wifi_channel_width(HasBits* has_bits) {
     (*has_bits)[0] |= 2048u;
   }
-  static void set_has_receive_buffer_size(HasBits* has_bits) {
+  static void set_has_send_buffer_size(HasBits* has_bits) {
     (*has_bits)[0] |= 4096u;
+  }
+  static void set_has_receive_buffer_size(HasBits* has_bits) {
+    (*has_bits)[0] |= 8192u;
+  }
+  static void set_has_connected_ap_frequency(HasBits* has_bits) {
+    (*has_bits)[0] |= 16384u;
+  }
+  static void set_has_is_mcc_mode(HasBits* has_bits) {
+    (*has_bits)[0] |= 512u;
   }
 };
 
@@ -6246,8 +6801,8 @@ ConnectionsLog_ConnectionAttemptMetadata::ConnectionsLog_ConnectionAttemptMetada
       GetArenaForAllocation());
   }
   ::memcpy(&technology_, &from.technology_,
-    static_cast<size_t>(reinterpret_cast<char*>(&receive_buffer_size_) -
-    reinterpret_cast<char*>(&technology_)) + sizeof(receive_buffer_size_));
+    static_cast<size_t>(reinterpret_cast<char*>(&connected_ap_frequency_) -
+    reinterpret_cast<char*>(&technology_)) + sizeof(connected_ap_frequency_));
   // @@protoc_insertion_point(copy_constructor:location.nearby.analytics.proto.ConnectionsLog.ConnectionAttemptMetadata)
 }
 
@@ -6262,8 +6817,8 @@ country_code_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStrin
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 ::memset(reinterpret_cast<char*>(this) + static_cast<size_t>(
     reinterpret_cast<char*>(&technology_) - reinterpret_cast<char*>(this)),
-    0, static_cast<size_t>(reinterpret_cast<char*>(&receive_buffer_size_) -
-    reinterpret_cast<char*>(&technology_)) + sizeof(receive_buffer_size_));
+    0, static_cast<size_t>(reinterpret_cast<char*>(&connected_ap_frequency_) -
+    reinterpret_cast<char*>(&technology_)) + sizeof(connected_ap_frequency_));
 }
 
 ConnectionsLog_ConnectionAttemptMetadata::~ConnectionsLog_ConnectionAttemptMetadata() {
@@ -6306,13 +6861,13 @@ void ConnectionsLog_ConnectionAttemptMetadata::Clear() {
   }
   if (cached_has_bits & 0x000000fcu) {
     ::memset(&technology_, 0, static_cast<size_t>(
-        reinterpret_cast<char*>(&wifi_hotspot_status_) -
-        reinterpret_cast<char*>(&technology_)) + sizeof(wifi_hotspot_status_));
+        reinterpret_cast<char*>(&is_tdls_used_) -
+        reinterpret_cast<char*>(&technology_)) + sizeof(is_tdls_used_));
   }
-  if (cached_has_bits & 0x00001f00u) {
-    ::memset(&max_tx_speed_, 0, static_cast<size_t>(
-        reinterpret_cast<char*>(&receive_buffer_size_) -
-        reinterpret_cast<char*>(&max_tx_speed_)) + sizeof(receive_buffer_size_));
+  if (cached_has_bits & 0x00007f00u) {
+    ::memset(&wifi_hotspot_status_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&connected_ap_frequency_) -
+        reinterpret_cast<char*>(&wifi_hotspot_status_)) + sizeof(connected_ap_frequency_));
   }
   _has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -6450,6 +7005,24 @@ const char* ConnectionsLog_ConnectionAttemptMetadata::_InternalParse(const char*
         } else
           goto handle_unusual;
         continue;
+      // optional int32 connected_ap_frequency = 14;
+      case 14:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 112)) {
+          _Internal::set_has_connected_ap_frequency(&has_bits);
+          connected_ap_frequency_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional bool is_mcc_mode = 15;
+      case 15:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 120)) {
+          _Internal::set_has_is_mcc_mode(&has_bits);
+          is_mcc_mode_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -6514,7 +7087,7 @@ uint8_t* ConnectionsLog_ConnectionAttemptMetadata::_InternalSerialize(
   }
 
   // optional bool is_tdls_used = 6;
-  if (cached_has_bits & 0x00000040u) {
+  if (cached_has_bits & 0x00000080u) {
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(6, this->_internal_is_tdls_used(), target);
   }
@@ -6526,39 +7099,51 @@ uint8_t* ConnectionsLog_ConnectionAttemptMetadata::_InternalSerialize(
   }
 
   // optional bool wifi_hotspot_status = 8;
-  if (cached_has_bits & 0x00000080u) {
+  if (cached_has_bits & 0x00000100u) {
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(8, this->_internal_wifi_hotspot_status(), target);
   }
 
   // optional int32 max_tx_speed = 9;
-  if (cached_has_bits & 0x00000100u) {
+  if (cached_has_bits & 0x00000040u) {
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(9, this->_internal_max_tx_speed(), target);
   }
 
   // optional int32 max_rx_speed = 10;
-  if (cached_has_bits & 0x00000200u) {
+  if (cached_has_bits & 0x00000400u) {
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(10, this->_internal_max_rx_speed(), target);
   }
 
   // optional int32 wifi_channel_width = 11;
-  if (cached_has_bits & 0x00000400u) {
+  if (cached_has_bits & 0x00000800u) {
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(11, this->_internal_wifi_channel_width(), target);
   }
 
   // optional int32 send_buffer_size = 12;
-  if (cached_has_bits & 0x00000800u) {
+  if (cached_has_bits & 0x00001000u) {
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(12, this->_internal_send_buffer_size(), target);
   }
 
   // optional int32 receive_buffer_size = 13;
-  if (cached_has_bits & 0x00001000u) {
+  if (cached_has_bits & 0x00002000u) {
     target = stream->EnsureSpace(target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(13, this->_internal_receive_buffer_size(), target);
+  }
+
+  // optional int32 connected_ap_frequency = 14;
+  if (cached_has_bits & 0x00004000u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(14, this->_internal_connected_ap_frequency(), target);
+  }
+
+  // optional bool is_mcc_mode = 15;
+  if (cached_has_bits & 0x00000200u) {
+    target = stream->EnsureSpace(target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(15, this->_internal_is_mcc_mode(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -6615,41 +7200,51 @@ size_t ConnectionsLog_ConnectionAttemptMetadata::ByteSizeLong() const {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_try_counts());
     }
 
-    // optional bool is_tdls_used = 6;
+    // optional int32 max_tx_speed = 9;
     if (cached_has_bits & 0x00000040u) {
-      total_size += 1 + 1;
+      total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_max_tx_speed());
     }
 
-    // optional bool wifi_hotspot_status = 8;
+    // optional bool is_tdls_used = 6;
     if (cached_has_bits & 0x00000080u) {
       total_size += 1 + 1;
     }
 
   }
-  if (cached_has_bits & 0x00001f00u) {
-    // optional int32 max_tx_speed = 9;
+  if (cached_has_bits & 0x00007f00u) {
+    // optional bool wifi_hotspot_status = 8;
     if (cached_has_bits & 0x00000100u) {
-      total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_max_tx_speed());
+      total_size += 1 + 1;
+    }
+
+    // optional bool is_mcc_mode = 15;
+    if (cached_has_bits & 0x00000200u) {
+      total_size += 1 + 1;
     }
 
     // optional int32 max_rx_speed = 10;
-    if (cached_has_bits & 0x00000200u) {
+    if (cached_has_bits & 0x00000400u) {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_max_rx_speed());
     }
 
     // optional int32 wifi_channel_width = 11;
-    if (cached_has_bits & 0x00000400u) {
+    if (cached_has_bits & 0x00000800u) {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_wifi_channel_width());
     }
 
     // optional int32 send_buffer_size = 12;
-    if (cached_has_bits & 0x00000800u) {
+    if (cached_has_bits & 0x00001000u) {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_send_buffer_size());
     }
 
     // optional int32 receive_buffer_size = 13;
-    if (cached_has_bits & 0x00001000u) {
+    if (cached_has_bits & 0x00002000u) {
       total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_receive_buffer_size());
+    }
+
+    // optional int32 connected_ap_frequency = 14;
+    if (cached_has_bits & 0x00004000u) {
+      total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32SizePlusOne(this->_internal_connected_ap_frequency());
     }
 
   }
@@ -6694,28 +7289,34 @@ void ConnectionsLog_ConnectionAttemptMetadata::MergeFrom(const ConnectionsLog_Co
       try_counts_ = from.try_counts_;
     }
     if (cached_has_bits & 0x00000040u) {
-      is_tdls_used_ = from.is_tdls_used_;
+      max_tx_speed_ = from.max_tx_speed_;
     }
     if (cached_has_bits & 0x00000080u) {
-      wifi_hotspot_status_ = from.wifi_hotspot_status_;
+      is_tdls_used_ = from.is_tdls_used_;
     }
     _has_bits_[0] |= cached_has_bits;
   }
-  if (cached_has_bits & 0x00001f00u) {
+  if (cached_has_bits & 0x00007f00u) {
     if (cached_has_bits & 0x00000100u) {
-      max_tx_speed_ = from.max_tx_speed_;
+      wifi_hotspot_status_ = from.wifi_hotspot_status_;
     }
     if (cached_has_bits & 0x00000200u) {
-      max_rx_speed_ = from.max_rx_speed_;
+      is_mcc_mode_ = from.is_mcc_mode_;
     }
     if (cached_has_bits & 0x00000400u) {
-      wifi_channel_width_ = from.wifi_channel_width_;
+      max_rx_speed_ = from.max_rx_speed_;
     }
     if (cached_has_bits & 0x00000800u) {
-      send_buffer_size_ = from.send_buffer_size_;
+      wifi_channel_width_ = from.wifi_channel_width_;
     }
     if (cached_has_bits & 0x00001000u) {
+      send_buffer_size_ = from.send_buffer_size_;
+    }
+    if (cached_has_bits & 0x00002000u) {
       receive_buffer_size_ = from.receive_buffer_size_;
+    }
+    if (cached_has_bits & 0x00004000u) {
+      connected_ap_frequency_ = from.connected_ap_frequency_;
     }
     _has_bits_[0] |= cached_has_bits;
   }
@@ -6750,8 +7351,8 @@ void ConnectionsLog_ConnectionAttemptMetadata::InternalSwap(ConnectionsLog_Conne
       &other->country_code_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ConnectionsLog_ConnectionAttemptMetadata, receive_buffer_size_)
-      + sizeof(ConnectionsLog_ConnectionAttemptMetadata::receive_buffer_size_)
+      PROTOBUF_FIELD_OFFSET(ConnectionsLog_ConnectionAttemptMetadata, connected_ap_frequency_)
+      + sizeof(ConnectionsLog_ConnectionAttemptMetadata::connected_ap_frequency_)
       - PROTOBUF_FIELD_OFFSET(ConnectionsLog_ConnectionAttemptMetadata, technology_)>(
           reinterpret_cast<char*>(&technology_),
           reinterpret_cast<char*>(&other->technology_));

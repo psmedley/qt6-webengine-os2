@@ -1,5 +1,6 @@
 <!-- markdownlint-disable MD041 -->
-<!-- Copyright 2015-2022 LunarG, Inc. -->
+<!-- Copyright 2015-2023 LunarG, Inc. -->
+<!-- Copyright 2015-2023 Valve Corporation -->
 [![Khronos Vulkan][1]][2]
 
 [1]: https://vulkan.lunarg.com/img/Vulkan_100px_Dec16.png "https://www.khronos.org/vulkan/"
@@ -35,7 +36,8 @@ The layer also allocates a buffer that describes the length of all descriptor ar
 It only does this if the VK_EXT_descriptor_indexing extension is enabled.
 
 The layer also allocates a buffer that describes all addresses retrieved from vkGetBufferDeviceAddressEXT and the sizes of the corresponding buffers.
-It only does this if the VK_EXT_buffer_device_address extension is enabled.
+It only does this if the VK_EXT_buffer_device_address extension is enabled. Note that GPU validation will enable VK_EXT_buffer_device_address itself,
+but it only does this checking it the application enabled the extension.
 
 As the shader is executed, the instrumented shader code performs the run-time checks.
 If a check detects an error condition, the instrumentation code writes an error record into the GPU's device memory.
@@ -102,12 +104,19 @@ array elements, those elements are not required to have been written.
 The instrumentation code needs to know which elements of a descriptor array have been written, so that it can tell if one is used
 that has not been written.
 
-Note that currently, VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT validation is not working and all accesses are reported as valid.
+Note that currently, `VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT` validation is not working and all accesses are reported as valid.
 
 ### Buffer device address checking
 The vkGetBufferDeviceAddressEXT routine can be used to get a GPU address that a shader can use to directly address a particular buffer.
 GPU-Assisted Validation code keeps track of all such addresses, along with the size of the associated buffer, and creates an input buffer listing all such address/size pairs
-Shader code is instrumented to validate buffer_reference addresses and report any reads or writes that do no fall within the listed address/size regions._
+Shader code is instrumented to validate buffer_reference addresses and report any reads or writes that do no fall within the listed address/size regions.
+
+Note: The mapping between a `VkBuffer` and a GPU address is not necessarily one to one. For instance, if multiple `VkBuffer` are bound to the same memory region, they can have the same GPU address.
+
+### Selective Shader Instrumentation
+With the khronos_validation.select_instrumented_shaders feature, an application can control which shaders are instrumented and thus, will return GPU-AV errors.
+After enabling the feature, the application will need to include a `VkValidationFeaturesEXT` structure with `VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT` in the pEnabledFeatures list 
+in the pNext chain of the VkShaderModuleCreateInfo used to create the shader. Otherwise, the shader will not be instrumented.
 
 ## GPU-Assisted Validation Limitations
 
@@ -116,7 +125,12 @@ There are several limitations that may impede the operation of GPU-Assisted Vali
 ### Vulkan 1.1
 
 Vulkan 1.1 or later is required because the GPU instrumentation code uses SPIR-V 1.3 features.
-Vulkan 1,1 is required to ensure that SPIR-V 1.3 is available.
+Vulkan 1.1 is required to ensure that SPIR-V 1.3 is available.
+
+### Buffer Device Address
+
+GPU-AV requires buffer device address support. This is to enable more efficient validation for applications
+that make heavy use of descriptor indexing. It also will allow GPU-AV to eventually support VK_EXT_descriptor_buffer.
 
 ### Descriptor Types
 
@@ -229,7 +243,7 @@ In general, the implementation does:
     However, it is not possible to identify the command buffer that causes the error if multiple command buffers
     are submitted at once.
 * For each draw, dispatch, and trace rays call, allocate a descriptor set and update it to point to the block of device memory just allocated.
-    If descriptor indexing is enabled, also update the descriptor set to point to the allocated input buffer.
+    If descriptor indexing (DI) is enabled, also update the descriptor set to point to the allocated input buffer.
     Fill the DI input buffer with the size and write state information for each descriptor array.
     There is a descriptor set manager to handle this efficiently.
     If the buffer device address extension is enabled, allocate an input buffer to hold the address / size pairs for all addresses retrieved from vkGetBufferDeviceAddressEXT.
@@ -243,10 +257,11 @@ In general, the implementation does:
     For devices that have a very high or no limit on this bound, pick an index that isn't too high, but above most other device
     maxima such as 32.
 * When creating a ShaderModule, pass the SPIR-V bytecode to the SPIR-V optimizer to perform the instrumentation pass.
-    Pass the desired descriptor set binding index to the optimizer via a parameter so that the instrumented
+    Update the desired descriptor set binding index to the optimizer via SwitchDescriptorSet pass so that the the instrumented
     code knows which descriptor to use for writing error report data to the memory block.
     If descriptor indexing is enabled, turn on OOB and write state checking in the instrumentation pass.
     If the buffer_device_address extension is enabled, apply a pass to add instrumentation checking for out of bounds buffer references.
+    Link the instrumentation helper functions in layers/gpu_shaders/inst_functions.comp to the instrumented bytecode.
     Use the instrumented bytecode to create the ShaderModule.
 * For all pipeline layouts, add our descriptor set to the layout, at the binding index determined earlier.
     Fill any gaps with empty descriptor sets.
@@ -270,9 +285,9 @@ More detail is found in the discussion of the individual hooked functions below.
 
 ### Initialization
 
-When the validation layer loads, it examines the user options from both the layer settings file and the
-`VK_EXT_validation_features` extension.
-Note that it also processes the subsumed `VK_EXT_validation_flags` extension for simple backwards compatibility.
+When the validation layer loads, it examines the user settings from the layer settings file, the environment variables and the
+`VK_EXT_layer_settings` extension as described by [Layers Overview and Configuration](https://vulkan.lunarg.com/doc/sdk/latest/windows/layer_configuration.html) document.
+Note that it also processes the subsumed `VK_EXT_validation_features` and `VK_EXT_validation_flags` extensions for simple backwards compatibility.
 From these options, the layer sets instance-scope flags in the validation layer tracking data to indicate if
 GPU-Assisted Validation has been requested, along with any other associated options.
 
@@ -311,8 +326,7 @@ This doesn't present any particular problem, but it does raise some issues:
 
   This should only need to be done after making any major changes to the implementation.
 
-  Another approach involves capturing an application trace with `vktrace` and then playing
-  it back with `vkreplay`.
+  Another approach involves capturing and replaying an application trace with `GFXReconstruct`
 
 * The additional API calls are not state-tracked
 
@@ -330,7 +344,7 @@ This doesn't present any particular problem, but it does raise some issues:
 ### Code Structure and Relationship to the Core Validation Layer
 
 The GPU-Assisted Validation code is largely contained in one
-[file](https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/master/layers/gpu_validation.cpp), with "hooks" in
+[file](https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/main/layers/gpu_validation.cpp), with "hooks" in
 the other validation code that call functions in this file.
 These hooks in the validation code look something like this:
 
@@ -360,9 +374,10 @@ The design of each hooked function follows:
 
 #### GpuPreCallRecordCreateDevice
 
-* Modify the `VkPhysicalDeviceFeatures` to turn on two additional physical device features:
+* Modify the `VkPhysicalDeviceFeatures` to turn on these additional physical device features:
   * `fragmentStoresAndAtomics`
   * `vertexPipelineStoresAndAtomics`
+  * `bufferDeviceAddress`
 
 #### GpuPostCallRecordCreateDevice
 
@@ -388,29 +403,29 @@ The design of each hooked function follows:
   * Get a descriptor set from the descriptor set manager
   * Get an output buffer and associated memory from VMA
   * If descriptor indexing is enabled, get an input buffer and fill with descriptor array information
-  * If buffer device address is enabled, get an input buffer and fill with address / size pairs for addresses retrieved from vkGetBufferDeviceAddressEXT
+  * If buffer device address is enabled, get an input buffer and fill with address / size pairs for addresses retrieved from `vkGetBufferDeviceAddressEXT`
   * Update (write) the descriptor set with the memory info
   * Check to see if the layout for the pipeline just bound is using our selected bind index
   * If no conflict, add an additional command to the command buffer to bind our descriptor set at our selected index
-* Record the above objects in the per-CB state;
-Note that the Draw and Dispatch calls include vkCmdDraw, vkCmdDrawIndexed, vkCmdDrawIndirect, vkCmdDrawIndexedIndirect, vkCmdDispatch, vkCmdDispatchIndirect, and vkCmdTraceRaysNV.
+* Record the above objects in the per command buffer state;
+Note that the Draw and Dispatch calls include `vkCmdDraw`, `vkCmdDrawIndexed`, `vkCmdDrawIndirect`, `vkCmdDrawIndexedIndirect`, `vkCmdDispatch`, `vkCmdDispatchIndirect`, and `vkCmdTraceRaysNV`.
 
 #### GpuPreCallRecordFreeCommandBuffers
 
 * For each command buffer:
   * Destroy the VMA buffer(s), releasing the memory
   * Give the descriptor sets back to the descriptor set manager
-  * Clean up CB state
+  * Clean up command buffer state
 
 #### GpuOverrideDispatchCreateShaderModule
 
-This function is called from PreCallRecordCreateShaderModule.
+This function is called from `PreCallRecordCreateShaderModule`.
 This routine sets up to call the SPIR-V optimizer to run the "BindlessCheckPass", replacing the original SPIR-V with the instrumented SPIR-V
-which is then used in the call down the chain to CreateShaderModule.
+which is then used in the call down the chain to `CreateShaderModule`.
 
 This function generates a "unique shader ID" that is passed to the SPIR-V optimizer,
 which the instrumented code puts in the debug error record to identify the shader.
-This ID is returned by this function so it can be recorded in the shader module at PostCallRecord time.
+This ID is returned by this function so it can be recorded in the shader module at `PostCallRecord` time.
 It would have been convenient to use the shader module handle returned from the driver to use as this shader ID.
 But the shader needs to be instrumented before creating the shader module and therefore the handle is not available to use
 as this ID to pass to the optimizer.
@@ -433,7 +448,7 @@ This ensures that the original SPIR-V bytecode is available if we need it to rep
 
 #### GpuOverrideDispatchCreatePipelineLayout
 
-This is function is called through PreCallRecordCreatePipelineLayout.
+This is function is called through `PreCallRecordCreatePipelineLayout`.
 
 * Check for a descriptor set binding index conflict.
   * If there is one, issue an error message and leave the pipeline layout unmodified
@@ -453,13 +468,13 @@ This is function is called through PreCallRecordCreatePipelineLayout.
 #### GpuPostCallQueueSubmit
 
 * Submit a command buffer containing a memory barrier to make GPU writes available to the host domain.
-* Call QueueWaitIdle.
+* Call `QueueWaitIdle`.
 * For each primary and secondary command buffer in the submission:
   * Call a helper function to process the instrumentation debug buffers (described later)
 
 #### GpuPreCallValidateCmdWaitEvents
 
-* Report an error about a possible deadlock if CmdWaitEvents is recorded with VK_PIPELINE_STAGE_HOST_BIT set.
+* Report an error about a possible deadlock if `CmdWaitEvents` is recorded with VK_PIPELINE_STAGE_HOST_BIT set.
 
 #### GpuPreCallRecordCreateGraphicsPipelines
 
@@ -472,7 +487,7 @@ This is function is called through PreCallRecordCreatePipelineLayout.
 #### GpuPostCallRecordCreateGraphicsPipelines
 
 * For every shader in the pipeline:
-  * Destroy the shader module created in GpuPreCallRecordCreateGraphicsPipelines, if any
+  * Destroy the shader module created in `GpuPreCallRecordCreateGraphicsPipelines`, if any
     * These are found in the CreateInfo used to create the pipeline and not in the shader_module
   * Create a shader tracking record that saves:
     * shader module handle
@@ -549,9 +564,9 @@ Instrumentation is applied to the following SPIR-V operations:
     OpImageSparseRead
     OpImageWrite
 
-Also, OpLoad and OpStore with an AccessChain into a base of OpVariable with
-either Uniform or StorageBuffer storage class and a type which is either a
-struct decorated with Block, or a runtime or statically-sized array of such
+Also, `OpLoad` and `OpStore` with an AccessChain into a base of OpVariable with
+either `Uniform` or `StorageBuffer` storage class and a type which is either a
+struct decorated with `Block`, or a runtime or statically-sized array of such
 a struct.
 
 
@@ -570,10 +585,12 @@ The format of this buffer is as follows:
 ```C
 struct DebugOutputBuffer_t
 {
+   uint flags;
    uint DataWrittenLength;
    uint Data[];
 }
 ```
+`flags` is a word of flag bits used to dynamically control the instrumentation code's behavior
 
 `DataWrittenLength` is the number of uint32_t words that have been attempted to be written.
 It should be initialized to 0.
@@ -693,7 +710,7 @@ The validation layer can continue to read valid records until it sees a Record L
 
 The programmatic interface for the above informal description is codified in the
 [SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools) repository in file
-[`instrument.hpp`](https://github.com/KhronosGroup/SPIRV-Tools/blob/master/include/spirv-tools/instrument.hpp).
+[`instrument.hpp`](https://github.com/KhronosGroup/SPIRV-Tools/blob/main/include/spirv-tools/instrument.hpp).
 It consists largely of integer constant definitions for the codes and values mentioned above and
 offsets into the record for locating each item.
 
@@ -780,55 +797,65 @@ then added to the validation error message.
 For example, if the OpLine line number is 15, and there is a "#line 10" on line 40
 in the OpSource source, then line 45 in the OpSource contains the correct source line.
 
+
 ### Shader Instrumentation Input Record Format for Descriptor Indexing
 
-Although the DI input buffer is a linear array of unsigned integers, conceptually there are arrays within the linear array.
-
-Word 1 starts an array (denoted by sets_to_sizes) that is number_of_sets long, with an index that indicates the start of that set's entries in the sizes array.
-
-After the sets_to_sizes array is the sizes array, that contains the array size (or 1 if descriptor is not an array) of each descriptor in the set.  Bindings with no descriptor are filled in with zeros.
-
-After the sizes array is the sets_to_bindings array that for each descriptor set, indexes into the bindings_to_written array.  Word 0 contains the index that is the start of the sets_to_bindings array.
-
-After the sets_to_bindings array, is the bindings_to_written array that for each binding in the set, indexes to the start of that binding's entries in the written array.
-
-Lastly comes the written array, which indicates whether a given binding / array element has been written.
+The DI input state consists of an array of device addresses for each descriptor set. This array always has 32 entries, no matter how many
+bound descriptor sets the device supports. If a descriptor set is bound, its entry in the array will be the address of a buffer containing
+the per-binding and per-descriptor state.  Although each descriptor set input buffer is a linear array of unsigned integers, conceptually
+there are arrays within the linear array.
 
 Example:
 ```
-Assume Descriptor Set 0 looks like:                        And Descriptor Set 1 looks like:
+Assume Descriptor Set 0 looks like:                        And Descriptor Set 2 looks like:
   Binding                                                    Binding
      0          Array[3]                                       2          Array[4]
      1          Non Array                                      3          Array[5]
      3          Array[2]
 
-Here is what the input buffer should look like:
+DI input buffer index 0 and 2 will contain the addresses of buffers representing the state of each bound descriptor set. All other entries will be 0.
 
-   Index of                     sets_to_sizes                     sizes             sets_to_bindings                       bindings_to_written    written
-   sets_to_bindings
+The descriptor set buffer at index 0 will look like:
 
-     0 |11| sets_to_bindings     1 |3| set 0 sizes start at 3     3  |3| S0B0       11 |13| set 0 bindings start at 13        13 |21| S0B0        21 |1| S0B0I0 was written
-            starts at 11         2 |7| set 1 sizes start at 7     4  |1| S0B1       12 |17| set 1 bindings start at 17        14 |24| S0B1        22 |1| S0B0I1 was written
-                                                                  5  |0| S0B2                                                 15 |0 | S0B2        23 |1| S0B0I3 was written
-                                                                  6  |2| S0B3                                                 16 |25| S0B3        24 |1| S0B1 was written
-                                                                  7  |0| S1B0                                                 17 |0 | S1B0        25 |1| S0B3I0 was written
-                                                                  8  |0| S1B1                                                 18 |0 | S1B1        26 |1| S0B3I1 was written
-                                                                  9  |4| S1B2                                                 19 |27| S1B2        27 |0| S1B2I0 was not written
-                                                                  10 |5| S1B3                                                 20 |31| S1B3        28 |1| S1B2I1 was written
-                                                                                                                                                  29 |1| S1B2I2 was written
-                                                                                                                                                  30 |1| S1B2I3 was written
-                                                                                                                                                  31 |1| S1B3I0 was written
-                                                                                                                                                  32 |1| S1B3I1 was written
-                                                                                                                                                  33 |1| S1B3I2 was written
-                                                                                                                                                  34 |1| S1B3I3 was written
-                                                                                                                                                  35 |1| S1B3I4 was written
+Index	Value	Description
+0	4       number of bindings in this descriptor set
+1 	3 	number of descriptors in binding 0
+2 	1	number of descriptors in binding 1
+3 	0	number of descriptors in binding 2 (ignored)
+4	2	number of descriptors in binding 3
+5 	9	start of init data for binding 0
+6 	12	start of init data for binding 1
+7 	0	start of init data for binding 2  (ignored)
+8 	13	start of init data for binding 3
+9 	0 or 1	Is set 0 binding 0 index 0 written?
+10	0 or 1	Is set 0 binding 0 index 1 written?
+11	0 or 1	Is set 0 binding 0 index 2 written?
+12	0 or 1	Is set 0 binding 1 index 0 written?
+13	0 or 1	Is set 0 binding 3 index 0 written?
+14	0 or 1	Is set 0 binding 3 index 1 written?
+
+The descriptor set buffer at index 2 will look like:
+
+Index	Value	Description
+0	4       number of bindings in this descriptor set
+1 	0 	number of descriptors in binding 0 (ignored)
+2 	0	number of descriptors in binding 1 (ignored)
+3 	4	number of descriptors in binding 2
+4	5	number of descriptors in binding 3
+5 	0	start of init data for binding 0 (ignored)
+6 	0	start of init data for binding 1 (ignored)
+7 	9	start of init data for binding 2
+8 	13	start of init data for binding 3
+9 	0 or 1	Is set 2 binding 2 index 0 written?
+10	0 or 1	Is set 2 binding 2 index 1 written?
+11	0 or 1	Is set 2 binding 2 index 2 written?
+12	0 or 1	Is set 2 binding 2 index 3 written?
+13	0 or 1	Is set 2 binding 3 index 0 written?
+14	0 or 1	Is set 2 binding 3 index 1 written?
+15	0 or 1	Is set 2 binding 3 index 2 written?
+16	0 or 1	Is set 2 binding 3 index 3 written?
+17	0 or 1	Is set 2 binding 3 index 4 written?
 ```
-Alternately, you could describe the array size and write state data as:
-(set = s, binding = b, index = i) is not initialized if 
-```
-Input[ i + Input[ b + Input[ s + Input[ Input[0] ] ] ] ] == 0
-```
-and the array's size = Input[ Input[ s + 1 ] + b ] 
 
 ### Shader Instrumentation Input Record Format for buffer device address
 The input buffer for buffer_reference accesses consists of all addresses retrieved from vkGetBufferDeviceAddressEXT and the sizes of the corresponding buffers.

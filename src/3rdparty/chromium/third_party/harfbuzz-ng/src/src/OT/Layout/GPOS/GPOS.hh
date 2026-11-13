@@ -39,7 +39,7 @@ struct GPOS : GSUBGPOS
 
   bool subset (hb_subset_context_t *c) const
   {
-    hb_subset_layout_context_t l (c, tableTag, c->plan->gpos_lookups, c->plan->gpos_langsys, c->plan->gpos_features);
+    hb_subset_layout_context_t l (c, tableTag);
     return GSUBGPOS::subset<PosLookup> (&l);
   }
 
@@ -156,7 +156,7 @@ GPOS::position_finish_offsets (hb_font_t *font, hb_buffer_t *buffer)
   {
     for (unsigned i = 0; i < len; i++)
       if (unlikely (pos[i].y_offset))
-        pos[i].x_offset += _hb_roundf (font->slant_xy * pos[i].y_offset);
+        pos[i].x_offset += roundf (font->slant_xy * pos[i].y_offset);
   }
 }
 

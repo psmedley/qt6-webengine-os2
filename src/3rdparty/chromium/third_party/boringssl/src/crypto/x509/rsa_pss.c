@@ -145,7 +145,9 @@ static int rsa_md_to_mgf1(X509_ALGOR **palg, const EVP_MD *mgf1md) {
   if (!*palg) {
     goto err;
   }
-  X509_ALGOR_set0(*palg, OBJ_nid2obj(NID_mgf1), V_ASN1_SEQUENCE, stmp);
+  if (!X509_ALGOR_set0(*palg, OBJ_nid2obj(NID_mgf1), V_ASN1_SEQUENCE, stmp)) {
+    goto err;
+  }
   stmp = NULL;
 
 err:
@@ -202,7 +204,7 @@ int x509_rsa_ctx_to_pss(EVP_MD_CTX *ctx, X509_ALGOR *algor) {
     OPENSSL_PUT_ERROR(X509, X509_R_INVALID_PSS_PARAMETERS);
     return 0;
   }
-  int md_len = EVP_MD_size(sigmd);
+  int md_len = (int)EVP_MD_size(sigmd);
   if (saltlen == -1) {
     saltlen = md_len;
   } else if (saltlen != md_len) {
@@ -235,7 +237,9 @@ int x509_rsa_ctx_to_pss(EVP_MD_CTX *ctx, X509_ALGOR *algor) {
     goto err;
   }
 
-  X509_ALGOR_set0(algor, OBJ_nid2obj(NID_rsassaPss), V_ASN1_SEQUENCE, os);
+  if (!X509_ALGOR_set0(algor, OBJ_nid2obj(NID_rsassaPss), V_ASN1_SEQUENCE, os)) {
+    goto err;
+  }
   os = NULL;
   ret = 1;
 

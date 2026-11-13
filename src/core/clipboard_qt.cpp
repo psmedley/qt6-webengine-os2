@@ -9,9 +9,12 @@
 #include "clipboard_change_observer.h"
 #include "type_conversion.h"
 
+#include "base/containers/map_util.h"
 #include "base/logging.h"
 #include "base/strings/utf_offset_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/types/variant_util.h"
+#include "base/types/optional_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -28,6 +31,8 @@
 #include <QMimeData>
 
 #include <memory>
+
+using namespace Qt::StringLiterals;
 
 namespace QtWebEngineCore {
 
@@ -98,11 +103,10 @@ void ClipboardQt::WritePortableAndPlatformRepresentations(ui::ClipboardBuffer ty
     DCHECK(CalledOnValidThread());
     DCHECK(IsSupportedClipboardBuffer(type));
 
-    for (const auto &object : objects)
-        DispatchPortableRepresentation(object.first, object.second);
-
     if (!platform_representations.empty())
         DispatchPlatformRepresentations(std::move(platform_representations));
+    for (const auto &object : objects)
+        DispatchPortableRepresentation(object.second);
 
     // Commit the accumulated data.
     if (uncommittedData)
@@ -111,11 +115,11 @@ void ClipboardQt::WritePortableAndPlatformRepresentations(ui::ClipboardBuffer ty
                                                                                           : QClipboard::Selection);
 
     if (type == ui::ClipboardBuffer::kCopyPaste && IsSupportedClipboardBuffer(ui::ClipboardBuffer::kSelection)) {
-        ObjectMap::const_iterator text_iter = objects.find(PortableFormat::kText);
+        auto text_iter = objects.find(base::VariantIndexOfType<Data, TextData>());
         if (text_iter != objects.end()) {
             // Copy text and SourceTag to the selection clipboard.
             WritePortableAndPlatformRepresentations(ui::ClipboardBuffer::kSelection,
-                                                    ObjectMap(text_iter, text_iter + 1),
+                                                    ObjectMap(text_iter, ++text_iter),
                                                     {},
                                                     nullptr);
         }
@@ -123,29 +127,32 @@ void ClipboardQt::WritePortableAndPlatformRepresentations(ui::ClipboardBuffer ty
     m_dataSrc[type] = std::move(data_src);
 }
 
-void ClipboardQt::WriteText(const char *text_data, size_t text_len)
+void ClipboardQt::WriteText(base::StringPiece text)
 {
-    getUncommittedData()->setText(QString::fromUtf8(text_data, text_len));
+    getUncommittedData()->setText(toQString(text));
 }
 
-void ClipboardQt::WriteHTML(const char *markup_data, size_t markup_len, const char *url_data, size_t url_len)
+void ClipboardQt::WriteHTML(base::StringPiece markup, absl::optional<base::StringPiece> source_url,
+                            ui::ClipboardContentType /*content_type*/)
 {
-    QString markup_string = QString::fromUtf8(markup_data, markup_len);
+
+    QString markup_string;
 #if defined (Q_OS_MACOS)
     // We need to prepend the charset on macOS to prevent garbled Unicode characters
     // when pasting to certain applications (e.g. Notes, TextEdit)
     // Mirrors the behavior in ui/base/clipboard/clipboard_mac.mm in Chromium.
-    markup_string.prepend(QLatin1String("<meta charset='utf-8'>"));
+    markup_string += "<meta charset='utf-8'>"_L1;
 #endif
+    markup_string += toQString(markup);
 
 #if !defined(Q_OS_WIN)
     getUncommittedData()->setHtml(markup_string);
 #else
-    std::string url;
-    if (url_len > 0)
-        url.assign(url_data, url_len);
+    QString url;
+    if (source_url)
+        url = toQString(*source_url);
 
-    std::string cf_html = HtmlToCFHtml(markup_string.toStdString(), url);
+    std::string cf_html = HtmlToCFHtml(markup_string.toStdString(), url.toStdString());
     size_t html_start = std::string::npos;
     size_t fragment_start = std::string::npos;
     size_t fragment_end = std::string::npos;
@@ -159,9 +166,9 @@ void ClipboardQt::WriteHTML(const char *markup_data, size_t markup_len, const ch
 #endif // !defined(Q_OS_WIN)
 }
 
-void ClipboardQt::WriteRTF(const char *rtf_data, size_t data_len)
+void ClipboardQt::WriteRTF(base::StringPiece rtf)
 {
-    getUncommittedData()->setData(QString::fromLatin1(ui::kMimeTypeRTF), QByteArray(rtf_data, data_len));
+    getUncommittedData()->setData(QString::fromLatin1(ui::kMimeTypeRTF), toQByteArray(rtf));
 }
 
 void ClipboardQt::WriteWebSmartPaste()
@@ -174,12 +181,12 @@ void ClipboardQt::WriteBitmap(const SkBitmap &bitmap)
     getUncommittedData()->setImageData(toQImage(bitmap).copy());
 }
 
-void ClipboardQt::WriteBookmark(const char *title_data, size_t title_len, const char *url_data, size_t url_len)
+void ClipboardQt::WriteBookmark(base::StringPiece title_in, base::StringPiece url_in)
 {
     // FIXME: Untested, seems to be used only for drag-n-drop.
     // Write as a mozilla url (UTF16: URL, newline, title).
-    QString url = QString::fromUtf8(url_data, url_len);
-    QString title = QString::fromUtf8(title_data, title_len);
+    const QString url = toQString(url_in);
+    const QString title = toQString(title_in);
 
     QByteArray data;
     data.append(reinterpret_cast<const char *>(url.utf16()), url.size() * 2);
@@ -188,9 +195,9 @@ void ClipboardQt::WriteBookmark(const char *title_data, size_t title_len, const 
     getUncommittedData()->setData(QString::fromLatin1(ui::kMimeTypeMozillaURL), data);
 }
 
-void ClipboardQt::WriteData(const ui::ClipboardFormatType &format, const char *data_data, size_t data_len)
+void ClipboardQt::WriteData(const ui::ClipboardFormatType &format, base::span<const uint8_t> data)
 {
-    getUncommittedData()->setData(QString::fromStdString(format.GetName()), QByteArray(data_data, data_len));
+    getUncommittedData()->setData(QString::fromStdString(format.GetName()), QByteArray((const char *)data.data(), data.size()));
 }
 
 bool ClipboardQt::IsFormatAvailable(const ui::ClipboardFormatType &format,
@@ -234,7 +241,8 @@ void ClipboardQt::ReadAvailableTypes(ui::ClipboardBuffer type,
 
     if (mimeData->hasFormat(QString::fromLatin1(ui::kMimeTypeWebCustomData))) {
         const QByteArray customData = mimeData->data(QString::fromLatin1(ui::kMimeTypeWebCustomData));
-        ui::ReadCustomDataTypes(customData.constData(), customData.size(), types);
+        const base::span custom_data(customData.constData(), (unsigned long)customData.size());
+        ui::ReadCustomDataTypes(base::as_bytes(custom_data), types);
     }
 }
 
@@ -342,7 +350,9 @@ void ClipboardQt::ReadCustomData(ui::ClipboardBuffer clipboard_type, const std::
     if (!mimeData)
         return;
     const QByteArray customData = mimeData->data(QString::fromLatin1(ui::kMimeTypeWebCustomData));
-    ui::ReadCustomDataForType(customData.constData(), customData.size(), type, result);
+    const base::span custom_data(customData.constData(), (unsigned long)customData.size());
+    if (auto maybe_result = ui::ReadCustomDataForType(base::as_bytes(custom_data), type))
+        *result = *std::move(maybe_result);
 }
 
 void ClipboardQt::ReadBookmark(const ui::DataTransferEndpoint *data_dst, std::u16string *title, std::string *url) const
@@ -363,10 +373,10 @@ void ClipboardQt::ReadSvg(ui::ClipboardBuffer clipboard_type,
         *result = toString16(QString::fromUtf8(svgData));
 }
 
-void ClipboardQt::WriteSvg(const char *svg_data, size_t data_len)
+void ClipboardQt::WriteSvg(base::StringPiece markup)
 {
     getUncommittedData()->setData(QString::fromLatin1(ui::kMimeTypeSvg),
-                                  QByteArray(svg_data, data_len));
+                                  toQByteArray(markup));
 }
 
 void ClipboardQt::ReadData(const ui::ClipboardFormatType &format,
@@ -387,10 +397,9 @@ const ui::ClipboardSequenceNumberToken &ClipboardQt::GetSequenceNumber(ui::Clipb
             : clipboardChangeObserver()->getSelectionSequenceNumber();
 }
 
-const ui::DataTransferEndpoint *ClipboardQt::GetSource(ui::ClipboardBuffer buffer) const
+absl::optional<ui::DataTransferEndpoint> ClipboardQt::GetSource(ui::ClipboardBuffer buffer) const
 {
-    auto it = m_dataSrc.find(buffer);
-    return it == m_dataSrc.end() ? nullptr : it->second.get();
+    return base::OptionalFromPtr(base::FindPtrOrNull(m_dataSrc, buffer));
 }
 
 void ClipboardQt::ReadFilenames(ui::ClipboardBuffer buffer,

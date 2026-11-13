@@ -4,7 +4,7 @@
 #ifndef LOCATION_PROVIDER_QT_H
 #define LOCATION_PROVIDER_QT_H
 
-#include <QtCore/qcompilerdetection.h>
+#include <QtCore/qtconfigmacros.h>
 
 #include "services/device/public/cpp/geolocation/geoposition.h"
 #include "services/device/public/cpp/geolocation/location_provider.h"
@@ -23,16 +23,17 @@ public:
     // LocationProvider
     void StartProvider(bool high_accuracy) override;
     void StopProvider() override;
-    const device::mojom::Geoposition& GetPosition() override { return m_lastKnownPosition; }
+    const device::mojom::GeopositionResult* GetPosition() override { return m_lastKnownPosition.get(); }
     void OnPermissionGranted() override;
-    void SetUpdateCallback(const LocationProviderUpdateCallback& callback) override;
+    void SetUpdateCallback(const LocationProviderUpdateCallback &callback) override;
+    void FillDiagnostics(device::mojom::GeolocationDiagnostics &) override {}
 
 private:
     friend class QtPositioningHelper;
 
-    void updatePosition(const device::mojom::Geoposition &);
+    void updatePosition(device::mojom::GeopositionResultPtr);
 
-    device::mojom::Geoposition m_lastKnownPosition;
+    device::mojom::GeopositionResultPtr m_lastKnownPosition;
     LocationProviderUpdateCallback m_callback;
     QtPositioningHelper *m_positioningHelper;
 };

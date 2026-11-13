@@ -49,7 +49,6 @@ bool IsBaselinePolicyAllowed(int sysno) {
          SyscallSets::IsAllowedFileSystemAccessViaFd(sysno) ||
          SyscallSets::IsAllowedFutex(sysno) ||
          SyscallSets::IsAllowedGeneralIo(sysno) ||
-         SyscallSets::IsAllowedGetOrModifySocket(sysno) ||
          SyscallSets::IsAllowedGettime(sysno) ||
          SyscallSets::IsAllowedProcessStartOrDeath(sysno) ||
          SyscallSets::IsAllowedSignalHandling(sysno) ||
@@ -144,6 +143,10 @@ ResultExpr EvaluateSyscallImpl(int fs_denied_errno,
 
   if (IsBaselinePolicyAllowed(sysno)) {
     return Allow();
+  }
+
+  if (SyscallSets::IsSockSendOneMsg(sysno)) {
+    return RestrictSockSendFlags(sysno);
   }
 
 #if defined(__NR_rseq) && !BUILDFLAG(IS_ANDROID)
@@ -362,6 +365,18 @@ ResultExpr EvaluateSyscallImpl(int fs_denied_errno,
     const Arg<pid_t> tgid(0);
     return If(tgid == current_pid, Allow())
            .Else(Error(EPERM));
+  }
+
+  // Allow creating pipes, but don't allow weird flags to pipe2().
+  // O_NOTIFICATION_PIPE (== O_EXCL) can be used to create
+  // "notification pipes", which are rarely used.
+#if !defined(__aarch64__)
+  if (sysno == __NR_pipe) {
+    return Allow();
+  }
+#endif
+  if (sysno == __NR_pipe2) {
+    return RestrictPipe2();
   }
 
   if (IsBaselinePolicyWatched(sysno)) {

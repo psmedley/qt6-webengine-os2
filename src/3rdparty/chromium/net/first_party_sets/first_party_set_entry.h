@@ -34,9 +34,11 @@ class NET_EXPORT FirstPartySetEntry {
    public:
     SiteIndex();
     explicit SiteIndex(uint32_t value);
-
+#if BUILDFLAG(IS_MAC_13)
+    bool operator==(const SiteIndex& other) const = default;
+#else
     bool operator==(const SiteIndex& other) const;
-
+#endif
     uint32_t value() const { return value_; }
 
    private:
@@ -60,10 +62,17 @@ class NET_EXPORT FirstPartySetEntry {
 
   ~FirstPartySetEntry();
 
+#if BUILDFLAG(IS_MAC_13)
+  bool operator==(const FirstPartySetEntry& other) const = default;
+  bool operator!=(const FirstPartySetEntry& other) const = default;
+#else
   bool operator==(const FirstPartySetEntry& other) const;
   bool operator!=(const FirstPartySetEntry& other) const;
+#endif
 
   static absl::optional<net::SiteType> DeserializeSiteType(int value);
+
+  std::string GetDebugString() const;
 
   const SchemefulSite& primary() const { return primary_; }
 

@@ -4,10 +4,11 @@
 
 #include "components/autofill/core/browser/autofill_address_util.h"
 
-#include "base/guid.h"
 #include "base/memory/raw_ptr.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/uuid.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/geo/address_i18n.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,7 +43,7 @@ class AddressFormattingTest : public ::testing::Test {
 // some countries consist of lines with literals only, which, in case
 // |include_literals| is false, appear empty and should be skipped.
 TEST_F(AddressFormattingTest, GetAddressComponentsSkipsEmptyLines) {
-  std::vector<std::vector<::i18n::addressinput::AddressUiComponent>> lines;
+  std::vector<std::vector<AutofillAddressUIComponent>> lines;
   std::string components_language_code;
   // For Åland Islands the last line contains "ÅLAND" and should be skipped.
   autofill::GetAddressComponents("AX", GetLocale(), /*include_literals=*/false,
@@ -55,11 +56,7 @@ TEST_F(AddressFormattingTest, GetAddressComponentsSkipsEmptyLines) {
 // Tests that address field extensions are applied to `GetAddressComponents()`,
 // by checking that Great Britain's address format is extended by a state field.
 TEST_F(AddressFormattingTest, GetAddressComponentsWithExtensions) {
-  base::test::ScopedFeatureList address_extension_feature;
-  address_extension_feature.InitAndEnableFeature(
-      features::kAutofillEnableExtendedAddressFormats);
-
-  std::vector<std::vector<::i18n::addressinput::AddressUiComponent>> lines;
+  std::vector<std::vector<AutofillAddressUIComponent>> lines;
   std::string components_language_code;
   autofill::GetAddressComponents("GB", GetLocale(), /*include_literals=*/false,
                                  &lines, &components_language_code);
@@ -68,15 +65,17 @@ TEST_F(AddressFormattingTest, GetAddressComponentsWithExtensions) {
   // Because `include_literals=false`, accessing `.field` is valid.
   auto state_line = base::ranges::find_if(lines, [](const auto& line) {
     return line.size() == 1 &&
-           line[0].field == ::i18n::addressinput::AddressField::ADMIN_AREA;
+           line[0].field == i18n::TypeForField(
+                                ::i18n::addressinput::AddressField::ADMIN_AREA);
   });
   ASSERT_NE(state_line, lines.end());
   EXPECT_EQ((*state_line)[0].length_hint,
-            ::i18n::addressinput::AddressUiComponent::HINT_LONG);
+            AutofillAddressUIComponent::HINT_LONG);
   // The prior component on the previous line should be the postal code.
   ASSERT_NE(state_line, lines.begin());
-  EXPECT_EQ((--state_line)->back().field,
-            ::i18n::addressinput::AddressField::POSTAL_CODE);
+  EXPECT_EQ(
+      (--state_line)->back().field,
+      i18n::TypeForField(::i18n::addressinput::AddressField::POSTAL_CODE));
 }
 
 TEST_F(AddressFormattingTest, GetEnvelopeStyleAddressSanity) {
@@ -90,8 +89,7 @@ TEST_F(AddressFormattingTest, GetEnvelopeStyleAddressSanity) {
   // some more highlevel conditions that are less probable to change.
 
   // The full name should be part of the envelope style address.
-  EXPECT_NE(address.find(
-                profile.GetInfo(NAME_FULL_WITH_HONORIFIC_PREFIX, GetLocale())),
+  EXPECT_NE(address.find(profile.GetInfo(NAME_FULL, GetLocale())),
             std::string::npos);
 
   // City should be part of the envelope style address.
@@ -124,7 +122,7 @@ TEST_F(AddressFormattingTest, GetEnvelopeStyleAddressSanity) {
 }
 
 TEST_F(AddressFormattingTest, GetEnvelopeStyleAddressWhenEmptyFullname) {
-  AutofillProfile profile(base::GenerateGUID(), /*origin=*/"");
+  AutofillProfile profile(i18n_model_definition::kLegacyHierarchyCountryCode);
   test::SetProfileInfo(&profile, /*first_name=*/"", /*middle_name=*/"",
                        /*last_name=*/"", "johndoe@hades.com", "Underworld",
                        "666 Erebus St.", "Apt 8", "Elysium", "CA", "91111",
@@ -141,7 +139,7 @@ TEST_F(AddressFormattingTest, GetEnvelopeStyleAddressWhenEmptyFullname) {
 // contain empty lines.
 TEST_F(AddressFormattingTest,
        GetEnvelopeStyleAddressWhenEmptyCompanyShouldHaveNoEmptyLines) {
-  AutofillProfile profile(base::GenerateGUID(), /*origin=*/"");
+  AutofillProfile profile(i18n_model_definition::kLegacyHierarchyCountryCode);
   test::SetProfileInfo(&profile, "FirstName", "MiddleName", "LastName",
                        "johndoe@hades.com", /*company=*/"", "666 Erebus St.",
                        "Apt 8", "Elysium", "CA", "91111", "US", "16502111111");
@@ -158,7 +156,7 @@ TEST_F(AddressFormattingTest,
 TEST_F(
     AddressFormattingTest,
     GetEnvelopeStyleAddressWhenEmptyStateShouldHaveNoConsecutiveWhitespaces) {
-  AutofillProfile profile(base::GenerateGUID(), /*origin=*/"");
+  AutofillProfile profile(i18n_model_definition::kLegacyHierarchyCountryCode);
   test::SetProfileInfo(&profile, "FirstName", "MiddleName", "LastName",
                        "johndoe@hades.com", "Underworld", "666 Erebus St.",
                        "Apt 8", "Elysium", /*state=*/"", "91111", "US",
@@ -175,11 +173,7 @@ TEST_F(
 // `GetEnvelopeStyleAddress()`, by checking that Great Britain's address format
 // is extended by a state field.
 TEST_F(AddressFormattingTest, GetEnvelopeStyleAddressWithExtensions) {
-  base::test::ScopedFeatureList address_extension_feature;
-  address_extension_feature.InitAndEnableFeature(
-      features::kAutofillEnableExtendedAddressFormats);
-
-  AutofillProfile profile(base::GenerateGUID(), /*origin=*/"");
+  AutofillProfile profile(i18n_model_definition::kLegacyHierarchyCountryCode);
   test::SetProfileInfo(&profile, "FirstName", "MiddleName", "LastName",
                        "johndoe@hades.com", /*company=*/"", "666 Erebus St.",
                        "Apt 8", "Elysium", /*state=*/"Greater London",
@@ -209,10 +203,9 @@ TEST_F(AddressFormattingTest,
   AutofillProfile profile2 = profile1;
   profile2.SetInfo(NAME_FULL, u"John Doe", "en-US");
 
-  EXPECT_THAT(
-      GetProfileDifferenceForUi(profile1, profile2, "en-US"),
-      ElementsAre(ProfileValueDifference{NAME_FULL_WITH_HONORIFIC_PREFIX,
-                                         u"John H. Doe", u"John Doe"}));
+  EXPECT_THAT(GetProfileDifferenceForUi(profile1, profile2, "en-US"),
+              ElementsAre(ProfileValueDifference{NAME_FULL, u"John H. Doe",
+                                                 u"John Doe"}));
 }
 
 TEST_F(AddressFormattingTest,
@@ -257,6 +250,13 @@ TEST(GetProfileDescription, NotIncludeAddressAndContacts) {
       profile, "en-US", /*include_address_and_contacts=*/false);
   // Should contain full name only.
   EXPECT_EQ(description, u"John H. Doe");
+}
+
+TEST(GetProfileDescription, ProfileDescriptionForMigration) {
+  AutofillProfile profile = test::GetFullProfile();
+  // Should contain full name only.
+  EXPECT_EQ(GetProfileSummaryForMigrationPrompt(profile, "en-US"),
+            u"John H. Doe\n666 Erebus St.\njohndoe@hades.com\n16502111111");
 }
 
 }  // namespace autofill

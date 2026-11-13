@@ -139,19 +139,25 @@ absl::optional<std::unique_ptr<Pairing>> Pairing::Parse(
     return absl::nullopt;
   }
 
-  pairing->tunnel_server_domain = tunnelserver::DecodeDomain(domain);
+  pairing->tunnel_server_domain = domain;
   pairing->contact_id = its[0]->second.GetBytestring();
   pairing->id = its[1]->second.GetBytestring();
   pairing->secret = its[2]->second.GetBytestring();
   const std::vector<uint8_t>& peer_public_key = its[3]->second.GetBytestring();
-  std::copy(peer_public_key.begin(), peer_public_key.end(),
-            pairing->peer_public_key_x962.begin());
+  base::ranges::copy(peer_public_key, pairing->peer_public_key_x962.begin());
   pairing->name = name_it->second.GetString();
 
   if (!VerifyPairingSignature(local_identity_seed,
                               pairing->peer_public_key_x962, handshake_hash,
                               its[4]->second.GetBytestring())) {
     return absl::nullopt;
+  }
+
+  const auto play_services_tag_it = map.find(cbor::Value(999));
+  if (play_services_tag_it != map.end() &&
+      play_services_tag_it->second.is_bool() &&
+      play_services_tag_it->second.GetBool()) {
+    pairing->from_new_implementation = true;
   }
 
   return pairing;
@@ -187,6 +193,9 @@ bool Pairing::EqualPublicKeys(const std::unique_ptr<Pairing>& a,
                               const std::unique_ptr<Pairing>& b) {
   return a->peer_public_key_x962 == b->peer_public_key_x962;
 }
+
+Pairing::Pairing(const Pairing&) = default;
+Pairing& Pairing::operator=(const Pairing&) = default;
 
 }  // namespace cablev2
 

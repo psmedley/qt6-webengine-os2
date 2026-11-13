@@ -1,9 +1,11 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:network-protocol
 
 #include "custom_url_loader_factory.h"
 
 #include "base/strings/stringprintf.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -24,7 +26,11 @@
 #include "api/qwebengineurlscheme.h"
 #include "net/url_request_custom_job_proxy.h"
 #include "profile_adapter.h"
+#include "qwebengineloadinginfo.h"
 #include "type_conversion.h"
+#include "web_contents_adapter_client.h"
+#include "web_contents_delegate_qt.h"
+#include "web_contents_view_qt.h"
 
 #include <QtCore/qbytearray.h>
 #include <QtCore/qfile.h>
@@ -32,6 +38,7 @@
 #include <QtCore/qiodevice.h>
 #include <QtCore/qmimedatabase.h>
 #include <QtCore/qmimedata.h>
+#include <QtCore/qpointer.h>
 #include <QtCore/qurl.h>
 
 namespace QtWebEngineCore {
@@ -45,11 +52,12 @@ public:
     static void CreateAndStart(const network::ResourceRequest &request,
                                mojo::PendingReceiver<network::mojom::URLLoader> loader,
                                mojo::PendingRemote<network::mojom::URLLoaderClient> client_remote,
-                               QPointer<ProfileAdapter> profileAdapter)
+                               QPointer<ProfileAdapter> profileAdapter,
+                               content::WebContents *webContents)
     {
         // CustomURLLoader will handle its own life-cycle, and delete when
         // the client lets go.
-        auto *customUrlLoader = new CustomURLLoader(request, std::move(loader), std::move(client_remote), profileAdapter);
+        auto *customUrlLoader = new CustomURLLoader(request, std::move(loader), std::move(client_remote), profileAdapter, webContents);
         customUrlLoader->Start();
     }
 
@@ -84,10 +92,12 @@ private:
     CustomURLLoader(const network::ResourceRequest &request,
                     mojo::PendingReceiver<network::mojom::URLLoader> loader,
                     mojo::PendingRemote<network::mojom::URLLoaderClient> client_remote,
-                    QPointer<ProfileAdapter> profileAdapter)
+                    QPointer<ProfileAdapter> profileAdapter,
+                    content::WebContents *webContents)
         // ### We can opt to run the url-loader on the UI thread instead
         : m_taskRunner(content::GetIOThreadTaskRunner({}))
         , m_proxy(new URLRequestCustomJobProxy(this, request.url.scheme(), profileAdapter))
+        , m_webContents(webContents)
         , m_receiver(this, std::move(loader))
         , m_client(std::move(client_remote))
         , m_request(request)
@@ -150,9 +160,11 @@ private:
             m_firstBytePosition = m_byteRange.first_byte_position();
 
 //        m_taskRunner->PostTask(FROM_HERE,
-        content::GetUIThreadTaskRunner({})->PostTask(FROM_HERE,
-                       base::BindOnce(&URLRequestCustomJobProxy::initialize, m_proxy,
-                                      m_request.url, m_request.method, m_request.request_initiator, std::move(headers)));
+        content::GetUIThreadTaskRunner({})->PostTask(
+                FROM_HERE,
+                base::BindOnce(&URLRequestCustomJobProxy::initialize, m_proxy, m_request.url,
+                               m_request.method, m_request.request_initiator, std::move(headers),
+                               m_request.request_body));
     }
 
     void CompleteWithFailure(network::CorsErrorStatus cors_error)
@@ -262,11 +274,17 @@ private:
                 headers += "Access-Control-Allow-Credentials: true\n";
             }
         }
+        for (auto it = m_additionalResponseHeaders.cbegin();
+             it != m_additionalResponseHeaders.cend(); ++it) {
+            headers += it.key().toLower().toStdString() + ": " + it.value().toLower().toStdString()
+                    + "\n";
+        }
         m_head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(net::HttpUtil::AssembleRawHeaders(headers));
         m_head->encoded_data_length = m_head->headers->raw_headers().length();
 
         if (!m_redirect.is_empty()) {
-            m_head->content_length = m_head->encoded_body_length = -1;
+            m_head->content_length = {};
+            m_head->encoded_body_length = {};
             net::RedirectInfo::FirstPartyURLPolicy first_party_url_policy =
                     m_request.update_first_party_url_on_redirect ? net::RedirectInfo::FirstPartyURLPolicy::UPDATE_URL_ON_REDIRECT
                                                                  : net::RedirectInfo::FirstPartyURLPolicy::NEVER_CHANGE_URL;
@@ -334,9 +352,18 @@ private:
         }
         m_head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(net::HttpUtil::AssembleRawHeaders(headers));
         m_head->encoded_data_length = m_head->headers->raw_headers().length();
-        m_head->content_length = m_head->encoded_body_length = -1;
+        m_head->content_length = {};
+        m_head->encoded_body_length = {};
         m_client->OnReceiveResponse(std::move(m_head), mojo::ScopedDataPipeConsumerHandle(), absl::nullopt);
         CompleteWithFailure(net::Error(error));
+    }
+    void notifySuccess() override
+    {
+        if (m_webContents) {
+            WebContentsDelegateQt *delegate =
+                    static_cast<WebContentsDelegateQt *>(m_webContents->GetDelegate());
+            delegate->emitLoadSucceeded(toQt(m_request.url));
+        }
     }
     void notifyReadyRead() override
     {
@@ -422,6 +449,7 @@ private:
 
     scoped_refptr<base::SequencedTaskRunner> m_taskRunner;
     scoped_refptr<URLRequestCustomJobProxy> m_proxy;
+    content::WebContents *m_webContents;
 
     mojo::Receiver<network::mojom::URLLoader> m_receiver;
     mojo::Remote<network::mojom::URLLoaderClient> m_client;
@@ -444,9 +472,10 @@ private:
 
 class CustomURLLoaderFactory : public network::mojom::URLLoaderFactory {
 public:
-    CustomURLLoaderFactory(ProfileAdapter *profileAdapter, mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
+    CustomURLLoaderFactory(ProfileAdapter *profileAdapter, content::WebContents *webContents, mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
         : m_taskRunner(content::GetIOThreadTaskRunner({}))
         , m_profileAdapter(profileAdapter)
+        , m_webContents(webContents)
     {
         m_receivers.set_disconnect_handler(base::BindRepeating(
             &CustomURLLoaderFactory::OnDisconnect, base::Unretained(this)));
@@ -470,7 +499,7 @@ public:
         m_taskRunner->PostTask(FROM_HERE,
                                base::BindOnce(&CustomURLLoader::CreateAndStart, request,
                                               std::move(loader), std::move(client),
-                                              m_profileAdapter));
+                                              m_profileAdapter, m_webContents));
 
     }
 
@@ -485,24 +514,24 @@ public:
             delete this;
     }
 
-    static mojo::PendingRemote<network::mojom::URLLoaderFactory> Create(ProfileAdapter *profileAdapter)
+    static mojo::PendingRemote<network::mojom::URLLoaderFactory> Create(ProfileAdapter *profileAdapter, content::WebContents *webContents)
     {
         mojo::PendingRemote<network::mojom::URLLoaderFactory> pending_remote;
-        new CustomURLLoaderFactory(profileAdapter, pending_remote.InitWithNewPipeAndPassReceiver());
+        new CustomURLLoaderFactory(profileAdapter, webContents, pending_remote.InitWithNewPipeAndPassReceiver());
         return pending_remote;
     }
 
     const scoped_refptr<base::SequencedTaskRunner> m_taskRunner;
     mojo::ReceiverSet<network::mojom::URLLoaderFactory> m_receivers;
     QPointer<ProfileAdapter> m_profileAdapter;
+    content::WebContents *m_webContents;
 };
 
 } // namespace
 
-mojo::PendingRemote<network::mojom::URLLoaderFactory> CreateCustomURLLoaderFactory(ProfileAdapter *profileAdapter)
+mojo::PendingRemote<network::mojom::URLLoaderFactory> CreateCustomURLLoaderFactory(ProfileAdapter *profileAdapter, content::WebContents *webContents)
 {
-    return CustomURLLoaderFactory::Create(profileAdapter);
+    return CustomURLLoaderFactory::Create(profileAdapter, webContents);
 }
 
 } // namespace QtWebEngineCore
-

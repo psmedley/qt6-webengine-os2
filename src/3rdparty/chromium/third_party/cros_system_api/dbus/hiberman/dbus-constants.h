@@ -14,9 +14,13 @@ const char kHibernateServicePath[] = "/org/chromium/Hibernate";
 const char kHibernateServiceName[] = "org.chromium.Hibernate";
 
 // Methods exposed by hiberman.
-const char kResumeFromHibernateMethod[] = "ResumeFromHibernate";
 const char kResumeFromHibernateASMethod[] = "ResumeFromHibernateAS";
 const char kAbortResumeMethod[] = "AbortResume";
+
+// When this file exists at boot, a resume from hibernation is in progress.
+// It is deleted if the resume is aborted.
+const char kHibernateResumeInProgressFile[] =
+    "/run/hibernate/resume_in_progress";
 
 }  // namespace hiberman
 

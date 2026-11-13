@@ -68,6 +68,8 @@ class [[nodiscard]] Error final
     inline EGLint getID() const;
     inline bool isError() const;
 
+    inline void setCode(EGLint code);
+
     const std::string &getMessage() const;
 
     static inline Error NoError();
@@ -159,14 +161,14 @@ inline Error NoError()
 
 namespace angle
 {
-// Result signals if calling code should continue running or early exit. A value of Stop can
-// either indicate an Error or a non-Error early exit condition such as a detected no-op.
-// Incomplete signals special cases that are neither success nor failure but require
-// special attention.
-enum class [[nodiscard]] Result{
+// Result implements an explicit exception handling mechanism.  A value of Stop signifies an
+// exception akin to |throw|.
+// TODO: make incorrect usage of Stop consistent with the above expectation.
+// http://anglebug.com/8414
+enum class [[nodiscard]] Result
+{
     Continue,
     Stop,
-    Incomplete,
 };
 
 // TODO(jmadill): Remove this when refactor is complete. http://anglebug.com/3041

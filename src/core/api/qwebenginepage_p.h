@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef QWEBENGINEPAGE_P_H
 #define QWEBENGINEPAGE_P_H
@@ -74,6 +75,7 @@ public:
     virtual void didPrintPage(QPrinter *&printer, QSharedPointer<QByteArray> result) = 0;
     virtual void didPrintPageToPdf(const QString &filePath, bool success) = 0;
     virtual void printRequested() = 0;
+    virtual void printRequestedByFrame(QWebEngineFrame frame) = 0;
     virtual void showAutofillPopup(QtWebEngineCore::AutofillPopupController *controller,
                                    const QRect &bounds, bool autoselectFirstSuggestion) = 0;
     virtual void hideAutofillPopup() = 0;
@@ -84,7 +86,7 @@ public:
     virtual void hideTouchSelectionMenu() = 0;
 };
 
-class Q_WEBENGINECORE_PRIVATE_EXPORT QWebEnginePagePrivate : public QtWebEngineCore::WebContentsAdapterClient
+class Q_WEBENGINECORE_EXPORT QWebEnginePagePrivate : public QtWebEngineCore::WebContentsAdapterClient
 {
 public:
     Q_DECLARE_PUBLIC(QWebEnginePage)
@@ -102,6 +104,7 @@ public:
     void titleChanged(const QString &) override;
     void urlChanged() override;
     void iconChanged(const QUrl &) override;
+    void zoomFactorChanged(qreal factor) override;
     void loadProgressChanged(int progress) override;
     void didUpdateTargetURL(const QUrl &) override;
     void selectionChanged() override;
@@ -122,17 +125,22 @@ public:
     bool isBeingAdopted() override;
     void close() override;
     void windowCloseRejected() override;
+    void desktopMediaRequested(QtWebEngineCore::DesktopMediaController *) override;
     void contextMenuRequested(QWebEngineContextMenuRequest *request) override;
-    void navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame) override;
+    void navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame, bool hasFormData) override;
     void requestFullScreenMode(const QUrl &origin, bool fullscreen) override;
     bool isFullScreenMode() const override;
     void javascriptDialog(QSharedPointer<QtWebEngineCore::JavaScriptDialogController>) override;
     void runFileChooser(QSharedPointer<QtWebEngineCore::FilePickerController>) override;
     void showColorDialog(QSharedPointer<QtWebEngineCore::ColorChooserController>) override;
-    void didRunJavaScript(quint64 requestId, const QVariant &result) override;
+    void runJavaScript(const QString &script, quint32 worldId, quint64 frameId,
+                       const std::function<void(const QVariant &)> &callback) override;
     void didFetchDocumentMarkup(quint64 requestId, const QString &result) override;
     void didFetchDocumentInnerText(quint64 requestId, const QString &result) override;
-    void didPrintPage(quint64 requestId, QSharedPointer<QByteArray> result) override;
+    void printToPdf(const QString &filePath, const QPageLayout &layout, const QPageRanges &ranges,
+                    quint64 frameId) override;
+    void printToPdf(std::function<void(QSharedPointer<QByteArray>)> &&callback,
+                    const QPageLayout &layout, const QPageRanges &ranges, quint64 frameId) override;
     void didPrintPageToPdf(const QString &filePath, bool success) override;
     bool passOnFocus(bool reverse) override;
     void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString &message,
@@ -141,7 +149,7 @@ public:
             QSharedPointer<QtWebEngineCore::AuthenticationDialogController>) override;
     void releaseProfile() override;
     void runMediaAccessPermissionRequest(const QUrl &securityOrigin, MediaRequestFlags requestFlags) override;
-    void runFeaturePermissionRequest(QtWebEngineCore::ProfileAdapter::PermissionType permission, const QUrl &securityOrigin) override;
+    void runFeaturePermissionRequest(QWebEnginePermission::PermissionType permissionType, const QUrl &securityOrigin) override;
     void runMouseLockPermissionRequest(const QUrl &securityOrigin) override;
     void runRegisterProtocolHandlerRequest(QWebEngineRegisterProtocolHandlerRequest) override;
     void runFileSystemAccessRequest(QWebEngineFileSystemAccessRequest) override;
@@ -160,6 +168,7 @@ public:
     bool isEnabled() const override;
     void setToolTip(const QString &toolTipText) override;
     void printRequested() override;
+    void printRequestedByFrame(quint64 frameId) override;
     QtWebEngineCore::TouchHandleDrawableDelegate *
     createTouchHandleDelegate(const QMap<int, QImage> &) override;
     void showTouchSelectionMenu(QtWebEngineCore::TouchSelectionMenuController *, const QRect &,
@@ -171,6 +180,8 @@ public:
     void showAutofillPopup(QtWebEngineCore::AutofillPopupController *controller,
                            const QRect &bounds, bool autoselectFirstSuggestion) override;
     void hideAutofillPopup() override;
+    void showWebAuthDialog(QWebEngineWebAuthUxRequest *controller) override;
+    QWebEnginePermission createFeaturePermissionObject(const QUrl &securityOrigin, QWebEnginePermission::PermissionType permissionType) override;
 
     QtWebEngineCore::ProfileAdapter *profileAdapter() override;
     QtWebEngineCore::WebContentsAdapter *webContentsAdapter() override;
@@ -182,9 +193,12 @@ public:
     bool adoptWebContents(QtWebEngineCore::WebContentsAdapter *webContents);
     QtWebEngineCore::WebContentsAdapter *webContents() { return adapter.data(); }
     void recreateFromSerializedHistory(QDataStream &input);
+    void didPrintPage(QSharedPointer<QByteArray> result);
 
     void setFullScreenMode(bool);
     void ensureInitialized() const;
+
+    static QString actionText(int action);
 
     QSharedPointer<QtWebEngineCore::WebContentsAdapter> adapter;
     QWebEngineHistory *history;
@@ -210,9 +224,7 @@ public:
     QPrinter *currentPrinter = nullptr;
 #endif
 
-    mutable QMap<quint64, std::function<void(const QVariant &)>> m_variantCallbacks;
     mutable QMap<quint64, std::function<void(const QString &)>> m_stringCallbacks;
-    QMap<quint64, std::function<void(const QByteArray &)>> m_pdfResultCallbacks;
     mutable QAction *actions[QWebEnginePage::WebActionCount];
 };
 

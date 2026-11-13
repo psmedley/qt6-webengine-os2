@@ -8,9 +8,9 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/format_macros.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_math.h"
 #include "base/process/memory.h"
@@ -199,6 +199,7 @@ bool GpuMemoryBufferImplSharedMemory::IsSizeValidForFormat(
       return true;
     case gfx::BufferFormat::YVU_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
+    case gfx::BufferFormat::YUVA_420_TRIPLANAR:
     case gfx::BufferFormat::P010: {
       size_t num_planes = gfx::NumberOfPlanesForLinearBufferFormat(format);
       for (size_t i = 0; i < num_planes; ++i) {

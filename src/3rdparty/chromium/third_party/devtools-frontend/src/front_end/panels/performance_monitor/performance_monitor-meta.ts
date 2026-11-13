@@ -9,32 +9,32 @@ import type * as PerformanceMonitor from './performance_monitor.js';
 
 const UIStrings = {
   /**
-  *@description Title of the 'Performance monitor' tool in the bottom drawer
-  */
+   *@description Title of the 'Performance monitor' tool in the bottom drawer
+   */
   performanceMonitor: 'Performance monitor',
   /**
- *@description A tag of Performance Monitor that can be searched in the command menu
- */
+   *@description A tag of Performance Monitor that can be searched in the command menu
+   */
   performance: 'performance',
   /**
- *@description A tag of Performance Monitor that can be searched in the command menu
- */
+   *@description A tag of Performance Monitor that can be searched in the command menu
+   */
   systemMonitor: 'system monitor',
   /**
- *@description A tag of Performance Monitor that can be searched in the command menu
- */
+   *@description A tag of Performance Monitor that can be searched in the command menu
+   */
   monitor: 'monitor',
   /**
- *@description A tag of Performance Monitor that can be searched in the command menu
- */
+   *@description A tag of Performance Monitor that can be searched in the command menu
+   */
   activity: 'activity',
   /**
- *@description A tag of Performance Monitor that can be searched in the command menu
- */
+   *@description A tag of Performance Monitor that can be searched in the command menu
+   */
   metrics: 'metrics',
   /**
-  *@description Command for showing the 'Performance monitor' tool in the bottom drawer
-  */
+   *@description Command for showing the 'Performance monitor' tool in the bottom drawer
+   */
   showPerformanceMonitor: 'Show Performance monitor',
 };
 
@@ -59,7 +59,7 @@ UI.ViewManager.registerViewExtension({
   order: 100,
   async loadView() {
     const PerformanceMonitor = await loadPerformanceMonitorModule();
-    return PerformanceMonitor.PerformanceMonitor.PerformanceMonitorImpl.instance();
+    return new PerformanceMonitor.PerformanceMonitor.PerformanceMonitorImpl();
   },
   tags: [
     i18nLazyString(UIStrings.performance),

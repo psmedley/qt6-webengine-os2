@@ -4,7 +4,7 @@
 
 #include "src/snapshot/embedded/platform-embedded-file-writer-aix.h"
 
-#include "src/objects/code.h"
+#include "src/objects/instruction-stream.h"
 
 namespace v8 {
 namespace internal {
@@ -69,7 +69,7 @@ void PlatformEmbeddedFileWriterAIX::AlignToCodeAlignment() {
 }
 
 void PlatformEmbeddedFileWriterAIX::AlignToDataAlignment() {
-  static_assert((1 << 3) >= Code::kMetadataAlignment);
+  static_assert((1 << 3) >= InstructionStream::kMetadataAlignment);
   fprintf(fp_, ".align 3\n");
 }
 

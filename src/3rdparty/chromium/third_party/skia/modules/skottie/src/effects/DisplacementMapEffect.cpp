@@ -23,10 +23,7 @@
 #include <tuple>
 
 namespace skottie::internal {
-
-#ifdef SK_ENABLE_SKSL
-
-namespace  {
+namespace {
 
 // AE's displacement map effect [1] is somewhat similar to SVG's feDisplacementMap [2].  Main
 // differences:
@@ -280,13 +277,10 @@ private:
             case Pos::kCenter:  return SkMatrix::Translate(
                                     (fChildSize.fWidth  - fDisplSize.fWidth ) / 2,
                                     (fChildSize.fHeight - fDisplSize.fHeight) / 2);
-                break;
             case Pos::kStretch: return SkMatrix::Scale(
                                     fChildSize.fWidth  / fDisplSize.fWidth,
                                     fChildSize.fHeight / fDisplSize.fHeight);
-                break;
             case Pos::kTile:    return SkMatrix::I();
-                break;
         }
         SkUNREACHABLE;
     }
@@ -390,11 +384,8 @@ private:
 
 } // namespace
 
-#endif  // SK_ENABLE_SKSL
-
 sk_sp<sksg::RenderNode> EffectBuilder::attachDisplacementMapEffect(
         const skjson::ArrayValue& jprops, sk_sp<sksg::RenderNode> layer) const {
-#ifdef SK_ENABLE_SKSL
     auto [ displ, displ_size ] = DisplacementMapAdapter::GetDisplacementSource(jprops, this);
 
     auto displ_node = DisplacementNode::Make(layer, fLayerSize, std::move(displ), displ_size);
@@ -406,10 +397,6 @@ sk_sp<sksg::RenderNode> EffectBuilder::attachDisplacementMapEffect(
     return fBuilder->attachDiscardableAdapter<DisplacementMapAdapter>(jprops,
                                                                       fBuilder,
                                                                       std::move(displ_node));
-#else
-    // TODO(skia:12197)
-    return layer;
-#endif
 }
 
 } // namespace skottie::internal

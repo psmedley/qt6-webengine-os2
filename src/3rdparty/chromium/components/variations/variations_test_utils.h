@@ -127,10 +127,10 @@ class MockEntropyProviders : public EntropyProviders {
  public:
   struct Results {
     double low_entropy = kAlwaysUseLastGroup;
-    absl::optional<double> high_entropy = absl::nullopt;
+    std::optional<double> high_entropy = std::nullopt;
   };
   explicit MockEntropyProviders(Results results,
-                                size_t low_entropy_domain = 8000);
+                                uint32_t low_entropy_domain = 8000);
   ~MockEntropyProviders() override;
 
   const base::FieldTrial::EntropyProvider& low_entropy() const override;

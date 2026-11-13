@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "url_request_custom_job_delegate.h"
 #include "url_request_custom_job_proxy.h"
@@ -14,16 +15,16 @@
 
 namespace QtWebEngineCore {
 
-URLRequestCustomJobDelegate::URLRequestCustomJobDelegate(URLRequestCustomJobProxy *proxy,
-                                                         const QUrl &url,
-                                                         const QByteArray &method,
-                                                         const QUrl &initiatorOrigin,
-                                                         const QMap<QByteArray, QByteArray> &headers)
-    : m_proxy(proxy),
-      m_request(url),
-      m_method(method),
-      m_initiatorOrigin(initiatorOrigin),
-      m_requestHeaders(headers)
+URLRequestCustomJobDelegate::URLRequestCustomJobDelegate(
+        URLRequestCustomJobProxy *proxy, const QUrl &url, const QByteArray &method,
+        const QUrl &initiatorOrigin, const QMap<QByteArray, QByteArray> &headers,
+        network::ResourceRequestBody *requestBody)
+    : m_proxy(proxy)
+    , m_request(url)
+    , m_method(method)
+    , m_initiatorOrigin(initiatorOrigin)
+    , m_requestHeaders(headers)
+    , m_resourceRequestBody(ResourceRequestBody(requestBody))
 {
 }
 
@@ -51,13 +52,29 @@ QMap<QByteArray, QByteArray> URLRequestCustomJobDelegate::requestHeaders() const
     return m_requestHeaders;
 }
 
+QIODevice *URLRequestCustomJobDelegate::requestBody()
+{
+    return &m_resourceRequestBody;
+}
+
+void URLRequestCustomJobDelegate::setAdditionalResponseHeaders(
+        const QMultiMap<QByteArray, QByteArray> &additionalResponseHeaders)
+{
+    m_additionalResponseHeaders = additionalResponseHeaders;
+}
+
 void URLRequestCustomJobDelegate::reply(const QByteArray &contentType, QIODevice *device)
 {
-    if (device)
+    if (!device)
+        m_proxy->m_ioTaskRunner->PostTask(FROM_HERE,
+                                          base::BindOnce(&URLRequestCustomJobProxy::succeed, m_proxy));
+    else {
         QObject::connect(device, &QIODevice::readyRead, this, &URLRequestCustomJobDelegate::slotReadyRead);
-    m_proxy->m_ioTaskRunner->PostTask(FROM_HERE,
-                                      base::BindOnce(&URLRequestCustomJobProxy::reply,
-                                                     m_proxy, contentType.toStdString(),device));
+        m_proxy->m_ioTaskRunner->PostTask(FROM_HERE,
+                                          base::BindOnce(&URLRequestCustomJobProxy::reply, m_proxy,
+                                                         contentType.toStdString(), device,
+                                                         std::move(m_additionalResponseHeaders)));
+    }
 }
 
 void URLRequestCustomJobDelegate::slotReadyRead()

@@ -26,13 +26,13 @@
 #include "connections/implementation/wifi_hotspot_endpoint_channel.h"
 #include "internal/platform/wifi_hotspot.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
-WifiHotspotBwuHandler::WifiHotspotBwuHandler(Mediums& mediums,
-                                             BwuNotifications notifications)
-    : BaseBwuHandler(std::move(notifications)), mediums_(mediums) {}
+WifiHotspotBwuHandler::WifiHotspotBwuHandler(
+    Mediums& mediums, IncomingConnectionCallback incoming_connection_callback)
+    : BaseBwuHandler(std::move(incoming_connection_callback)),
+      mediums_(mediums) {}
 
 // Called by BWU initiator. Set up WifiHotspot upgraded medium for this
 // endpoint, and returns a upgrade path info (SSID, Password, Gateway used as
@@ -49,11 +49,9 @@ ByteArray WifiHotspotBwuHandler::HandleInitializeUpgradedMediumForEndpoint(
   if (!wifi_hotspot_medium_.IsAcceptingConnections(upgrade_service_id)) {
     if (!wifi_hotspot_medium_.StartAcceptingConnections(
             upgrade_service_id,
-            {
-                .accepted_cb = absl::bind_front(
-                    &WifiHotspotBwuHandler::OnIncomingWifiHotspotConnection,
-                    this, client),
-            })) {
+            absl::bind_front(
+                &WifiHotspotBwuHandler::OnIncomingWifiHotspotConnection, this,
+                client))) {
       NEARBY_LOGS(ERROR)
           << "WifiHotspotBwuHandler couldn't initiate WifiHotspot upgrade for "
           << "service " << upgrade_service_id << " and endpoint " << endpoint_id
@@ -76,15 +74,16 @@ ByteArray WifiHotspotBwuHandler::HandleInitializeUpgradedMediumForEndpoint(
   std::string password = hotspot_crendential->GetPassword();
   std::string gateway = hotspot_crendential->GetGateway();
   std::int32_t port = hotspot_crendential->GetPort();
+  std::int32_t frequency = hotspot_crendential->GetFrequency();
 
   NEARBY_LOGS(INFO) << "Start SoftAP with SSID:" << ssid
                     << ",  Password:" << password << ",  Port:" << port
-                    << ",  Gateway:" << gateway;
+                    << ",  Gateway:" << gateway << ",  Frequency:" << frequency;
 
   bool disabling_encryption =
       (client->GetAdvertisingOptions().strategy == Strategy::kP2pPointToPoint);
   return parser::ForBwuWifiHotspotPathAvailable(
-      ssid, password, port, gateway,
+      ssid, password, port, frequency, gateway,
       /* supports_disabling_encryption */ disabling_encryption);
 }
 
@@ -116,12 +115,13 @@ WifiHotspotBwuHandler::CreateUpgradedEndpointChannel(
   const std::string& password = upgrade_path_info_credentials.password();
   const std::string& gateway = upgrade_path_info_credentials.gateway();
   std::int32_t port = upgrade_path_info_credentials.port();
+  std::int32_t frequency = upgrade_path_info_credentials.frequency();
 
   NEARBY_LOGS(INFO) << "Received Hotspot credential SSID: " << ssid
                     << ",  Password:" << password << ",  Port:" << port
-                    << ",  Gateway:" << gateway;
+                    << ",  Gateway:" << gateway << ",  Frequency:" << frequency;
 
-  if (!wifi_hotspot_medium_.ConnectWifiHotspot(ssid, password)) {
+  if (!wifi_hotspot_medium_.ConnectWifiHotspot(ssid, password, frequency)) {
     NEARBY_LOGS(ERROR) << "Connect to Hotspot failed";
     return nullptr;
   }
@@ -158,9 +158,8 @@ void WifiHotspotBwuHandler::OnIncomingWifiHotspotConnection(
               upgrade_service_id, socket),
           .channel = std::move(channel),
       });
-  bwu_notifications_.incoming_connection_cb(client, std::move(connection));
+  NotifyOnIncomingConnection(client, std::move(connection));
 }
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

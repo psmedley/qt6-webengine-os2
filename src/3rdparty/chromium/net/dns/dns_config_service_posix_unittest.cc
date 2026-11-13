@@ -7,10 +7,11 @@
 #include <resolv.h>
 
 #include <memory>
+#include <optional>
 
-#include "base/bind.h"
 #include "base/cancelable_callback.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "base/sys_byteorder.h"
 #include "base/task/sequenced_task_runner.h"
@@ -23,7 +24,6 @@
 #include "net/dns/dns_config.h"
 #include "net/dns/public/dns_protocol.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/path_utils.h"
@@ -155,7 +155,7 @@ TEST(DnsConfigServicePosixTest, CreateAndDestroy) {
 TEST(DnsConfigServicePosixTest, ConvertResStateToDnsConfig) {
   struct __res_state res;
   InitializeResState(&res);
-  absl::optional<DnsConfig> config = internal::ConvertResStateToDnsConfig(res);
+  std::optional<DnsConfig> config = internal::ConvertResStateToDnsConfig(res);
   CloseResState(&res);
   ASSERT_TRUE(config.has_value());
   EXPECT_TRUE(config->IsValid());

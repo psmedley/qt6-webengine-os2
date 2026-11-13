@@ -31,64 +31,62 @@
 import * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
+import type * as SDK from '../../core/sdk/sdk.js';
+import type * as Protocol from '../../generated/protocol.js';
+import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import layers3DViewStyles from './layers3DView.css.js';
-
-import type * as Protocol from '../../generated/protocol.js';
-
-import type * as SDK from '../../core/sdk/sdk.js';
-import * as UI from '../../ui/legacy/legacy.js';
-
 import {
   LayerSelection,
+  type LayerView,
+  type LayerViewHost,
+  ScrollRectSelection,
   Selection,
   SnapshotSelection,
   Type,
-  ScrollRectSelection,
-  type LayerView,
-  type LayerViewHost,
 } from './LayerViewHost.js';
 import {Events as TransformControllerEvents, TransformController} from './TransformController.js';
 
 const UIStrings = {
   /**
-  *@description Text of a DOM element in DView of the Layers panel
-  */
+   *@description Text of a DOM element in DView of the Layers panel
+   */
   layerInformationIsNotYet: 'Layer information is not yet available.',
   /**
-  *@description Accessibility label for canvas view in Layers tool
-  */
+   *@description Accessibility label for canvas view in Layers tool
+   */
   dLayersView: '3D Layers View',
   /**
-  *@description Text in DView of the Layers panel
-  */
+   *@description Text in DView of the Layers panel
+   */
   cantDisplayLayers: 'Can\'t display layers,',
   /**
-  *@description Text in DView of the Layers panel
-  */
+   *@description Text in DView of the Layers panel
+   */
   webglSupportIsDisabledInYour: 'WebGL support is disabled in your browser.',
   /**
-  *@description Text in DView of the Layers panel
-  *@example {about:gpu} PH1
-  */
+   *@description Text in DView of the Layers panel
+   *@example {about:gpu} PH1
+   */
   checkSForPossibleReasons: 'Check {PH1} for possible reasons.',
   /**
-  *@description Text for a checkbox in the toolbar of the Layers panel to show the area of slow scroll rect
-  */
+   *@description Text for a checkbox in the toolbar of the Layers panel to show the area of slow scroll rect
+   */
   slowScrollRects: 'Slow scroll rects',
   /**
-  * @description Text for a checkbox in the toolbar of the Layers panel. This is a noun, for a
-  * setting meaning 'display paints in the layers viewer'. 'Paints' here means 'paint events' i.e.
-  * when the browser draws pixels to the screen.
-  */
+   * @description Text for a checkbox in the toolbar of the Layers panel. This is a noun, for a
+   * setting meaning 'display paints in the layers viewer'. 'Paints' here means 'paint events' i.e.
+   * when the browser draws pixels to the screen.
+   */
   paints: 'Paints',
   /**
-  *@description A context menu item in the DView of the Layers panel
-  */
+   *@description A context menu item in the DView of the Layers panel
+   */
   resetView: 'Reset View',
   /**
-  *@description A context menu item in the DView of the Layers panel
-  */
+   *@description A context menu item in the DView of the Layers panel
+   */
   showPaintProfiler: 'Show Paint Profiler',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/layer_viewer/Layers3DView.ts', UIStrings);
@@ -130,6 +128,7 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
   private gl?: WebGLRenderingContext|null;
   private dimensionsForAutoscale?: {width: number, height: number};
   private needsUpdate?: boolean;
+  private updateScheduled?: boolean;
   private panelToolbar?: UI.Toolbar.Toolbar;
   private showSlowScrollRectsSetting?: Common.Settings.Setting<boolean>;
   private showPaintsSetting?: Common.Settings.Setting<boolean>;
@@ -138,6 +137,7 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
 
   constructor(layerViewHost: LayerViewHost) {
     super(true);
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('layers-3d-view')}`);
 
     this.contentElement.classList.add('layers-3d-view');
     this.failBanner = new UI.Widget.VBox();
@@ -157,10 +157,13 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
     this.canvasElement.addEventListener('mouseleave', this.onMouseMove.bind(this), false);
     this.canvasElement.addEventListener('mousemove', this.onMouseMove.bind(this), false);
     this.canvasElement.addEventListener('contextmenu', this.onContextMenu.bind(this), false);
-    UI.ARIAUtils.setAccessibleName(this.canvasElement, i18nString(UIStrings.dLayersView));
+    this.canvasElement.setAttribute(
+        'jslog', `${VisualLogging.canvas().track({click: true, drag: true}).context('layers-canvas')}`);
+    UI.ARIAUtils.setLabel(this.canvasElement, i18nString(UIStrings.dLayersView));
 
     this.lastSelection = {};
     this.layerTree = null;
+    this.updateScheduled = false;
 
     this.textureManager = new LayerTextureManager(this.update.bind(this));
 
@@ -197,16 +200,16 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
     });
   }
 
-  onResize(): void {
+  override onResize(): void {
     this.resizeCanvas();
     this.update();
   }
 
-  willHide(): void {
+  override willHide(): void {
     this.textureManager.suspend();
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     this.textureManager.resume();
     this.registerCSSFiles([layers3DViewStyles]);
     if (!this.needsUpdate) {
@@ -602,6 +605,10 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
     gl.vertexAttribPointer(attribute, length, gl.FLOAT, false, 0, 0);
   }
 
+  // This view currently draws every rect, every frame
+  // It'd be far more effectient to retain the buffers created in setVertexAttribute,
+  // and manipulate them as needed.
+  // TODO(crbug.com/1473451): consider those optimizations or porting to 3D css transforms
   private drawRectangle(vertices: number[], mode: number, color?: number[], texture?: Object): void {
     const gl = this.gl;
     const white = [255, 255, 255, 1];
@@ -736,6 +743,20 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
       this.needsUpdate = true;
       return;
     }
+    // Debounce into the next frame (double rAF).
+    // Without this the GPU work can pile up without any backpressure.
+    // A single rAF might be fine, but the GPU work here is so heavy, we prefer
+    // the extra breathing room over lower latency
+    if (!this.updateScheduled) {
+      this.updateScheduled = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+                              this.updateScheduled = false;
+                              this.innerUpdate();
+                            }));
+    }
+  }
+
+  private innerUpdate(): void {
     if (!this.layerTree || !this.layerTree.root()) {
       this.failBanner.show(this.contentElement);
       return;
@@ -767,7 +788,8 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
     fragment.createChild('div').textContent = i18nString(UIStrings.cantDisplayLayers);
     fragment.createChild('div').textContent = i18nString(UIStrings.webglSupportIsDisabledInYour);
     fragment.appendChild(i18n.i18n.getFormatLocalizedString(
-        str_, UIStrings.checkSForPossibleReasons, {PH1: UI.XLink.XLink.create('about:gpu')}));
+        str_, UIStrings.checkSForPossibleReasons,
+        {PH1: UI.XLink.XLink.create('about:gpu', undefined, undefined, undefined, 'about-gpu')}));
     return fragment;
   }
 
@@ -780,8 +802,8 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
     let closestObject: Selection|null = null;
     const projectionMatrix =
         new WebKitCSSMatrix().scale(1, -1, -1).translate(-1, -1, 0).multiply(this.projectionMatrix);
-    const x0 = (mouseEvent.clientX - this.canvasElement.totalOffsetLeft()) * window.devicePixelRatio;
-    const y0 = -(mouseEvent.clientY - this.canvasElement.totalOffsetTop()) * window.devicePixelRatio;
+    const x0 = (mouseEvent.clientX - this.canvasElement.getBoundingClientRect().left) * window.devicePixelRatio;
+    const y0 = -(mouseEvent.clientY - this.canvasElement.getBoundingClientRect().top) * window.devicePixelRatio;
 
     function checkIntersection(rect: Rectangle): void {
       if (!rect.relatedObject) {
@@ -810,10 +832,10 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
   private initToolbar(): void {
     this.panelToolbar = this.transformController.toolbar();
     this.contentElement.appendChild(this.panelToolbar.element);
+    this.showPaintsSetting =
+        this.createVisibilitySetting(i18nString(UIStrings.paints), 'frameViewerShowPaints', false, this.panelToolbar);
     this.showSlowScrollRectsSetting = this.createVisibilitySetting(
         i18nString(UIStrings.slowScrollRects), 'frameViewerShowSlowScrollRects', true, this.panelToolbar);
-    this.showPaintsSetting =
-        this.createVisibilitySetting(i18nString(UIStrings.paints), 'frameViewerShowPaints', true, this.panelToolbar);
     this.showPaintsSetting.addChangeListener(this.updatePaints, this);
     Common.Settings.Settings.instance()
         .moduleSetting('frameViewerHideChromeWindow')
@@ -823,12 +845,16 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
   private onContextMenu(event: Event): void {
     const contextMenu = new UI.ContextMenu.ContextMenu(event);
     contextMenu.defaultSection().appendItem(
-        i18nString(UIStrings.resetView), () => this.transformController.resetAndNotify(), false);
+        i18nString(UIStrings.resetView), () => this.transformController.resetAndNotify(), {
+          jslogContext: 'layers.3d-center',
+        });
     const selection = this.selectionFromEventPoint(event);
     if (selection && selection.type() === Type.Snapshot) {
       contextMenu.defaultSection().appendItem(
           i18nString(UIStrings.showPaintProfiler),
-          () => this.dispatchEventToListeners(Events.PaintProfilerRequested, selection), false);
+          () => this.dispatchEventToListeners(Events.PaintProfilerRequested, selection), {
+            jslogContext: 'layers.paint-profiler',
+          });
     }
     this.layerViewHost.showContextMenu(contextMenu, selection);
   }
@@ -882,16 +908,12 @@ export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, ty
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
 export enum OutlineType {
   Hovered = 'hovered',
   Selected = 'selected',
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   PaintProfilerRequested = 'PaintProfilerRequested',
   ScaleChanged = 'ScaleChanged',
 }

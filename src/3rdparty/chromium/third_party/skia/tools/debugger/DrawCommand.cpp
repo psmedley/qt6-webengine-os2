@@ -9,7 +9,9 @@
 
 #include "include/core/SkAlphaType.h"
 #include "include/core/SkBitmap.h"
+#include "include/core/SkBlendMode.h"
 #include "include/core/SkBlurTypes.h"
+#include "include/core/SkClipOp.h"
 #include "include/core/SkColorFilter.h"
 #include "include/core/SkColorType.h"
 #include "include/core/SkDrawable.h"
@@ -30,11 +32,14 @@
 #include "include/core/SkStream.h"
 #include "include/core/SkTypeface.h"
 #include "include/encode/SkPngEncoder.h"
-#include "include/private/SkMalloc.h"
-#include "include/private/SkShadowFlags.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkMalloc.h"
+#include "include/private/base/SkTo.h"
 #include "include/private/gpu/ganesh/GrImageContext.h"
-#include "src/core/SkAutoMalloc.h"
+#include "include/utils/SkShadowUtils.h"
+#include "src/base/SkAutoMalloc.h"
 #include "src/core/SkCanvasPriv.h"
+#include "src/core/SkFontPriv.h"
 #include "src/core/SkMaskFilterBase.h"
 #include "src/core/SkPaintDefaults.h"
 #include "src/core/SkRectPriv.h"
@@ -47,12 +52,12 @@
 #include "tools/debugger/JsonWriteBuffer.h"
 
 #include <algorithm>
-#include <string>
+#include <cstring>
 #include <utility>
 
 class GrDirectContext;
 
-#if SK_SUPPORT_GPU
+#if defined(SK_GANESH)
 #include "include/gpu/GrRecordingContext.h"
 #endif
 
@@ -71,6 +76,7 @@ class GrDirectContext;
 #define DEBUGCANVAS_ATTRIBUTE_MODE "mode"
 #define DEBUGCANVAS_ATTRIBUTE_POINTS "points"
 #define DEBUGCANVAS_ATTRIBUTE_PATH "path"
+#define DEBUGCANVAS_ATTRIBUTE_CLUSTERS "clusters"
 #define DEBUGCANVAS_ATTRIBUTE_TEXT "text"
 #define DEBUGCANVAS_ATTRIBUTE_COLOR "color"
 #define DEBUGCANVAS_ATTRIBUTE_ALPHA "alpha"
@@ -389,7 +395,7 @@ void apply_paint_blend_mode(const SkPaint& paint, SkJSONWriter& writer) {
     }
 }
 
-};  // namespace
+}  // namespace
 
 void DrawCommand::MakeJsonColor(SkJSONWriter& writer, const SkColor color) {
     writer.beginArray(nullptr, false);
@@ -624,7 +630,7 @@ static SkString encode_data(const void*     bytes,
 void DrawCommand::flatten(const SkFlattenable* flattenable,
                           SkJSONWriter&        writer,
                           UrlDataManager&      urlDataManager) {
-    SkBinaryWriteBuffer buffer;
+    SkBinaryWriteBuffer buffer({});  // TODO(kjlubick, bungeman) feed SkSerialProcs through API
     flattenable->flatten(buffer);
     void* data = sk_malloc_throw(buffer.bytesWritten());
     buffer.writeToMemory(data);
@@ -641,7 +647,7 @@ void DrawCommand::flatten(const SkFlattenable* flattenable,
     sk_free(data);
 }
 
-void DrawCommand::WritePNG(SkBitmap bitmap, SkWStream& out) {
+void DrawCommand::WritePNG(const SkBitmap& bitmap, SkWStream& out) {
     SkPixmap pm;
     SkAssertResult(bitmap.peekPixels(&pm));
 
@@ -670,7 +676,7 @@ bool DrawCommand::flatten(const SkImage&  image,
             SkImageInfo::Make(image.dimensions(), kN32_SkColorType, kPremul_SkAlphaType);
     // "cheat" for this debug tool and use image's context
     GrDirectContext* dContext = nullptr;
-#if SK_SUPPORT_GPU
+#if defined(SK_GANESH)
     dContext = GrAsDirectContext(as_IB(&image)->context());
 #endif
     if (!image.readPixels(dContext, dstInfo, buffer.get(), rowBytes, 0, 0)) {
@@ -893,7 +899,7 @@ static void apply_paint_patheffect(const SkPaint&  paint,
 static void apply_font_typeface(const SkFont&   font,
                                 SkJSONWriter&   writer,
                                 UrlDataManager& urlDataManager) {
-    SkTypeface* typeface = font.getTypefaceOrDefault();
+    SkTypeface* typeface = font.getTypeface();
     if (typeface != nullptr) {
         writer.beginObject(DEBUGCANVAS_ATTRIBUTE_TYPEFACE);
         SkDynamicMemoryWStream buffer;
@@ -1087,7 +1093,7 @@ void ClipRRectCommand::toJSON(SkJSONWriter& writer, UrlDataManager& urlDataManag
 
 ClipShaderCommand::ClipShaderCommand(sk_sp<SkShader> cs, SkClipOp op)
         : INHERITED(kClipShader_OpType) {
-    fShader = cs;
+    fShader = std::move(cs);
     fOp     = op;
 }
 
@@ -1685,10 +1691,25 @@ bool DrawTextBlobCommand::render(SkCanvas* canvas) const {
 
 void DrawTextBlobCommand::toJSON(SkJSONWriter& writer, UrlDataManager& urlDataManager) const {
     INHERITED::toJSON(writer, urlDataManager);
+    writer.appendFloat(DEBUGCANVAS_ATTRIBUTE_X, fXPos);
+    writer.appendFloat(DEBUGCANVAS_ATTRIBUTE_Y, fYPos);
+    SkRect bounds = fBlob->bounds();
+    writer.appendName(DEBUGCANVAS_ATTRIBUTE_BOUNDS);
+    MakeJsonRect(writer, bounds);
+    writer.appendName(DEBUGCANVAS_ATTRIBUTE_PAINT);
+    MakeJsonPaint(writer, fPaint, urlDataManager);
+
     writer.beginArray(DEBUGCANVAS_ATTRIBUTE_RUNS);
     SkTextBlobRunIterator iter(fBlob.get());
     while (!iter.done()) {
         writer.beginObject();  // run
+        if (iter.textSize()) {
+            writer.appendString(DEBUGCANVAS_ATTRIBUTE_TEXT, iter.text(), iter.textSize());
+        }
+        writer.appendName(DEBUGCANVAS_ATTRIBUTE_FONT);
+        MakeJsonFont(iter.font(), writer, urlDataManager);
+        writer.appendName(DEBUGCANVAS_ATTRIBUTE_COORDS);
+        MakeJsonPoint(writer, iter.offset());
         writer.beginArray(DEBUGCANVAS_ATTRIBUTE_GLYPHS);
         for (uint32_t i = 0; i < iter.glyphCount(); i++) {
             writer.appendU32(iter.glyphs()[i]);
@@ -1713,22 +1734,17 @@ void DrawTextBlobCommand::toJSON(SkJSONWriter& writer, UrlDataManager& urlDataMa
             }
             writer.endArray();  // positions
         }
-        writer.appendName(DEBUGCANVAS_ATTRIBUTE_FONT);
-        MakeJsonFont(iter.font(), writer, urlDataManager);
-        writer.appendName(DEBUGCANVAS_ATTRIBUTE_COORDS);
-        MakeJsonPoint(writer, iter.offset());
-
+        if (iter.clusters()) {
+            writer.beginArray(DEBUGCANVAS_ATTRIBUTE_CLUSTERS);
+            for (uint32_t i = 0; i < iter.glyphCount(); i++) {
+                writer.appendU32(iter.clusters()[i]);
+            }
+            writer.endArray();  // clusters
+        }
         writer.endObject();  // run
         iter.next();
     }
     writer.endArray();  // runs
-    writer.appendFloat(DEBUGCANVAS_ATTRIBUTE_X, fXPos);
-    writer.appendFloat(DEBUGCANVAS_ATTRIBUTE_Y, fYPos);
-    SkRect bounds = fBlob->bounds();
-    writer.appendName(DEBUGCANVAS_ATTRIBUTE_COORDS);
-    MakeJsonRect(writer, bounds);
-    writer.appendName(DEBUGCANVAS_ATTRIBUTE_PAINT);
-    MakeJsonPaint(writer, fPaint, urlDataManager);
 
     SkString desc;
     // make the bounds local by applying the x,y

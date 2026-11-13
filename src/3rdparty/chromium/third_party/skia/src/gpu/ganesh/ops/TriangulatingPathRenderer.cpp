@@ -5,6 +5,7 @@
  * found in the LICENSE file.
  */
 
+
 #include "src/gpu/ganesh/ops/TriangulatingPathRenderer.h"
 
 #include "include/private/SkIDChangeListener.h"
@@ -31,6 +32,8 @@
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
 
 #include <cstdio>
+
+#if !defined(SK_ENABLE_OPTIMIZE_SIZE)
 
 #ifndef GR_AA_TESSELLATOR_MAX_VERB_COUNT
 #define GR_AA_TESSELLATOR_MAX_VERB_COUNT 10
@@ -522,7 +525,7 @@ private:
         flushState->drawMesh(*fMesh);
     }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     SkString onDumpInfo() const override {
         return SkStringPrintf("Color 0x%08x, aa: %d\n%s",
                               fColor.toBytes_RGBA(), fAntiAlias, fHelper.dumpInfo().c_str());
@@ -548,7 +551,7 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 
 GR_DRAW_OP_TEST_DEFINE(TriangulatingPathOp) {
     SkMatrix viewMatrix = GrTest::TestMatrixInvertible(random);
@@ -574,7 +577,7 @@ GR_DRAW_OP_TEST_DEFINE(TriangulatingPathOp) {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 TriangulatingPathRenderer::TriangulatingPathRenderer()
     : fMaxVerbCount(GR_AA_TESSELLATOR_MAX_VERB_COUNT) {
@@ -628,4 +631,6 @@ bool TriangulatingPathRenderer::onDrawPath(const DrawPathArgs& args) {
     return true;
 }
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh
+
+#endif // SK_ENABLE_OPTIMIZE_SIZE

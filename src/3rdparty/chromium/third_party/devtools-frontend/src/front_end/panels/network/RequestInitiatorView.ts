@@ -7,22 +7,23 @@ import * as SDK from '../../core/sdk/sdk.js';
 import * as Logs from '../../models/logs/logs.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import requestInitiatorViewStyles from './requestInitiatorView.css.js';
 import requestInitiatorViewTreeStyles from './requestInitiatorViewTree.css.js';
 
 const UIStrings = {
   /**
-  *@description Text in Request Initiator View of the Network panel
-  */
+   *@description Text in Request Initiator View of the Network panel
+   */
   thisRequestHasNoInitiatorData: 'This request has no initiator data.',
   /**
-  *@description Title of a section in Request Initiator view of the Network Panel
-  */
+   *@description Title of a section in Request Initiator view of the Network Panel
+   */
   requestCallStack: 'Request call stack',
   /**
-  *@description Title of a section in Request Initiator view of the Network Panel
-  */
+   *@description Title of a section in Request Initiator view of the Network Panel
+   */
   requestInitiatorChain: 'Request initiator chain',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/network/RequestInitiatorView.ts', UIStrings);
@@ -37,6 +38,7 @@ export class RequestInitiatorView extends UI.Widget.VBox {
     super();
 
     this.element.classList.add('request-initiator-view');
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('initiator')}`);
     this.linkifier = new Components.Linkifier.Linkifier();
     this.request = request;
     this.emptyWidget = new UI.EmptyWidget.EmptyWidget(i18nString(UIStrings.thisRequestHasNoInitiatorData));
@@ -64,6 +66,7 @@ export class RequestInitiatorView extends UI.Widget.VBox {
     const treeOutline = new UI.TreeOutline.TreeOutlineInShadow();
     treeOutline.registerCSSFiles([requestInitiatorViewTreeStyles]);
     treeOutline.contentElement.classList.add('request-initiator-view-tree');
+    treeOutline.contentElement.setAttribute('jslog', `${VisualLogging.tree().context('initiator-tree')}`);
 
     return treeOutline;
   }
@@ -135,7 +138,7 @@ export class RequestInitiatorView extends UI.Widget.VBox {
     root.expand();
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     if (this.hasShown) {
       return;
     }

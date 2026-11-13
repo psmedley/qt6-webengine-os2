@@ -12,11 +12,13 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/types/optional_ref.h"
+#include "base/values.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -84,7 +86,8 @@ class WebHistoryService : public KeyedService {
   // TODO(dubroy): Extract the dictionary Value into a structured results
   // object.
   using QueryWebHistoryCallback =
-      base::OnceCallback<void(Request*, const base::Value*)>;
+      base::OnceCallback<void(Request*,
+                              base::optional_ref<const base::Value::Dict>)>;
 
   using ExpireWebHistoryCallback = base::OnceCallback<void(bool success)>;
 
@@ -161,14 +164,14 @@ class WebHistoryService : public KeyedService {
   // Used for tests.
   size_t GetNumberOfPendingAudioHistoryRequests();
 
-#if !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_QTWEBENGINE)
   // Whether there are other forms of browsing history stored on the server.
   void QueryOtherFormsOfBrowsingHistory(
       version_info::Channel channel,
       QueryOtherFormsOfBrowsingHistoryCallback callback,
       const net::PartialNetworkTrafficAnnotationTag&
           partial_traffic_annotation);
-#endif // !defined(TOOLKIT_QT)
+#endif // !BUILDFLAG(IS_QTWEBENGINE)
 
  protected:
   // This function is pulled out for testing purposes. Caller takes ownership of
@@ -178,10 +181,10 @@ class WebHistoryService : public KeyedService {
                                  const net::PartialNetworkTrafficAnnotationTag&
                                      partial_traffic_annotation);
 
-  // Extracts a JSON-encoded HTTP response into a dictionary Value.
+  // Extracts a JSON-encoded HTTP response into a base::Value::Dict.
   // If `request`'s HTTP response code indicates failure, or if the response
   // body is not JSON, nullopt is returned.
-  static absl::optional<base::Value> ReadResponse(Request* request);
+  static absl::optional<base::Value::Dict> ReadResponse(Request* request);
 
   // Called by `request` when a web history query has completed. Unpacks the
   // response and calls `callback`, which is the original callback that was
@@ -215,7 +218,7 @@ class WebHistoryService : public KeyedService {
       WebHistoryService::Request* request,
       bool success);
 
-#if !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_QTWEBENGINE)
   // Called by `request` when a query for other forms of browsing history has
   // completed. Unpacks the response and calls `callback`, which is the original
   // callback that was passed to QueryOtherFormsOfBrowsingHistory().
@@ -223,7 +226,7 @@ class WebHistoryService : public KeyedService {
       WebHistoryService::QueryWebAndAppActivityCallback callback,
       WebHistoryService::Request* request,
       bool success);
-#endif // !defined(TOOLKIT_QT)
+#endif // !BUILDFLAG(IS_QTWEBENGINE)
 
  private:
   friend class WebHistoryServiceTest;

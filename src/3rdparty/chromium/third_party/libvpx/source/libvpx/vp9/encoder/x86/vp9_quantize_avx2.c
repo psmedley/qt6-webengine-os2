@@ -16,6 +16,8 @@
 #include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_dsp/x86/bitdepth_conversion_avx2.h"
 #include "vpx_dsp/x86/quantize_sse2.h"
+#include "vp9/common/vp9_scan.h"
+#include "vp9/encoder/vp9_block.h"
 
 // Zero fill 8 positions in the output buffer.
 static VPX_FORCE_INLINE void store_zero_tran_low(tran_low_t *a) {
@@ -29,11 +31,13 @@ static VPX_FORCE_INLINE void store_zero_tran_low(tran_low_t *a) {
 }
 
 static VPX_FORCE_INLINE void load_fp_values_avx2(
-    const int16_t *round_ptr, __m256i *round, const int16_t *quant_ptr,
-    __m256i *quant, const int16_t *dequant_ptr, __m256i *dequant) {
-  *round = _mm256_castsi128_si256(_mm_load_si128((const __m128i *)round_ptr));
+    const struct macroblock_plane *mb_plane, __m256i *round, __m256i *quant,
+    const int16_t *dequant_ptr, __m256i *dequant) {
+  *round = _mm256_castsi128_si256(
+      _mm_load_si128((const __m128i *)mb_plane->round_fp));
   *round = _mm256_permute4x64_epi64(*round, 0x54);
-  *quant = _mm256_castsi128_si256(_mm_load_si128((const __m128i *)quant_ptr));
+  *quant = _mm256_castsi128_si256(
+      _mm_load_si128((const __m128i *)mb_plane->quant_fp));
   *quant = _mm256_permute4x64_epi64(*quant, 0x54);
   *dequant =
       _mm256_castsi128_si256(_mm_load_si128((const __m128i *)dequant_ptr));
@@ -43,16 +47,13 @@ static VPX_FORCE_INLINE void load_fp_values_avx2(
 static VPX_FORCE_INLINE __m256i get_max_lane_eob(const int16_t *iscan,
                                                  __m256i v_eobmax,
                                                  __m256i v_mask) {
-  const __m256i v_iscan = _mm256_loadu_si256((const __m256i *)iscan);
 #if CONFIG_VP9_HIGHBITDEPTH
-  // typedef int32_t tran_low_t;
-  const __m256i v_iscan_perm = _mm256_permute4x64_epi64(v_iscan, 0xD8);
-  const __m256i v_iscan_plus1 = _mm256_sub_epi16(v_iscan_perm, v_mask);
+  const __m256i v_iscan = _mm256_permute4x64_epi64(
+      _mm256_loadu_si256((const __m256i *)iscan), 0xD8);
 #else
-  // typedef int16_t tran_low_t;
-  const __m256i v_iscan_plus1 = _mm256_sub_epi16(v_iscan, v_mask);
+  const __m256i v_iscan = _mm256_loadu_si256((const __m256i *)iscan);
 #endif
-  const __m256i v_nz_iscan = _mm256_and_si256(v_iscan_plus1, v_mask);
+  const __m256i v_nz_iscan = _mm256_and_si256(v_iscan, v_mask);
   return _mm256_max_epi16(v_eobmax, v_nz_iscan);
 }
 
@@ -101,13 +102,13 @@ static VPX_FORCE_INLINE void quantize_fp_16(
 }
 
 void vp9_quantize_fp_avx2(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
-                          const int16_t *round_ptr, const int16_t *quant_ptr,
+                          const struct macroblock_plane *const mb_plane,
                           tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr,
                           const int16_t *dequant_ptr, uint16_t *eob_ptr,
-                          const int16_t *scan, const int16_t *iscan) {
+                          const struct ScanOrder *const scan_order) {
   __m256i round, quant, dequant, thr;
   __m256i eob_max = _mm256_setzero_si256();
-  (void)scan;
+  const int16_t *iscan = scan_order->iscan;
 
   coeff_ptr += n_coeffs;
   iscan += n_coeffs;
@@ -116,8 +117,7 @@ void vp9_quantize_fp_avx2(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
   n_coeffs = -n_coeffs;
 
   // Setup global values
-  load_fp_values_avx2(round_ptr, &round, quant_ptr, &quant, dequant_ptr,
-                      &dequant);
+  load_fp_values_avx2(mb_plane, &round, &quant, dequant_ptr, &dequant);
   thr = _mm256_setzero_si256();
 
   quantize_fp_16(&round, &quant, &dequant, &thr, coeff_ptr + n_coeffs,
@@ -206,14 +206,13 @@ static VPX_FORCE_INLINE void quantize_fp_32x32_16(
 }
 
 void vp9_quantize_fp_32x32_avx2(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
-                                const int16_t *round_ptr,
-                                const int16_t *quant_ptr,
+                                const struct macroblock_plane *const mb_plane,
                                 tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr,
                                 const int16_t *dequant_ptr, uint16_t *eob_ptr,
-                                const int16_t *scan, const int16_t *iscan) {
+                                const struct ScanOrder *const scan_order) {
   __m256i round, quant, dequant, thr;
   __m256i eob_max = _mm256_setzero_si256();
-  (void)scan;
+  const int16_t *iscan = scan_order->iscan;
 
   coeff_ptr += n_coeffs;
   iscan += n_coeffs;
@@ -222,8 +221,7 @@ void vp9_quantize_fp_32x32_avx2(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
   n_coeffs = -n_coeffs;
 
   // Setup global values
-  load_fp_values_avx2(round_ptr, &round, quant_ptr, &quant, dequant_ptr,
-                      &dequant);
+  load_fp_values_avx2(mb_plane, &round, &quant, dequant_ptr, &dequant);
   thr = _mm256_srli_epi16(dequant, 2);
   quant = _mm256_slli_epi16(quant, 1);
   {
@@ -289,22 +287,22 @@ static VPX_FORCE_INLINE __m256i highbd_init_256(const int16_t *val_ptr) {
 }
 
 static VPX_FORCE_INLINE void highbd_load_fp_values(
-    const int16_t *round_ptr, __m256i *round, const int16_t *quant_ptr,
-    __m256i *quant, const int16_t *dequant_ptr, __m256i *dequant) {
-  *round = highbd_init_256(round_ptr);
-  *quant = highbd_init_256(quant_ptr);
+    const struct macroblock_plane *mb_plane, __m256i *round, __m256i *quant,
+    const int16_t *dequant_ptr, __m256i *dequant) {
+  *round = highbd_init_256(mb_plane->round_fp);
+  *quant = highbd_init_256(mb_plane->quant_fp);
   *dequant = highbd_init_256(dequant_ptr);
 }
 
 static VPX_FORCE_INLINE __m256i highbd_get_max_lane_eob(
     const int16_t *iscan_ptr, __m256i eobmax, __m256i nz_mask) {
-  const __m256i packed_nz_mask = _mm256_packs_epi32(nz_mask, nz_mask);
+  const __m256i packed_nz_mask =
+      _mm256_packs_epi32(nz_mask, _mm256_setzero_si256());
   const __m256i packed_nz_mask_perm =
       _mm256_permute4x64_epi64(packed_nz_mask, 0xD8);
   const __m256i iscan =
       _mm256_castsi128_si256(_mm_loadu_si128((const __m128i *)iscan_ptr));
-  const __m256i iscan_plus1 = _mm256_sub_epi16(iscan, packed_nz_mask_perm);
-  const __m256i nz_iscan = _mm256_and_si256(iscan_plus1, packed_nz_mask_perm);
+  const __m256i nz_iscan = _mm256_and_si256(iscan, packed_nz_mask_perm);
   return _mm256_max_epi16(eobmax, nz_iscan);
 }
 
@@ -328,16 +326,15 @@ static VPX_FORCE_INLINE void highbd_quantize_fp(
 }
 
 void vp9_highbd_quantize_fp_avx2(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
-                                 const int16_t *round_ptr,
-                                 const int16_t *quant_ptr,
+                                 const struct macroblock_plane *const mb_plane,
                                  tran_low_t *qcoeff_ptr,
                                  tran_low_t *dqcoeff_ptr,
                                  const int16_t *dequant_ptr, uint16_t *eob_ptr,
-                                 const int16_t *scan, const int16_t *iscan) {
+                                 const struct ScanOrder *const scan_order) {
   const int step = 8;
   __m256i round, quant, dequant;
   __m256i eob_max = _mm256_setzero_si256();
-  (void)scan;
+  const int16_t *iscan = scan_order->iscan;
 
   coeff_ptr += n_coeffs;
   iscan += n_coeffs;
@@ -346,8 +343,7 @@ void vp9_highbd_quantize_fp_avx2(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
   n_coeffs = -n_coeffs;
 
   // Setup global values
-  highbd_load_fp_values(round_ptr, &round, quant_ptr, &quant, dequant_ptr,
-                        &dequant);
+  highbd_load_fp_values(mb_plane, &round, &quant, dequant_ptr, &dequant);
 
   highbd_quantize_fp(&round, &quant, &dequant, coeff_ptr + n_coeffs,
                      iscan + n_coeffs, qcoeff_ptr + n_coeffs,
@@ -394,14 +390,14 @@ static VPX_FORCE_INLINE void highbd_quantize_fp_32x32(
 }
 
 void vp9_highbd_quantize_fp_32x32_avx2(
-    const tran_low_t *coeff_ptr, intptr_t n_coeffs, const int16_t *round_ptr,
-    const int16_t *quant_ptr, tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr,
-    const int16_t *dequant_ptr, uint16_t *eob_ptr, const int16_t *scan,
-    const int16_t *iscan) {
+    const tran_low_t *coeff_ptr, intptr_t n_coeffs,
+    const struct macroblock_plane *const mb_plane, tran_low_t *qcoeff_ptr,
+    tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, uint16_t *eob_ptr,
+    const struct ScanOrder *const scan_order) {
   const int step = 8;
   __m256i round, quant, dequant, thr;
   __m256i eob_max = _mm256_setzero_si256();
-  (void)scan;
+  const int16_t *iscan = scan_order->iscan;
 
   coeff_ptr += n_coeffs;
   iscan += n_coeffs;
@@ -410,8 +406,7 @@ void vp9_highbd_quantize_fp_32x32_avx2(
   n_coeffs = -n_coeffs;
 
   // Setup global values
-  highbd_load_fp_values(round_ptr, &round, quant_ptr, &quant, dequant_ptr,
-                        &dequant);
+  highbd_load_fp_values(mb_plane, &round, &quant, dequant_ptr, &dequant);
   thr = _mm256_srli_epi32(dequant, 2);
   // Subtracting 1 here eliminates a _mm256_cmpeq_epi32() instruction when
   // calculating the zbin mask.

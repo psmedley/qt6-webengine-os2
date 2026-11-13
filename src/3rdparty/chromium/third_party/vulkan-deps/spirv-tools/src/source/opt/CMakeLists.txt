@@ -15,6 +15,7 @@ set(SPIRV_TOOLS_OPT_SOURCES
   fix_func_call_arguments.h
   aggressive_dead_code_elim_pass.h
   amd_ext_to_khr.h
+  analyze_live_input_pass.h
   basic_block.h
   block_merge_pass.h
   block_merge_util.h
@@ -46,8 +47,9 @@ set(SPIRV_TOOLS_OPT_SOURCES
   eliminate_dead_constant_pass.h
   eliminate_dead_functions_pass.h
   eliminate_dead_functions_util.h
-  eliminate_dead_input_components_pass.h
+  eliminate_dead_io_components_pass.h
   eliminate_dead_members_pass.h
+  eliminate_dead_output_stores_pass.h
   empty_pass.h
   feature_manager.h
   fix_storage_class.h
@@ -69,11 +71,13 @@ set(SPIRV_TOOLS_OPT_SOURCES
   instruction_list.h
   instrument_pass.h
   interface_var_sroa.h
+  invocation_interlock_placement_pass.h
   interp_fixup_pass.h
   ir_builder.h
   ir_context.h
   ir_loader.h
   licm_pass.h
+  liveness.h
   local_access_chain_convert_pass.h
   local_redundancy_elimination.h
   local_single_block_elim_pass.h
@@ -118,7 +122,9 @@ set(SPIRV_TOOLS_OPT_SOURCES
   strip_debug_info_pass.h
   strip_nonsemantic_info_pass.h
   struct_cfg_analysis.h
+  switch_descriptorset_pass.h
   tree_iterator.h
+  trim_capabilities_pass.h
   type_manager.h
   types.h
   unify_const_pass.h
@@ -131,6 +137,7 @@ set(SPIRV_TOOLS_OPT_SOURCES
   fix_func_call_arguments.cpp
   aggressive_dead_code_elim_pass.cpp
   amd_ext_to_khr.cpp
+  analyze_live_input_pass.cpp
   basic_block.cpp
   block_merge_pass.cpp
   block_merge_util.cpp
@@ -162,8 +169,9 @@ set(SPIRV_TOOLS_OPT_SOURCES
   eliminate_dead_constant_pass.cpp
   eliminate_dead_functions_pass.cpp
   eliminate_dead_functions_util.cpp
-  eliminate_dead_input_components_pass.cpp
+  eliminate_dead_io_components_pass.cpp
   eliminate_dead_members_pass.cpp
+  eliminate_dead_output_stores_pass.cpp
   feature_manager.cpp
   fix_storage_class.cpp
   flatten_decoration_pass.cpp
@@ -184,10 +192,12 @@ set(SPIRV_TOOLS_OPT_SOURCES
   instruction_list.cpp
   instrument_pass.cpp
   interface_var_sroa.cpp
+  invocation_interlock_placement_pass.cpp
   interp_fixup_pass.cpp
   ir_context.cpp
   ir_loader.cpp
   licm_pass.cpp
+  liveness.cpp
   local_access_chain_convert_pass.cpp
   local_redundancy_elimination.cpp
   local_single_block_elim_pass.cpp
@@ -230,6 +240,8 @@ set(SPIRV_TOOLS_OPT_SOURCES
   strip_debug_info_pass.cpp
   strip_nonsemantic_info_pass.cpp
   struct_cfg_analysis.cpp
+  switch_descriptorset_pass.cpp
+  trim_capabilities_pass.cpp
   type_manager.cpp
   types.cpp
   unify_const_pass.cpp
@@ -265,10 +277,7 @@ set_property(TARGET SPIRV-Tools-opt PROPERTY FOLDER "SPIRV-Tools libraries")
 spvtools_check_symbol_exports(SPIRV-Tools-opt)
 
 if(ENABLE_SPIRV_TOOLS_INSTALL)
-  install(TARGETS SPIRV-Tools-opt EXPORT SPIRV-Tools-optTargets
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(TARGETS SPIRV-Tools-opt EXPORT SPIRV-Tools-optTargets)
   export(EXPORT SPIRV-Tools-optTargets FILE SPIRV-Tools-optTargets.cmake)
 
   spvtools_config_package_dir(SPIRV-Tools-opt PACKAGE_DIR)

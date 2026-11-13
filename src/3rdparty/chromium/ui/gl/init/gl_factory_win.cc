@@ -26,8 +26,8 @@ namespace init {
 
 std::vector<GLImplementationParts> GetAllowedGLImplementations() {
   std::vector<GLImplementationParts> impls;
-  impls.emplace_back(GLImplementationParts(kGLImplementationDesktopGL));
-  impls.emplace_back(GLImplementationParts(kGLImplementationEGLANGLE));
+  impls.emplace_back(kGLImplementationDesktopGL);
+  impls.emplace_back(kGLImplementationEGLANGLE);
   return impls;
 }
 
@@ -42,7 +42,8 @@ bool GetGLWindowSystemBindingInfo(const GLVersionInfo& gl_info,
       return false;
   }
 }
-#if !defined(TOOLKIT_QT)
+
+#if !BUILDFLAG(IS_QTWEBENGINE)
 scoped_refptr<GLContext> CreateGLContext(GLShareGroup* share_group,
                                          GLSurface* compatible_surface,
                                          const GLContextAttribs& attribs) {
@@ -62,8 +63,10 @@ scoped_refptr<GLContext> CreateGLContext(GLShareGroup* share_group,
       stub_context->SetUseStubApi(true);
       return stub_context;
     }
+    case kGLImplementationDisabled:
+      return nullptr;
     default:
-      NOTREACHED();
+      DUMP_WILL_BE_NOTREACHED_NORETURN();
       return nullptr;
   }
 }
@@ -83,42 +86,37 @@ scoped_refptr<GLSurface> CreateViewGLSurface(GLDisplay* display,
           base::MakeRefCounted<NativeViewGLSurfaceWGL>(window));
     case kGLImplementationMockGL:
     case kGLImplementationStubGL:
-      return new GLSurfaceStub;
+      return InitializeGLSurface(new GLSurfaceStub());
     default:
       NOTREACHED();
       return nullptr;
   }
 }
 
-scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
-    GLDisplay* display,
-    const gfx::Size& size,
-    GLSurfaceFormat format) {
+scoped_refptr<GLSurface> CreateOffscreenGLSurface(GLDisplay* display,
+                                                  const gfx::Size& size) {
   TRACE_EVENT0("gpu", "gl::init::CreateOffscreenGLSurface");
   switch (GetGLImplementation()) {
     case kGLImplementationEGLANGLE: {
       GLDisplayEGL* display_egl = display->GetAs<gl::GLDisplayEGL>();
       if (display_egl->IsEGLSurfacelessContextSupported() &&
           size.width() == 0 && size.height() == 0) {
-        return InitializeGLSurfaceWithFormat(
-            new SurfacelessEGL(display_egl, size), format);
+        return InitializeGLSurface(new SurfacelessEGL(display_egl, size));
       } else {
-        return InitializeGLSurfaceWithFormat(
-            new PbufferGLSurfaceEGL(display_egl, size), format);
+        return InitializeGLSurface(new PbufferGLSurfaceEGL(display_egl, size));
       }
     }
     case kGLImplementationDesktopGL:
-      return InitializeGLSurfaceWithFormat(
-          new PbufferGLSurfaceWGL(size), format);
+      return InitializeGLSurfaceWithFormat(new PbufferGLSurfaceWGL(size));
     case kGLImplementationMockGL:
     case kGLImplementationStubGL:
-      return new GLSurfaceStub;
+      return InitializeGLSurface(new GLSurfaceStub());
     default:
       NOTREACHED();
       return nullptr;
   }
 }
-#endif
+#endif  // !BUILDFLAG(IS_QTWEBENGINE)
 
 void SetDisabledExtensionsPlatform(const std::string& disabled_extensions) {
   GLImplementation implementation = GetGLImplementation();

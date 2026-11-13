@@ -41,7 +41,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   user-select: none;
-  color: var(--color-text-primary);
+  color: var(--sys-color-on-surface);
   overflow: hidden;
 }
 
@@ -62,6 +62,7 @@
   margin: 0;
   overflow: hidden;
   max-width: 500px;
+  padding: 3px;
 }
 
 .network-discovery-footer > * {

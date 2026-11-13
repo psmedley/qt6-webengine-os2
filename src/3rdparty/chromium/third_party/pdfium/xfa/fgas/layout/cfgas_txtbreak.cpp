@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -260,7 +260,6 @@ CFGAS_Char::BreakType CFGAS_TxtBreak::AppendChar(wchar_t wch) {
       case FX_CHARTYPE::kSpace:
       case FX_CHARTYPE::kNumeric:
       case FX_CHARTYPE::kNormal:
-      default:
         dwRet2 = AppendChar_Others(pCurChar);
         break;
     }
@@ -280,7 +279,7 @@ void CFGAS_TxtBreak::EndBreakSplitLine(CFGAS_BreakLine* pNextLine,
       case FX_CHARTYPE::kSpace:
         break;
       default:
-        SplitTextLine(m_pCurLine.Get(), pNextLine, bAllChars);
+        SplitTextLine(m_pCurLine, pNextLine, bAllChars);
         bDone = true;
         break;
     }

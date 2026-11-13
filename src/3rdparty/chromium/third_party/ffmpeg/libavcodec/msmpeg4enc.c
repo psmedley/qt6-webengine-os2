@@ -41,6 +41,7 @@
 #include "mpeg4video.h"
 #include "msmpeg4.h"
 #include "msmpeg4data.h"
+#include "msmpeg4_vc1_data.h"
 #include "msmpeg4enc.h"
 #include "put_bits.h"
 #include "rl.h"
@@ -215,7 +216,7 @@ static void find_best_tables(MSMPEG4EncContext *ms)
 }
 
 /* write MSMPEG4 compatible frame header */
-void ff_msmpeg4_encode_picture_header(MpegEncContext * s, int picture_number)
+void ff_msmpeg4_encode_picture_header(MpegEncContext * s)
 {
     MSMPEG4EncContext *const ms = (MSMPEG4EncContext*)s;
 
@@ -279,15 +280,28 @@ void ff_msmpeg4_encode_picture_header(MpegEncContext * s, int picture_number)
 
 void ff_msmpeg4_encode_ext_header(MpegEncContext * s)
 {
-        unsigned fps = s->avctx->time_base.den / s->avctx->time_base.num / FFMAX(s->avctx->ticks_per_frame, 1);
-        put_bits(&s->pb, 5, FFMIN(fps, 31)); //yes 29.97 -> 29
+    unsigned fps;
 
-        put_bits(&s->pb, 11, FFMIN(s->bit_rate/1024, 2047));
+    if (s->avctx->framerate.num > 0 && s->avctx->framerate.den > 0)
+        fps = s->avctx->framerate.num / s->avctx->framerate.den;
+    else {
+FF_DISABLE_DEPRECATION_WARNINGS
+        fps = s->avctx->time_base.den / s->avctx->time_base.num
+#if FF_API_TICKS_PER_FRAME
+            / FFMAX(s->avctx->ticks_per_frame, 1)
+#endif
+            ;
+FF_ENABLE_DEPRECATION_WARNINGS
+    }
 
-        if(s->msmpeg4_version>=3)
-            put_bits(&s->pb, 1, s->flipflop_rounding);
-        else
-            av_assert0(s->flipflop_rounding==0);
+    put_bits(&s->pb, 5, FFMIN(fps, 31)); //yes 29.97 -> 29
+
+    put_bits(&s->pb, 11, FFMIN(s->bit_rate / 1024, 2047));
+
+    if (s->msmpeg4_version >= 3)
+        put_bits(&s->pb, 1, s->flipflop_rounding);
+    else
+        av_assert0(!s->flipflop_rounding);
 }
 
 void ff_msmpeg4_encode_motion(MpegEncContext * s,
@@ -530,19 +544,8 @@ static void msmpeg4_encode_dc(MpegEncContext * s, int level, int n, int *dir_ptr
         if (code > DC_MAX)
             code = DC_MAX;
 
-        if (s->dc_table_index == 0) {
-            if (n < 4) {
-                put_bits(&s->pb, ff_table0_dc_lum[code][1], ff_table0_dc_lum[code][0]);
-            } else {
-                put_bits(&s->pb, ff_table0_dc_chroma[code][1], ff_table0_dc_chroma[code][0]);
-            }
-        } else {
-            if (n < 4) {
-                put_bits(&s->pb, ff_table1_dc_lum[code][1], ff_table1_dc_lum[code][0]);
-            } else {
-                put_bits(&s->pb, ff_table1_dc_chroma[code][1], ff_table1_dc_chroma[code][0]);
-            }
-        }
+        put_bits(&s->pb, ff_msmp4_dc_tables[s->dc_table_index][n >= 4][code][1],
+                         ff_msmp4_dc_tables[s->dc_table_index][n >= 4][code][0]);
 
         if (code == DC_MAX)
             put_bits(&s->pb, 8, level);
@@ -683,6 +686,7 @@ const FFCodec ff_msmpeg4v2_encoder = {
     .p.id           = AV_CODEC_ID_MSMPEG4V2,
     .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
     .p.priv_class   = &ff_mpv_enc_class,
+    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(MSMPEG4EncContext),
     .init           = ff_mpv_encode_init,
@@ -697,6 +701,7 @@ const FFCodec ff_msmpeg4v3_encoder = {
     .p.id           = AV_CODEC_ID_MSMPEG4V3,
     .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
     .p.priv_class   = &ff_mpv_enc_class,
+    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(MSMPEG4EncContext),
     .init           = ff_mpv_encode_init,
@@ -711,6 +716,7 @@ const FFCodec ff_wmv1_encoder = {
     .p.id           = AV_CODEC_ID_WMV1,
     .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
     .p.priv_class   = &ff_mpv_enc_class,
+    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(MSMPEG4EncContext),
     .init           = ff_mpv_encode_init,

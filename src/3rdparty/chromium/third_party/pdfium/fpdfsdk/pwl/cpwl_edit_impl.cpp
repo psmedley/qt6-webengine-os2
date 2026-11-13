@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -142,7 +142,7 @@ void CPWL_EditImpl::RefreshState::BeginRefresh() {
 
 void CPWL_EditImpl::RefreshState::Push(const CPVT_WordRange& linerange,
                                        const CFX_FloatRect& rect) {
-  m_NewLineRects.emplace_back(LineRect(linerange, rect));
+  m_NewLineRects.emplace_back(linerange, rect);
 }
 
 void CPWL_EditImpl::RefreshState::NoAnalyse() {
@@ -167,7 +167,7 @@ void CPWL_EditImpl::RefreshState::Add(const CFX_FloatRect& new_rect) {
     if (rect.Contains(new_rect))
       return;
   }
-  m_RefreshRects.emplace_back(CFX_FloatRect(new_rect));
+  m_RefreshRects.push_back(new_rect);
 }
 
 CPWL_EditImpl::UndoStack::UndoStack() = default;
@@ -181,19 +181,24 @@ bool CPWL_EditImpl::UndoStack::CanUndo() const {
 void CPWL_EditImpl::UndoStack::Undo() {
   DCHECK(!m_bWorking);
   m_bWorking = true;
-  int nUndoRemain = 1;
-  while (CanUndo() && nUndoRemain > 0) {
-    nUndoRemain += m_UndoItemStack[m_nCurUndoPos - 1]->Undo();
+  int undo_remaining = 1;
+  while (CanUndo() && undo_remaining > 0) {
+    undo_remaining += m_UndoItemStack[m_nCurUndoPos - 1]->Undo();
     m_nCurUndoPos--;
-    nUndoRemain--;
+    undo_remaining--;
   }
-  DCHECK_EQ(nUndoRemain, 0);
+  DCHECK_EQ(undo_remaining, 0);
   DCHECK(m_bWorking);
   m_bWorking = false;
 }
 
 bool CPWL_EditImpl::UndoStack::CanRedo() const {
   return m_nCurUndoPos < m_UndoItemStack.size();
+}
+
+CPWL_EditImpl::UndoItemIface* CPWL_EditImpl::UndoStack::GetLastAddItem() {
+  CHECK(!m_UndoItemStack.empty());
+  return m_UndoItemStack.back().get();
 }
 
 void CPWL_EditImpl::UndoStack::Redo() {
@@ -349,25 +354,32 @@ CPWL_EditImpl::UndoReplaceSelection::UndoReplaceSelection(CPWL_EditImpl* pEdit,
                                                           bool bIsEnd)
     : m_pEdit(pEdit), m_bEnd(bIsEnd) {
   DCHECK(m_pEdit);
+  // Redo ClearSelection, InsertText and ReplaceSelection's end marker
+  // Undo InsertText, ClearSelection and ReplaceSelection's beginning
+  // marker
+  set_undo_remaining(3);
 }
 
 CPWL_EditImpl::UndoReplaceSelection::~UndoReplaceSelection() = default;
 
 int CPWL_EditImpl::UndoReplaceSelection::Redo() {
   m_pEdit->SelectNone();
-  if (IsEnd())
+  if (IsEnd()) {
     return 0;
-  // Redo ClearSelection, InsertText and ReplaceSelection's end marker
-  return 3;
+  }
+  // Redo ClearSelection, InsertText and ReplaceSelection's end
+  // marker. (ClearSelection may not exist)
+  return undo_remaining();
 }
 
 int CPWL_EditImpl::UndoReplaceSelection::Undo() {
   m_pEdit->SelectNone();
-  if (!IsEnd())
+  if (!IsEnd()) {
     return 0;
+  }
   // Undo InsertText, ClearSelection and ReplaceSelection's beginning
-  // marker
-  return 3;
+  // marker. (ClearSelection may not exist)
+  return undo_remaining();
 }
 
 class CPWL_EditImpl::UndoBackspace final : public CPWL_EditImpl::UndoItemIface {
@@ -1232,9 +1244,12 @@ void CPWL_EditImpl::Refresh() {
       if (!m_bNotifyFlag) {
         AutoRestorer<bool> restorer(&m_bNotifyFlag);
         m_bNotifyFlag = true;
-        if (std::vector<CFX_FloatRect>* pRects = m_Refresh.GetRefreshRects()) {
-          for (auto& rect : *pRects)
-            m_pNotify->InvalidateRect(&rect);
+        std::vector<CFX_FloatRect>* pRects = m_Refresh.GetRefreshRects();
+        for (auto& rect : *pRects) {
+          if (!m_pNotify->InvalidateRect(&rect)) {
+            m_pNotify = nullptr;  // Gone, dangling even.
+            break;
+          }
         }
       }
     }
@@ -1302,7 +1317,9 @@ void CPWL_EditImpl::RefreshWordRange(const CPVT_WordRange& wr) {
           AutoRestorer<bool> restorer(&m_bNotifyFlag);
           m_bNotifyFlag = true;
           CFX_FloatRect rcRefresh = VTToEdit(rcWord);
-          m_pNotify->InvalidateRect(&rcRefresh);
+          if (!m_pNotify->InvalidateRect(&rcRefresh)) {
+            m_pNotify = nullptr;  // Gone, dangling even.
+          }
         }
       }
     } else {
@@ -1316,7 +1333,9 @@ void CPWL_EditImpl::RefreshWordRange(const CPVT_WordRange& wr) {
           AutoRestorer<bool> restorer(&m_bNotifyFlag);
           m_bNotifyFlag = true;
           CFX_FloatRect rcRefresh = VTToEdit(rcLine);
-          m_pNotify->InvalidateRect(&rcRefresh);
+          if (!m_pNotify->InvalidateRect(&rcRefresh)) {
+            m_pNotify = nullptr;  // Gone, dangling even.
+          }
         }
       }
 
@@ -1761,11 +1780,39 @@ void CPWL_EditImpl::PaintInsertText(const CPVT_WordPlace& wpOld,
   }
 }
 
+void CPWL_EditImpl::ReplaceAndKeepSelection(const WideString& text) {
+  AddEditUndoItem(std::make_unique<UndoReplaceSelection>(this, false));
+  bool is_insert_undo_clear = ClearSelection();
+  // It is necessary to determine whether the value of `undo_remaining_` is 2 or
+  // 3 based on ClearSelection().
+  if (!is_insert_undo_clear) {
+    m_Undo.GetLastAddItem()->set_undo_remaining(2);
+  }
+  // Select the inserted text.
+  CPVT_WordPlace caret_before_insert = m_wpCaret;
+  InsertText(text, FX_Charset::kDefault);
+  CPVT_WordPlace caret_after_insert = m_wpCaret;
+  m_SelState.Set(caret_before_insert, caret_after_insert);
+
+  AddEditUndoItem(std::make_unique<UndoReplaceSelection>(this, true));
+  if (!is_insert_undo_clear) {
+    m_Undo.GetLastAddItem()->set_undo_remaining(2);
+  }
+}
+
 void CPWL_EditImpl::ReplaceSelection(const WideString& text) {
   AddEditUndoItem(std::make_unique<UndoReplaceSelection>(this, false));
-  ClearSelection();
+  bool is_insert_undo_clear = ClearSelection();
+  // It is necessary to determine whether the value of `undo_remaining_` is 2 or
+  // 3 based on ClearSelection().
+  if (!is_insert_undo_clear) {
+    m_Undo.GetLastAddItem()->set_undo_remaining(2);
+  }
   InsertText(text, FX_Charset::kDefault);
   AddEditUndoItem(std::make_unique<UndoReplaceSelection>(this, true));
+  if (!is_insert_undo_clear) {
+    m_Undo.GetLastAddItem()->set_undo_remaining(2);
+  }
 }
 
 bool CPWL_EditImpl::Redo() {

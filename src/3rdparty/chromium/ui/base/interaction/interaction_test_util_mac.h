@@ -21,9 +21,8 @@ class InteractionTestUtilSimulatorMac : public InteractionTestUtil::Simulator {
   ~InteractionTestUtilSimulatorMac() override;
 
   // InteractionTestUtil::Simulator:
-  bool PressButton(ui::TrackedElement* element, InputType input_type) override;
-  bool SelectMenuItem(ui::TrackedElement* element,
-                      InputType input_type) override;
+  ActionResult SelectMenuItem(ui::TrackedElement* element,
+                              InputType input_type) override;
 };
 
 }  // namespace ui::test

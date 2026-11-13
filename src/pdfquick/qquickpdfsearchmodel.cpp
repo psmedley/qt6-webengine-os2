@@ -10,7 +10,7 @@ Q_LOGGING_CATEGORY(qLcSearch, "qt.pdf.search")
 
 /*!
     \qmltype PdfSearchModel
-//!    \instantiates QQuickPdfSearchModel
+//!    \nativetype QQuickPdfSearchModel
     \inqmlmodule QtQuick.Pdf
     \ingroup pdf
     \brief A representation of text search results within a PDF Document.
@@ -199,7 +199,7 @@ QList<QPolygonF> QQuickPdfSearchModel::boundingPolygonsOnPage(int page)
 */
 void QQuickPdfSearchModel::setCurrentPage(int currentPage)
 {
-    if (m_currentPage == currentPage)
+    if (m_currentPage == currentPage || !document())
         return;
 
     const auto pageCount = document()->document()->pageCount();
@@ -268,6 +268,13 @@ QPdfLink QQuickPdfSearchModel::currentResultLink() const
     \qmlproperty string PdfSearchModel::searchString
 
     The string to search for.
+*/
+
+/*!
+    \since 6.8
+    \qmlproperty int PdfSearchModel::count
+
+    The number of search results found.
 */
 
 QT_END_NAMESPACE

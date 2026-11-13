@@ -30,7 +30,6 @@ var allSkiaFlags = []string{
 	"--ck_enable_embedded_font",
 	"--ck_enable_fonts",
 	"--ck_enable_matrix_js",
-	"--ck_enable_particles",
 	"--ck_enable_runtime_effect",
 	"--ck_enable_skottie",
 	"--ck_enable_skp_serialization",
@@ -38,12 +37,10 @@ var allSkiaFlags = []string{
 	"--enable_gpu_test_utils",
 	"--enable_pdf_backend",
 	"--enable_sksl_tracing",
-	"--enable_sksl",
 	// "--enable_skslc", // external dependency on spirv-tools/libspirv.hpp
 	"--enable_svg_canvas",
 	"--enable_tracing",
 	"--enable_vma",
-	// "--fontmgr_factory=custom_embedded_fontmgr_factory", // external dependency on ft2build.h
 	"--gpu_backend=gl_backend",
 	// "--include_decoder=*",  // All decoders have external dependencies.
 	// "--include_encoder",    // All encoders have external dependencies.
@@ -110,6 +107,9 @@ func (c *BazelQueryCommand) Read() ([]byte, error) {
 	_ = os.Chdir(pwd)
 	data, err := cmd.Output()
 	if err != nil {
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			fmt.Printf("Stderr: %s\n", exiterr.Stderr)
+		}
 		return nil, skerr.Wrapf(err, `error running %v`, cmd)
 	}
 	return data, nil

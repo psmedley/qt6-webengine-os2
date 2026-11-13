@@ -7,22 +7,26 @@
 
 #include "include/core/SkSpan.h"
 #include "include/core/SkTypes.h"
-#include "include/private/SkSLDefines.h"
-#include "include/private/SkSLProgramElement.h"
-#include "include/private/SkSLStatement.h"
-#include "include/private/SkTArray.h"
+#include "include/private/base/SkTArray.h"
 #include "src/sksl/SkSLCompiler.h"
+#include "src/sksl/SkSLDefines.h"
 #include "src/sksl/analysis/SkSLProgramUsage.h"
 #include "src/sksl/ir/SkSLFunctionDefinition.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 #include "src/sksl/ir/SkSLIfStatement.h"
 #include "src/sksl/ir/SkSLNop.h"
 #include "src/sksl/ir/SkSLProgram.h"
+#include "src/sksl/ir/SkSLProgramElement.h"
+#include "src/sksl/ir/SkSLStatement.h"
 #include "src/sksl/ir/SkSLSwitchCase.h"
 #include "src/sksl/ir/SkSLSwitchStatement.h"
 #include "src/sksl/transform/SkSLProgramWriter.h"
 #include "src/sksl/transform/SkSLTransform.h"
 
 #include <memory>
+#include <vector>
+
+using namespace skia_private;
 
 namespace SkSL {
 
@@ -187,8 +191,8 @@ static void eliminate_unreachable_code(SkSpan<std::unique_ptr<ProgramElement>> e
         }
 
         ProgramUsage* fUsage;
-        SkSTArray<32, bool> fFoundFunctionExit;
-        SkSTArray<32, bool> fFoundBlockExit;
+        STArray<32, bool> fFoundFunctionExit;
+        STArray<32, bool> fFoundBlockExit;
 
         using INHERITED = ProgramWriter;
     };
@@ -201,7 +205,7 @@ static void eliminate_unreachable_code(SkSpan<std::unique_ptr<ProgramElement>> e
     }
 }
 
-void Transform::EliminateUnreachableCode(LoadedModule& module, ProgramUsage* usage) {
+void Transform::EliminateUnreachableCode(Module& module, ProgramUsage* usage) {
     return eliminate_unreachable_code(SkSpan(module.fElements), usage);
 }
 

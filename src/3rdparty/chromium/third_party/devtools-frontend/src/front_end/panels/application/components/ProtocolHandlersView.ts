@@ -20,45 +20,45 @@ import protocolHandlersViewStyles from './protocolHandlersView.css.js';
 const PROTOCOL_DOCUMENT_URL = 'https://web.dev/url-protocol-handler/';
 const UIStrings = {
   /**
- *@description Status message for when protocol handlers are detected in the manifest
- *@example {protocolhandler/manifest.json} PH1
- */
+   *@description Status message for when protocol handlers are detected in the manifest
+   *@example {protocolhandler/manifest.json} PH1
+   */
   protocolDetected:
       'Found valid protocol handler registration in the {PH1}. With the app installed, test the registered protocols.',
   /**
- *@description Status message for when protocol handlers are not detected in the manifest
- *@example {protocolhandler/manifest.json} PH1
- */
+   *@description Status message for when protocol handlers are not detected in the manifest
+   *@example {protocolhandler/manifest.json} PH1
+   */
   protocolNotDetected:
       'Define protocol handlers in the {PH1} to register your app as a handler for custom protocols when your app is installed.',
   /**
- *@description Text wrapping a link pointing to more information on handling protocol handlers
- *@example {https://example.com/} PH1
- */
+   *@description Text wrapping a link pointing to more information on handling protocol handlers
+   *@example {https://example.com/} PH1
+   */
   needHelpReadOur: 'Need help? Read {PH1}.',
   /**
- *@description Link text for more information on URL protocol handler registrations for PWAs
- */
+   *@description Link text for more information on URL protocol handler registrations for PWAs
+   */
   protocolHandlerRegistrations: 'URL protocol handler registration for PWAs',
   /**
- *@description In text hyperlink to the PWA manifest
- */
+   *@description In text hyperlink to the PWA manifest
+   */
   manifest: 'manifest',
   /**
- *@description Text for test protocol button
- */
+   *@description Text for test protocol button
+   */
   testProtocol: 'Test protocol',
   /**
-  * @description Aria text for screen reader to announce they can select a protocol handler in the dropdown
-  */
+   * @description Aria text for screen reader to announce they can select a protocol handler in the dropdown
+   */
   dropdownLabel: 'Select protocol handler',
   /**
-  * @description Aria text for screen reader to announce they can enter query parameters or endpoints into the textbox
-  */
+   * @description Aria text for screen reader to announce they can enter query parameters or endpoints into the textbox
+   */
   textboxLabel: 'Query parameter or endpoint for protocol handler',
   /**
-  * @description Placeholder for textbox input field, rest of the URL of protocol to test.
-  */
+   * @description Placeholder for textbox input field, rest of the URL of protocol to test.
+   */
   textboxPlaceholder: 'Enter URL',
 };
 
@@ -107,22 +107,21 @@ export class ProtocolHandlersView extends HTMLElement {
   }
 
   #renderStatusMessage(): LitHtml.TemplateResult {
-    const manifestInTextLink = UI.XLink.XLink.create(this.#manifestLink, i18nString(UIStrings.manifest));
+    const manifestInTextLink =
+        UI.XLink.XLink.create(this.#manifestLink, i18nString(UIStrings.manifest), undefined, undefined, 'manifest');
     const statusString = this.#protocolHandlers.length > 0 ? UIStrings.protocolDetected : UIStrings.protocolNotDetected;
-    const iconData: IconButton.Icon.IconData = {
-      iconName: this.#protocolHandlers.length > 0 ? 'ic_checkmark_16x16' : 'ic_info_black_18dp',
-      color: this.#protocolHandlers.length > 0 ? 'var( --color-ic-file-image)' : 'var(--color-link)',
-      width: '16px',
-    };
+    // clang-format off
     return LitHtml.html`
     <div class="protocol-handlers-row status">
-            <${IconButton.Icon.Icon.litTagName} class="inline-icon" .data=${iconData as IconButton.Icon.IconData}>
+            <${IconButton.Icon.Icon.litTagName} class="inline-icon"
+                                                name=${this.#protocolHandlers.length > 0 ? 'check-circle' : 'info'}>
             </${IconButton.Icon.Icon.litTagName}>
             ${i18n.i18n.getFormatLocalizedString(str_, statusString, {
       PH1: manifestInTextLink,
     })}
     </div>
     `;
+    // clang-format on
   }
 
   #renderProtocolTest(): LitHtml.LitTemplate {
@@ -172,8 +171,8 @@ export class ProtocolHandlersView extends HTMLElement {
   }
 
   #render(): void {
-    const protocolDocLink =
-        UI.XLink.XLink.create(PROTOCOL_DOCUMENT_URL, i18nString(UIStrings.protocolHandlerRegistrations));
+    const protocolDocLink = UI.XLink.XLink.create(
+        PROTOCOL_DOCUMENT_URL, i18nString(UIStrings.protocolHandlerRegistrations), undefined, undefined, 'learn-more');
     // clang-format off
     LitHtml.render(LitHtml.html`
       ${this.#renderStatusMessage()}

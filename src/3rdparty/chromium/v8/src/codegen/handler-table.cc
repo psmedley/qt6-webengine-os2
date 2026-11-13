@@ -19,15 +19,9 @@
 namespace v8 {
 namespace internal {
 
-HandlerTable::HandlerTable(Code code)
-    : HandlerTable(code.HandlerTableAddress(), code.handler_table_size(),
+HandlerTable::HandlerTable(Tagged<Code> code)
+    : HandlerTable(code->handler_table_address(), code->handler_table_size(),
                    kReturnAddressBasedEncoding) {}
-
-#ifdef V8_EXTERNAL_CODE_SPACE
-HandlerTable::HandlerTable(CodeDataContainer code)
-    : HandlerTable(code.HandlerTableAddress(), code.handler_table_size(),
-                   kReturnAddressBasedEncoding) {}
-#endif  // V8_EXTERNAL_CODE_SPACE
 
 #if V8_ENABLE_WEBASSEMBLY
 HandlerTable::HandlerTable(const wasm::WasmCode* code)
@@ -35,12 +29,12 @@ HandlerTable::HandlerTable(const wasm::WasmCode* code)
                    kReturnAddressBasedEncoding) {}
 #endif  // V8_ENABLE_WEBASSEMBLY
 
-HandlerTable::HandlerTable(BytecodeArray bytecode_array)
-    : HandlerTable(bytecode_array.handler_table()) {}
+HandlerTable::HandlerTable(Tagged<BytecodeArray> bytecode_array)
+    : HandlerTable(bytecode_array->handler_table()) {}
 
-HandlerTable::HandlerTable(ByteArray byte_array)
-    : HandlerTable(reinterpret_cast<Address>(byte_array.GetDataStartAddress()),
-                   byte_array.length(), kRangeBasedEncoding) {}
+HandlerTable::HandlerTable(Tagged<TrustedByteArray> byte_array)
+    : HandlerTable(reinterpret_cast<Address>(byte_array->begin()),
+                   byte_array->length(), kRangeBasedEncoding) {}
 
 HandlerTable::HandlerTable(Address handler_table, int handler_table_size,
                            EncodingMode encoding_mode)
@@ -135,6 +129,7 @@ void HandlerTable::SetRangeEnd(int index, int value) {
 
 void HandlerTable::SetRangeHandler(int index, int handler_offset,
                                    CatchPrediction prediction) {
+  CHECK(HandlerOffsetField::is_valid(handler_offset));  
   int value = HandlerOffsetField::encode(handler_offset) |
               HandlerPredictionField::encode(prediction);
   int offset = index * kRangeEntrySize + kRangeHandlerIndex;
@@ -153,7 +148,7 @@ int HandlerTable::LengthForRange(int entries) {
 
 // static
 int HandlerTable::EmitReturnTableStart(Assembler* masm) {
-  masm->DataAlign(Code::kMetadataAlignment);
+  masm->DataAlign(InstructionStream::kMetadataAlignment);
   masm->RecordComment(";;; Exception handler table.");
   int table_start = masm->pc_offset();
   return table_start;

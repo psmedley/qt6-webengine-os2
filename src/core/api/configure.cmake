@@ -7,17 +7,17 @@ if(NOT QT_CONFIGURE_RUNNING)
     find_package(GLIB2 COMPONENTS GIO)
     find_package(GSSAPI)
     find_package(PkgConfig)
-    if(PkgConfig_FOUND)
+    if(PkgConfig_FOUND AND QT_FEATURE_pkg_config)
         pkg_check_modules(ALSA alsa IMPORTED_TARGET)
         pkg_check_modules(PULSEAUDIO libpulse>=0.9.10 libpulse-mainloop-glib)
         pkg_check_modules(XDAMAGE xdamage)
         pkg_check_modules(POPPLER_CPP poppler-cpp IMPORTED_TARGET)
+        pkg_check_modules(GBM gbm)
+        pkg_check_modules(LIBVA libva>=1.14)
         if(NOT GIO_FOUND)
             pkg_check_modules(GIO gio-2.0)
         endif()
     endif()
-    find_package(Cups)
-
     find_package(Qt6 ${PROJECT_VERSION} CONFIG QUIET
         OPTIONAL_COMPONENTS Positioning WebChannel PrintSupport)
 endif()
@@ -62,6 +62,10 @@ qt_feature("webengine-system-alsa" PRIVATE
     LABEL "Use ALSA"
     CONDITION UNIX AND TEST_alsa
 )
+qt_feature("webengine-v8-context-snapshot" PRIVATE
+    LABEL "Use v8 context snapshot"
+    AUTODETECT NOT CMAKE_CROSSCOMPILING
+)
 qt_feature("webengine-geolocation" PUBLIC
     LABEL "Geolocation"
     CONDITION TARGET Qt::Positioning
@@ -71,12 +75,17 @@ qt_feature("webengine-system-pulseaudio" PRIVATE
     AUTODETECT UNIX
     CONDITION PULSEAUDIO_FOUND
 )
+qt_feature("webengine-system-gbm" PRIVATE
+    SECTION "WebEngine"
+    LABEL "Use system GBM"
+    AUTODETECT UNIX
+    CONDITION GBM_FOUND
+)
 qt_feature("webengine-printing-and-pdf" PRIVATE
     LABEL "Printing and PDF"
     PURPOSE "Provides printing and output to PDF."
     AUTODETECT NOT QT_FEATURE_webengine_embedded_build
-    CONDITION TARGET Qt::PrintSupport AND QT_FEATURE_printer AND
-    (CUPS_FOUND OR WIN32)
+    CONDITION TARGET Qt::PrintSupport AND QT_FEATURE_printer
 )
 qt_feature("webengine-pepper-plugins" PRIVATE
     LABEL "Pepper Plugins"
@@ -151,10 +160,28 @@ qt_feature("webengine-vulkan" PRIVATE
     LABEL "Vulkan support"
     PURPOSE "Enables support for Vulkan rendering"
     CONDITION QT_FEATURE_vulkan
+    DISABLE MACOS
+)
+qt_feature("webengine-vaapi" PRIVATE
+    SECTION "WebEngine"
+    LABEL "VA-API support"
+    PURPOSE "Enables support for VA-API hardware acceleration"
+    AUTODETECT GBM_FOUND AND LIBVA_FOUND AND QT_FEATURE_vulkan
+    # hardware accelerated encoding requires bundled libvpx
+    CONDITION LINUX AND NOT QT_FEATURE_webengine_system_libvpx
+)
+list(LENGTH CMAKE_OSX_ARCHITECTURES osx_arch_count)
+qt_feature("webenginedriver" PUBLIC
+    SECTION "WebEngine"
+    LABEL "Build WebEngineDriver"
+    PURPOSE "Enables WebEngineDriver build"
+    CONDITION NOT CMAKE_CROSSCOMPILING
+              AND NOT (CMAKE_OSX_ARCHITECTURES AND osx_arch_count GREATER 1)
+    DISABLE CMAKE_BUILD_TYPE STREQUAL Debug
 )
 # internal testing feature
 qt_feature("webengine-system-poppler" PRIVATE
-    LABEL "popler"
+    LABEL "poppler"
     CONDITION UNIX AND TEST_poppler
 )
 qt_configure_add_summary_section(NAME "Qt WebEngineCore")
@@ -184,13 +211,19 @@ qt_configure_add_summary_entry(
     CONDITION QT_FEATURE_vulkan
 )
 qt_configure_add_summary_entry(
+    ARGS "webengine-vaapi"
+    CONDITION LINUX
+)
+qt_configure_add_summary_entry(
     ARGS "webengine-system-alsa"
-    CONDITION UNIX
+    CONDITION LINUX
 )
 qt_configure_add_summary_entry(
     ARGS "webengine-system-pulseaudio"
-    CONDITION UNIX
+    CONDITION LINUX
 )
+qt_configure_add_summary_entry(ARGS "webengine-v8-context-snapshot")
+qt_configure_add_summary_entry(ARGS "webenginedriver")
 qt_configure_end_summary_section() # end of "Qt WebEngineCore" section
 if(CMAKE_CROSSCOMPILING)
     check_thumb(armThumb)
@@ -207,4 +240,14 @@ qt_configure_add_report_entry(
     TYPE WARNING
     MESSAGE "WebRTC requires XDamage with qpa_xcb."
     CONDITION QT_FEATURE_webengine_ozone_x11 AND NOT XDAMAGE_FOUND
+)
+qt_configure_add_report_entry(
+    TYPE WARNING
+    MESSAGE "VA-API is incompatible with system libvpx."
+    CONDITION QT_FEATURE_webengine_system_libvpx AND QT_FEATURE_webengine_vaapi
+)
+qt_configure_add_report_entry(
+    TYPE WARNING
+    MESSAGE "System GBM is disabled. The bundled minigbm supports Intel only, you might need to install libgbm to avoid rendering issues."
+    CONDITION LINUX AND NOT QT_FEATURE_webengine_system_gbm
 )

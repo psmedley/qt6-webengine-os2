@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "build/build_config.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/eme_constants.h"
@@ -84,10 +84,9 @@ class MEDIA_EXPORT KeySystemInfo {
   virtual bool UseAesDecryptor() const;
 };
 
-using KeySystemInfoVector = std::vector<std::unique_ptr<KeySystemInfo>>;
+using KeySystemInfos = std::vector<std::unique_ptr<KeySystemInfo>>;
 
-using GetSupportedKeySystemsCB =
-    base::RepeatingCallback<void(KeySystemInfoVector)>;
+using GetSupportedKeySystemsCB = base::RepeatingCallback<void(KeySystemInfos)>;
 
 }  // namespace media
 

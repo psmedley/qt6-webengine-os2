@@ -14,6 +14,7 @@
 #include "build/build_config.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/extension_set.h"
+#include "ui/gl/angle_implementation.h"
 #include "ui/gl/buildflags.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_switches.h"
@@ -45,20 +46,6 @@ enum GLImplementation {
   kMaxValue = kGLImplementationEGLANGLE,
 };
 
-enum class ANGLEImplementation {
-  kNone = 0,
-  kD3D9 = 1,
-  kD3D11 = 2,
-  kOpenGL = 3,
-  kOpenGLES = 4,
-  kNull = 5,
-  kVulkan = 6,
-  kSwiftShader = 7,
-  kMetal = 8,
-  kDefault = 9,
-  kMaxValue = kDefault,
-};
-
 struct GL_EXPORT GLImplementationParts {
   constexpr explicit GLImplementationParts(const ANGLEImplementation angle_impl)
       : gl(kGLImplementationEGLANGLE),
@@ -75,18 +62,29 @@ struct GL_EXPORT GLImplementationParts {
   constexpr bool operator==(const GLImplementationParts& other) const {
     return (gl == other.gl && angle == other.angle);
   }
+  constexpr bool operator!=(const GLImplementationParts& other) const {
+    return !operator==(other);
+  }
 
   constexpr bool operator==(const ANGLEImplementation angle_impl) const {
     return operator==(GLImplementationParts(angle_impl));
+  }
+  constexpr bool operator!=(const ANGLEImplementation angle_impl) const {
+    return !operator==(angle_impl);
   }
 
   constexpr bool operator==(const GLImplementation gl_impl) const {
     return operator==(GLImplementationParts(gl_impl));
   }
+  constexpr bool operator!=(const GLImplementation gl_impl) const {
+    return !operator==(gl_impl);
+  }
 
   bool IsValid() const;
   bool IsAllowed(const std::vector<GLImplementationParts>& allowed_impls) const;
   std::string ToString() const;
+  std::string GLString() const;
+  std::string ANGLEString() const;
 
  private:
   static constexpr ANGLEImplementation MakeANGLEImplementation(
@@ -120,9 +118,9 @@ typedef GLFunctionPointerType(WINAPI* GLGetProcAddressProc)(const char* name);
 typedef GLFunctionPointerType (*GLGetProcAddressProc)(const char* name);
 #endif
 
-// Initialize stub methods for drawing operations in the GL bindings. The
+// Sets stub methods for drawing operations in the GL bindings. The
 // null draw bindings default to enabled, so that draw operations do nothing.
-GL_EXPORT void InitializeNullDrawGLBindings();
+GL_EXPORT void SetNullDrawGLBindings(bool enabled);
 
 // TODO(danakj): Remove this when all test suites are using null-draw.
 GL_EXPORT bool HasInitializedNullDrawGLBindings();

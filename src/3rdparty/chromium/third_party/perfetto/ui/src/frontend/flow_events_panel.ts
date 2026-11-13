@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
+import {Icons} from '../base/semantic_icons';
 import {Actions} from '../common/actions';
-import {timeToCode} from '../common/time';
+import {raf} from '../core/raf_scheduler';
 
 import {Flow, globals} from './globals';
-import {BLANK_CHECKBOX, CHECKBOX} from './icons';
-import {Panel, PanelSize} from './panel';
+import {DurationWidget} from './widgets/duration';
 
 export const ALL_CATEGORIES = '_all_';
 
@@ -36,7 +36,7 @@ export function getFlowCategories(flow: Flow): string[] {
   return categories;
 }
 
-export class FlowEventsPanel extends Panel {
+export class FlowEventsPanel implements m.ClassComponent {
   view() {
     const selection = globals.state.currentSelection;
     if (!selection || selection.kind !== 'CHROME_SLICE') {
@@ -44,12 +44,11 @@ export class FlowEventsPanel extends Panel {
     }
 
     const flowClickHandler = (sliceId: number, trackId: number) => {
-      const uiTrackId = globals.state.uiTrackIdByTraceTrackId[trackId];
-      if (uiTrackId) {
+      const trackKey = globals.state.trackKeyByTrackId[trackId];
+      if (trackKey) {
         globals.makeSelection(
-            Actions.selectChromeSlice(
-                {id: sliceId, trackId: uiTrackId, table: 'slice'}),
-            'bound_flows');
+            Actions.selectChromeSlice({id: sliceId, trackKey, table: 'slice'}),
+            {tab: 'bound_flows'});
       }
     };
 
@@ -95,7 +94,7 @@ export class FlowEventsPanel extends Panel {
 
       const data = [
         m('td.flow-link', args, outgoing ? 'Outgoing' : 'Incoming'),
-        m('td.flow-link', args, timeToCode(flow.dur)),
+        m('td.flow-link', args, m(DurationWidget, {dur: flow.dur})),
         m('td.flow-link', args, otherEnd.sliceId.toString()),
         m('td.flow-link', args, otherEnd.sliceName),
         m('td.flow-link', args, flow.begin.threadName),
@@ -117,11 +116,9 @@ export class FlowEventsPanel extends Panel {
       m('.flow-events-table', m('table', rows)),
     ]);
   }
-
-  renderCanvas(_ctx: CanvasRenderingContext2D, _size: PanelSize) {}
 }
 
-export class FlowEventsAreaSelectedPanel extends Panel {
+export class FlowEventsAreaSelectedPanel implements m.ClassComponent {
   view() {
     const selection = globals.state.currentSelection;
     if (!selection || selection.kind !== 'AREA') {
@@ -169,10 +166,10 @@ export class FlowEventsAreaSelectedPanel extends Panel {
                 });
               }
               globals.visibleFlowCategories.set(ALL_CATEGORIES, !allWasChecked);
-              globals.rafScheduler.scheduleFullRedraw();
+              raf.scheduleFullRedraw();
             },
           },
-          allWasChecked ? CHECKBOX : BLANK_CHECKBOX)),
+          allWasChecked ? Icons.Checkbox : Icons.BlankCheckbox)),
     ]));
 
     categoryToFlowsNum.forEach((num, cat) => {
@@ -189,10 +186,10 @@ export class FlowEventsAreaSelectedPanel extends Panel {
                   globals.visibleFlowCategories.set(ALL_CATEGORIES, false);
                 }
                 globals.visibleFlowCategories.set(cat, !wasChecked);
-                globals.rafScheduler.scheduleFullRedraw();
+                raf.scheduleFullRedraw();
               },
             },
-            wasChecked ? CHECKBOX : BLANK_CHECKBOX)),
+            wasChecked ? Icons.Checkbox : Icons.BlankCheckbox)),
       ];
       rows.push(m('tr', data));
     });
@@ -202,6 +199,4 @@ export class FlowEventsAreaSelectedPanel extends Panel {
       m('.flow-events-table', m('table', rows)),
     ]);
   }
-
-  renderCanvas(_ctx: CanvasRenderingContext2D, _size: PanelSize) {}
 }

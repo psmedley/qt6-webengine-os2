@@ -7,13 +7,27 @@
 #include <utility>
 
 #include "base/strings/string_number_conversions.h"
+#include "base/types/cxx23_to_underlying.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "components/autofill/core/browser/payments/payments_client.h"
+#include "components/autofill/core/browser/payments/client_behavior_constants.h"
+#include "components/autofill/core/browser/payments/payments_network_interface.h"
 
 namespace autofill::payments {
 
 PaymentsRequest::~PaymentsRequest() = default;
+
+bool PaymentsRequest::IsRetryableFailure(const std::string& error_code) {
+  // Returns true if the `error_code` denotes this is a retryable failure. This
+  // should be overridden in subclasses that have additional cases where the
+  // PaymentsRpcResult should be kTryAgainFailure if certain conditions are
+  // true. If this function is overridden in subclasses, the super class'
+  // implementation should still be called in addition to the subclass'
+  // implementation. An example of this is in the virtual card CVC
+  // authentication flow, we want to set result to kTryAgainFailure if a flow
+  // status is present in the response.
+  return base::EqualsCaseInsensitiveASCII(error_code, "internal");
+}
 
 base::Value::Dict PaymentsRequest::BuildRiskDictionary(
     const std::string& encoded_risk_data) {
@@ -41,18 +55,21 @@ base::Value::Dict PaymentsRequest::BuildCustomerContextDictionary(
   return customer_context;
 }
 
-void PaymentsRequest::SetActiveExperiments(
-    const std::vector<const char*>& active_experiments,
-    base::Value::Dict& request_dict) {
-  if (active_experiments.empty())
-    return;
-
-  base::Value::List active_chrome_experiments;
-  for (const char* experiment : active_experiments)
-    active_chrome_experiments.Append(experiment);
-
-  request_dict.Set("active_chrome_experiments",
-                   std::move(active_chrome_experiments));
+base::Value::Dict PaymentsRequest::BuildChromeUserContext(
+    const std::vector<ClientBehaviorConstants>& client_behavior_signals,
+    bool full_sync_enabled) {
+  base::Value::Dict chrome_user_context;
+  chrome_user_context.Set("full_sync_enabled", full_sync_enabled);
+  if (!client_behavior_signals.empty()) {
+    base::Value::List active_client_signals;
+    for (ClientBehaviorConstants signal : client_behavior_signals) {
+      active_client_signals.Append(base::to_underlying(signal));
+    }
+    base::ranges::sort(active_client_signals);
+    chrome_user_context.Set("client_behavior_signals",
+                            std::move(active_client_signals));
+  }
+  return chrome_user_context;
 }
 
 base::Value::Dict PaymentsRequest::BuildAddressDictionary(
@@ -63,7 +80,8 @@ base::Value::Dict PaymentsRequest::BuildAddressDictionary(
 
   if (include_non_location_data) {
     SetStringIfNotEmpty(profile, NAME_FULL, app_locale,
-                        PaymentsClient::kRecipientName, postal_address);
+                        PaymentsNetworkInterface::kRecipientName,
+                        postal_address);
   }
 
   base::Value::List address_lines;
@@ -93,7 +111,7 @@ base::Value::Dict PaymentsRequest::BuildAddressDictionary(
 
   if (include_non_location_data) {
     SetStringIfNotEmpty(profile, PHONE_HOME_WHOLE_NUMBER, app_locale,
-                        PaymentsClient::kPhoneNumber, address);
+                        PaymentsNetworkInterface::kPhoneNumber, address);
   }
 
   return address;
@@ -127,7 +145,7 @@ base::Value::Dict PaymentsRequest::BuildCreditCardDictionary(
 
 // static
 void PaymentsRequest::AppendStringIfNotEmpty(const AutofillProfile& profile,
-                                             const ServerFieldType& type,
+                                             const FieldType& type,
                                              const std::string& app_locale,
                                              base::Value::List& list) {
   std::u16string value = profile.GetInfo(type, app_locale);
@@ -137,7 +155,7 @@ void PaymentsRequest::AppendStringIfNotEmpty(const AutofillProfile& profile,
 
 // static
 void PaymentsRequest::SetStringIfNotEmpty(const AutofillDataModel& profile,
-                                          const ServerFieldType& type,
+                                          const FieldType& type,
                                           const std::string& app_locale,
                                           const std::string& path,
                                           base::Value::Dict& dictionary) {

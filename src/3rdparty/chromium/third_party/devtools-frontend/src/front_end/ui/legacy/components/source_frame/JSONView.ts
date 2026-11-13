@@ -31,6 +31,7 @@
 import * as i18n from '../../../../core/i18n/i18n.js';
 import * as Platform from '../../../../core/platform/platform.js';
 import * as SDK from '../../../../core/sdk/sdk.js';
+import * as VisualLogging from '../../../visual_logging/visual_logging.js';
 import * as UI from '../../legacy.js';
 import * as ObjectUI from '../object_ui/object_ui.js';
 
@@ -38,8 +39,8 @@ import jsonViewStyles from './jsonView.css.legacy.js';
 
 const UIStrings = {
   /**
-  *@description Text to find an item
-  */
+   *@description Text to find an item
+   */
   find: 'Find',
 };
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/components/source_frame/JSONView.ts', UIStrings);
@@ -60,6 +61,7 @@ export class JSONView extends UI.Widget.VBox implements UI.SearchableView.Search
     this.parsedJSON = parsedJSON;
     this.startCollapsed = Boolean(startCollapsed);
     this.element.classList.add('json-view');
+    this.element.setAttribute('jslog', `${VisualLogging.section().context('json-view')}`);
     this.currentSearchFocusIndex = 0;
     this.currentSearchTreeElements = [];
     this.searchRegex = null;
@@ -151,7 +153,7 @@ export class JSONView extends UI.Widget.VBox implements UI.SearchableView.Search
     return {start: start, end: end, length: length};
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     this.initialize();
   }
 
@@ -211,7 +213,7 @@ export class JSONView extends UI.Widget.VBox implements UI.SearchableView.Search
     this.searchableView.updateCurrentMatchIndex(index);
   }
 
-  searchCanceled(): void {
+  onSearchCanceled(): void {
     this.searchRegex = null;
     this.currentSearchTreeElements = [];
 
@@ -229,7 +231,7 @@ export class JSONView extends UI.Widget.VBox implements UI.SearchableView.Search
   performSearch(searchConfig: UI.SearchableView.SearchConfig, shouldJump: boolean, jumpBackwards?: boolean): void {
     let newIndex: number = this.currentSearchFocusIndex;
     const previousSearchFocusElement = this.currentSearchTreeElements[newIndex];
-    this.searchCanceled();
+    this.onSearchCanceled();
     this.searchRegex = searchConfig.toSearchRegex(true).regex;
 
     let element: UI.TreeOutline.TreeElement|null;

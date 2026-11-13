@@ -4,19 +4,25 @@
 
 #include "ui/accessibility/platform/ax_platform_node_base.h"
 
-#include <algorithm>
 #include <iomanip>
 #include <limits>
 #include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "base/no_destructor.h"
 #include "base/numerics/checked_math.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/memory_dump_provider.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_action_data.h"
@@ -69,14 +75,57 @@ bool FindDescendantRoleWithMaxDepth(const AXPlatformNodeBase* node,
   return false;
 }
 
-}  // namespace
-
-const char16_t AXPlatformNodeBase::kEmbeddedCharacter = u'\xfffc';
-
 // Map from each AXPlatformNode's unique id to its instance.
 using UniqueIdMap = std::unordered_map<int32_t, AXPlatformNode*>;
 base::LazyInstance<UniqueIdMap>::Leaky g_unique_id_map =
     LAZY_INSTANCE_INITIALIZER;
+
+// Adds process-wide statistics about accessibility objects to traces.
+class AXPlatformNodeMemoryDumpProvider
+    : public base::trace_event::MemoryDumpProvider {
+ public:
+  AXPlatformNodeMemoryDumpProvider(const AXPlatformNodeMemoryDumpProvider&) =
+      delete;
+  AXPlatformNodeMemoryDumpProvider& operator=(
+      const AXPlatformNodeMemoryDumpProvider&) = delete;
+
+  // base::trace_event::MemoryDumpProvider:
+  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                    base::trace_event::ProcessMemoryDump* pmd) override;
+
+ private:
+  friend class base::NoDestructor<AXPlatformNodeMemoryDumpProvider>;
+
+  explicit AXPlatformNodeMemoryDumpProvider(const UniqueIdMap& id_to_node);
+  ~AXPlatformNodeMemoryDumpProvider() override = default;
+
+  const raw_ref<const UniqueIdMap> id_to_node_;
+};
+
+bool AXPlatformNodeMemoryDumpProvider::OnMemoryDump(
+    const base::trace_event::MemoryDumpArgs& args,
+    base::trace_event::ProcessMemoryDump* pmd) {
+  auto* const dump = pmd->CreateAllocatorDump("accessibility/ax_platform_node");
+  dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameObjectCount,
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  id_to_node_->size());
+  return true;
+}
+
+AXPlatformNodeMemoryDumpProvider::AXPlatformNodeMemoryDumpProvider(
+    const UniqueIdMap& id_to_node)
+    : id_to_node_(id_to_node) {
+  // Skip this in tests that don't set up a task runner on the main thread.
+  if (base::SingleThreadTaskRunner::HasCurrentDefault()) {
+    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+        this, "AXPlatformNode",
+        base::SingleThreadTaskRunner::GetCurrentDefault());
+  }
+}
+
+}  // namespace
+
+const char16_t AXPlatformNodeBase::kEmbeddedCharacter = u'\xfffc';
 
 // TODO(fxbug.dev/91030): Remove the !BUILDFLAG(IS_FUCHSIA) condition once
 // fuchsia has native accessibility.
@@ -121,6 +170,9 @@ void AXPlatformNodeBase::Init(AXPlatformNodeDelegate* delegate) {
 
   // This must be called after assigning our delegate.
   g_unique_id_map.Get()[GetUniqueId()] = this;
+
+  static base::NoDestructor<AXPlatformNodeMemoryDumpProvider> dump_provider(
+      g_unique_id_map.Get());
 }
 
 const AXNodeData& AXPlatformNodeBase::GetData() const {
@@ -250,7 +302,7 @@ absl::optional<size_t> AXPlatformNodeBase::GetIndexInParent() {
   if (parent->delegate_ && parent->delegate_->HasModalDialog())
     return absl::nullopt;
 
-  NOTREACHED()
+  DCHECK(false)
       << "Unable to find the child in the list of its parent's children.";
   return absl::nullopt;
 }
@@ -407,6 +459,13 @@ gfx::NativeViewAccessible AXPlatformNodeBase::GetNativeViewAccessible() {
 }
 
 void AXPlatformNodeBase::NotifyAccessibilityEvent(ax::mojom::Event event_type) {
+  if (event_type == ax::mojom::Event::kAlert) {
+    CHECK(ui::IsAlert(GetRole()))
+        << "On some platforms, the alert event does not work correctly unless "
+           "it is fired on an object with an alert role. Role was "
+        << GetRole();
+  }
+
   OnNotifyEventCallbackMap& callback_map = GetOnNotifyEventCallbackMap();
   if (callback_map.find(event_type) != callback_map.end() &&
       callback_map[event_type]) {
@@ -415,7 +474,8 @@ void AXPlatformNodeBase::NotifyAccessibilityEvent(ax::mojom::Event event_type) {
 }
 
 #if BUILDFLAG(IS_APPLE)
-void AXPlatformNodeBase::AnnounceText(const std::u16string& text) {}
+void AXPlatformNodeBase::AnnounceTextAs(const std::u16string& text,
+                                        AnnouncementType announcement_type) {}
 #endif
 
 AXPlatformNodeDelegate* AXPlatformNodeBase::GetDelegate() const {
@@ -838,13 +898,15 @@ bool AXPlatformNodeBase::IsPlatformDocument() const {
 bool AXPlatformNodeBase::IsStructuredAnnotation() const {
   // The node represents a structured annotation if it can trace back to a
   // target node that is being annotated.
-  std::set<AXPlatformNode*> reverse_relations =
-      GetDelegate()->GetReverseRelations(
+  std::vector<AXPlatformNode*> reverse_relations =
+      GetDelegate()->GetSourceNodesForReverseRelations(
           ax::mojom::IntListAttribute::kDetailsIds);
 
   return !reverse_relations.empty();
 }
 
+// TODO(accessibility): This is only used in AXPlatformNodeWin and therefore
+// should be moved there.
 bool AXPlatformNodeBase::IsSelectionItemSupported() const {
   switch (GetRole()) {
     // An ARIA 1.1+ role of "cell", or a role of "row" inside
@@ -881,9 +943,13 @@ bool AXPlatformNodeBase::IsSelectionItemSupported() const {
     case ax::mojom::Role::kListBoxOption:
     case ax::mojom::Role::kListItem:
     case ax::mojom::Role::kMenuListOption:
-    case ax::mojom::Role::kTab:
     case ax::mojom::Role::kTreeItem:
       return HasBoolAttribute(ax::mojom::BoolAttribute::kSelected);
+    case ax::mojom::Role::kTab:
+      // According to the UIA documentation, this role should always support the
+      // SelectionItem control pattern:
+      // https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-supporttabitemcontroltype#required-control-patterns.
+      return true;
     default:
       return false;
   }
@@ -1138,14 +1204,20 @@ bool AXPlatformNodeBase::IsInvisibleOrIgnored() const {
   if (!GetData().IsInvisibleOrIgnored())
     return false;
 
-  if (HasState(ax::mojom::State::kFocusable))
-    return !IsFocused();
+  // Never marked a focused node as invisible or ignored, otherwise screen
+  // reader users will not hear an announcement for it when it receives focus.
+  if (IsFocused())
+    return false;
 
   return !HasVisibleCaretOrSelection();
 }
 
 bool AXPlatformNodeBase::IsFocused() const {
   return delegate_ && FromNativeViewAccessible(delegate_->GetFocus()) == this;
+}
+
+bool AXPlatformNodeBase::IsFocusable() const {
+  return delegate_ && delegate_->IsFocusable();
 }
 
 bool AXPlatformNodeBase::IsScrollable() const {
@@ -1188,7 +1260,7 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
                        "AXPlatformNodeDelegate.";
   // Expose some HTML and ARIA attributes in the IAccessible2 attributes string
   // "display", "tag", and "xml-roles" have somewhat unusual names for
-  // historical reasons. Aside from that virtually every ARIA attribute
+  // historical reasons. Aside from that, virtually every ARIA attribute
   // is exposed in a really straightforward way, i.e. "aria-foo" is exposed
   // as "foo".
   AddAttributeToList(ax::mojom::StringAttribute::kDisplay, "display",
@@ -1247,20 +1319,20 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
         from = "table-caption";
         break;
       case ax::mojom::DescriptionFrom::kTitle:
-      case ax::mojom::DescriptionFrom::kPopupElement:
+      case ax::mojom::DescriptionFrom::kPopoverAttribute:
         // The following types of markup are mapped to "tooltip":
         // * The title attribute.
-        // * A related popup=hint related via popuptoggletarget /
-        // popupshowtarget / popuphidetarget.
+        // * A popover=something related via the `popovertarget` attribute.
         // * A tooltip related via aria-describedby (see kRelatedElement above).
         from = "tooltip";
         break;
       case ax::mojom::DescriptionFrom::kNone:
       case ax::mojom::DescriptionFrom::kAttributeExplicitlyEmpty:
-        NOTREACHED();
+        break;
     }
-    DCHECK(!from.empty());
-    AddAttributeToList("description-from", from, attributes);
+    if (!from.empty()) {
+      AddAttributeToList("description-from", from, attributes);
+    }
   }
 
   AddAttributeToList(ax::mojom::StringAttribute::kAriaBrailleLabel,
@@ -1338,6 +1410,24 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
     AddAttributeToList("haspopup", "menu", attributes);
   }
 
+  // Expose the aria-ispopup attribute.
+  int32_t is_popup;
+  if (GetIntAttribute(ax::mojom::IntAttribute::kIsPopup, &is_popup)) {
+    switch (static_cast<ax::mojom::IsPopup>(is_popup)) {
+      case ax::mojom::IsPopup::kNone:
+        break;
+      case ax::mojom::IsPopup::kManual:
+        AddAttributeToList("ispopup", "manual", attributes);
+        break;
+      case ax::mojom::IsPopup::kAuto:
+        AddAttributeToList("ispopup", "auto", attributes);
+        break;
+      case ax::mojom::IsPopup::kHint:
+        AddAttributeToList("ispopup", "hint", attributes);
+        break;
+    }
+  }
+
   // Expose the aria-current attribute.
   int32_t aria_current_state;
   if (GetIntAttribute(ax::mojom::IntAttribute::kAriaCurrentState,
@@ -1404,8 +1494,8 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
 
     if (aria_rowindex && physical_rowindex &&
         aria_rowindex.value() - 1 != physical_rowindex.value()) {
-      AddAttributeToList(ax::mojom::IntAttribute::kAriaCellRowIndex, "rowindex",
-                         attributes);
+      std::string str_value = base::NumberToString(*aria_rowindex);
+      AddAttributeToList("rowindex", str_value, attributes);
     }
 
     if (!IsTableRow(GetRole()) && aria_colindex && physical_colindex &&
@@ -1475,14 +1565,10 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
 
   // Expose dropeffect attribute.
   // aria-dropeffect is deprecated in WAI-ARIA 1.1.
-  if (delegate_->HasIntAttribute(ax::mojom::IntAttribute::kDropeffect)) {
-    std::string dropeffect = GetData().DropeffectBitfieldToString();
-    AddAttributeToList("dropeffect", dropeffect, attributes);
+  if (delegate_->HasIntAttribute(
+          ax::mojom::IntAttribute::kDropeffectDeprecated)) {
+    NOTREACHED();
   }
-
-  // Expose grabbed attribute.
-  // aria-grabbed is deprecated in WAI-ARIA 1.1.
-  AddAttributeToList(ax::mojom::BoolAttribute::kGrabbed, "grabbed", attributes);
 
   // Expose class attribute.
   std::string class_attr;
@@ -1557,6 +1643,11 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
   std::string details_roles = ComputeDetailsRoles();
   if (!details_roles.empty())
     AddAttributeToList("details-roles", details_roles, attributes);
+
+  if (ui::IsLink(GetRole())) {
+    AddAttributeToList(ax::mojom::StringAttribute::kLinkTarget, "link-target",
+                       attributes);
+  }
 }
 
 void AXPlatformNodeBase::AddAttributeToList(
@@ -1605,6 +1696,18 @@ AXLegacyHypertext::~AXLegacyHypertext() = default;
 AXLegacyHypertext::AXLegacyHypertext(const AXLegacyHypertext& other) = default;
 AXLegacyHypertext& AXLegacyHypertext::operator=(
     const AXLegacyHypertext& other) = default;
+AXLegacyHypertext::AXLegacyHypertext(AXLegacyHypertext&& other) noexcept
+    : needs_update(std::exchange(other.needs_update, true)),
+      hyperlink_offset_to_index(std::move(other.hyperlink_offset_to_index)),
+      hyperlinks(std::move(other.hyperlinks)),
+      hypertext(std::move(other.hypertext)) {}
+AXLegacyHypertext& AXLegacyHypertext::operator=(AXLegacyHypertext&& other) {
+  needs_update = std::exchange(other.needs_update, true);
+  hyperlink_offset_to_index = std::move(other.hyperlink_offset_to_index);
+  hyperlinks = std::move(other.hyperlinks);
+  hypertext = std::move(other.hypertext);
+  return *this;
+}
 
 // TODO(nektar): To be able to use AXNode in Views, move this logic to AXNode.
 void AXPlatformNodeBase::UpdateComputedHypertext() const {
@@ -1612,7 +1715,7 @@ void AXPlatformNodeBase::UpdateComputedHypertext() const {
     return;
   hypertext_ = AXLegacyHypertext();
 
-  if (IsLeaf()) {
+  if (GetData().IsIgnored() || IsLeaf()) {
     hypertext_.hypertext = GetTextContentUTF16();
     hypertext_.needs_update = false;
     return;
@@ -1722,8 +1825,8 @@ int32_t AXPlatformNodeBase::GetHyperlinkIndexFromChild(
   if (hypertext_.hyperlinks.empty())
     return -1;
 
-  auto iterator = std::find(hypertext_.hyperlinks.begin(),
-                            hypertext_.hyperlinks.end(), child->GetUniqueId());
+  auto iterator =
+      base::ranges::find(hypertext_.hyperlinks, child->GetUniqueId());
   if (iterator == hypertext_.hyperlinks.end())
     return -1;
 
@@ -1916,7 +2019,10 @@ int AXPlatformNodeBase::GetHypertextOffsetFromEndpoint(
   if (endpoint_index_in_common_parent > index_in_common_parent)
     return static_cast<int>(GetHypertext().size());
 
-  NOTREACHED();
+  // TODO(crbug.com/1423589): Make sure this doesn't fire then turn the last
+  // conditional into a CHECK_GT(endpoint_index_in_common_parent,
+  // index_in_common_parent); and remove this code path.
+  DUMP_WILL_BE_NOTREACHED_NORETURN();
   return -1;
 }
 
@@ -1924,6 +2030,12 @@ AXPlatformNodeBase::AXPosition AXPlatformNodeBase::HypertextOffsetToEndpoint(
     int hypertext_offset) const {
   DCHECK_GE(hypertext_offset, 0);
   DCHECK_LT(hypertext_offset, static_cast<int>(GetHypertext().size()));
+
+  if (IsLeaf()) {
+    if (IsText())
+      return GetDelegate()->CreateTextPositionAt(hypertext_offset);
+    return GetDelegate()->CreatePositionAt(hypertext_offset);
+  }
 
   int current_hypertext_offset = hypertext_offset;
   for (auto child_iter = AXPlatformNodeChildrenBegin();
@@ -1937,9 +2049,8 @@ AXPlatformNodeBase::AXPosition AXPlatformNodeBase::HypertextOffsetToEndpoint(
 
     if (current_hypertext_offset < child_text_len) {
       int endpoint_offset = child_text_len - current_hypertext_offset;
-      if (child_iter->IsText()) {
+      if (child_iter->IsText())
         return child_iter->GetDelegate()->CreateTextPositionAt(endpoint_offset);
-      }
       return child_iter->GetDelegate()->CreatePositionAt(endpoint_offset);
     }
     current_hypertext_offset -= child_text_len;
@@ -2292,11 +2403,16 @@ int AXPlatformNodeBase::NearestTextIndexToPoint(gfx::Point point) {
 ui::TextAttributeList AXPlatformNodeBase::ComputeTextAttributes() const {
   ui::TextAttributeList attributes;
 
-  // We include list markers for now, but there might be other objects that are
-  // auto generated.
-  // TODO(nektar): Compute what objects are auto-generated in Blink.
-  if (GetRole() == ax::mojom::Role::kListMarker)
-    attributes.push_back(std::make_pair("auto-generated", "true"));
+  // From the IA2 Spec:
+  //
+  // Occasionally, word processors will automatically generate characters which
+  // appear on a line along with editable text. The characters are not
+  // themselves editable, but are part of the document. The most common examples
+  // of automatically inserted characters are in bulleted and numbered lists.
+  if (IsTextField() &&
+      HasBoolAttribute(ax::mojom::BoolAttribute::kNotUserSelectableStyle)) {
+    attributes.emplace_back("auto-generated", "true");
+  }
 
   int color;
   if ((color = delegate_->GetBackgroundColor())) {
@@ -2307,7 +2423,7 @@ ui::TextAttributeList AXPlatformNodeBase::ComputeTextAttributes() const {
                               base::NumberToString(green) + ',' +
                               base::NumberToString(blue) + ')';
     SanitizeTextAttributeValue(color_value, &color_value);
-    attributes.push_back(std::make_pair("background-color", color_value));
+    attributes.emplace_back(std::make_pair("background-color", color_value));
   }
 
   if ((color = delegate_->GetColor())) {
@@ -2318,7 +2434,7 @@ ui::TextAttributeList AXPlatformNodeBase::ComputeTextAttributes() const {
                               base::NumberToString(green) + ',' +
                               base::NumberToString(blue) + ')';
     SanitizeTextAttributeValue(color_value, &color_value);
-    attributes.push_back(std::make_pair("color", color_value));
+    attributes.emplace_back(std::make_pair("color", color_value));
   }
 
   // First try to get the inherited font family name from the delegate. If we
@@ -2333,13 +2449,13 @@ ui::TextAttributeList AXPlatformNodeBase::ComputeTextAttributes() const {
   // Attribute has no default value.
   if (!font_family.empty()) {
     SanitizeTextAttributeValue(font_family, &font_family);
-    attributes.push_back(std::make_pair("font-family", font_family));
+    attributes.emplace_back(std::make_pair("font-family", font_family));
   }
 
   absl::optional<float> font_size_in_points = GetFontSizeInPoints();
   // Attribute has no default value.
   if (font_size_in_points) {
-    attributes.push_back(std::make_pair(
+    attributes.emplace_back(std::make_pair(
         "font-size", base::NumberToString(*font_size_in_points) + "pt"));
   }
 
@@ -2350,23 +2466,24 @@ ui::TextAttributeList AXPlatformNodeBase::ComputeTextAttributes() const {
   int32_t text_style = GetIntAttribute(ax::mojom::IntAttribute::kTextStyle);
   if (text_style) {
     if (HasTextStyle(ax::mojom::TextStyle::kBold))
-      attributes.push_back(std::make_pair("font-weight", "bold"));
+      attributes.emplace_back(std::make_pair("font-weight", "bold"));
     if (HasTextStyle(ax::mojom::TextStyle::kItalic))
-      attributes.push_back(std::make_pair("font-style", "italic"));
+      attributes.emplace_back(std::make_pair("font-style", "italic"));
     if (HasTextStyle(ax::mojom::TextStyle::kLineThrough)) {
       // TODO(nektar): Figure out a more specific value.
-      attributes.push_back(std::make_pair("text-line-through-style", "solid"));
+      attributes.emplace_back(
+          std::make_pair("text-line-through-style", "solid"));
     }
     if (HasTextStyle(ax::mojom::TextStyle::kUnderline)) {
       // TODO(nektar): Figure out a more specific value.
-      attributes.push_back(std::make_pair("text-underline-style", "solid"));
+      attributes.emplace_back(std::make_pair("text-underline-style", "solid"));
     }
   }
 
   std::string language = GetDelegate()->GetLanguage();
   if (!language.empty()) {
     SanitizeTextAttributeValue(language, &language);
-    attributes.push_back(std::make_pair("language", language));
+    attributes.emplace_back(std::make_pair("language", language));
   }
 
   auto text_direction = static_cast<ax::mojom::WritingDirection>(
@@ -2375,17 +2492,17 @@ ui::TextAttributeList AXPlatformNodeBase::ComputeTextAttributes() const {
     case ax::mojom::WritingDirection::kNone:
       break;
     case ax::mojom::WritingDirection::kLtr:
-      attributes.push_back(std::make_pair("writing-mode", "lr"));
+      attributes.emplace_back(std::make_pair("writing-mode", "lr"));
       break;
     case ax::mojom::WritingDirection::kRtl:
-      attributes.push_back(std::make_pair("writing-mode", "rl"));
+      attributes.emplace_back(std::make_pair("writing-mode", "rl"));
       break;
     case ax::mojom::WritingDirection::kTtb:
-      attributes.push_back(std::make_pair("writing-mode", "tb"));
+      attributes.emplace_back(std::make_pair("writing-mode", "tb"));
       break;
     case ax::mojom::WritingDirection::kBtt:
       // Not listed in the IA2 Spec.
-      attributes.push_back(std::make_pair("writing-mode", "bt"));
+      attributes.emplace_back(std::make_pair("writing-mode", "bt"));
       break;
   }
 
@@ -2395,10 +2512,10 @@ ui::TextAttributeList AXPlatformNodeBase::ComputeTextAttributes() const {
     case ax::mojom::TextPosition::kNone:
       break;
     case ax::mojom::TextPosition::kSubscript:
-      attributes.push_back(std::make_pair("text-position", "sub"));
+      attributes.emplace_back(std::make_pair("text-position", "sub"));
       break;
     case ax::mojom::TextPosition::kSuperscript:
-      attributes.push_back(std::make_pair("text-position", "super"));
+      attributes.emplace_back(std::make_pair("text-position", "super"));
       break;
   }
 
@@ -2511,8 +2628,15 @@ std::string AXPlatformNodeBase::ComputeDetailsRoles() const {
         [[fallthrough]];
       }
       default:
-        // Use * to indicate some other role.
-        details_roles_set.insert("*");
+        // If a popover of any kind, use "popover" -- technically this is not a
+        // role, and therefore, details-roles is more of a hints field. Use * to
+        // indicate some other role.
+        if (detail_object->GetDelegate()->node()->HasIntAttribute(
+                ax::mojom::IntAttribute::kIsPopup)) {
+          details_roles_set.insert("popover");
+        } else {
+          details_roles_set.insert("*");
+        }
         break;
     }
   }

@@ -88,7 +88,7 @@ GrD3DBuffer::GrD3DBuffer(GrD3DGpu* gpu, size_t size, GrGpuBufferType intendedTyp
     , fResourceState(resourceState)
     , fD3DResource(std::move(bufferResource))
     , fAlloc(std::move(alloc)) {
-    this->registerWithCache(SkBudgeted::kYes);
+    this->registerWithCache(skgpu::Budgeted::kYes);
 
     // TODO: persistently map UPLOAD resources?
 
@@ -230,7 +230,9 @@ void* GrD3DBuffer::internalMap(MapType type, size_t offset, size_t size) {
     // read. If we're only writing then pass an empty range.
     range.End = type == MapType::kRead ? offset + size : offset;
     void* result;
-    fD3DResource->Map(0, &range, &result);
+    if (fD3DResource->Map(0, &range, &result) != S_OK) {
+        return nullptr;
+    }
     if (result) {
         result = SkTAddOffset<void>(result, offset);
     }

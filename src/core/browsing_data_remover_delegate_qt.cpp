@@ -3,8 +3,8 @@
 
 #include "browsing_data_remover_delegate_qt.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/browsing_data_remover.h"
 
@@ -50,7 +50,8 @@ void BrowsingDataRemoverDelegateQt::RemoveEmbedderData(const base::Time &delete_
     std::move(callback).Run(0);
 }
 
-std::vector<std::string> BrowsingDataRemoverDelegateQt::GetDomainsForDeferredCookieDeletion(uint64_t)
+std::vector<std::string> BrowsingDataRemoverDelegateQt::GetDomainsForDeferredCookieDeletion(
+            content::StoragePartition *, uint64_t)
 {
     return {};
 }

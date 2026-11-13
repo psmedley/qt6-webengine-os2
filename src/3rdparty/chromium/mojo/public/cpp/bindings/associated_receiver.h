@@ -8,20 +8,22 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string_view>
 #include <utility>
 
 #include "base/check.h"
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string_piece.h"
 #include "base/task/sequenced_task_runner.h"
 #include "mojo/public/cpp/bindings/lib/sync_method_traits.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/raw_ptr_impl_ref_traits.h"
 #include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/runtime_features.h"
 
 namespace mojo {
 
@@ -39,7 +41,7 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) AssociatedReceiverBase {
   void SetFilter(std::unique_ptr<MessageFilter> filter);
 
   void reset();
-  void ResetWithReason(uint32_t custom_reason, base::StringPiece description);
+  void ResetWithReason(uint32_t custom_reason, std::string_view description);
 
   void set_disconnect_handler(base::OnceClosure error_handler);
   void set_disconnect_with_reason_handler(
@@ -112,7 +114,7 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
   // Constructs a bound AssociatedReceiver by consuming |pending_receiver|. The
   // AssociatedReceiver is permanently linked to |impl| and will schedule
   // incoming |impl| method and disconnection notifications on the default
-  // SequencedTaskRunner (i.e. base::SequencedTaskRunnerHandle::Get() at
+  // SequencedTaskRunner (i.e. base::SequencedTaskRunner::GetCurrentDefault() at
   // construction time).
   AssociatedReceiver(ImplPointerType impl,
                      PendingAssociatedReceiver<Interface> pending_receiver)
@@ -188,8 +190,10 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
       scoped_refptr<base::SequencedTaskRunner> task_runner = nullptr) {
     DCHECK(!is_bound()) << "AssociatedReceiver for " << Interface::Name_
                         << " is already bound";
-
     PendingAssociatedRemote<Interface> remote;
+    if (!internal::GetRuntimeFeature_ExpectEnabled<Interface>()) {
+      return remote;
+    }
     Bind(remote.InitWithNewEndpointAndPassReceiver(), std::move(task_runner));
     return remote;
   }
@@ -203,17 +207,20 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
             scoped_refptr<base::SequencedTaskRunner> task_runner = nullptr) {
     DCHECK(!is_bound()) << "AssociatedReceiver for " << Interface::Name_
                         << " is already bound";
-
-    if (pending_receiver) {
-      BindImpl(pending_receiver.PassHandle(), &stub_,
-               base::WrapUnique(new typename Interface::RequestValidator_()),
-               internal::SyncMethodTraits<Interface>::GetOrdinals(),
-               std::move(task_runner), Interface::Version_, Interface::Name_,
-               Interface::MessageToMethodInfo_,
-               Interface::MessageToMethodName_);
-    } else {
+    if (!pending_receiver) {
       reset();
+      return;
     }
+    if (!internal::GetRuntimeFeature_ExpectEnabled<Interface>()) {
+      reset();
+      return;
+    }
+
+    BindImpl(pending_receiver.PassHandle(), &stub_,
+             base::WrapUnique(new typename Interface::RequestValidator_()),
+             internal::SyncMethodTraits<Interface>::GetOrdinals(),
+             std::move(task_runner), Interface::Version_, Interface::Name_,
+             Interface::MessageToMethodInfo_, Interface::MessageToMethodName_);
   }
 
   // Binds this AssociatedReceiver with the returned PendingAssociatedRemote
@@ -229,9 +236,10 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
   BindNewEndpointAndPassDedicatedRemote() {
     DCHECK(!is_bound()) << "AssociatedReceiver for " << Interface::Name_
                         << " is already bound";
-
     PendingAssociatedRemote<Interface> remote = BindNewEndpointAndPassRemote();
-    remote.EnableUnassociatedUsage();
+    if (remote) {
+      remote.EnableUnassociatedUsage();
+    }
     return remote;
   }
 
@@ -296,7 +304,7 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
   // message dispatch. If you need to do asynchronous work before determining
   // the legitimacy of a message, use GetBadMessageCallback() and retain its
   // result until ready to invoke or discard it.
-  void ReportBadMessage(const std::string& error) {
+  NOT_TAIL_CALLED void ReportBadMessage(const std::string& error) {
     GetBadMessageCallback().Run(error);
   }
 
@@ -310,8 +318,7 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
   ReportBadMessageCallback GetBadMessageCallback() {
     return base::BindOnce(
         [](ReportBadMessageCallback inner_callback,
-           base::WeakPtr<AssociatedReceiver> receiver,
-           base::StringPiece error) {
+           base::WeakPtr<AssociatedReceiver> receiver, std::string_view error) {
           std::move(inner_callback).Run(error);
           if (receiver)
             receiver->reset();

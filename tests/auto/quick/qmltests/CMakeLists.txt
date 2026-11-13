@@ -1,4 +1,4 @@
-# Copyright (C) 2022 The Qt Company Ltd.
+# Copyright (C) 2023 The Qt Company Ltd.
 # SPDX-License-Identifier: BSD-3-Clause
 
 include(../../httpserver/httpserver.cmake)
@@ -12,6 +12,7 @@ qt_internal_add_test(tst_qmltests
         Qt::QuickTest
         Qt::TestPrivate
         Qt::WebEngineQuick
+        Qt::WebEngineCorePrivate
         Test::HttpServer
         Test::Util
 )
@@ -33,9 +34,9 @@ set(testList
     tst_findText.qml
     tst_focusOnNavigation.qml
     tst_fullScreenRequest.qml
-    tst_geopermission.qml
     tst_getUserMedia.qml
     tst_inputMethod.qml
+    tst_inputTextDirection.qml
     tst_javaScriptDialogs.qml
     tst_keyboardEvents.qml
     tst_keyboardModifierMapping.qml
@@ -60,7 +61,13 @@ set(testList
     tst_userScripts.qml
     tst_userScriptCollection.qml
     tst_viewSource.qml
+    tst_save.qml
 )
+
+# QTBUG-128652
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(arm|aarch).*64" AND LINUX)
+    list(REMOVE_ITEM testList tst_faviconDatabase.qml)
+endif()
 
 if(QT_FEATURE_webengine_webchannel)
     list(APPEND testList tst_webchannel.qml)
@@ -68,6 +75,10 @@ endif()
 
 if(QT_FEATURE_ssl)
     list(APPEND testList tst_certificateError.qml)
+endif()
+
+if (NOT APPLE)
+   list(APPEND testList tst_geopermission.qml)
 endif()
 
 set(content "")

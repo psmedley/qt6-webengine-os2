@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
 #include "components/viz/common/viz_vulkan_context_provider_export.h"
 #include "gpu/vulkan/buildflags.h"
@@ -17,7 +17,7 @@
 #include <vulkan/vulkan_core.h>
 #endif
 
-#if !defined(VK_VERSION_1_1)
+#if !defined(VK_VERSION_1_1) && !defined(VK_VERSION_1_0)
 // Workaround compiling issue when vulkan is disabled.
 typedef void* VkSemaphore;
 #endif

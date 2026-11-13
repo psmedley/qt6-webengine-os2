@@ -28,7 +28,7 @@ namespace test {
 class QuicSentPacketManagerPeer;
 }  // namespace test
 
-class QUIC_EXPORT_PRIVATE PacingSender {
+class QUICHE_EXPORT PacingSender {
  public:
   PacingSender();
   PacingSender(const PacingSender&) = delete;
@@ -44,6 +44,8 @@ class QUIC_EXPORT_PRIVATE PacingSender {
     max_pacing_rate_ = max_pacing_rate;
   }
 
+  void set_remove_non_initial_burst() { remove_non_initial_burst_ = true; }
+
   void set_alarm_granularity(QuicTime::Delta alarm_granularity) {
     alarm_granularity_ = alarm_granularity;
   }
@@ -53,7 +55,8 @@ class QUIC_EXPORT_PRIVATE PacingSender {
   void OnCongestionEvent(bool rtt_updated, QuicByteCount bytes_in_flight,
                          QuicTime event_time,
                          const AckedPacketVector& acked_packets,
-                         const LostPacketVector& lost_packets);
+                         const LostPacketVector& lost_packets,
+                         QuicPacketCount num_ect, QuicPacketCount num_ce);
 
   void OnPacketSent(QuicTime sent_time, QuicByteCount bytes_in_flight,
                     QuicPacketNumber packet_number, QuicByteCount bytes,
@@ -106,6 +109,9 @@ class QUIC_EXPORT_PRIVATE PacingSender {
   // Indicates whether pacing throttles the sending. If true, make up for lost
   // time.
   bool pacing_limited_;
+
+  bool remove_non_initial_burst_ =
+      GetQuicReloadableFlag(quic_pacing_remove_non_initial_burst);
 };
 
 }  // namespace quic

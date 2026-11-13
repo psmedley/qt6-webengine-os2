@@ -70,7 +70,7 @@ AssemblerOptions AssemblerOptions::Default(Isolate* isolate) {
   options.enable_simulator_code = !serializer || v8_flags.target_is_simulator;
 #endif
 
-#if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_LOONG64
   options.code_range_base = isolate->heap()->code_range_base();
 #endif
   bool short_builtin_calls =
@@ -85,15 +85,6 @@ AssemblerOptions AssemblerOptions::Default(Isolate* isolate) {
   return options;
 }
 
-AssemblerOptions AssemblerOptions::DefaultForOffHeapTrampoline(
-    Isolate* isolate) {
-  AssemblerOptions options = AssemblerOptions::Default(isolate);
-  // Off-heap trampolines may not contain any metadata since their metadata
-  // offsets refer to the off-heap metadata area.
-  options.emit_code_comments = false;
-  return options;
-}
-
 namespace {
 
 class DefaultAssemblerBuffer : public AssemblerBuffer {
@@ -102,11 +93,11 @@ class DefaultAssemblerBuffer : public AssemblerBuffer {
       : buffer_(base::OwnedVector<uint8_t>::NewForOverwrite(
             std::max(AssemblerBase::kMinimalBufferSize, size))) {
 #ifdef DEBUG
-    ZapCode(reinterpret_cast<Address>(buffer_.start()), buffer_.size());
+    ZapCode(reinterpret_cast<Address>(buffer_.begin()), buffer_.size());
 #endif
   }
 
-  byte* start() const override { return buffer_.start(); }
+  uint8_t* start() const override { return buffer_.begin(); }
 
   int size() const override { return static_cast<int>(buffer_.size()); }
 
@@ -121,10 +112,10 @@ class DefaultAssemblerBuffer : public AssemblerBuffer {
 
 class ExternalAssemblerBufferImpl : public AssemblerBuffer {
  public:
-  ExternalAssemblerBufferImpl(byte* start, int size)
+  ExternalAssemblerBufferImpl(uint8_t* start, int size)
       : start_(start), size_(size) {}
 
-  byte* start() const override { return start_; }
+  uint8_t* start() const override { return start_; }
 
   int size() const override { return size_; }
 
@@ -137,7 +128,7 @@ class ExternalAssemblerBufferImpl : public AssemblerBuffer {
   void operator delete(void* ptr) noexcept;
 
  private:
-  byte* const start_;
+  uint8_t* const start_;
   const int size_;
 };
 
@@ -170,7 +161,7 @@ void ExternalAssemblerBufferImpl::operator delete(void* ptr) noexcept {
 std::unique_ptr<AssemblerBuffer> ExternalAssemblerBuffer(void* start,
                                                          int size) {
   return std::make_unique<ExternalAssemblerBufferImpl>(
-      reinterpret_cast<byte*>(start), size);
+      reinterpret_cast<uint8_t*>(start), size);
 }
 
 std::unique_ptr<AssemblerBuffer> NewAssemblerBuffer(int size) {
@@ -240,12 +231,19 @@ HeapNumberRequest::HeapNumberRequest(double heap_number, int offset)
 
 void Assembler::RecordDeoptReason(DeoptimizeReason reason, uint32_t node_id,
                                   SourcePosition position, int id) {
-  EnsureSpace ensure_space(this);
-  RecordRelocInfo(RelocInfo::DEOPT_SCRIPT_OFFSET, position.ScriptOffset());
-  RecordRelocInfo(RelocInfo::DEOPT_INLINING_ID, position.InliningId());
-  RecordRelocInfo(RelocInfo::DEOPT_REASON, static_cast<int>(reason));
-  RecordRelocInfo(RelocInfo::DEOPT_ID, id);
+  static_assert(RelocInfoWriter::kMaxSize * 2 <= kGap);
+  {
+    EnsureSpace space(this);
+    RecordRelocInfo(RelocInfo::DEOPT_SCRIPT_OFFSET, position.ScriptOffset());
+    RecordRelocInfo(RelocInfo::DEOPT_INLINING_ID, position.InliningId());
+  }
+  {
+    EnsureSpace space(this);
+    RecordRelocInfo(RelocInfo::DEOPT_REASON, static_cast<int>(reason));
+    RecordRelocInfo(RelocInfo::DEOPT_ID, id);
+  }
 #ifdef DEBUG
+  EnsureSpace space(this);
   RecordRelocInfo(RelocInfo::DEOPT_NODE_ID, node_id);
 #endif  // DEBUG
 }
@@ -265,7 +263,7 @@ void AssemblerBase::RequestHeapNumber(HeapNumberRequest request) {
   heap_number_requests_.push_front(request);
 }
 
-int AssemblerBase::AddCodeTarget(Handle<CodeT> target) {
+int AssemblerBase::AddCodeTarget(Handle<Code> target) {
   int current = static_cast<int>(code_targets_.size());
   if (current > 0 && !target.is_null() &&
       code_targets_.back().address() == target.address()) {
@@ -277,7 +275,7 @@ int AssemblerBase::AddCodeTarget(Handle<CodeT> target) {
   }
 }
 
-Handle<CodeT> AssemblerBase::GetCodeTarget(intptr_t code_target_index) const {
+Handle<Code> AssemblerBase::GetCodeTarget(intptr_t code_target_index) const {
   DCHECK_LT(static_cast<size_t>(code_target_index), code_targets_.size());
   return code_targets_[code_target_index];
 }
@@ -318,12 +316,13 @@ int Assembler::WriteCodeComments() {
 
 #ifdef V8_CODE_COMMENTS
 int Assembler::CodeComment::depth() const { return assembler_->comment_depth_; }
-void Assembler::CodeComment::Open(const std::string& comment) {
+void Assembler::CodeComment::Open(const std::string& comment,
+                                  const SourceLocation& loc) {
   std::stringstream sstream;
   sstream << std::setfill(' ') << std::setw(depth() * kIndentWidth + 2);
   sstream << "[ " << comment;
   assembler_->comment_depth_++;
-  assembler_->RecordComment(sstream.str());
+  assembler_->RecordComment(sstream.str(), loc);
 }
 
 void Assembler::CodeComment::Close() {
@@ -331,7 +330,8 @@ void Assembler::CodeComment::Close() {
   std::string comment = "]";
   comment.insert(0, depth() * kIndentWidth, ' ');
   DCHECK_LE(0, depth());
-  assembler_->RecordComment(comment);
+  // Don't record source information for the closed comment.
+  assembler_->RecordComment(comment, SourceLocation());
 }
 #endif
 

@@ -1,16 +1,29 @@
-// Copyright 2021 The Dawn Authors
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "src/dawn/node/binding/GPUCommandEncoder.h"
 
@@ -31,33 +44,45 @@ namespace wgpu::binding {
 ////////////////////////////////////////////////////////////////////////////////
 // wgpu::bindings::GPUCommandEncoder
 ////////////////////////////////////////////////////////////////////////////////
-GPUCommandEncoder::GPUCommandEncoder(wgpu::CommandEncoder enc) : enc_(std::move(enc)) {}
+GPUCommandEncoder::GPUCommandEncoder(wgpu::Device device,
+                                     const wgpu::CommandEncoderDescriptor& desc,
+                                     wgpu::CommandEncoder enc)
+    : device_(std::move(device)), enc_(std::move(enc)), label_(desc.label ? desc.label : "") {}
 
 interop::Interface<interop::GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
     Napi::Env env,
     interop::GPURenderPassDescriptor descriptor) {
-    Converter conv(env);
+    Converter conv(env, device_);
 
     wgpu::RenderPassDescriptor desc{};
-    // TODO(dawn:1250) handle timestampWrites
+    wgpu::RenderPassDescriptorMaxDrawCount maxDrawCountDesc{};
+    desc.nextInChain = &maxDrawCountDesc;
+
     if (!conv(desc.colorAttachments, desc.colorAttachmentCount, descriptor.colorAttachments) ||
         !conv(desc.depthStencilAttachment, descriptor.depthStencilAttachment) ||
         !conv(desc.label, descriptor.label) ||
-        !conv(desc.occlusionQuerySet, descriptor.occlusionQuerySet)) {
+        !conv(desc.occlusionQuerySet, descriptor.occlusionQuerySet) ||
+        !conv(desc.timestampWrites, descriptor.timestampWrites) ||
+        !conv(maxDrawCountDesc.maxDrawCount, descriptor.maxDrawCount)) {
         return {};
     }
 
-    return interop::GPURenderPassEncoder::Create<GPURenderPassEncoder>(env,
+    return interop::GPURenderPassEncoder::Create<GPURenderPassEncoder>(env, desc,
                                                                        enc_.BeginRenderPass(&desc));
 }
 
 interop::Interface<interop::GPUComputePassEncoder> GPUCommandEncoder::beginComputePass(
     Napi::Env env,
     interop::GPUComputePassDescriptor descriptor) {
+    Converter conv(env, device_);
+
     wgpu::ComputePassDescriptor desc{};
-    // TODO(dawn:1250) handle timestampWrites
+    if (!conv(desc.label, descriptor.label) ||
+        !conv(desc.timestampWrites, descriptor.timestampWrites)) {
+        return {};
+    }
     return interop::GPUComputePassEncoder::Create<GPUComputePassEncoder>(
-        env, enc_.BeginComputePass(&desc));
+        env, desc, enc_.BeginComputePass(&desc));
 }
 
 void GPUCommandEncoder::clearBuffer(Napi::Env env,
@@ -163,14 +188,10 @@ void GPUCommandEncoder::insertDebugMarker(Napi::Env, std::string markerLabel) {
 void GPUCommandEncoder::writeTimestamp(Napi::Env env,
                                        interop::Interface<interop::GPUQuerySet> querySet,
                                        interop::GPUSize32 queryIndex) {
-    Converter conv(env);
-
-    wgpu::QuerySet q{};
-    if (!conv(q, querySet)) {
-        return;
-    }
-
-    enc_.WriteTimestamp(q, queryIndex);
+    Napi::TypeError::New(
+        env, "writeTimestamp is no longer supported with the 'timestamp-query' feature.")
+        .ThrowAsJavaScriptException();
+    return;
 }
 
 void GPUCommandEncoder::resolveQuerySet(Napi::Env env,
@@ -201,16 +222,21 @@ void GPUCommandEncoder::resolveQuerySet(Napi::Env env,
 interop::Interface<interop::GPUCommandBuffer> GPUCommandEncoder::finish(
     Napi::Env env,
     interop::GPUCommandBufferDescriptor descriptor) {
+    Converter conv(env);
     wgpu::CommandBufferDescriptor desc{};
-    return interop::GPUCommandBuffer::Create<GPUCommandBuffer>(env, enc_.Finish(&desc));
+    if (!conv(desc.label, descriptor.label)) {
+        return {};
+    }
+    return interop::GPUCommandBuffer::Create<GPUCommandBuffer>(env, desc, enc_.Finish(&desc));
 }
 
 std::string GPUCommandEncoder::getLabel(Napi::Env) {
-    UNIMPLEMENTED();
+    return label_;
 }
 
 void GPUCommandEncoder::setLabel(Napi::Env, std::string value) {
-    UNIMPLEMENTED();
+    enc_.SetLabel(value.c_str());
+    label_ = value;
 }
 
 }  // namespace wgpu::binding

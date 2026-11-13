@@ -1,5 +1,7 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
+
 #ifndef EXTENSIONS_API_PROVIDER_QT_H
 #define EXTENSIONS_API_PROVIDER_QT_H
 
@@ -18,7 +20,7 @@ public:
     void AddPermissionFeatures(FeatureProvider* provider) override;
 
     bool IsAPISchemaGenerated(const std::string& name) override;
-    base::StringPiece GetAPISchema(const std::string& name) override;
+    std::string_view GetAPISchema(const std::string &name) override;
 
     // Adds feature definitions to the given |provider| of the specified type.
     void AddManifestFeatures(FeatureProvider* provider) override { }

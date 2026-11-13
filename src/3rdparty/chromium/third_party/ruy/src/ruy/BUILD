@@ -8,66 +8,55 @@ load(":ruy_test_ext.oss.bzl", "ruy_test_ext_defines", "ruy_test_ext_deps")
 load(":ruy_test.bzl", "ruy_benchmark", "ruy_test")
 
 package(
+    default_applicable_licenses = ["//third_party/ruy:license"],
     licenses = ["notice"],  # Apache 2.0
 )
 
-config_setting(
-    name = "armeabi-v7a",
-    values = {"cpu": "armeabi-v7a"},
-)
-
-config_setting(
-    name = "armv7a",
-    values = {"cpu": "armv7a"},
-)
-
 # Detect ARM 32-bit targets where we are going to just assume NEON support.
-selects.config_setting_group(
+config_setting(
     name = "arm32_assuming_neon",
-    match_any = [
-        ":armeabi-v7a",
-        ":armv7a",
+    constraint_values = [
+        "@platforms//cpu:armv7",
     ],
 )
 
 config_setting(
-    name = "x86_64_k8",
-    values = {"cpu": "k8"},
-)
-
-config_setting(
-    name = "x86_64_haswell",
-    values = {"cpu": "haswell"},
-)
-
-# MSVC toolchains define a different "cpu" value, which helps us as we need
-# to pass different flags on MSVC vs GCC-compatible toolchains to enable
-# x86 SIMD extensions.
-selects.config_setting_group(
     name = "x86_64_and_not_msvc",
-    match_any = [
-        ":x86_64_k8",
-        ":x86_64_haswell",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
     ],
+)
+
+config_setting(
+    name = "windows_msvc",
+    constraint_values = [
+        "@platforms//os:windows",
+    ],
+    flag_values = {
+        "//tools/cpp:compiler": "msvc",
+    },
 )
 
 config_setting(
     name = "ppc",
-    values = {
-        "cpu": "ppc",
-    },
+    constraint_values = [
+        "@platforms//cpu:ppc",
+    ],
 )
 
 config_setting(
     name = "s390x",
-    values = {
-        "cpu": "s390x",
-    },
+    constraint_values = [
+        "@platforms//cpu:s390x",
+    ],
 )
 
 config_setting(
     name = "fuchsia",
-    values = {"cpu": "fuchsia"},
+    constraint_values = [
+        "@platforms//os:fuchsia",
+    ],
 )
 
 config_setting(
@@ -87,7 +76,7 @@ config_setting(
 selects.config_setting_group(
     name = "do_not_want_O3",
     match_any = [
-        "@bazel_tools//src/conditions:windows_msvc",
+        ":windows_msvc",
         ":dbg_build",
         ":fastbuild_build",
     ],
@@ -380,7 +369,7 @@ cc_library(
     ],
     copts = ruy_copts() +
             select({
-                "@bazel_tools//src/conditions:windows": [],
+                "@platforms//os:windows": [],
                 "//conditions:default": [
                     # ruy_copts contains -Wundef, but cpuinfo's header warns with that.
                     "-Wno-undef",
@@ -397,9 +386,9 @@ cc_library(
         "//conditions:default": ["-DRUY_HAVE_CPUINFO"],
     }),
     deps = [
-        ":platform",
         ":check_macros",
         ":cpu_cache_params",
+        ":platform",
     ] + select({
         # This select must match the similar select in `copts`
         ":ppc": [],
@@ -431,6 +420,13 @@ cc_library(
 cc_library(
     name = "performance_advisory",
     hdrs = ["performance_advisory.h"],
+    copts = ruy_copts(),
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "strategy_controls",
+    hdrs = ["strategy_controls.h"],
     copts = ruy_copts(),
     visibility = ["//visibility:public"],
 )
@@ -859,6 +855,7 @@ cc_library(
         ":performance_advisory",
         ":platform",
         ":prepacked_cache",
+        ":strategy_controls",
         ":thread_pool",
         ":tune",
     ],
@@ -874,6 +871,7 @@ cc_test(
         ":path",
         ":platform",
         ":prepacked_cache",
+        ":strategy_controls",
         ":tune",
     ],
 )
@@ -907,6 +905,7 @@ cc_library(
         ":performance_advisory",
         ":platform",
         ":prepacked_cache",
+        ":strategy_controls",
         ":thread_pool",
         ":trace",
         ":tune",
@@ -937,6 +936,7 @@ cc_test(
         ":gtest_wrapper",
         ":path",
         ":platform",
+        ":strategy_controls",
     ],
 )
 
@@ -972,6 +972,7 @@ cc_library(
         ":opt_set",
         ":side_pair",
         ":size_util",
+        ":strategy_controls",
         ":thread_pool",
         ":trace",
         ":trmul_params",
@@ -1126,24 +1127,24 @@ cc_library(
     # need defines, not copts, because it's controlling a header, test.h
     defines = ruy_test_ext_defines(),
     linkopts = select({
-        "@bazel_tools//src/conditions:windows": [],
+        "@platforms//os:windows": [],
         "//conditions:default": ["-lm"],
     }),
     deps = [
         ":allocator",
-        ":size_util",
-        ":reference_mul",
-        ":matrix",
-        ":pmu",
-        ":ruy",
-        ":mul_params",
-        ":time",
-        ":gtest_wrapper",
-        ":platform",
         ":context",
-        ":ctx",
         ":context_get_ctx",
+        ":ctx",
+        ":gtest_wrapper",
+        ":matrix",
+        ":mul_params",
         ":pack_common",
+        ":platform",
+        ":pmu",
+        ":reference_mul",
+        ":ruy",
+        ":size_util",
+        ":time",
         "//ruy/profiler",
     ] + ruy_test_ext_deps(),
 )

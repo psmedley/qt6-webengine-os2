@@ -371,7 +371,7 @@ void GdbServer::PrepareStep() {
 void GdbServer::AddWasmModule(uint32_t module_id,
                               Local<debug::WasmScript> wasm_script) {
   // Executed in the isolate thread.
-  DCHECK_EQ(Script::TYPE_WASM, Utils::OpenHandle(*wasm_script)->type());
+  DCHECK_EQ(Script::Type::kWasm, Utils::OpenHandle(*wasm_script)->type());
   v8::Isolate* isolate = wasm_script->GetIsolate();
   scripts_.insert(
       std::make_pair(module_id, WasmModuleDebug(isolate, wasm_script)));
@@ -395,7 +395,7 @@ GdbServer::DebugDelegate::DebugDelegate(Isolate* isolate, GdbServer* gdb_server)
 
   // Register the delegate
   isolate_->debug()->SetDebugDelegate(this);
-  v8::debug::TierDownAllModulesPerIsolate((v8::Isolate*)isolate_);
+  v8::debug::EnterDebuggingForIsolate((v8::Isolate*)isolate_);
   v8::debug::ChangeBreakOnException((v8::Isolate*)isolate_,
                                     v8::debug::BreakOnUncaughtException);
 }

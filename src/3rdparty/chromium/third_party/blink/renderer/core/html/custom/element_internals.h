@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/html/forms/labels_node_list.h"
 #include "third_party/blink/renderer/core/html/forms/listed_element.h"
@@ -22,7 +23,8 @@ class HTMLElement;
 class ValidityStateFlags;
 
 class CORE_EXPORT ElementInternals : public ScriptWrappable,
-                                     public ListedElement {
+                                     public ListedElement,
+                                     public ElementRareDataField {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -46,7 +48,7 @@ class CORE_EXPORT ElementInternals : public ScriptWrappable,
                    ExceptionState& exception_state);
   void setValidity(ValidityStateFlags* flags,
                    const String& message,
-                   Element* anchor,
+                   HTMLElement* anchor,
                    ExceptionState& exception_state);
   bool willValidate(ExceptionState& exception_state) const;
   ValidityState* validity(ExceptionState& exception_state);
@@ -67,10 +69,37 @@ class CORE_EXPORT ElementInternals : public ScriptWrappable,
 
   void SetElementAttribute(const QualifiedName& name, Element* element);
   Element* GetElementAttribute(const QualifiedName& name);
-  HeapVector<Member<Element>>* GetElementArrayAttribute(
+  ScriptValue GetElementArrayAttribute(ScriptState* script_state,
+                                       const QualifiedName& name);
+  HeapVector<Member<Element>>* GetAttrAssociatedElements(
       const QualifiedName& name) const;
-  void SetElementArrayAttribute(const QualifiedName& name,
-                                const HeapVector<Member<Element>>* elements);
+  void SetElementArrayAttribute(ScriptState* script_state,
+                                const QualifiedName& name,
+                                const ScriptValue given_value,
+                                const char* const property_name);
+
+  ScriptValue ariaControlsElements(ScriptState* script_state);
+  void setAriaControlsElements(ScriptState* script_state,
+                               ScriptValue given_elements);
+  ScriptValue ariaDescribedByElements(ScriptState* script_state);
+  void setAriaDescribedByElements(ScriptState* script_state,
+                                  ScriptValue given_elements);
+  ScriptValue ariaDetailsElements(ScriptState* script_state);
+  void setAriaDetailsElements(ScriptState* script_state,
+                              ScriptValue given_elements);
+  ScriptValue ariaErrorMessageElements(ScriptState* script_state);
+  void setAriaErrorMessageElements(ScriptState* script_state,
+                                   ScriptValue given_elements);
+  ScriptValue ariaFlowToElements(ScriptState* script_state);
+  void setAriaFlowToElements(ScriptState* script_state,
+                             ScriptValue given_elements);
+  ScriptValue ariaLabelledByElements(ScriptState* script_state);
+  void setAriaLabelledByElements(ScriptState* script_state,
+                                 ScriptValue given_elements);
+  ScriptValue ariaOwnsElements(ScriptState* script_state);
+  void setAriaOwnsElements(ScriptState* script_state,
+                           ScriptValue given_elements);
+
   bool HasAttribute(const QualifiedName& attribute) const;
   const HashMap<QualifiedName, AtomicString>& GetAttributes() const;
 

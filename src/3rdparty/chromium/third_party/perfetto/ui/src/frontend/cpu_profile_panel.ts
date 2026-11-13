@@ -12,20 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {CallsiteInfo} from '../common/state';
+
 import {globals} from './globals';
-import {Panel} from './panel';
 
 interface CpuProfileDetailsPanelAttrs {}
 
-export class CpuProfileDetailsPanel extends Panel<CpuProfileDetailsPanelAttrs> {
+export class CpuProfileDetailsPanel implements
+    m.ClassComponent<CpuProfileDetailsPanelAttrs> {
   view() {
     const sampleDetails = globals.cpuProfileDetails;
     const header =
         m('.details-panel-heading', m('h2', `CPU Profile Sample Details`));
-    if (!sampleDetails || sampleDetails.id === undefined) {
+    if (sampleDetails.id === undefined) {
       return m('.details-panel', header);
     }
 
@@ -39,12 +40,10 @@ export class CpuProfileDetailsPanel extends Panel<CpuProfileDetailsPanelAttrs> {
     if (!stack) return [];
 
     const result = [];
-    for (let i = 0; i < stack.length; i++) {
+    for (let i = stack.length - 1; i >= 0; --i) {
       result.push(m('tr', m('td', stack[i].name), m('td', stack[i].mapping)));
     }
 
     return result;
   }
-
-  renderCanvas() {}
 }

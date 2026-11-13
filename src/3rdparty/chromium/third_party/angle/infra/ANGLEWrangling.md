@@ -115,14 +115,19 @@ The [ANGLE into Chrome auto-roller](https://autoroll.skia.org/r/angle-chromium-a
 Chrome with the latest ANGLE changes.
 
 The [ANGLE into Android auto-roller](https://autoroll.skia.org/r/angle-android-autoroll) updates Android with
-the latest ANGLE changes. You must manually approve and land these rolls.
+the latest ANGLE changes. You must manually approve and land these rolls.  The
+recommendation is to pre-approve the roll and set "**Autosubmit**".
+ * The auto-roller abandons a presubmit-passed roll whenever a new ANGLE change
+   comes.  During work hours, it's hard for Wrangler to approve and land in
+   time.
 
-We also use additional auto-rollers to roll third party libraries into ANGLE:
+We also use additional auto-rollers to roll third party libraries into ANGLE and Chromium:
 
  * [SwiftShader into ANGLE](https://autoroll.skia.org/r/swiftshader-angle-autoroll)
  * [vulkan-deps into ANGLE](https://autoroll.skia.org/r/vulkan-deps-angle-autoroll)
  * [VK-GL-CTS into ANGLE](https://autoroll.skia.org/r/vk-gl-cts-angle-autoroll)
  * [Chromium into ANGLE](https://autoroll.skia.org/r/chromium-angle-autoroll)
+ * [SwiftShader into Chromium](https://autoroll.skia.org/r/swiftshader-chromium-autoroll)
 
 **Roller health**: You will be cc'ed on all rolls. Please check failed rolls
   to verify there is no blocking breakage.
@@ -132,6 +137,10 @@ high-priority changes. For example: Chromium-side test expectation updates or
 suppressions. When a roll fails, stop the roller, determine if the root cause
 is a problem with ANGLE or with the upstream repo, and file an issue with an
 appropriate next step.
+
+To monitor the rollers during your shift, you can:
+  1. Open the [autoroll dashboard](https://autoroll.skia.org/) and put "angle" in `Filter`.  The dashboard provides the status of ANGLE related rollers.  Monitor their modes and numbers.
+  1. Filter out the non-critical emails by a filter: “`from:(*-autoroll (Gerrit))`”.  This improves the signal to noise ratio of your inbox, so the important emails, ex) "`The roll is failing consistently. Time to investigate.`", can stand out.
 
 The autoroller configurations live in the
 [skia-autoroll-internal-config repository](https://skia.googlesource.com/skia-autoroll-internal-config.git/+/main/skia-public).

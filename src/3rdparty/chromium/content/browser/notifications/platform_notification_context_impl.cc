@@ -4,15 +4,16 @@
 
 #include "content/browser/notifications/platform_notification_context_impl.h"
 
+#include <set>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
-#include "base/containers/cxx20_erase.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "content/browser/notifications/blink_notification_service_impl.h"
 #include "content/browser/notifications/notification_database.h"
@@ -48,21 +49,6 @@ bool CanTrigger(const NotificationDatabaseData& data) {
   if (!base::FeatureList::IsEnabled(features::kNotificationTriggers))
     return false;
   return data.notification_data.show_trigger_timestamp && !data.has_triggered;
-}
-
-void LogNotificationTriggerUMA(const NotificationDatabaseData& data) {
-  UMA_HISTOGRAM_BOOLEAN(
-      "Notifications.Triggers.HasShowTrigger",
-      data.notification_data.show_trigger_timestamp.has_value());
-
-  if (!data.notification_data.show_trigger_timestamp)
-    return;
-
-  base::TimeDelta show_trigger_delay =
-      data.notification_data.show_trigger_timestamp.value() - base::Time::Now();
-
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Notifications.Triggers.ShowTriggerDelay",
-                              show_trigger_delay.InDays(), 1, 365, 50);
 }
 
 void RecordOldestNotificationTimeUMA(base::Time oldest_notification_time) {
@@ -155,9 +141,8 @@ void PlatformNotificationContextImpl::Initialize() {
       &PlatformNotificationServiceProxy::RecordNotificationUkmEvent,
       service_proxy_->AsWeakPtr());
 
-  service->GetDisplayedNotifications(
-      base::BindOnce(&PlatformNotificationContextImpl::DidGetNotifications,
-                     this));
+  service->GetDisplayedNotifications(base::BindOnce(
+      &PlatformNotificationContextImpl::DidGetNotifications, this));
 }
 
 void PlatformNotificationContextImpl::DidGetNotifications(
@@ -196,7 +181,7 @@ void PlatformNotificationContextImpl::DoSyncNotificationData(
     return;
 
   // Reset |next_trigger_| to keep track of the next trigger timestamp.
-  next_trigger_ = absl::nullopt;
+  next_trigger_ = std::nullopt;
 
   // Iterate over all notifications and delete all expired ones.
   std::set<std::string> close_notification_ids;
@@ -283,20 +268,22 @@ void PlatformNotificationContextImpl::Shutdown() {
 
 void PlatformNotificationContextImpl::CreateService(
     RenderProcessHost* render_process_host,
-    const url::Origin& origin,
+    const blink::StorageKey& storage_key,
     const GURL& document_url,
     const WeakDocumentPtr& weak_document_ptr,
+    RenderProcessHost::NotificationServiceCreatorType creator_type,
     mojo::PendingReceiver<blink::mojom::NotificationService> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   services_.push_back(std::make_unique<BlinkNotificationServiceImpl>(
       this, browser_context_, service_worker_context_, render_process_host,
-      origin, document_url, weak_document_ptr, std::move(receiver)));
+      storage_key, document_url, weak_document_ptr, creator_type,
+      std::move(receiver)));
 }
 
 void PlatformNotificationContextImpl::RemoveService(
     BlinkNotificationServiceImpl* service) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::EraseIf(
+  std::erase_if(
       services_,
       [service](const std::unique_ptr<BlinkNotificationServiceImpl>& ptr) {
         return ptr.get() == service;
@@ -365,7 +352,7 @@ void PlatformNotificationContextImpl::CheckPermissionsAndDeleteBlocked(
   }
 
   // Erase all valid origins so we're left with invalid ones.
-  base::EraseIf(origins, [controller](const GURL& origin) {
+  std::erase_if(origins, [controller](const GURL& origin) {
     auto permission = controller
                           ->GetPermissionResultForOriginWithoutContext(
                               blink::PermissionType::NOTIFICATIONS,
@@ -382,13 +369,13 @@ void PlatformNotificationContextImpl::CheckPermissionsAndDeleteBlocked(
   InitializeDatabase(base::BindOnce(
       &PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins,
       this, std::move(origins), /* tag= */ std::string(),
-      /* is_shown_by_browser= */ absl::nullopt, std::move(callback)));
+      /* is_shown_by_browser= */ std::nullopt, std::move(callback)));
 }
 
 void PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins(
     std::set<GURL> origins,
     const std::string& tag,
-    absl::optional<bool> is_shown_by_browser,
+    std::optional<bool> is_shown_by_browser,
     DeleteAllResultCallback callback,
     bool initialized) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
@@ -407,9 +394,6 @@ void PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins(
     if (status != NotificationDatabase::STATUS_OK)
       break;
   }
-
-  UMA_HISTOGRAM_ENUMERATION("Notifications.Database.DeleteAllForOriginsResult",
-                            status, NotificationDatabase::STATUS_COUNT);
 
   bool success = status == NotificationDatabase::STATUS_OK;
 
@@ -431,7 +415,7 @@ void PlatformNotificationContextImpl::DoDeleteAllNotificationDataForOrigins(
 
 void PlatformNotificationContextImpl::DeleteAllNotificationDataWithTag(
     const std::string& tag,
-    absl::optional<bool> is_shown_by_browser,
+    std::optional<bool> is_shown_by_browser,
     const GURL& origin,
     DeleteAllResultCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -510,10 +494,6 @@ void PlatformNotificationContextImpl::DoTriggerNotification(
   NotificationDatabase::Status status = database_->ReadNotificationResources(
       database_data.notification_id, database_data.origin, &resources);
 
-  UMA_HISTOGRAM_ENUMERATION(
-      "Notifications.Database.ReadResourcesForTriggeredResult", status,
-      NotificationDatabase::STATUS_COUNT);
-
   if (status != NotificationDatabase::STATUS_OK)
     resources = blink::NotificationResources();
 
@@ -523,19 +503,11 @@ void PlatformNotificationContextImpl::DoTriggerNotification(
   status = database_->WriteNotificationData(write_database_data.origin,
                                             write_database_data);
 
-  UMA_HISTOGRAM_ENUMERATION("Notifications.Database.WriteTriggeredResult",
-                            status, NotificationDatabase::STATUS_COUNT);
-
   if (status != NotificationDatabase::STATUS_OK) {
     database_->DeleteNotificationData(write_database_data.notification_id,
                                       write_database_data.origin);
     return;
   }
-
-  base::Time timestamp =
-      database_data.notification_data.show_trigger_timestamp.value();
-  UMA_HISTOGRAM_LONG_TIMES("Notifications.Triggers.DisplayDelay",
-                           base::Time::Now() - timestamp);
 
   // Remove resources from DB as we don't need them anymore.
   database_->DeleteNotificationResources(write_database_data.notification_id,
@@ -702,9 +674,6 @@ void PlatformNotificationContextImpl::DoReadNotificationResources(
   NotificationDatabase::Status status = database_->ReadNotificationResources(
       notification_id, origin, &notification_resources);
 
-  UMA_HISTOGRAM_ENUMERATION("Notifications.Database.ReadResourcesResult",
-                            status, NotificationDatabase::STATUS_COUNT);
-
   if (status == NotificationDatabase::STATUS_OK) {
     GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), /* success= */ true,
@@ -732,6 +701,7 @@ void PlatformNotificationContextImpl::OnGetDisplayedNotifications(
 }
 
 void PlatformNotificationContextImpl::TryGetDisplayedNotifications(
+    const GURL& origin,
     InitializeGetDisplayedCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -747,9 +717,10 @@ void PlatformNotificationContextImpl::TryGetDisplayedNotifications(
     return;
   }
 
-  service->GetDisplayedNotifications(base::BindOnce(
-      &PlatformNotificationContextImpl::OnGetDisplayedNotifications, this,
-      std::move(callback)));
+  service->GetDisplayedNotificationsForOrigin(
+      origin, base::BindOnce(
+                  &PlatformNotificationContextImpl::OnGetDisplayedNotifications,
+                  this, std::move(callback)));
 }
 
 void PlatformNotificationContextImpl::
@@ -760,6 +731,7 @@ void PlatformNotificationContextImpl::
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   TryGetDisplayedNotifications(
+      origin,
       base::BindOnce(&PlatformNotificationContextImpl::
                          DoReadAllNotificationDataForServiceWorkerRegistration,
                      this, base::Time::Now(), origin,
@@ -773,11 +745,12 @@ void PlatformNotificationContextImpl::
         CountResultCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  TryGetDisplayedNotifications(base::BindOnce(
-      &PlatformNotificationContextImpl::
-          DoCountVisibleNotificationsForServiceWorkerRegistration,
-      this, base::Time::Now(), origin, service_worker_registration_id,
-      std::move(callback)));
+  TryGetDisplayedNotifications(
+      origin, base::BindOnce(
+                  &PlatformNotificationContextImpl::
+                      DoCountVisibleNotificationsForServiceWorkerRegistration,
+                  this, base::Time::Now(), origin,
+                  service_worker_registration_id, std::move(callback)));
 }
 
 void PlatformNotificationContextImpl::
@@ -937,9 +910,6 @@ void PlatformNotificationContextImpl::DoWriteNotificationData(
     return;
   }
 
-  if (base::FeatureList::IsEnabled(features::kNotificationTriggers))
-    LogNotificationTriggerUMA(database_data);
-
   bool replaces_existing = false;
   std::string notification_id =
       notification_id_generator_.GenerateForPersistentNotification(
@@ -990,7 +960,7 @@ void PlatformNotificationContextImpl::DoWriteNotificationData(
 
   // Only store resources for notifications that will be scheduled.
   if (!CanTrigger(write_database_data))
-    write_database_data.notification_resources = absl::nullopt;
+    write_database_data.notification_resources = std::nullopt;
 
   NotificationDatabase::Status status =
       database_->WriteNotificationData(origin, write_database_data);
@@ -1118,10 +1088,6 @@ void PlatformNotificationContextImpl::
   NotificationDatabase::Status status =
       database_->DeleteAllNotificationDataForServiceWorkerRegistration(
           origin, service_worker_registration_id, &deleted_notification_ids);
-
-  UMA_HISTOGRAM_ENUMERATION(
-      "Notifications.Database.DeleteServiceWorkerRegistrationResult", status,
-      NotificationDatabase::STATUS_COUNT);
 
   // Blow away the database if a corruption error occurred during the deletion.
   if (status == NotificationDatabase::STATUS_ERROR_CORRUPTED)

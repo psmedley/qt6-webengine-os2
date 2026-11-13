@@ -28,8 +28,16 @@
 #include "api/jsep.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/video_codecs/builtin_video_decoder_factory.h"
-#include "api/video_codecs/builtin_video_encoder_factory.h"
+#include "api/video_codecs/video_decoder_factory_template.h"
+#include "api/video_codecs/video_decoder_factory_template_dav1d_adapter.h"
+#include "api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h"
+#include "api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h"
+#include "api/video_codecs/video_decoder_factory_template_open_h264_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template.h"
+#include "api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template_open_h264_adapter.h"
 #include "modules/audio_device/include/audio_device.h"
 #include "modules/audio_processing/include/audio_processing.h"
 #include "p2p/base/fake_port_allocator.h"
@@ -47,7 +55,9 @@
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/ssl_fingerprint.h"
 #include "rtc_base/thread.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/scoped_key_value_config.h"
 #ifdef WEBRTC_ANDROID
 #include "pc/test/android_test_initializer.h"
 #endif
@@ -61,6 +71,7 @@ namespace webrtc {
 using RTCConfiguration = PeerConnectionInterface::RTCConfiguration;
 using RTCOfferAnswerOptions = PeerConnectionInterface::RTCOfferAnswerOptions;
 using ::testing::Combine;
+using ::testing::HasSubstr;
 using ::testing::Values;
 
 constexpr int kGenerateCertTimeout = 1000;
@@ -79,9 +90,14 @@ class PeerConnectionCryptoBaseTest : public ::testing::Test {
     pc_factory_ = CreatePeerConnectionFactory(
         rtc::Thread::Current(), rtc::Thread::Current(), rtc::Thread::Current(),
         FakeAudioCaptureModule::Create(), CreateBuiltinAudioEncoderFactory(),
-        CreateBuiltinAudioDecoderFactory(), CreateBuiltinVideoEncoderFactory(),
-        CreateBuiltinVideoDecoderFactory(), nullptr /* audio_mixer */,
-        nullptr /* audio_processing */);
+        CreateBuiltinAudioDecoderFactory(),
+        std::make_unique<VideoEncoderFactoryTemplate<
+            LibvpxVp8EncoderTemplateAdapter, LibvpxVp9EncoderTemplateAdapter,
+            OpenH264EncoderTemplateAdapter, LibaomAv1EncoderTemplateAdapter>>(),
+        std::make_unique<VideoDecoderFactoryTemplate<
+            LibvpxVp8DecoderTemplateAdapter, LibvpxVp9DecoderTemplateAdapter,
+            OpenH264DecoderTemplateAdapter, Dav1dDecoderTemplateAdapter>>(),
+        nullptr /* audio_mixer */, nullptr /* audio_processing */);
   }
 
   WrapperPtr CreatePeerConnection() {
@@ -97,7 +113,8 @@ class PeerConnectionCryptoBaseTest : public ::testing::Test {
       std::unique_ptr<rtc::RTCCertificateGeneratorInterface> cert_gen) {
     auto fake_port_allocator = std::make_unique<cricket::FakePortAllocator>(
         rtc::Thread::Current(),
-        std::make_unique<rtc::BasicPacketSocketFactory>(vss_.get()));
+        std::make_unique<rtc::BasicPacketSocketFactory>(vss_.get()),
+        &field_trials_);
     auto observer = std::make_unique<MockPeerConnectionObserver>();
     RTCConfiguration modified_config = config;
     modified_config.sdp_semantics = sdp_semantics_;
@@ -147,6 +164,7 @@ class PeerConnectionCryptoBaseTest : public ::testing::Test {
     return transport_info->description.connection_role;
   }
 
+  test::ScopedKeyValueConfig field_trials_;
   std::unique_ptr<rtc::VirtualSocketServer> vss_;
   rtc::AutoSocketServerThread main_;
   rtc::scoped_refptr<PeerConnectionFactoryInterface> pc_factory_;
@@ -183,7 +201,7 @@ SdpContentPredicate HaveSdesGcmCryptos(size_t num_crypto_suites) {
     }
     for (size_t i = 0; i < cryptos.size(); ++i) {
       if (cryptos[i].key_params.size() == 67U &&
-          cryptos[i].cipher_suite == "AEAD_AES_256_GCM")
+          cryptos[i].crypto_suite == "AEAD_AES_256_GCM")
         return true;
     }
     return false;
@@ -773,16 +791,13 @@ TEST_P(PeerConnectionCryptoTest, SessionErrorIfFingerprintInvalid) {
   // Set the invalid answer and expect a fingerprint error.
   std::string error;
   ASSERT_FALSE(callee->SetLocalDescription(std::move(invalid_answer), &error));
-  EXPECT_PRED_FORMAT2(AssertStringContains, error,
-                      "Local fingerprint does not match identity.");
+  EXPECT_THAT(error, HasSubstr("Local fingerprint does not match identity."));
 
   // Make sure that setting a valid remote offer or local answer also fails now.
   ASSERT_FALSE(callee->SetRemoteDescription(caller->CreateOffer(), &error));
-  EXPECT_PRED_FORMAT2(AssertStringContains, error,
-                      "Session error code: ERROR_CONTENT.");
+  EXPECT_THAT(error, HasSubstr("Session error code: ERROR_CONTENT."));
   ASSERT_FALSE(callee->SetLocalDescription(std::move(valid_answer), &error));
-  EXPECT_PRED_FORMAT2(AssertStringContains, error,
-                      "Session error code: ERROR_CONTENT.");
+  EXPECT_THAT(error, HasSubstr("Session error code: ERROR_CONTENT."));
 }
 
 INSTANTIATE_TEST_SUITE_P(PeerConnectionCryptoTest,

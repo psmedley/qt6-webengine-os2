@@ -379,7 +379,11 @@ static int open_track_resource_context(AVFormatContext *s,
         return AVERROR(ENOMEM);
 
     track_resource->ctx->io_open = s->io_open;
+#if FF_API_AVFORMAT_IO_CLOSE
+FF_DISABLE_DEPRECATION_WARNINGS
     track_resource->ctx->io_close = s->io_close;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
     track_resource->ctx->io_close2 = s->io_close2;
     track_resource->ctx->flags |= s->flags & ~AVFMT_FLAG_CUSTOM_IO;
 
@@ -627,6 +631,8 @@ static int imf_read_header(AVFormatContext *s)
     IMFContext *c = s->priv_data;
     char *asset_map_path;
     char *tmp_str;
+    AVDictionaryEntry* tcr;
+    char tc_buf[AV_TIMECODE_STR_SIZE];
     int ret = 0;
 
     c->interrupt_callback = &s->interrupt_callback;
@@ -643,8 +649,17 @@ static int imf_read_header(AVFormatContext *s)
 
     av_log(s, AV_LOG_DEBUG, "start parsing IMF CPL: %s\n", s->url);
 
-    if ((ret = ff_imf_parse_cpl(s->pb, &c->cpl)) < 0)
+    if ((ret = ff_imf_parse_cpl(s, s->pb, &c->cpl)) < 0)
         return ret;
+
+    tcr = av_dict_get(s->metadata, "timecode", NULL, 0);
+    if (!tcr && c->cpl->tc) {
+        ret = av_dict_set(&s->metadata, "timecode",
+                          av_timecode_make_string(c->cpl->tc, tc_buf, 0), 0);
+        if (ret)
+            return ret;
+        av_log(s, AV_LOG_INFO, "Setting timecode to IMF CPL timecode %s\n", tc_buf);
+    }
 
     av_log(s,
            AV_LOG_DEBUG,
@@ -686,8 +701,11 @@ static IMFVirtualTrackPlaybackCtx *get_next_track_with_minimum_timestamp(AVForma
 {
     IMFContext *c = s->priv_data;
     IMFVirtualTrackPlaybackCtx *track;
-
     AVRational minimum_timestamp = av_make_q(INT32_MAX, 1);
+
+    if (!c->track_count)
+        return NULL;
+
     for (uint32_t i = c->track_count; i > 0; i--) {
         av_log(s, AV_LOG_TRACE, "Compare track %d timestamp " AVRATIONAL_FORMAT
                " to minimum " AVRATIONAL_FORMAT
@@ -702,8 +720,6 @@ static IMFVirtualTrackPlaybackCtx *get_next_track_with_minimum_timestamp(AVForma
         }
     }
 
-    av_log(s, AV_LOG_DEBUG, "Found next track to read: %d (timestamp: %lf / %lf)\n",
-           track->index, av_q2d(track->current_timestamp), av_q2d(minimum_timestamp));
     return track;
 }
 
@@ -765,6 +781,14 @@ static int imf_read_packet(AVFormatContext *s, AVPacket *pkt)
     AVRational next_timestamp;
 
     track = get_next_track_with_minimum_timestamp(s);
+
+    if (!track) {
+        av_log(s, AV_LOG_ERROR, "No track found for playback\n");
+        return AVERROR_INVALIDDATA;
+    }
+
+    av_log(s, AV_LOG_DEBUG, "Found track %d to read at timestamp %lf\n",
+           track->index, av_q2d(track->current_timestamp));
 
     ret = get_resource_context_for_timestamp(s, track, &resource);
     if (ret)
@@ -998,7 +1022,7 @@ static const AVClass imf_class = {
 const AVInputFormat ff_imf_demuxer = {
     .name           = "imf",
     .long_name      = NULL_IF_CONFIG_SMALL("IMF (Interoperable Master Format)"),
-    .flags          = AVFMT_EXPERIMENTAL | AVFMT_NO_BYTE_SEEK,
+    .flags          = AVFMT_NO_BYTE_SEEK,
     .flags_internal = FF_FMT_INIT_CLEANUP,
     .priv_class     = &imf_class,
     .priv_data_size = sizeof(IMFContext),

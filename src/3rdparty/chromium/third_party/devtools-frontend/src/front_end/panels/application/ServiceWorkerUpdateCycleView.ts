@@ -6,29 +6,30 @@ import * as i18n from '../../core/i18n/i18n.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 const UIStrings = {
   /**
-  *@description Text in Indexed DBViews of the Application panel
-  */
+   *@description Text in Indexed DBViews of the Application panel
+   */
   version: 'Version',
   /**
-  *@description Table heading for Service Workers update information. Update is a noun.
-  */
+   *@description Table heading for Service Workers update information. Update is a noun.
+   */
   updateActivity: 'Update Activity',
   /**
-  *@description Title for the timeline tab.
-  */
+   *@description Title for the timeline tab.
+   */
   timeline: 'Timeline',
   /**
-  *@description Text in Service Workers Update Life Cycle
-  *@example {2} PH1
-  */
+   *@description Text in Service Workers Update Life Cycle
+   *@example {2} PH1
+   */
   startTimeS: 'Start time: {PH1}',
   /**
-  *@description Text for end time of an event
-  *@example {2} PH1
-  */
+   *@description Text for end time of an event
+   *@example {2} PH1
+   */
   endTimeS: 'End time: {PH1}',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/application/ServiceWorkerUpdateCycleView.ts', UIStrings);
@@ -132,6 +133,7 @@ export class ServiceWorkerUpdateCycleView {
 
   private createTimingTable(): void {
     this.tableElement.classList.add('service-worker-update-timing-table');
+    this.tableElement.setAttribute('jslog', `${VisualLogging.tree().context('update-timing-table')}`);
     const timeRanges = this.calculateServiceWorkerUpdateRanges();
     this.updateTimingTable(timeRanges);
   }
@@ -175,6 +177,7 @@ export class ServiceWorkerUpdateCycleView {
       const right = (scale * (endTime - range.end));
 
       const tr = this.tableElement.createChild('tr', 'service-worker-update-timeline');
+      tr.setAttribute('jslog', `${VisualLogging.treeItem().context('update-timeline')}`);
       this.rows.push(tr as HTMLTableRowElement);
       const timingBarVersionElement = tr.createChild('td');
       UI.UIUtils.createTextChild(timingBarVersionElement, '#' + range.id);
@@ -184,6 +187,8 @@ export class ServiceWorkerUpdateCycleView {
       timingBarVersionElement.addEventListener('focus', (event: Event) => {
         this.onFocus(event);
       });
+      timingBarVersionElement.setAttribute(
+          'jslog', `${VisualLogging.treeItemExpand().track({click: true}).context('timing-info')}`);
       UI.ARIAUtils.setChecked(timingBarVersionElement, false);
       const timingBarTitleElement = tr.createChild('td');
       UI.UIUtils.createTextChild(timingBarTitleElement, phaseName);

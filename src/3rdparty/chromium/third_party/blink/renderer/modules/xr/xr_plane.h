@@ -10,13 +10,16 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/geometry/dom_point_read_only.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace blink {
 
 class XRSession;
 class XRSpace;
+
+template <typename IDLType>
+class FrozenArray;
 
 class XRPlane : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
@@ -33,12 +36,12 @@ class XRPlane : public ScriptWrappable {
 
   XRSpace* planeSpace() const;
 
-  absl::optional<TransformationMatrix> MojoFromObject() const;
+  absl::optional<gfx::Transform> MojoFromObject() const;
 
   device::mojom::blink::XRNativeOriginInformationPtr NativeOrigin() const;
 
   String orientation() const;
-  HeapVector<Member<DOMPointReadOnly>> polygon() const;
+  const FrozenArray<DOMPointReadOnly>& polygon() const;
   double lastChangedTime() const;
 
   // Updates plane data from passed in |plane_data|. The resulting instance
@@ -60,12 +63,12 @@ class XRPlane : public ScriptWrappable {
   XRPlane(uint64_t id,
           XRSession* session,
           const absl::optional<Orientation>& orientation,
-          const HeapVector<Member<DOMPointReadOnly>>& polygon,
+          HeapVector<Member<DOMPointReadOnly>> polygon,
           const absl::optional<device::Pose>& mojo_from_plane,
           double timestamp);
 
   const uint64_t id_;
-  HeapVector<Member<DOMPointReadOnly>> polygon_;
+  Member<FrozenArray<DOMPointReadOnly>> polygon_;
   absl::optional<Orientation> orientation_;
 
   // Plane center's pose in device (mojo) space.  Nullptr if the pose of the

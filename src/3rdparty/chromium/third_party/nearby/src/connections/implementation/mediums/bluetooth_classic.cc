@@ -18,11 +18,11 @@
 #include <string>
 #include <utility>
 
+#include "internal/platform/bluetooth_classic.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/uuid.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -41,7 +41,15 @@ std::string ScanModeToString(BluetoothAdapter::ScanMode mode) {
 }
 }  // namespace
 
-BluetoothClassic::BluetoothClassic(BluetoothRadio& radio) : radio_(radio) {}
+BluetoothClassic::BluetoothClassic(BluetoothRadio& radio)
+    : BluetoothClassic(radio, std::make_unique<BluetoothClassicMedium>(
+                                  radio.GetBluetoothAdapter())) {}
+
+BluetoothClassic::BluetoothClassic(
+    BluetoothRadio& radio, std::unique_ptr<BluetoothClassicMedium> medium)
+    : radio_(radio),
+      adapter_(radio_.GetBluetoothAdapter()),
+      medium_(std::move(medium)) {}
 
 BluetoothClassic::~BluetoothClassic() {
   // Destructor is not taking locks, but methods it is calling are.
@@ -64,10 +72,12 @@ bool BluetoothClassic::IsAvailable() const {
 }
 
 bool BluetoothClassic::IsAvailableLocked() const {
-  return medium_.IsValid() && adapter_.IsValid() && adapter_.IsEnabled();
+  return medium_->IsValid() && adapter_.IsValid() && adapter_.IsEnabled();
 }
 
 bool BluetoothClassic::TurnOnDiscoverability(const std::string& device_name) {
+  NEARBY_LOGS(INFO) << "Turning on BT discoverability with device_name="
+                    << device_name;
   MutexLock lock(&mutex_);
 
   if (device_name.empty()) {
@@ -118,6 +128,7 @@ bool BluetoothClassic::TurnOnDiscoverability(const std::string& device_name) {
 }
 
 bool BluetoothClassic::TurnOffDiscoverability() {
+  NEARBY_LOGS(INFO) << "Turning off Bluetooth discoverability.";
   MutexLock lock(&mutex_);
 
   if (!IsDiscoverable()) {
@@ -128,7 +139,7 @@ bool BluetoothClassic::TurnOffDiscoverability() {
   RestoreScanMode();
   RestoreDeviceName();
 
-  NEARBY_LOGS(INFO) << "Turned Bluetooth discoverability off";
+  NEARBY_LOGS(INFO) << "Turned Bluetooth discoverability off.";
   return true;
 }
 
@@ -204,7 +215,7 @@ bool BluetoothClassic::StartDiscovery(DiscoveredDeviceCallback callback) {
     return false;
   }
 
-  if (!medium_.StartDiscovery(callback)) {
+  if (!medium_->StartDiscovery(std::move(callback))) {
     NEARBY_LOGS(INFO) << "Failed to start discovery of BT devices.";
     return false;
   }
@@ -224,7 +235,7 @@ bool BluetoothClassic::StopDiscovery() {
     return false;
   }
 
-  if (!medium_.StopDiscovery()) {
+  if (!medium_->StopDiscovery()) {
     NEARBY_LOGS(INFO) << "Failed to stop discovery of Bluetooth devices.";
     return false;
   }
@@ -265,7 +276,7 @@ bool BluetoothClassic::StartAcceptingConnections(
   }
 
   BluetoothServerSocket socket =
-      medium_.ListenForService(service_id, GenerateUuidFromString(service_id));
+      medium_->ListenForService(service_id, GenerateUuidFromString(service_id));
   if (!socket.IsValid()) {
     NEARBY_LOGS(INFO) << "Failed to start accepting Bluetooth connections for "
                       << service_id;
@@ -290,8 +301,9 @@ bool BluetoothClassic::StartAcceptingConnections(
             server_socket.Close();
             break;
           }
-
-          callback.accepted_cb(service_id, std::move(client_socket));
+          if (callback) {
+            callback(service_id, std::move(client_socket));
+          }
         }
       });
 
@@ -352,14 +364,31 @@ bool BluetoothClassic::StopAcceptingConnections(const std::string& service_id) {
 BluetoothSocket BluetoothClassic::Connect(BluetoothDevice& bluetooth_device,
                                           const std::string& service_id,
                                           CancellationFlag* cancellation_flag) {
-  for (int attempts_count = 0; attempts_count < kConnectAttemptsLimit;
-       attempts_count++) {
+  service_id_to_connect_attempts_count_map_[service_id] = 1;
+  while (service_id_to_connect_attempts_count_map_[service_id] <=
+         kConnectAttemptsLimit) {
+    if (cancellation_flag->Cancelled()) {
+      NEARBY_LOGS(WARNING)
+          << "Attempt #"
+          << service_id_to_connect_attempts_count_map_[service_id]
+          << ": Cannot start creating client BT socket due to cancel.";
+      return BluetoothSocket();
+    }
+
+    NEARBY_LOGS(INFO) << "Attempt #"
+                      << service_id_to_connect_attempts_count_map_[service_id]
+                      << " to connect.";
     auto wrapper_result =
         AttemptToConnect(bluetooth_device, service_id, cancellation_flag);
     if (wrapper_result.IsValid()) {
       return wrapper_result;
     }
+
+    service_id_to_connect_attempts_count_map_[service_id]++;
   }
+
+  NEARBY_LOGS(WARNING) << "Giving up after " << kConnectAttemptsLimit
+                       << " attempts";
   return BluetoothSocket();
 }
 
@@ -390,16 +419,16 @@ BluetoothSocket BluetoothClassic::AttemptToConnect(
     return socket;
   }
 
-  if (cancellation_flag->Cancelled()) {
-    NEARBY_LOGS(INFO) << "Can't create client BT socket due to cancel.";
-    return socket;
-  }
-
-  socket = medium_.ConnectToService(
+  socket = medium_->ConnectToService(
       bluetooth_device, GenerateUuidFromString(service_id), cancellation_flag);
-  if (!socket.IsValid()) {
+
+  // If the socket isn't valid or if the cancellation flag has fired during
+  // `ConnectToService`, return an empty socket. There is no need for a
+  // CancellationFlagListener because the attempt logic is not asynchronous.
+  if (!socket.IsValid() || cancellation_flag->Cancelled()) {
     NEARBY_LOGS(INFO) << "Failed to Connect via BT [service=" << service_id
                       << "]";
+    return BluetoothSocket();
   }
 
   return socket;
@@ -413,7 +442,7 @@ BluetoothDevice BluetoothClassic::GetRemoteDevice(
     return {};
   }
 
-  return medium_.GetRemoteDevice(mac_address);
+  return medium_->GetRemoteDevice(mac_address);
 }
 
 std::string BluetoothClassic::GetMacAddress() const {
@@ -423,7 +452,7 @@ std::string BluetoothClassic::GetMacAddress() const {
     return {};
   }
 
-  return medium_.GetMacAddress();
+  return medium_->GetMacAddress();
 }
 
 std::string BluetoothClassic::GenerateUuidFromString(const std::string& data) {
@@ -432,4 +461,3 @@ std::string BluetoothClassic::GenerateUuidFromString(const std::string& data) {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,14 +12,12 @@
 #include "v8/include/v8-object.h"
 #include "v8/include/v8-template.h"
 
-namespace pdfium {
-namespace fxjse {
+namespace pdfium::fxjse {
 
 const char kFuncTag[] = "function descriptor tag";
 const char kClassTag[] = "class descriptor tag";
 
-}  // namespace fxjse
-}  // namespace pdfium
+}  // namespace pdfium::fxjse
 
 // static
 CFXJSE_HostObject* CFXJSE_HostObject::FromV8(v8::Local<v8::Value> arg) {

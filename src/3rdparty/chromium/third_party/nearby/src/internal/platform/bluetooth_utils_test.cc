@@ -16,7 +16,6 @@
 
 #include "gtest/gtest.h"
 
-namespace location {
 namespace nearby {
 
 constexpr absl::string_view kBluetoothMacAddress{"00:00:E6:88:64:13"};
@@ -83,7 +82,22 @@ TEST(BluetoothUtilsTest, InvalidStringReturnsEmptyByteArray) {
   std::string bad_bt_mac_address_4 = "BLUETOOTHCHIP";
   bytes_result = BluetoothUtils::FromString(bad_bt_mac_address_4);
   EXPECT_TRUE(bytes_result.Empty());
+
+  std::string bad_bt_mac_address_5 = "G1:F2:F3:F4:F5:F6";
+  bytes_result = BluetoothUtils::FromString(bad_bt_mac_address_5);
+  EXPECT_TRUE(bytes_result.Empty());
+}
+
+TEST(BluetoothUtilsTest, FromNumber) {
+  EXPECT_EQ(BluetoothUtils::FromNumber(0xF1F2F3F4F5F6), "F1:F2:F3:F4:F5:F6");
+}
+
+TEST(BluetoothUtilsTest, ToNumber) {
+  EXPECT_EQ(BluetoothUtils::ToNumber("F1:F2:F3:F4:F5:F6"), 0xF1F2F3F4F5F6);
+}
+
+TEST(BluetoothUtilsTest, ToNumberInvalidString) {
+  EXPECT_EQ(BluetoothUtils::ToNumber("22:00:11:33:77:aa::bb::99"), 0);
 }
 
 }  // namespace nearby
-}  // namespace location

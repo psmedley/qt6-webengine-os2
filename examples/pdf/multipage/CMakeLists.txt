@@ -1,5 +1,5 @@
 # Copyright (C) 2022 The Qt Company Ltd.
-# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 cmake_minimum_required(VERSION 3.16)
 project(multipage LANGUAGES CXX)
@@ -12,7 +12,10 @@ endif()
 
 set(INSTALL_EXAMPLEDIR "${INSTALL_EXAMPLESDIR}/pdf/multipage")
 
-find_package(Qt6 REQUIRED COMPONENTS Gui Qml)
+find_package(Qt6 REQUIRED COMPONENTS Gui Qml OPTIONAL_COMPONENTS Svg)
+if(NOT TARGET Qt::Svg)
+    message(WARNING "QtSvg is required as runtime dependency for qtpdfquick examples.")
+endif()
 
 qt_add_executable(multipage
     main.cpp
@@ -63,7 +66,7 @@ set(viewer_resource_files
 
 qt_add_resources(multipage "viewer"
     PREFIX
-        "/pdfviewer"
+        "/multipage"
     FILES
         ${viewer_resource_files}
 )

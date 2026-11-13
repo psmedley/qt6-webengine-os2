@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 
 #include "core/fxcrt/retain_ptr.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CPDF_ExpIntFunc;
 class CPDF_Object;
@@ -48,11 +48,11 @@ class CPDF_Function {
                     float ymin,
                     float ymax) const;
 
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
+#if defined(PDF_USE_SKIA)
   const CPDF_SampledFunc* ToSampledFunc() const;
   const CPDF_ExpIntFunc* ToExpIntFunc() const;
   const CPDF_StitchFunc* ToStitchFunc() const;
-#endif  // defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
+#endif  // defined(PDF_USE_SKIA)
 
  protected:
   explicit CPDF_Function(Type type);
@@ -67,8 +67,8 @@ class CPDF_Function {
                       pdfium::span<float> results) const = 0;
 
   const Type m_Type;
-  uint32_t m_nInputs;
-  uint32_t m_nOutputs;
+  uint32_t m_nInputs = 0;
+  uint32_t m_nOutputs = 0;
   std::vector<float> m_Domains;
   std::vector<float> m_Ranges;
 };

@@ -8,7 +8,8 @@
 
 #include <string>
 
-#include "base/bind.h"
+#include "base/callback_list.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/metrics_hashes.h"
@@ -78,9 +79,11 @@ void ClonedInstallDetector::SaveMachineId(PrefService* local_state,
   MachineIdState id_state = ID_NO_STORED_VALUE;
   if (local_state->HasPrefPath(prefs::kMetricsMachineId)) {
     if (local_state->GetInteger(prefs::kMetricsMachineId) != hashed_id) {
+      DCHECK(!detected_this_session_);
       id_state = ID_CHANGED;
       detected_this_session_ = true;
       local_state->SetBoolean(prefs::kMetricsResetIds, true);
+      callback_list_.Notify();
     } else {
       id_state = ID_UNCHANGED;
     }
@@ -109,6 +112,23 @@ bool ClonedInstallDetector::ClonedInstallDetectedInCurrentSession() const {
   return detected_this_session_;
 }
 
+base::CallbackListSubscription
+ClonedInstallDetector::AddOnClonedInstallDetectedCallback(
+    base::OnceClosure callback) {
+  if (detected_this_session_) {
+    // If this install has already been detected as cloned, run the callback
+    // immediately.
+    std::move(callback).Run();
+    return base::CallbackListSubscription();
+  }
+  return callback_list_.Add(std::move(callback));
+}
+
+void ClonedInstallDetector::SaveMachineIdForTesting(PrefService* local_state,
+                                                    const std::string& raw_id) {
+  SaveMachineId(local_state, raw_id);
+}
+
 // static
 void ClonedInstallDetector::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kMetricsResetIds, false);
@@ -120,13 +140,12 @@ void ClonedInstallDetector::RegisterPrefs(PrefRegistrySimple* registry) {
 
 ClonedInstallInfo ClonedInstallDetector::ReadClonedInstallInfo(
     PrefService* local_state) {
-  ClonedInstallInfo out = {
-//      .last_reset_timestamp =
+  return ClonedInstallInfo{
+      .last_reset_timestamp =
           local_state->GetInt64(prefs::kLastClonedResetTimestamp),
-//      .first_reset_timestamp =
+      .first_reset_timestamp =
           local_state->GetInt64(prefs::kFirstClonedResetTimestamp),
-      /*.reset_count =*/ local_state->GetInteger(prefs::kClonedResetCount)};
-  return out;
+      .reset_count = local_state->GetInteger(prefs::kClonedResetCount)};
 }
 
 void ClonedInstallDetector::ClearClonedInstallInfo(PrefService* local_state) {

@@ -4,7 +4,7 @@
 
 #include "content/browser/browsing_topics/browsing_topics_document_host.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/document_service.h"
@@ -91,11 +91,16 @@ void BrowsingTopicsDocumentHost::GetBrowsingTopics(
     return;
   }
 
+  std::vector<blink::mojom::EpochTopicPtr> topics;
+  GetContentClient()->browser()->HandleTopicsWebApi(
+      render_frame_host().GetLastCommittedOrigin(),
+      render_frame_host().GetMainFrame(),
+      browsing_topics::ApiCallerSource::kJavaScript,
+      /*get_topics=*/true, observe, topics);
+
   std::move(callback).Run(
       blink::mojom::GetBrowsingTopicsResult::NewBrowsingTopics(
-          GetContentClient()->browser()->GetBrowsingTopicsForJsApi(
-              render_frame_host().GetLastCommittedOrigin(),
-              render_frame_host().GetMainFrame(), observe)));
+          std::move(topics)));
 }
 
 BrowsingTopicsDocumentHost::~BrowsingTopicsDocumentHost() = default;

@@ -1,209 +1,94 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/d3d12/BackendD3D12.h"
 
+#include <memory>
 #include <utility>
 
+#include "dawn/common/Log.h"
 #include "dawn/native/D3D12Backend.h"
 #include "dawn/native/Instance.h"
-#include "dawn/native/d3d12/AdapterD3D12.h"
-#include "dawn/native/d3d12/D3D12Error.h"
-#include "dawn/native/d3d12/PlatformFunctions.h"
+#include "dawn/native/d3d/D3DError.h"
+#include "dawn/native/d3d12/PhysicalDeviceD3D12.h"
+#include "dawn/native/d3d12/PlatformFunctionsD3D12.h"
 #include "dawn/native/d3d12/UtilsD3D12.h"
 
 namespace dawn::native::d3d12 {
 
-namespace {
-
-ResultOrError<ComPtr<IDXGIFactory4>> CreateFactory(const PlatformFunctions* functions,
-                                                   BackendValidationLevel validationLevel,
-                                                   bool beginCaptureOnStartup) {
-    ComPtr<IDXGIFactory4> factory;
-
-    uint32_t dxgiFactoryFlags = 0;
-
-    // Enable the debug layer (requires the Graphics Tools "optional feature").
-    {
-        if (validationLevel != BackendValidationLevel::Disabled) {
-            ComPtr<ID3D12Debug3> debugController;
-            if (SUCCEEDED(functions->d3d12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
-                ASSERT(debugController != nullptr);
-                debugController->EnableDebugLayer();
-                if (validationLevel == BackendValidationLevel::Full) {
-                    debugController->SetEnableGPUBasedValidation(true);
-                }
-
-                // Enable additional debug layers.
-                dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-            }
-        }
-
-        if (beginCaptureOnStartup) {
-            ComPtr<IDXGraphicsAnalysis> graphicsAnalysis;
-            if (functions->dxgiGetDebugInterface1 != nullptr &&
-                SUCCEEDED(functions->dxgiGetDebugInterface1(0, IID_PPV_ARGS(&graphicsAnalysis)))) {
-                graphicsAnalysis->BeginCapture();
-            }
-        }
-    }
-
-    if (FAILED(functions->createDxgiFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)))) {
-        return DAWN_INTERNAL_ERROR("Failed to create a DXGI factory");
-    }
-
-    ASSERT(factory != nullptr);
-    return std::move(factory);
-}
-
-ResultOrError<Ref<AdapterBase>> CreateAdapterFromIDXGIAdapter(Backend* backend,
-                                                              ComPtr<IDXGIAdapter> dxgiAdapter) {
-    ComPtr<IDXGIAdapter3> dxgiAdapter3;
-    DAWN_TRY(CheckHRESULT(dxgiAdapter.As(&dxgiAdapter3), "DXGIAdapter retrieval"));
-    Ref<Adapter> adapter = AcquireRef(new Adapter(backend, std::move(dxgiAdapter3)));
-    DAWN_TRY(adapter->Initialize());
-
-    return {std::move(adapter)};
-}
-
-}  // anonymous namespace
-
-Backend::Backend(InstanceBase* instance) : BackendConnection(instance, wgpu::BackendType::D3D12) {}
+Backend::Backend(InstanceBase* instance) : Base(instance, wgpu::BackendType::D3D12) {}
 
 MaybeError Backend::Initialize() {
-    mFunctions = std::make_unique<PlatformFunctions>();
-    DAWN_TRY(mFunctions->LoadFunctions());
+    auto functions = std::make_unique<PlatformFunctions>();
+    DAWN_TRY(functions->LoadFunctions());
 
+    // Enable the debug layer (requires the Graphics Tools "optional feature").
     const auto instance = GetInstance();
-
-    DAWN_TRY_ASSIGN(mFactory, CreateFactory(mFunctions.get(), instance->GetBackendValidationLevel(),
-                                            instance->IsBeginCaptureOnStartupEnabled()));
-
-    return {};
-}
-
-ComPtr<IDXGIFactory4> Backend::GetFactory() const {
-    return mFactory;
-}
-
-MaybeError Backend::EnsureDxcLibrary() {
-    if (mDxcLibrary == nullptr) {
-        DAWN_TRY(CheckHRESULT(
-            mFunctions->dxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&mDxcLibrary)),
-            "DXC create library"));
-        ASSERT(mDxcLibrary != nullptr);
+    if (instance->GetBackendValidationLevel() != BackendValidationLevel::Disabled) {
+        ComPtr<ID3D12Debug3> debugController;
+        if (SUCCEEDED(functions->d3d12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
+            DAWN_ASSERT(debugController != nullptr);
+            debugController->EnableDebugLayer();
+            if (instance->GetBackendValidationLevel() == BackendValidationLevel::Full) {
+                debugController->SetEnableGPUBasedValidation(true);
+            }
+        }
     }
-    return {};
-}
 
-MaybeError Backend::EnsureDxcCompiler() {
-    if (mDxcCompiler == nullptr) {
-        DAWN_TRY(CheckHRESULT(
-            mFunctions->dxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&mDxcCompiler)),
-            "DXC create compiler"));
-        ASSERT(mDxcCompiler != nullptr);
+    if (instance->IsBeginCaptureOnStartupEnabled()) {
+        ComPtr<IDXGraphicsAnalysis> graphicsAnalysis;
+        if (functions->dxgiGetDebugInterface1 != nullptr &&
+            SUCCEEDED(functions->dxgiGetDebugInterface1(0, IID_PPV_ARGS(&graphicsAnalysis)))) {
+            graphicsAnalysis->BeginCapture();
+        }
     }
+
+    DAWN_TRY(Base::Initialize(std::move(functions)));
+
+#ifdef DAWN_USE_BUILT_DXC
+    DAWN_INVALID_IF(!IsDXCAvailable(), "DXC dlls were built, but are not available");
+#endif
+
     return {};
-}
-
-MaybeError Backend::EnsureDxcValidator() {
-    if (mDxcValidator == nullptr) {
-        DAWN_TRY(CheckHRESULT(
-            mFunctions->dxcCreateInstance(CLSID_DxcValidator, IID_PPV_ARGS(&mDxcValidator)),
-            "DXC create validator"));
-        ASSERT(mDxcValidator != nullptr);
-    }
-    return {};
-}
-
-ComPtr<IDxcLibrary> Backend::GetDxcLibrary() const {
-    ASSERT(mDxcLibrary != nullptr);
-    return mDxcLibrary;
-}
-
-ComPtr<IDxcCompiler> Backend::GetDxcCompiler() const {
-    ASSERT(mDxcCompiler != nullptr);
-    return mDxcCompiler;
-}
-
-ComPtr<IDxcValidator> Backend::GetDxcValidator() const {
-    ASSERT(mDxcValidator != nullptr);
-    return mDxcValidator;
-}
-
-ResultOrError<uint64_t> Backend::GetDXCompilerVersion() {
-    DAWN_TRY(EnsureDxcValidator());
-
-    ComPtr<IDxcVersionInfo> versionInfo;
-    DAWN_TRY(CheckHRESULT(mDxcValidator.As(&versionInfo),
-                          "D3D12 QueryInterface IDxcValidator to IDxcVersionInfo"));
-
-    uint32_t compilerMajor, compilerMinor;
-    DAWN_TRY(CheckHRESULT(versionInfo->GetVersion(&compilerMajor, &compilerMinor),
-                          "IDxcVersionInfo::GetVersion"));
-
-    // Pack both into a single version number.
-    return MakeDXCVersion(compilerMajor, compilerMinor);
 }
 
 const PlatformFunctions* Backend::GetFunctions() const {
-    return mFunctions.get();
+    return static_cast<const PlatformFunctions*>(Base::GetFunctions());
 }
 
-std::vector<Ref<AdapterBase>> Backend::DiscoverDefaultAdapters() {
-    AdapterDiscoveryOptions options;
-    auto result = DiscoverAdapters(&options);
-    if (result.IsError()) {
-        GetInstance()->ConsumedError(result.AcquireError());
-        return {};
-    }
-    return result.AcquireSuccess();
-}
+ResultOrError<Ref<PhysicalDeviceBase>> Backend::CreatePhysicalDeviceFromIDXGIAdapter(
+    ComPtr<IDXGIAdapter> dxgiAdapter) {
+    ComPtr<IDXGIAdapter3> dxgiAdapter3;
+    DAWN_TRY(CheckHRESULT(dxgiAdapter.As(&dxgiAdapter3), "DXGIAdapter retrieval"));
+    Ref<PhysicalDevice> physicalDevice =
+        AcquireRef(new PhysicalDevice(this, std::move(dxgiAdapter3)));
+    DAWN_TRY(physicalDevice->Initialize());
 
-ResultOrError<std::vector<Ref<AdapterBase>>> Backend::DiscoverAdapters(
-    const AdapterDiscoveryOptionsBase* optionsBase) {
-    ASSERT(optionsBase->backendType == WGPUBackendType_D3D12);
-    const AdapterDiscoveryOptions* options =
-        static_cast<const AdapterDiscoveryOptions*>(optionsBase);
-
-    std::vector<Ref<AdapterBase>> adapters;
-    if (options->dxgiAdapter != nullptr) {
-        // |dxgiAdapter| was provided. Discover just that adapter.
-        Ref<AdapterBase> adapter;
-        DAWN_TRY_ASSIGN(adapter, CreateAdapterFromIDXGIAdapter(this, options->dxgiAdapter));
-        adapters.push_back(std::move(adapter));
-        return std::move(adapters);
-    }
-
-    // Enumerate and discover all available adapters.
-    for (uint32_t adapterIndex = 0;; ++adapterIndex) {
-        ComPtr<IDXGIAdapter1> dxgiAdapter = nullptr;
-        if (mFactory->EnumAdapters1(adapterIndex, &dxgiAdapter) == DXGI_ERROR_NOT_FOUND) {
-            break;  // No more adapters to enumerate.
-        }
-
-        ASSERT(dxgiAdapter != nullptr);
-        ResultOrError<Ref<AdapterBase>> adapter = CreateAdapterFromIDXGIAdapter(this, dxgiAdapter);
-        if (adapter.IsError()) {
-            GetInstance()->ConsumedError(adapter.AcquireError());
-            continue;
-        }
-
-        adapters.push_back(adapter.AcquireSuccess());
-    }
-
-    return adapters;
+    return {std::move(physicalDevice)};
 }
 
 BackendConnection* Connect(InstanceBase* instance) {

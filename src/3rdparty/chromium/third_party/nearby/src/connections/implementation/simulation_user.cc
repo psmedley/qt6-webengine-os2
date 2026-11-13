@@ -16,10 +16,10 @@
 
 #include "absl/functional/bind_front.h"
 #include "connections/listeners.h"
+#include "internal/interop/device.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/system_clock.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -64,13 +64,12 @@ void SimulationUser::OnEndpointLost(const std::string& endpoint_id) {
   if (lost_latch_) lost_latch_->CountDown();
 }
 
-void SimulationUser::OnPayload(const std::string& endpoint_id,
-                               Payload payload) {
+void SimulationUser::OnPayload(absl::string_view endpoint_id, Payload payload) {
   payload_ = std::move(payload);
   if (payload_latch_) payload_latch_->CountDown();
 }
 
-void SimulationUser::OnPayloadProgress(const std::string& endpoint_id,
+void SimulationUser::OnPayloadProgress(absl::string_view endpoint_id,
                                        const PayloadProgressInfo& info) {
   MutexLock lock(&progress_mutex_);
   progress_info_ = info;
@@ -78,7 +77,7 @@ void SimulationUser::OnPayloadProgress(const std::string& endpoint_id,
 }
 
 bool SimulationUser::WaitForProgress(
-    std::function<bool(const PayloadProgressInfo&)> predicate,
+    absl::AnyInvocable<bool(const PayloadProgressInfo&)> predicate,
     absl::Duration timeout) {
   Future<bool> future;
   {
@@ -131,6 +130,12 @@ void SimulationUser::StartDiscovery(const std::string& service_id,
           .Ok());
 }
 
+void SimulationUser::StopDiscovery() { mgr_.StopDiscovery(&client_); }
+
+Status SimulationUser::UpdateDiscoveryOptions(absl::string_view service_id) {
+  return mgr_.UpdateDiscoveryOptions(&client_, service_id, discovery_options_);
+}
+
 void SimulationUser::InjectEndpoint(
     const std::string& service_id,
     const OutOfBandConnectionMetadata& metadata) {
@@ -159,6 +164,29 @@ void SimulationUser::RequestConnection(CountDownLatch* latch) {
           .Ok());
 }
 
+void SimulationUser::RequestConnectionV3(CountDownLatch* latch,
+                                         const NearbyDevice& remote_device) {
+  initiated_latch_ = latch;
+  ConnectionListener listener = {
+      .initiated_cb =
+          std::bind(&SimulationUser::OnConnectionInitiated, this,
+                    std::placeholders::_1, std::placeholders::_2, true),
+      .accepted_cb =
+          absl::bind_front(&SimulationUser::OnConnectionAccepted, this),
+      .rejected_cb =
+          absl::bind_front(&SimulationUser::OnConnectionRejected, this),
+  };
+  client_.AddCancellationFlag(remote_device.GetEndpointId());
+  EXPECT_TRUE(
+      mgr_.RequestConnectionV3(&client_, remote_device,
+                               {
+                                   .endpoint_info = discovered_.endpoint_info,
+                                   .listener = std::move(listener),
+                               },
+                               connection_options_)
+          .Ok());
+}
+
 void SimulationUser::AcceptConnection(CountDownLatch* latch) {
   accept_latch_ = latch;
   PayloadListener listener = {
@@ -176,6 +204,15 @@ void SimulationUser::RejectConnection(CountDownLatch* latch) {
   EXPECT_TRUE(mgr_.RejectConnection(&client_, discovered_.endpoint_id).Ok());
 }
 
+void SimulationUser::StartListeningForIncomingConnections(
+    CountDownLatch* latch, absl::string_view service_id,
+    const v3::ConnectionListeningOptions& options, Status expected_status) {
+  auto result = mgr_.StartListeningForIncomingConnections(
+      &client_, service_id, /*listener=*/{}, options);
+  latch->CountDown();
+  NEARBY_LOGS(INFO) << "status: " << result.first.ToString();
+  EXPECT_EQ(expected_status, result.first);
+}
+
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

@@ -20,18 +20,6 @@
 namespace egl
 {
 
-namespace
-{
-enum CacheResult
-{
-    kCacheMiss,
-    kCacheHitMemory,
-    kCacheHitDisk,
-    kCacheResultMax,
-};
-
-}  // anonymous namespace
-
 // In oder to store more cache in blob cache, compress cacheData to compressedData
 // before being stored.
 bool CompressBlobCacheData(const size_t cacheSize,
@@ -68,11 +56,19 @@ bool CompressBlobCacheData(const size_t cacheSize,
 
 bool DecompressBlobCacheData(const uint8_t *compressedData,
                              const size_t compressedSize,
+                             size_t maxUncompressedDataSize,
                              angle::MemoryBuffer *uncompressedData)
 {
     // Call zlib function to decompress.
     uint32_t uncompressedSize =
         zlib_internal::GetGzipUncompressedSize(compressedData, compressedSize);
+
+    if (uncompressedSize > maxUncompressedDataSize)
+    {
+        ERR() << "Decompressed data size is larger than the maximum supported (" << uncompressedSize
+              << " vs " << maxUncompressedDataSize << ")";
+        return false;
+    }
 
     // Allocate enough memory.
     if (!uncompressedData->resize(uncompressedSize))
@@ -83,11 +79,11 @@ bool DecompressBlobCacheData(const uint8_t *compressedData,
 
     uLong destLen = uncompressedSize;
     int zResult   = zlib_internal::GzipUncompressHelper(
-          uncompressedData->data(), &destLen, compressedData, static_cast<uLong>(compressedSize));
+        uncompressedData->data(), &destLen, compressedData, static_cast<uLong>(compressedSize));
 
     if (zResult != Z_OK)
     {
-        ERR() << "Failed to decompress data: " << zResult << "\n";
+        WARN() << "Failed to decompress data: " << zResult << "\n";
         return false;
     }
 
@@ -228,6 +224,7 @@ bool BlobCache::getAt(size_t index, const BlobCache::Key **keyOut, BlobCache::Va
 BlobCache::GetAndDecompressResult BlobCache::getAndDecompress(
     angle::ScratchBuffer *scratchBuffer,
     const BlobCache::Key &key,
+    size_t maxUncompressedDataSize,
     angle::MemoryBuffer *uncompressedValueOut)
 {
     ASSERT(uncompressedValueOut);
@@ -243,7 +240,8 @@ BlobCache::GetAndDecompressResult BlobCache::getAndDecompress(
         // This needs to be locked because `DecompressBlobCacheData` is reading shared memory from
         // `compressedValue.data()`.
         std::scoped_lock<std::mutex> lock(mBlobCacheMutex);
-        if (!DecompressBlobCacheData(compressedValue.data(), compressedSize, uncompressedValueOut))
+        if (!DecompressBlobCacheData(compressedValue.data(), compressedSize,
+                                     maxUncompressedDataSize, uncompressedValueOut))
         {
             return GetAndDecompressResult::DecompressFailure;
         }

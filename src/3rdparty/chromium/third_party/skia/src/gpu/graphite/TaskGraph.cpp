@@ -5,6 +5,7 @@
  * found in the LICENSE file.
  */
 
+#include "src/core/SkTraceEvent.h"
 #include "src/gpu/graphite/TaskGraph.h"
 
 namespace skgpu::graphite {
@@ -16,8 +17,13 @@ void TaskGraph::add(sk_sp<Task> task) {
     fTasks.emplace_back(std::move(task));
 }
 
+void TaskGraph::prepend(sk_sp<Task> task) {
+    fTasks.emplace(fTasks.begin(), std::move(task));
+}
+
 bool TaskGraph::prepareResources(ResourceProvider* resourceProvider,
-                                 const SkRuntimeEffectDictionary* runtimeDict) {
+                                 const RuntimeEffectDictionary* runtimeDict) {
+    TRACE_EVENT1("skia.gpu", TRACE_FUNC, "# tasks", fTasks.size());
     for (const auto& task: fTasks) {
         if (!task->prepareResources(resourceProvider, runtimeDict)) {
             return false;
@@ -27,9 +33,13 @@ bool TaskGraph::prepareResources(ResourceProvider* resourceProvider,
     return true;
 }
 
-bool TaskGraph::addCommands(ResourceProvider* resourceProvider, CommandBuffer* commandBuffer) {
+bool TaskGraph::addCommands(Context* context,
+                            CommandBuffer* commandBuffer,
+                            Task::ReplayTargetData replayData) {
+    TRACE_EVENT1("skia.gpu", TRACE_FUNC, "# tasks", fTasks.size());
+
     for (const auto& task: fTasks) {
-        if (!task->addCommands(resourceProvider, commandBuffer)) {
+        if (!task->addCommands(context, commandBuffer, replayData)) {
             return false;
         }
     }

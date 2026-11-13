@@ -15,8 +15,7 @@
 --
 
 DROP TABLE IF EXISTS {{table_name}}_unagg_values;
-
-CREATE TABLE {{table_name}}_unagg_values AS
+CREATE PERFETTO TABLE {{table_name}}_unagg_values AS
 SELECT
   upid,
   RepeatedField(
@@ -25,6 +24,6 @@ SELECT
       'oom_score', oom_score_val,
       'value', {{table_name}}_val
     )
-  ) as metric
+  ) AS metric
 FROM {{table_name}}_by_oom_span
 GROUP BY upid;

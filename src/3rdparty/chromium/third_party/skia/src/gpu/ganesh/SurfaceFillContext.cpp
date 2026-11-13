@@ -7,6 +7,7 @@
 
 #include "src/gpu/ganesh/SurfaceFillContext.h"
 
+#include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/effects/GrMatrixEffect.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #include "src/gpu/ganesh/geometry/GrRect.h"
@@ -27,7 +28,7 @@ private:
     GrDrawingManager* fDrawingManager;
 };
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 // In MDB mode the reffing of the 'getLastOpsTask' call's result allows in-progress
 // OpsTask to be picked up and added to by SurfaceFillContext lower in the call
@@ -264,4 +265,4 @@ void SurfaceFillContext::onValidate() const {
 }
 #endif
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh

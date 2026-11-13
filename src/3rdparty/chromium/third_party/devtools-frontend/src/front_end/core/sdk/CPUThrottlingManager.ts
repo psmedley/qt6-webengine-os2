@@ -51,8 +51,19 @@ export class CPUThrottlingManager extends Common.ObjectWrapper.ObjectWrapper<Eve
     this.dispatchEventToListeners(Events.HardwareConcurrencyChanged, this.#hardwareConcurrencyInternal);
   }
 
+  hasPrimaryPageTargetSet(): boolean {
+    // In some environments, such as Node, trying to check if we have a page
+    // target may error. So if we get any errors here at all, assume that we do
+    // not have a target.
+    try {
+      return TargetManager.instance().primaryPageTarget() !== null;
+    } catch {
+      return false;
+    }
+  }
+
   async getHardwareConcurrency(): Promise<number> {
-    const target = TargetManager.instance().mainFrameTarget();
+    const target = TargetManager.instance().primaryPageTarget();
     const existingCallback = this.#pendingMainTargetPromise;
 
     // If the main target hasn't attached yet, block callers until it appears.
@@ -104,9 +115,7 @@ export class CPUThrottlingManager extends Common.ObjectWrapper.ObjectWrapper<Eve
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   RateChanged = 'RateChanged',
   HardwareConcurrencyChanged = 'HardwareConcurrencyChanged',
 }
@@ -120,8 +129,6 @@ export function throttlingManager(): CPUThrottlingManager {
   return CPUThrottlingManager.instance();
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
 export enum CPUThrottlingRates {
   NoThrottling = 1,
   MidTierMobile = 4,

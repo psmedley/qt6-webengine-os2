@@ -3,145 +3,178 @@
 // found in the LICENSE file.
 
 import * as Common from '../../core/common/common.js';
+import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
+import type * as ElementsComponents from './components/components.js';
 import type * as Elements from './elements.js';
 
-import * as i18n from '../../core/i18n/i18n.js';
 const UIStrings = {
   /**
-  * @description Command for showing the 'Elements' panel. Elements refers to HTML elements.
-  */
+   * @description Command for showing the 'Elements' panel. Elements refers to HTML elements.
+   */
   showElements: 'Show Elements',
   /**
-  * @description Title of the Elements Panel. Elements refers to HTML elements.
-  */
+   * @description Title of the Elements Panel. Elements refers to HTML elements.
+   */
   elements: 'Elements',
   /**
-  * @description Command for showing the 'Event Listeners' tool. Refers to DOM Event listeners.
-  */
+   * @description Command for showing the 'Event Listeners' tool. Refers to DOM Event listeners.
+   */
   showEventListeners: 'Show Event Listeners',
   /**
-  * @description Title of the 'Event Listeners' tool in the sidebar of the elements panel. Refers to
-  * DOM Event listeners.
-  */
+   * @description Title of the 'Event Listeners' tool in the sidebar of the elements panel. Refers to
+   * DOM Event listeners.
+   */
   eventListeners: 'Event Listeners',
   /**
-  * @description Command for showing the 'Properties' tool. Refers to HTML properties.
-  */
+   * @description Command for showing the 'Properties' tool. Refers to HTML properties.
+   */
   showProperties: 'Show Properties',
   /**
-  * @description Title of the 'Properties' tool in the sidebar of the elements tool. Refers to HTML
-  * properties.
-  */
+   * @description Title of the 'Properties' tool in the sidebar of the elements tool. Refers to HTML
+   * properties.
+   */
   properties: 'Properties',
   /**
-  * @description Command for showing the 'Stack Trace' tool. Stack trace refers to the location in
-  * the code where the program was at a point in time.
-  */
+   * @description Command for showing the 'Stack Trace' tool. Stack trace refers to the location in
+   * the code where the program was at a point in time.
+   */
   showStackTrace: 'Show Stack Trace',
   /**
-  * @description Text for the execution stack trace tool, which shows the stack trace from when this
-  * HTML element was created. Stack trace refers to the location in the code where the program was
-  * at a point in time.
-  */
+   * @description Text for the execution stack trace tool, which shows the stack trace from when this
+   * HTML element was created. Stack trace refers to the location in the code where the program was
+   * at a point in time.
+   */
   stackTrace: 'Stack Trace',
   /**
-  * @description Command for showing the 'Layout' tool
-  */
+   * @description Command for showing the 'Layout' tool
+   */
   showLayout: 'Show Layout',
   /**
-  * @description The title of the 'Layout' tool in the sidebar of the elements panel.
-  */
+   * @description The title of the 'Layout' tool in the sidebar of the elements panel.
+   */
   layout: 'Layout',
   /**
-  * @description Command to hide a HTML element in the Elements tree.
-  */
+   * @description Command to hide a HTML element in the Elements tree.
+   */
   hideElement: 'Hide element',
   /**
-  * @description A context menu item (command) in the Elements panel that allows the user to edit the
-  * currently selected node as raw HTML text.
-  */
+   * @description A context menu item (command) in the Elements panel that allows the user to edit the
+   * currently selected node as raw HTML text.
+   */
   editAsHtml: 'Edit as HTML',
   /**
-  * @description A context menu item (command) in the Elements panel that creates an exact copy of
-  * this HTML element.
-  */
+   * @description A context menu item (command) in the Elements panel that creates an exact copy of
+   * this HTML element.
+   */
   duplicateElement: 'Duplicate element',
   /**
-  * @description A command in the Elements panel to undo the last action the user took.
-  */
+   * @description A command in the Elements panel to undo the last action the user took.
+   */
   undo: 'Undo',
   /**
-  * @description A command in the Elements panel to redo the last action the user took (undo an
-  * undo).
-  */
+   * @description A command in the Elements panel to redo the last action the user took (undo an
+   * undo).
+   */
   redo: 'Redo',
   /**
-  * @description A command in the Elements panel to capture a screenshot of the selected area.
-  */
+   * @description A command in the Elements panel to capture a screenshot of the selected area.
+   */
   captureAreaScreenshot: 'Capture area screenshot',
   /**
-  * @description Title/tooltip of an action in the elements panel to toggle element search on/off.
-  */
+   * @description Title/tooltip of an action in the elements panel to toggle element search on/off.
+   */
   selectAnElementInThePageTo: 'Select an element in the page to inspect it',
   /**
-  * @description Title of a setting under the Elements category in Settings. Whether words should be
-  * wrapped around at the end of lines or not.
-  */
+   *@description Title/tooltip of an action in the elements panel to add a new style rule.
+   */
+  newStyleRule: 'New Style Rule',
+  /**
+   * @description Title/tooltip of an action in the elements panel to refresh the event listeners.
+   */
+  refreshEventListeners: 'Refresh event listeners',
+  /**
+   * @description Title of a setting under the Elements category in Settings. Whether words should be
+   * wrapped around at the end of lines or not.
+   */
   wordWrap: 'Word wrap',
   /**
-  * @description Title of a setting under the Elements category. Whether words should be wrapped
-  * around at the end of lines or not when showing DOM elements.
-  */
+   * @description Title of a setting under the Elements category. Whether words should be wrapped
+   * around at the end of lines or not when showing DOM elements.
+   */
   enableDomWordWrap: 'Enable `DOM` word wrap',
   /**
-  * @description Title of a setting under the Elements category. Whether words should be wrapped
-  * around at the end of lines or not when showing DOM elements.
-  */
+   * @description Title of a setting under the Elements category. Whether words should be wrapped
+   * around at the end of lines or not when showing DOM elements.
+   */
   disableDomWordWrap: 'Disable `DOM` word wrap',
   /**
-  * @description Title of a setting under the Elements category. Whether to show/hide code comments in HTML.
-  */
+   * @description Title of a setting under the Elements category. Whether to show/hide code comments in HTML.
+   */
   showHtmlComments: 'Show `HTML` comments',
   /**
-  * @description Title of a setting under the Elements category. Whether to show/hide code comments in HTML.
-  */
+   * @description Title of a setting under the Elements category. Whether to show/hide code comments in HTML.
+   */
   hideHtmlComments: 'Hide `HTML` comments',
   /**
-  * @description Title of a setting under the Elements category in Settings. Whether the position of
-  * the DOM node on the actual website should be highlighted/revealed to the user when they hover
-  * over the corresponding node in the DOM tree in DevTools.
-  */
+   * @description Title of a setting under the Elements category in Settings. Whether the position of
+   * the DOM node on the actual website should be highlighted/revealed to the user when they hover
+   * over the corresponding node in the DOM tree in DevTools.
+   */
   revealDomNodeOnHover: 'Reveal `DOM` node on hover',
   /**
-  * @description Title of a setting under the Elements category in Settings. Turns on a mode where
-  * the inspect tooltip (an information pane that hovers next to selected DOM elements) has extra
-  * detail.
-  */
+   * @description Title of a setting under the Elements category in Settings. Turns on a mode where
+   * the inspect tooltip (an information pane that hovers next to selected DOM elements) has extra
+   * detail.
+   */
   showDetailedInspectTooltip: 'Show detailed inspect tooltip',
   /**
-  *@description A context menu item (command) in the Elements panel that copy the styles of
-  * the HTML element.
-  */
+   * @description Title of a setting under the Elements category in Settings. Turns on a mode where
+   * hovering over CSS properties in the Styles pane will display a popover with documentation.
+   */
+  showCSSDocumentationTooltip: 'Show CSS documentation tooltip',
+  /**
+   *@description A context menu item (command) in the Elements panel that copy the styles of
+   * the HTML element.
+   */
   copyStyles: 'Copy styles',
   /**
    * @description Title of a setting under the Elements category. Whether to show/hide hide
    * the shadow DOM nodes of HTML elements that are built into the browser (e.g. the <input> element).
    */
   showUserAgentShadowDOM: 'Show user agent shadow `DOM`',
+  /**
+   * @description Command for showing the 'Computed' tool. Displays computed CSS styles in Elements sidebar.
+   */
+  showComputedStyles: 'Show Computed Styles',
+  /**
+   * @description Command for showing the 'Styles' tool. Displays CSS styles in Elements sidebar.
+   */
+  showStyles: 'Show Styles',
+  /**
+   * @description Command for toggling the eye dropper when the color picker is open
+   */
+  toggleEyeDropper: 'Toggle eye dropper',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/elements/elements-meta.ts', UIStrings);
 const i18nLazyString = i18n.i18n.getLazilyComputedLocalizedString.bind(undefined, str_);
 let loadedElementsModule: (typeof Elements|undefined);
+let loadedElementsComponentsModule: (typeof ElementsComponents|undefined);
 
 async function loadElementsModule(): Promise<typeof Elements> {
   if (!loadedElementsModule) {
     loadedElementsModule = await import('./elements.js');
   }
   return loadedElementsModule;
+}
+async function loadElementsComponentsModule(): Promise<typeof ElementsComponents> {
+  if (!loadedElementsComponentsModule) {
+    loadedElementsComponentsModule = await import('./components/components.js');
+  }
+  return loadedElementsComponentsModule;
 }
 function maybeRetrieveContextTypes<T = unknown>(getClassCallBack: (elementsModule: typeof Elements) => T[]): T[] {
   if (loadedElementsModule === undefined) {
@@ -161,6 +194,26 @@ UI.ViewManager.registerViewExtension({
   async loadView() {
     const Elements = await loadElementsModule();
     return Elements.ElementsPanel.ElementsPanel.instance();
+  },
+});
+
+UI.ActionRegistration.registerActionExtension({
+  actionId: 'elements.show-styles',
+  category: UI.ActionRegistration.ActionCategory.ELEMENTS,
+  title: i18nLazyString(UIStrings.showStyles),
+  async loadActionDelegate() {
+    const Elements = await loadElementsModule();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
+  },
+});
+
+UI.ActionRegistration.registerActionExtension({
+  actionId: 'elements.show-computed',
+  category: UI.ActionRegistration.ActionCategory.ELEMENTS,
+  title: i18nLazyString(UIStrings.showComputedStyles),
+  async loadActionDelegate() {
+    const Elements = await loadElementsModule();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
   },
 });
 
@@ -187,7 +240,7 @@ UI.ViewManager.registerViewExtension({
   persistence: UI.ViewManager.ViewPersistence.PERMANENT,
   async loadView() {
     const Elements = await loadElementsModule();
-    return Elements.PropertiesWidget.PropertiesWidget.instance();
+    return new Elements.PropertiesWidget.PropertiesWidget();
   },
 });
 
@@ -201,7 +254,7 @@ UI.ViewManager.registerViewExtension({
   persistence: UI.ViewManager.ViewPersistence.PERMANENT,
   async loadView() {
     const Elements = await loadElementsModule();
-    return Elements.NodeStackTraceWidget.NodeStackTraceWidget.instance();
+    return new Elements.NodeStackTraceWidget.NodeStackTraceWidget();
   },
 });
 
@@ -213,8 +266,8 @@ UI.ViewManager.registerViewExtension({
   order: 4,
   persistence: UI.ViewManager.ViewPersistence.PERMANENT,
   async loadView() {
-    const Elements = await loadElementsModule();
-    return Elements.LayoutSidebarPane.LayoutSidebarPane.instance();
+    const ElementsComponents = await loadElementsComponentsModule();
+    return ElementsComponents.LayoutPane.LayoutPane.instance().wrapper as UI.Widget.Widget;
   },
 });
 
@@ -224,7 +277,7 @@ UI.ActionRegistration.registerActionExtension({
   title: i18nLazyString(UIStrings.hideElement),
   async loadActionDelegate() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.ElementsActionDelegate.instance();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
   },
   contextTypes() {
     return maybeRetrieveContextTypes(Elements => [Elements.ElementsPanel.ElementsPanel]);
@@ -237,12 +290,30 @@ UI.ActionRegistration.registerActionExtension({
 });
 
 UI.ActionRegistration.registerActionExtension({
+  actionId: 'elements.toggle-eye-dropper',
+  category: UI.ActionRegistration.ActionCategory.ELEMENTS,
+  title: i18nLazyString(UIStrings.toggleEyeDropper),
+  async loadActionDelegate() {
+    const Elements = await loadElementsModule();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
+  },
+  contextTypes() {
+    return maybeRetrieveContextTypes(Elements => [Elements.ColorSwatchPopoverIcon.ColorSwatchPopoverIcon]);
+  },
+  bindings: [
+    {
+      shortcut: 'c',
+    },
+  ],
+});
+
+UI.ActionRegistration.registerActionExtension({
   actionId: 'elements.edit-as-html',
   category: UI.ActionRegistration.ActionCategory.ELEMENTS,
   title: i18nLazyString(UIStrings.editAsHtml),
   async loadActionDelegate() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.ElementsActionDelegate.instance();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
   },
   contextTypes() {
     return maybeRetrieveContextTypes(Elements => [Elements.ElementsPanel.ElementsPanel]);
@@ -260,7 +331,7 @@ UI.ActionRegistration.registerActionExtension({
   title: i18nLazyString(UIStrings.duplicateElement),
   async loadActionDelegate() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.ElementsActionDelegate.instance();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
   },
   contextTypes() {
     return maybeRetrieveContextTypes(Elements => [Elements.ElementsPanel.ElementsPanel]);
@@ -278,7 +349,7 @@ UI.ActionRegistration.registerActionExtension({
   title: i18nLazyString(UIStrings.copyStyles),
   async loadActionDelegate() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.ElementsActionDelegate.instance();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
   },
   contextTypes() {
     return maybeRetrieveContextTypes(Elements => [Elements.ElementsPanel.ElementsPanel]);
@@ -301,7 +372,7 @@ UI.ActionRegistration.registerActionExtension({
   title: i18nLazyString(UIStrings.undo),
   async loadActionDelegate() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.ElementsActionDelegate.instance();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
   },
   contextTypes() {
     return maybeRetrieveContextTypes(Elements => [Elements.ElementsPanel.ElementsPanel]);
@@ -324,7 +395,7 @@ UI.ActionRegistration.registerActionExtension({
   title: i18nLazyString(UIStrings.redo),
   async loadActionDelegate() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.ElementsActionDelegate.instance();
+    return new Elements.ElementsPanel.ElementsActionDelegate();
   },
   contextTypes() {
     return maybeRetrieveContextTypes(Elements => [Elements.ElementsPanel.ElementsPanel]);
@@ -345,7 +416,7 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'elements.capture-area-screenshot',
   async loadActionDelegate() {
     const Elements = await loadElementsModule();
-    return Elements.InspectElementModeController.ToggleSearchActionDelegate.instance();
+    return new Elements.InspectElementModeController.ToggleSearchActionDelegate();
   },
   condition: Root.Runtime.ConditionName.CAN_DOCK,
   title: i18nLazyString(UIStrings.captureAreaScreenshot),
@@ -358,7 +429,7 @@ UI.ActionRegistration.registerActionExtension({
   toggleable: true,
   async loadActionDelegate() {
     const Elements = await loadElementsModule();
-    return Elements.InspectElementModeController.ToggleSearchActionDelegate.instance();
+    return new Elements.InspectElementModeController.ToggleSearchActionDelegate();
   },
   title: i18nLazyString(UIStrings.selectAnElementInThePageTo),
   iconClass: UI.ActionRegistration.IconClass.LARGEICON_NODE_SEARCH,
@@ -372,6 +443,34 @@ UI.ActionRegistration.registerActionExtension({
       platform: UI.ActionRegistration.Platforms.Mac,
     },
   ],
+});
+
+UI.ActionRegistration.registerActionExtension({
+  category: UI.ActionRegistration.ActionCategory.ELEMENTS,
+  actionId: 'elements.new-style-rule',
+  title: i18nLazyString(UIStrings.newStyleRule),
+  iconClass: UI.ActionRegistration.IconClass.PLUS,
+  async loadActionDelegate() {
+    const Elements = await loadElementsModule();
+    return new Elements.StylesSidebarPane.ActionDelegate();
+  },
+  contextTypes() {
+    return maybeRetrieveContextTypes(Elements => [Elements.StylesSidebarPane.StylesSidebarPane]);
+  },
+});
+
+UI.ActionRegistration.registerActionExtension({
+  category: UI.ActionRegistration.ActionCategory.ELEMENTS,
+  actionId: 'elements.refresh-event-listeners',
+  title: i18nLazyString(UIStrings.refreshEventListeners),
+  iconClass: UI.ActionRegistration.IconClass.REFRESH,
+  async loadActionDelegate() {
+    const Elements = await loadElementsModule();
+    return new Elements.EventListenersWidget.ActionDelegate();
+  },
+  contextTypes() {
+    return maybeRetrieveContextTypes(Elements => [Elements.EventListenersWidget.EventListenersWidget]);
+  },
 });
 
 Common.Settings.registerSettingExtension({
@@ -458,6 +557,15 @@ Common.Settings.registerSettingExtension({
   defaultValue: [],
 });
 
+Common.Settings.registerSettingExtension({
+  category: Common.Settings.SettingCategory.ELEMENTS,
+  storageType: Common.Settings.SettingStorageType.Synced,
+  title: i18nLazyString(UIStrings.showCSSDocumentationTooltip),
+  settingName: 'showCSSPropertyDocumentationOnHover',
+  settingType: Common.Settings.SettingType.BOOLEAN,
+  defaultValue: true,
+});
+
 UI.ContextMenu.registerProvider({
   contextTypes() {
     return [
@@ -468,14 +576,14 @@ UI.ContextMenu.registerProvider({
   },
   async loadProvider() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.ContextMenuProvider.instance();
+    return new Elements.ElementsPanel.ContextMenuProvider();
   },
   experiment: undefined,
 });
 
 UI.ViewManager.registerLocationResolver({
   name: UI.ViewManager.ViewLocationValues.ELEMENTS_SIDEBAR,
-  category: UI.ViewManager.ViewLocationCategoryValues.ELEMENTS,
+  category: UI.ViewManager.ViewLocationCategory.ELEMENTS,
   async loadResolver() {
     const Elements = await loadElementsModule();
     return Elements.ElementsPanel.ElementsPanel.instance();
@@ -493,7 +601,7 @@ Common.Revealer.registerRevealer({
   destination: Common.Revealer.RevealerDestination.ELEMENTS_PANEL,
   async loadRevealer() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.DOMNodeRevealer.instance();
+    return new Elements.ElementsPanel.DOMNodeRevealer();
   },
 });
 
@@ -506,7 +614,7 @@ Common.Revealer.registerRevealer({
   destination: Common.Revealer.RevealerDestination.STYLES_SIDEBAR,
   async loadRevealer() {
     const Elements = await loadElementsModule();
-    return Elements.ElementsPanel.CSSPropertyRevealer.instance();
+    return new Elements.ElementsPanel.CSSPropertyRevealer();
   },
 });
 

@@ -5,21 +5,34 @@
 #ifndef BASE_TEST_SCOPED_FEATURE_LIST_H_
 #define BASE_TEST_SCOPED_FEATURE_LIST_H_
 
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ref.h"
-#include "base/memory/ref_counted.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/types/pass_key.h"
 #include "third_party/abseil-cpp/absl/base/attributes.h"
 
 namespace base::test {
+
+// A reference to a base::Feature and field trial params that should be force
+// enabled and overwritten for test purposes.
+struct FeatureRefAndParams {
+  FeatureRefAndParams(const Feature& feature ABSL_ATTRIBUTE_LIFETIME_BOUND,
+                      const FieldTrialParams& params);
+
+  FeatureRefAndParams(const FeatureRefAndParams& other);
+
+  ~FeatureRefAndParams();
+
+  const raw_ref<const Feature> feature;
+  const FieldTrialParams params;
+};
 
 // A lightweight wrapper for a reference to a base::Feature. Allows lists of
 // features to be enabled/disabled to be easily passed without actually copying
@@ -35,6 +48,9 @@ class FeatureRef {
   const Feature* operator->() const { return &*feature_; }
 
  private:
+  friend bool operator==(const FeatureRef& lhs, const FeatureRef& rhs) {
+    return &*lhs == &*rhs;
+  }
   friend bool operator<(const FeatureRef& lhs, const FeatureRef& rhs) {
     return &*lhs < &*rhs;
   }
@@ -42,9 +58,11 @@ class FeatureRef {
   raw_ref<const Feature> feature_;
 };
 
-// ScopedFeatureList resets the global FeatureList instance to a new empty
-// instance and restores the original instance upon destruction. When using the
-// non-deprecated APIs, a corresponding FieldTrialList is also created.
+// ScopedFeatureList resets the global FeatureList instance to a new instance
+// and restores the original instance upon destruction. Whether the existing
+// FeatureList state is kept or discarded depends on the `Init` method called.
+// When using the non-deprecated APIs, a corresponding FieldTrialList is also
+// created.
 //
 // Note: Re-using the same object is allowed. To reset the feature list and
 // initialize it anew, call `Reset` and then one of the `Init` methods.
@@ -66,21 +84,6 @@ class ScopedFeatureList final {
  public:
   struct Features;
   struct FeatureWithStudyGroup;
-
-  // TODO(https://crbug.com/1370851): Temporary "alias" to allow incremental
-  // migration.
-  // A reference to a base::Feature and field trial params that should be force
-  // enabled and overwritten for test purposes.
-  struct FeatureAndParams {
-    FeatureAndParams(const Feature& feature ABSL_ATTRIBUTE_LIFETIME_BOUND,
-                     const FieldTrialParams& params);
-    ~FeatureAndParams();
-
-    FeatureAndParams(const FeatureAndParams& other);
-
-    const Feature& feature;
-    const FieldTrialParams params;
-  };
 
   // Constructs the instance in a non-initialized state.
   ScopedFeatureList();
@@ -158,7 +161,7 @@ class ScopedFeatureList final {
   // Note: This creates a scoped global field trial list if there is not
   // currently one.
   void InitWithFeaturesAndParameters(
-      const std::vector<FeatureAndParams>& enabled_features,
+      const std::vector<FeatureRefAndParams>& enabled_features,
       const std::vector<FeatureRef>& disabled_features);
 
   // Initializes and registers a FeatureList instance based on the current
@@ -169,6 +172,12 @@ class ScopedFeatureList final {
   // FeatureList and overridden with a single feature either enabled or
   // disabled depending on |enabled|.
   void InitWithFeatureState(const Feature& feature, bool enabled);
+
+  // Same as `InitWithFeatureState()`, but supports multiple features at a time.
+  // `feature_states` - a map where the keys are features and the values are
+  //                    their overridden states (`false` for force-disabled,
+  //                    `true` for force-enabled).
+  void InitWithFeatureStates(const flat_map<FeatureRef, bool>& feature_states);
 
  private:
   using PassKey = base::PassKey<ScopedFeatureList>;
@@ -183,7 +192,7 @@ class ScopedFeatureList final {
   // empty).
   void InitWithFeaturesImpl(
       const std::vector<FeatureRef>& enabled_features,
-      const std::vector<FeatureAndParams>& enabled_features_and_params,
+      const std::vector<FeatureRefAndParams>& enabled_features_and_params,
       const std::vector<FeatureRef>& disabled_features,
       bool keep_existing_states = true);
 
@@ -208,8 +217,6 @@ class ScopedFeatureList final {
   std::string original_params_;
   std::unique_ptr<base::FieldTrialList> field_trial_list_;
 };
-
-using FeatureRefAndParams = ScopedFeatureList::FeatureAndParams;
 
 }  // namespace base::test
 

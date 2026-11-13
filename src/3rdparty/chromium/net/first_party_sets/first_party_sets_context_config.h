@@ -5,10 +5,11 @@
 #ifndef NET_FIRST_PARTY_SETS_FIRST_PARTY_SETS_CONTEXT_CONFIG_H_
 #define NET_FIRST_PARTY_SETS_FIRST_PARTY_SETS_CONTEXT_CONFIG_H_
 
+#include "build/build_config.h"
 #include "base/containers/flat_map.h"
 #include "base/functional/function_ref.h"
 #include "net/base/schemeful_site.h"
-#include "net/first_party_sets/first_party_set_entry.h"
+#include "net/first_party_sets/first_party_set_entry_override.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace mojo {
@@ -25,11 +26,9 @@ namespace net {
 // info in the given network context.
 class NET_EXPORT FirstPartySetsContextConfig {
  public:
-  using OverrideSets =
-      base::flat_map<SchemefulSite, absl::optional<FirstPartySetEntry>>;
-
   FirstPartySetsContextConfig();
-  explicit FirstPartySetsContextConfig(OverrideSets customizations);
+  explicit FirstPartySetsContextConfig(
+      base::flat_map<SchemefulSite, FirstPartySetEntryOverride> customizations);
 
   FirstPartySetsContextConfig(FirstPartySetsContextConfig&& other);
   FirstPartySetsContextConfig& operator=(FirstPartySetsContextConfig&& other);
@@ -38,16 +37,19 @@ class NET_EXPORT FirstPartySetsContextConfig {
 
   FirstPartySetsContextConfig Clone() const;
 
+#if BUILDFLAG(IS_MAC_13)
+  bool operator==(const FirstPartySetsContextConfig& other) const = default;
+#else
   bool operator==(const FirstPartySetsContextConfig& other) const;
+#endif
 
   bool empty() const { return customizations_.empty(); }
 
   // Finds an override for the given site, in this context. Returns:
   // - nullopt if no override was found.
-  // - optional(nullopt) if an override was found, and it's a deletion.
-  // - optional(optional(entry)) if an override was found, and it's a
-  // modification/addition.
-  absl::optional<absl::optional<FirstPartySetEntry>> FindOverride(
+  // - optional(override) if an override was found. The override may be a
+  //     deletion or a modification/addition.
+  absl::optional<FirstPartySetEntryOverride> FindOverride(
       const SchemefulSite& site) const;
 
   // Returns whether an override can be found for the given site in this
@@ -55,17 +57,14 @@ class NET_EXPORT FirstPartySetsContextConfig {
   bool Contains(const SchemefulSite& site) const;
 
   // Synchronously iterate over all the override entries. Each iteration will be
-  // invoked with the relevant site and the override that applies to it. The
-  // override will be `nullopt` if it is a deletion, or `optional(entry)` if it
-  // is a modification of an existing entry, or an addition.
+  // invoked with the relevant site and the override that applies to it.
   //
   // Returns early if any of the iterations returns false. Returns false if
   // iteration was incomplete; true if all iterations returned true. No
   // guarantees are made re: iteration order.
   bool ForEachCustomizationEntry(
       base::FunctionRef<bool(const SchemefulSite&,
-                             const absl::optional<FirstPartySetEntry>&)> f)
-      const;
+                             const FirstPartySetEntryOverride&)> f) const;
 
  private:
   // mojo (de)serialization needs access to private details.
@@ -73,9 +72,7 @@ class NET_EXPORT FirstPartySetsContextConfig {
       network::mojom::FirstPartySetsContextConfigDataView,
       FirstPartySetsContextConfig>;
 
-  const OverrideSets& customizations() const { return customizations_; }
-
-  OverrideSets customizations_;
+  base::flat_map<SchemefulSite, FirstPartySetEntryOverride> customizations_;
 };
 
 }  // namespace net

@@ -23,10 +23,17 @@ front_end/third_party/lighthouse/*/
 // The CodeMirror bundle file is auto-generated and rolled-up as part of the
 // install script, so we don't need to lint it.
 front_end/third_party/codemirror.next/bundle.ts
+// Lit lib files are auto-generated and rolled up as part of the install script.
+front_end/third_party/lit/src/*.ts
+// @puppeteer/replay is auto-generated.
+front_end/third_party/puppeteer-replay/**/*.ts
+
+extensions/cxx_debugging/third_party/
 
 node_modules
 scripts/migration/**/*.js
 scripts/protocol_typescript/*.js
+scripts/deps/tests/fixtures
 test/**/fixtures/
 test/e2e/**/*.js
 test/shared/**/*.js

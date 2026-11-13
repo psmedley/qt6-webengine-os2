@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,21 +22,21 @@ class CPDF_Pattern : public Retainable, public Observable {
   // Values used in PDFs. Do not change.
   enum PatternType { kTiling = 1, kShading = 2 };
 
-  ~CPDF_Pattern() override;
-
   virtual CPDF_TilingPattern* AsTilingPattern();
   virtual CPDF_ShadingPattern* AsShadingPattern();
 
-  // All the getters that return pointers return non-NULL pointers.
-  CPDF_Document* document() const { return m_pDocument.Get(); }
-  RetainPtr<CPDF_Object> pattern_obj() const { return m_pPatternObj; }
   const CFX_Matrix& pattern_to_form() const { return m_Pattern2Form; }
-  const CFX_Matrix& parent_matrix() const { return m_ParentMatrix; }
 
  protected:
   CPDF_Pattern(CPDF_Document* pDoc,
                RetainPtr<CPDF_Object> pObj,
                const CFX_Matrix& parentMatrix);
+  ~CPDF_Pattern() override;
+
+  // All the getters that return pointers return non-NULL pointers.
+  CPDF_Document* document() const { return m_pDocument; }
+  RetainPtr<CPDF_Object> pattern_obj() const { return m_pPatternObj; }
+  const CFX_Matrix& parent_matrix() const { return m_ParentMatrix; }
 
   void SetPatternToFormMatrix();
 

@@ -9,12 +9,11 @@ Returns the sine of e. Component-wise when T is a vector.
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { TypeF32 } from '../../../../../util/conversion.js';
-import { sinInterval } from '../../../../../util/f32_interval.js';
-import { fullF32Range, linearRange } from '../../../../../util/math.js';
-import { allInputSources, Case, makeUnaryToF32IntervalCase, run } from '../../expression.js';
+import { TypeF16, TypeF32 } from '../../../../../util/conversion.js';
+import { allInputSources, run } from '../../expression.js';
 
 import { builtin } from './builtin.js';
+import { d } from './sin.cache.js';
 
 export const g = makeTestGroup(GPUTest);
 
@@ -39,16 +38,7 @@ TODO(#792): Decide what the ground-truth is for these tests. [1]
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    const makeCase = (n: number): Case => {
-      return makeUnaryToF32IntervalCase(n, sinInterval);
-    };
-
-    const cases: Array<Case> = [
-      // Well defined accuracy range
-      ...linearRange(-Math.PI, Math.PI, 1000),
-
-      ...fullF32Range(),
-    ].map(makeCase);
+    const cases = await d.get('f32');
     await run(t, builtin('sin'), [TypeF32], TypeF32, t.params, cases);
   });
 
@@ -58,4 +48,10 @@ g.test('f16')
   .params(u =>
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
-  .unimplemented();
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get('f16');
+    await run(t, builtin('sin'), [TypeF16], TypeF16, t.params, cases);
+  });

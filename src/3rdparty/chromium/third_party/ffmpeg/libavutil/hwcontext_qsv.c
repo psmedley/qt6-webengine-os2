@@ -109,20 +109,41 @@ typedef struct QSVFramesContext {
 static const struct {
     enum AVPixelFormat pix_fmt;
     uint32_t           fourcc;
+    uint16_t           mfx_shift;
 } supported_pixel_formats[] = {
-    { AV_PIX_FMT_NV12, MFX_FOURCC_NV12 },
-    { AV_PIX_FMT_BGRA, MFX_FOURCC_RGB4 },
-    { AV_PIX_FMT_P010, MFX_FOURCC_P010 },
-    { AV_PIX_FMT_PAL8, MFX_FOURCC_P8   },
-#if CONFIG_VAAPI
+    { AV_PIX_FMT_NV12, MFX_FOURCC_NV12, 0 },
+    { AV_PIX_FMT_BGRA, MFX_FOURCC_RGB4, 0 },
+    { AV_PIX_FMT_P010, MFX_FOURCC_P010, 1 },
+    { AV_PIX_FMT_PAL8, MFX_FOURCC_P8,   0 },
     { AV_PIX_FMT_YUYV422,
-                       MFX_FOURCC_YUY2 },
+                       MFX_FOURCC_YUY2, 0 },
+#if CONFIG_VAAPI
+    { AV_PIX_FMT_UYVY422,
+                       MFX_FOURCC_UYVY, 0 },
+#endif
     { AV_PIX_FMT_Y210,
-                       MFX_FOURCC_Y210 },
+                       MFX_FOURCC_Y210, 1 },
     // VUYX is used for VAAPI child device,
     // the SDK only delares support for AYUV
     { AV_PIX_FMT_VUYX,
-                       MFX_FOURCC_AYUV },
+                       MFX_FOURCC_AYUV, 0 },
+    // XV30 is used for VAAPI child device,
+    // the SDK only delares support for Y410
+    { AV_PIX_FMT_XV30,
+                       MFX_FOURCC_Y410, 0 },
+#if QSV_VERSION_ATLEAST(1, 31)
+    // P012 is used for VAAPI child device,
+    // the SDK only delares support for P016
+    { AV_PIX_FMT_P012,
+                       MFX_FOURCC_P016, 1 },
+    // Y212 is used for VAAPI child device,
+    // the SDK only delares support for Y216
+    { AV_PIX_FMT_Y212,
+                       MFX_FOURCC_Y216, 1 },
+    // XV36 is used for VAAPI child device,
+    // the SDK only delares support for Y416
+    { AV_PIX_FMT_XV36,
+                       MFX_FOURCC_Y416, 1 },
 #endif
 };
 
@@ -167,6 +188,16 @@ static uint32_t qsv_fourcc_from_pix_fmt(enum AVPixelFormat pix_fmt)
         if (supported_pixel_formats[i].pix_fmt == pix_fmt)
             return supported_pixel_formats[i].fourcc;
     }
+    return 0;
+}
+
+static uint16_t qsv_shift_from_pix_fmt(enum AVPixelFormat pix_fmt)
+{
+    for (int i = 0; i < FF_ARRAY_ELEMS(supported_pixel_formats); i++) {
+        if (supported_pixel_formats[i].pix_fmt == pix_fmt)
+            return supported_pixel_formats[i].mfx_shift;
+    }
+
     return 0;
 }
 
@@ -503,7 +534,7 @@ static int qsv_init_surface(AVHWFramesContext *ctx, mfxFrameSurface1 *surf)
 
     surf->Info.BitDepthLuma   = desc->comp[0].depth;
     surf->Info.BitDepthChroma = desc->comp[0].depth;
-    surf->Info.Shift          = desc->comp[0].depth > 8;
+    surf->Info.Shift          = qsv_shift_from_pix_fmt(ctx->sw_format);
 
     if (desc->log2_chroma_w && desc->log2_chroma_h)
         surf->Info.ChromaFormat   = MFX_CHROMAFORMAT_YUV420;
@@ -634,6 +665,7 @@ static mfxStatus frame_get_hdl(mfxHDL pthis, mfxMemId mid, mfxHDL *hdl)
 
 static int qsv_d3d11_update_config(void *ctx, mfxHDL handle, mfxConfig cfg)
 {
+    int ret = AVERROR_UNKNOWN;
 #if CONFIG_D3D11VA
     mfxStatus sts;
     IDXGIAdapter *pDXGIAdapter;
@@ -648,7 +680,8 @@ static int qsv_d3d11_update_config(void *ctx, mfxHDL handle, mfxConfig cfg)
         hr = IDXGIDevice_GetAdapter(pDXGIDevice, &pDXGIAdapter);
         if (FAILED(hr)) {
             av_log(ctx, AV_LOG_ERROR, "Error IDXGIDevice_GetAdapter %d\n", hr);
-            goto fail;
+            IDXGIDevice_Release(pDXGIDevice);
+            return ret;
         }
 
         hr = IDXGIAdapter_GetDesc(pDXGIAdapter, &adapterDesc);
@@ -658,7 +691,7 @@ static int qsv_d3d11_update_config(void *ctx, mfxHDL handle, mfxConfig cfg)
         }
     } else {
         av_log(ctx, AV_LOG_ERROR, "Error ID3D11Device_QueryInterface %d\n", hr);
-        goto fail;
+        return ret;
     }
 
     impl_value.Type = MFX_VARIANT_TYPE_U16;
@@ -691,11 +724,13 @@ static int qsv_d3d11_update_config(void *ctx, mfxHDL handle, mfxConfig cfg)
         goto fail;
     }
 
-    return 0;
+    ret = 0;
 
 fail:
+    IDXGIAdapter_Release(pDXGIAdapter);
+    IDXGIDevice_Release(pDXGIDevice);
 #endif
-    return AVERROR_UNKNOWN;
+    return ret;
 }
 
 static int qsv_d3d9_update_config(void *ctx, mfxHDL handle, mfxConfig cfg)
@@ -721,25 +756,28 @@ static int qsv_d3d9_update_config(void *ctx, mfxHDL handle, mfxConfig cfg)
     hr = IDirect3DDeviceManager9_LockDevice(devmgr, device_handle, &device, TRUE);
     if (FAILED(hr)) {
         av_log(ctx, AV_LOG_ERROR, "Error LockDevice %d\n", hr);
+        IDirect3DDeviceManager9_CloseDeviceHandle(devmgr, device_handle);
         goto fail;
     }
 
     hr = IDirect3DDevice9Ex_GetCreationParameters(device, &params);
     if (FAILED(hr)) {
         av_log(ctx, AV_LOG_ERROR, "Error IDirect3DDevice9_GetCreationParameters %d\n", hr);
+        IDirect3DDevice9Ex_Release(device);
         goto unlock;
     }
 
     hr = IDirect3DDevice9Ex_GetDirect3D(device, &d3d9ex);
     if (FAILED(hr)) {
         av_log(ctx, AV_LOG_ERROR, "Error IDirect3DDevice9Ex_GetAdapterLUID %d\n", hr);
+        IDirect3DDevice9Ex_Release(device);
         goto unlock;
     }
 
     hr = IDirect3D9Ex_GetAdapterLUID(d3d9ex, params.AdapterOrdinal, &luid);
     if (FAILED(hr)) {
         av_log(ctx, AV_LOG_ERROR, "Error IDirect3DDevice9Ex_GetAdapterLUID %d\n", hr);
-        goto unlock;
+        goto release;
     }
 
     impl_value.Type = MFX_VARIANT_TYPE_PTR;
@@ -749,13 +787,18 @@ static int qsv_d3d9_update_config(void *ctx, mfxHDL handle, mfxConfig cfg)
     if (sts != MFX_ERR_NONE) {
         av_log(ctx, AV_LOG_ERROR, "Error adding a MFX configuration"
                "DeviceLUID property: %d.\n", sts);
-        goto unlock;
+        goto release;
     }
 
     ret = 0;
 
+release:
+    IDirect3D9Ex_Release(d3d9ex);
+    IDirect3DDevice9Ex_Release(device);
+
 unlock:
     IDirect3DDeviceManager9_UnlockDevice(devmgr, device_handle, FALSE);
+    IDirect3DDeviceManager9_CloseDeviceHandle(devmgr, device_handle);
 fail:
 #endif
     return ret;
@@ -1478,6 +1521,7 @@ static int map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
     switch (frame->format) {
     case AV_PIX_FMT_NV12:
     case AV_PIX_FMT_P010:
+    case AV_PIX_FMT_P012:
         surface->Data.Y  = frame->data[0];
         surface->Data.UV = frame->data[1];
         break;
@@ -1494,7 +1538,6 @@ static int map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
         surface->Data.R = frame->data[0] + 2;
         surface->Data.A = frame->data[0] + 3;
         break;
-#if CONFIG_VAAPI
     case AV_PIX_FMT_YUYV422:
         surface->Data.Y = frame->data[0];
         surface->Data.U = frame->data[0] + 1;
@@ -1502,6 +1545,7 @@ static int map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
         break;
 
     case AV_PIX_FMT_Y210:
+    case AV_PIX_FMT_Y212:
         surface->Data.Y16 = (mfxU16 *)frame->data[0];
         surface->Data.U16 = (mfxU16 *)frame->data[0] + 1;
         surface->Data.V16 = (mfxU16 *)frame->data[0] + 3;
@@ -1513,6 +1557,23 @@ static int map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
         // Only set Data.A to a valid address, the SDK doesn't
         // use the value from the frame.
         surface->Data.A = frame->data[0] + 3;
+        break;
+    case AV_PIX_FMT_XV30:
+        surface->Data.U = frame->data[0];
+        break;
+    case AV_PIX_FMT_XV36:
+        surface->Data.U = frame->data[0];
+        surface->Data.Y = frame->data[0] + 2;
+        surface->Data.V = frame->data[0] + 4;
+        // Only set Data.A to a valid address, the SDK doesn't
+        // use the value from the frame.
+        surface->Data.A = frame->data[0] + 6;
+        break;
+#if CONFIG_VAAPI
+    case AV_PIX_FMT_UYVY422:
+        surface->Data.Y = frame->data[0] + 1;
+        surface->Data.U = frame->data[0];
+        surface->Data.V = frame->data[0] + 2;
         break;
 #endif
     default:
@@ -1841,7 +1902,7 @@ static int qsv_map_to(AVHWFramesContext *dst_ctx,
         case AV_PIX_FMT_VAAPI:
         {
             mfxHDLPair *pair = (mfxHDLPair*)hwctx->surfaces[i].Data.MemId;
-            if (*(VASurfaceID*)pair->first == (VASurfaceID)src->data[3]) {
+            if (*(VASurfaceID*)pair->first == (VASurfaceID)(uintptr_t)src->data[3]) {
                 index = i;
                 break;
             }
@@ -2045,6 +2106,15 @@ static int qsv_device_derive(AVHWDeviceContext *ctx,
                              AVDictionary *opts, int flags)
 {
     mfxIMPL impl;
+    QSVDevicePriv *priv;
+
+    priv = av_mallocz(sizeof(*priv));
+    if (!priv)
+        return AVERROR(ENOMEM);
+
+    ctx->user_opaque = priv;
+    ctx->free = qsv_device_free;
+
     impl = choose_implementation("hw_any", child_device_ctx->type);
     return qsv_device_derive_from_child(ctx, impl,
                                         child_device_ctx, flags);
@@ -2077,8 +2147,6 @@ static int qsv_device_create(AVHWDeviceContext *ctx, const char *device,
                    "\"%s\".\n", e->value);
             return AVERROR(EINVAL);
         }
-    } else if (CONFIG_VAAPI) {
-        child_device_type = AV_HWDEVICE_TYPE_VAAPI;
 #if QSV_ONEVPL
     } else if (CONFIG_D3D11VA) {  // Use D3D11 by default if d3d11va is enabled
         av_log(ctx, AV_LOG_VERBOSE,
@@ -2098,10 +2166,22 @@ static int qsv_device_create(AVHWDeviceContext *ctx, const char *device,
     } else if (CONFIG_D3D11VA) {
         child_device_type = AV_HWDEVICE_TYPE_D3D11VA;
 #endif
+    } else if (CONFIG_VAAPI) {
+        child_device_type = AV_HWDEVICE_TYPE_VAAPI;
     } else {
         av_log(ctx, AV_LOG_ERROR, "No supported child device type is enabled\n");
         return AVERROR(ENOSYS);
     }
+
+#if CONFIG_VAAPI && defined(_WIN32)
+    /* AV_HWDEVICE_TYPE_VAAPI on Windows/Libva-win32 not supported */
+    /* Reject user specified child_device_type or CONFIG_VAAPI on Windows */
+    if (child_device_type == AV_HWDEVICE_TYPE_VAAPI) {
+        av_log(ctx, AV_LOG_ERROR, "VAAPI child device type not supported for oneVPL on Windows"
+                "\"%s\".\n", e->value);
+        return AVERROR(EINVAL);
+    }
+#endif
 
     child_device_opts = NULL;
     switch (child_device_type) {

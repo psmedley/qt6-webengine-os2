@@ -62,7 +62,8 @@ inline bool KeyMatchesId(const AtomicString& key, const Element& element) {
 
 inline bool KeyMatchesMapName(const AtomicString& key, const Element& element) {
   auto* html_map_element = DynamicTo<HTMLMapElement>(element);
-  return html_map_element && html_map_element->GetName() == key;
+  return html_map_element && (html_map_element->GetName() == key ||
+                              html_map_element->GetIdAttribute() == key);
 }
 
 inline bool KeyMatchesSlotName(const AtomicString& key,
@@ -121,7 +122,7 @@ inline Element* TreeOrderedMap::Get(const AtomicString& key,
   MapEntry* entry = it->value;
   DCHECK(entry->count);
   if (entry->element)
-    return entry->element;
+    return entry->element.Get();
 
   // Iterate to find the node that matches. Nothing will match iff an element
   // with children having duplicate IDs is being removed -- the tree traversal
@@ -202,7 +203,7 @@ Element* TreeOrderedMap::GetCachedFirstElementWithoutAccessingNodeTree(
     return nullptr;
   MapEntry* entry = it->value;
   DCHECK(entry->count);
-  return entry->element;
+  return entry->element.Get();
 }
 
 void TreeOrderedMap::Trace(Visitor* visitor) const {

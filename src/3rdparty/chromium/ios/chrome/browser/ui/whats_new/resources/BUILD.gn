@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,4 +10,8 @@ imageset("whats_new_icon_tile") {
     "whats_new_icon_tile.imageset/whats_new_icon_tile@2x.png",
     "whats_new_icon_tile.imageset/whats_new_icon_tile@3x.png",
   ]
+}
+
+colorset("hero_image_background_color") {
+  sources = [ "hero_image_background_color.colorset/Contents.json" ]
 }

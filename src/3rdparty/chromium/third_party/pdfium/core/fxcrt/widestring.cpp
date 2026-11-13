@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,13 @@
 
 #include "core/fxcrt/fx_codepage.h"
 #include "core/fxcrt/fx_extension.h"
+#include "core/fxcrt/fx_memcpy_wrappers.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/string_pool_template.h"
+#include "core/fxcrt/utf16.h"
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
-#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/numerics/safe_math.h"
 
 template class fxcrt::StringDataTemplate<wchar_t>;
@@ -32,6 +33,23 @@ template struct std::hash<WideString>;
 #define FORCE_INT64 0x40000
 
 namespace {
+
+#if defined(WCHAR_T_IS_32_BIT)
+size_t FuseSurrogates(pdfium::span<wchar_t> s) {
+  size_t dest_pos = 0;
+  for (size_t i = 0; i < s.size(); ++i) {
+    // TODO(crbug.com/pdfium/2031): Always use UTF-16.
+    if (pdfium::IsHighSurrogate(s[i]) && i + 1 < s.size() &&
+        pdfium::IsLowSurrogate(s[i + 1])) {
+      s[dest_pos++] = pdfium::SurrogatePair(s[i], s[i + 1]).ToCodePoint();
+      ++i;
+      continue;
+    }
+    s[dest_pos++] = s[i];
+  }
+  return dest_pos;
+}
+#endif  // defined(WCHAR_T_IS_32_BIT)
 
 constexpr wchar_t kWideTrimChars[] = L"\x09\x0a\x0b\x0c\x0d\x20";
 
@@ -280,6 +298,66 @@ absl::optional<WideString> TryVSWPrintf(size_t size,
   return str;
 }
 
+// Appends a Unicode code point to a `WideString` using either UTF-16 or UTF-32,
+// depending on the platform's definition of `wchar_t`.
+//
+// TODO(crbug.com/pdfium/2031): Always use UTF-16.
+// TODO(crbug.com/pdfium/2041): Migrate to `WideString`.
+void AppendCodePointToWideString(char32_t code_point, WideString& buffer) {
+  if (code_point > pdfium::kMaximumSupplementaryCodePoint) {
+    // Invalid code point above U+10FFFF.
+    return;
+  }
+
+#if defined(WCHAR_T_IS_16_BIT)
+  if (code_point < pdfium::kMinimumSupplementaryCodePoint) {
+    buffer += static_cast<wchar_t>(code_point);
+  } else {
+    // Encode as UTF-16 surrogate pair.
+    pdfium::SurrogatePair surrogate_pair(code_point);
+    buffer += surrogate_pair.high();
+    buffer += surrogate_pair.low();
+  }
+#else
+  buffer += static_cast<wchar_t>(code_point);
+#endif  // defined(WCHAR_T_IS_16_BIT)
+}
+
+WideString UTF8Decode(ByteStringView bsStr) {
+  WideString buffer;
+
+  int remaining = 0;
+  char32_t code_point = 0;
+  for (char byte : bsStr) {
+    uint8_t code_unit = static_cast<uint8_t>(byte);
+    if (code_unit < 0x80) {
+      remaining = 0;
+      AppendCodePointToWideString(code_unit, buffer);
+    } else if (code_unit < 0xc0) {
+      if (remaining > 0) {
+        --remaining;
+        code_point = (code_point << 6) | (code_unit & 0x3f);
+        if (remaining == 0) {
+          AppendCodePointToWideString(code_point, buffer);
+        }
+      }
+    } else if (code_unit < 0xe0) {
+      remaining = 1;
+      code_point = code_unit & 0x1f;
+    } else if (code_unit < 0xf0) {
+      remaining = 2;
+      code_point = code_unit & 0x0f;
+    } else if (code_unit < 0xf8) {
+      remaining = 3;
+      code_point = code_unit & 0x07;
+    } else {
+      remaining = 0;
+    }
+  }
+
+  return buffer;
+}
+
 }  // namespace
 
 namespace fxcrt {
@@ -298,18 +376,13 @@ WideString WideString::FormatInteger(int i) {
 WideString WideString::FormatV(const wchar_t* format, va_list argList) {
   va_list argListCopy;
   va_copy(argListCopy, argList);
-  int maxLen = vswprintf(nullptr, 0, format, argListCopy);
+  auto guess = GuessSizeForVSWPrintf(format, argListCopy);
   va_end(argListCopy);
 
-  if (maxLen <= 0) {
-    va_copy(argListCopy, argList);
-    auto guess = GuessSizeForVSWPrintf(format, argListCopy);
-    va_end(argListCopy);
-
-    if (!guess.has_value())
-      return WideString();
-    maxLen = pdfium::base::checked_cast<int>(guess.value());
+  if (!guess.has_value()) {
+    return WideString();
   }
+  int maxLen = pdfium::base::checked_cast<int>(guess.value());
 
   while (maxLen < 32 * 1024) {
     va_copy(argListCopy, argList);
@@ -335,7 +408,7 @@ WideString WideString::Format(const wchar_t* pFormat, ...) {
 
 WideString::WideString() = default;
 
-WideString::WideString(const WideString& other) : m_pData(other.m_pData) {}
+WideString::WideString(const WideString& other) = default;
 
 WideString::WideString(WideString&& other) noexcept {
   m_pData.Swap(other.m_pData);
@@ -470,7 +543,7 @@ bool WideString::operator==(const wchar_t* ptr) const {
     return m_pData->m_nDataLength == 0;
 
   return wcslen(ptr) == m_pData->m_nDataLength &&
-         wmemcmp(ptr, m_pData->m_String, m_pData->m_nDataLength) == 0;
+         FXSYS_wmemcmp(ptr, m_pData->m_String, m_pData->m_nDataLength) == 0;
 }
 
 bool WideString::operator==(WideStringView str) const {
@@ -478,8 +551,8 @@ bool WideString::operator==(WideStringView str) const {
     return str.IsEmpty();
 
   return m_pData->m_nDataLength == str.GetLength() &&
-         wmemcmp(m_pData->m_String, str.unterminated_c_str(),
-                 str.GetLength()) == 0;
+         FXSYS_wmemcmp(m_pData->m_String, str.unterminated_c_str(),
+                       str.GetLength()) == 0;
 }
 
 bool WideString::operator==(const WideString& other) const {
@@ -509,8 +582,8 @@ bool WideString::operator<(WideStringView str) const {
 
   size_t len = GetLength();
   size_t other_len = str.GetLength();
-  int result =
-      wmemcmp(c_str(), str.unterminated_c_str(), std::min(len, other_len));
+  int result = FXSYS_wmemcmp(c_str(), str.unterminated_c_str(),
+                             std::min(len, other_len));
   return result < 0 || (result == 0 && len < other_len);
 }
 
@@ -612,8 +685,9 @@ size_t WideString::Delete(size_t index, size_t count) {
     return 0;
 
   size_t old_length = m_pData->m_nDataLength;
-  if (count == 0 || index != pdfium::clamp<size_t>(index, 0, old_length))
+  if (count == 0 || index != std::clamp<size_t>(index, 0, old_length)) {
     return old_length;
+  }
 
   size_t removal_length = index + count;
   if (removal_length > old_length)
@@ -692,22 +766,22 @@ ByteString WideString::ToUTF8() const {
 }
 
 ByteString WideString::ToUTF16LE() const {
-  if (!m_pData)
-    return ByteString("\0\0", 2);
-
+  std::u16string utf16 = FX_UTF16Encode(AsStringView());
   ByteString result;
-  size_t len = m_pData->m_nDataLength;
+  size_t output_length = 0;
   {
     // Span's lifetime must end before ReleaseBuffer() below.
-    pdfium::span<char> buffer = result.GetBuffer(len * 2 + 2);
-    for (size_t i = 0; i < len; i++) {
-      buffer[i * 2] = m_pData->m_String[i] & 0xff;
-      buffer[i * 2 + 1] = m_pData->m_String[i] >> 8;
+    // 2 bytes required per UTF-16 code unit.
+    pdfium::span<uint8_t> buffer =
+        pdfium::as_writable_bytes(result.GetBuffer(utf16.size() * 2 + 2));
+    for (char16_t c : utf16) {
+      buffer[output_length++] = c & 0xff;
+      buffer[output_length++] = c >> 8;
     }
-    buffer[len * 2] = 0;
-    buffer[len * 2 + 1] = 0;
+    buffer[output_length++] = 0;
+    buffer[output_length++] = 0;
   }
-  result.ReleaseBuffer(len * 2 + 2);
+  result.ReleaseBuffer(output_length);
   return result;
 }
 
@@ -774,8 +848,8 @@ size_t WideString::Insert(size_t index, wchar_t ch) {
 
   const size_t new_length = cur_length + 1;
   ReallocBeforeWrite(new_length);
-  wmemmove(m_pData->m_String + index + 1, m_pData->m_String + index,
-           new_length - index);
+  FXSYS_wmemmove(m_pData->m_String + index + 1, m_pData->m_String + index,
+                 new_length - index);
   m_pData->m_String[index] = ch;
   m_pData->m_nDataLength = new_length;
   return new_length;
@@ -788,8 +862,8 @@ absl::optional<size_t> WideString::Find(wchar_t ch, size_t start) const {
   if (!IsValidIndex(start))
     return absl::nullopt;
 
-  const wchar_t* pStr =
-      wmemchr(m_pData->m_String + start, ch, m_pData->m_nDataLength - start);
+  const wchar_t* pStr = FXSYS_wmemchr(m_pData->m_String + start, ch,
+                                      m_pData->m_nDataLength - start);
   return pStr ? absl::optional<size_t>(
                     static_cast<size_t>(pStr - m_pData->m_String))
               : absl::nullopt;
@@ -910,13 +984,13 @@ size_t WideString::Replace(WideStringView pOld, WideStringView pNew) {
     const wchar_t* pTarget =
         FX_wcsstr(pStart, static_cast<size_t>(pEnd - pStart),
                   pOld.unterminated_c_str(), nSourceLen);
-    wmemcpy(pDest, pStart, pTarget - pStart);
+    FXSYS_wmemcpy(pDest, pStart, pTarget - pStart);
     pDest += pTarget - pStart;
-    wmemcpy(pDest, pNew.unterminated_c_str(), pNew.GetLength());
+    FXSYS_wmemcpy(pDest, pNew.unterminated_c_str(), pNew.GetLength());
     pDest += pNew.GetLength();
     pStart = pTarget + nSourceLen;
   }
-  wmemcpy(pDest, pStart, pEnd - pStart);
+  FXSYS_wmemcpy(pDest, pStart, pEnd - pStart);
   m_pData.Swap(pNewData);
   return count;
 }
@@ -957,40 +1031,51 @@ WideString WideString::FromDefANSI(ByteStringView bstr) {
 
 // static
 WideString WideString::FromUTF8(ByteStringView str) {
-  return FX_UTF8Decode(str);
+  return UTF8Decode(str);
 }
 
 // static
-WideString WideString::FromUTF16LE(const unsigned short* wstr, size_t wlen) {
-  if (!wstr || wlen == 0)
+WideString WideString::FromUTF16LE(pdfium::span<const uint8_t> data) {
+  if (data.empty()) {
     return WideString();
+  }
 
   WideString result;
+  size_t length = 0;
   {
     // Span's lifetime must end before ReleaseBuffer() below.
-    pdfium::span<wchar_t> buf = result.GetBuffer(wlen);
-    for (size_t i = 0; i < wlen; i++)
-      buf[i] = wstr[i];
+    pdfium::span<wchar_t> buf = result.GetBuffer(data.size() / 2);
+    for (size_t i = 0; i + 1 < data.size(); i += 2) {
+      buf[length++] = data[i] | data[i + 1] << 8;
+    }
+
+#if defined(WCHAR_T_IS_32_BIT)
+    length = FuseSurrogates(buf.first(length));
+#endif
   }
-  result.ReleaseBuffer(wlen);
+  result.ReleaseBuffer(length);
   return result;
 }
 
-WideString WideString::FromUTF16BE(const unsigned short* wstr, size_t wlen) {
-  if (!wstr || wlen == 0)
+WideString WideString::FromUTF16BE(pdfium::span<const uint8_t> data) {
+  if (data.empty()) {
     return WideString();
+  }
 
   WideString result;
+  size_t length = 0;
   {
     // Span's lifetime must end before ReleaseBuffer() below.
-    pdfium::span<wchar_t> buf = result.GetBuffer(wlen);
-    for (size_t i = 0; i < wlen; i++) {
-      auto wch = wstr[i];
-      wch = (wch >> 8) | (wch << 8);
-      buf[i] = wch;
+    pdfium::span<wchar_t> buf = result.GetBuffer(data.size() / 2);
+    for (size_t i = 0; i + 1 < data.size(); i += 2) {
+      buf[length++] = data[i] << 8 | data[i + 1];
     }
+
+#if defined(WCHAR_T_IS_32_BIT)
+    length = FuseSurrogates(buf.first(length));
+#endif
   }
-  result.ReleaseBuffer(wlen);
+  result.ReleaseBuffer(length);
   return result;
 }
 
@@ -1015,7 +1100,7 @@ int WideString::Compare(const WideString& str) const {
   size_t this_len = m_pData->m_nDataLength;
   size_t that_len = str.m_pData->m_nDataLength;
   size_t min_len = std::min(this_len, that_len);
-  int result = wmemcmp(m_pData->m_String, str.m_pData->m_String, min_len);
+  int result = FXSYS_wmemcmp(m_pData->m_String, str.m_pData->m_String, min_len);
   if (result != 0)
     return result;
   if (this_len == that_len)

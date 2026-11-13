@@ -19,6 +19,19 @@
       'swarming_containment_auto',
     ],
     'machines': {
+      'android-arm64-exp-pixel6': {  # android-arm64-pixel6 below for android-arm64-test
+        'os_type': 'android',
+        'mixins': [
+          'android_t',
+          'oriole',
+          'gpu-swarming-pool',
+          'limited_capacity_bot',
+        ],
+        'test_suites': {
+          'gtest_tests': 'android_vulkan_gtests',
+          'isolated_scripts': 'isolated_scripts_group_pixel6',
+        },
+      },
       'android-arm64-pixel4': {
         'os_type': 'android',
         'mixins': [
@@ -28,7 +41,7 @@
         ],
         'test_suites': {
           'gtest_tests': 'android_gtests',
-          'isolated_scripts': 'common_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_common',
         },
       },
       'android-arm64-pixel4-perf': {
@@ -40,7 +53,7 @@
           'timeout_120m',
         ],
         'test_suites': {
-          'isolated_scripts': 'angle_perf_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_perf',
         },
       },
       'android-arm64-pixel6': {
@@ -49,11 +62,22 @@
           'android_t',
           'oriole',
           'gpu-swarming-pool',
-          'limited_capacity_bot',
         ],
         'test_suites': {
           'gtest_tests': 'android_vulkan_gtests',
-          'isolated_scripts': 'angle_restricted_trace_gold_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_pixel6',
+        },
+      },
+      'android-arm64-pixel6-perf': {
+        'os_type': 'android',
+        'mixins': [
+          'android_t',
+          'oriole',
+          'gpu-swarming-pool',
+          'timeout_120m',
+        ],
+        'test_suites': {
+          'isolated_scripts': 'isolated_scripts_group_perf',
         },
       },
       'linux-amd': {
@@ -72,6 +96,42 @@
         'test_suites': {
         },
       },
+      'linux-exp-swiftshader': {
+        'os_type': 'linux',
+        'mixins': [
+          'gpu-swarming-pool',
+          'no_gpu',
+          'linux-jammy',
+          'timeout_15m',
+          'x86-64',
+        ],
+        'test_suites': {
+        },
+      },
+      'linux-exp-swiftshader-asan': {
+        'os_type': 'linux',
+        'mixins': [
+          'gpu-swarming-pool',
+          'no_gpu',
+          'linux-jammy',
+          'timeout_15m',
+          'x86-64',
+        ],
+        'test_suites': {
+        },
+      },
+      'linux-exp-swiftshader-tsan': {
+        'os_type': 'linux',
+        'mixins': [
+          'gpu-swarming-pool',
+          'no_gpu',
+          'linux-jammy',
+          'timeout_15m',
+          'x86-64',
+        ],
+        'test_suites': {
+        },
+      },
       'linux-intel': {
         'os_type': 'linux',
         'mixins': [
@@ -79,7 +139,7 @@
         ],
         'test_suites': {
           'gtest_tests': 'linux_intel_gtests',
-          'isolated_scripts': 'common_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_common',
         },
       },
       'linux-intel-perf': {
@@ -89,7 +149,7 @@
           'timeout_120m',
         ],
         'test_suites': {
-          'isolated_scripts': 'angle_perf_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_perf',
         },
       },
       'linux-nvidia': {
@@ -99,7 +159,7 @@
         ],
         'test_suites': {
           'gtest_tests': 'linux_nvidia_gtests',
-          'isolated_scripts': 'common_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_common',
         },
       },
       'linux-nvidia-perf': {
@@ -109,7 +169,7 @@
           'timeout_120m',
         ],
         'test_suites': {
-          'isolated_scripts': 'angle_perf_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_perf',
         },
       },
       'linux-swiftshader': {
@@ -117,7 +177,7 @@
         'mixins': [
           'gpu-swarming-pool',
           'no_gpu',
-          'linux-bionic',
+          'linux-jammy',
           'timeout_15m',
           'x86-64',
         ],
@@ -131,20 +191,7 @@
         'mixins': [
           'gpu-swarming-pool',
           'no_gpu',
-          'linux-bionic',
-          'timeout_15m',
-          'x86-64',
-        ],
-        'test_suites': {
-          'gtest_tests': 'swangle_gtests',
-        },
-      },
-      'linux-swiftshader-tsan': {
-        'os_type': 'linux',
-        'mixins': [
-          'gpu-swarming-pool',
-          'no_gpu',
-          'linux-bionic',
+          'linux-jammy',
           'timeout_15m',
           'x86-64',
         ],
@@ -152,17 +199,17 @@
           'gtest_tests': 'swangle_slow_gtests',
         },
       },
-      'linux-swiftshader-ubsan': {
+      'linux-swiftshader-tsan': {
         'os_type': 'linux',
         'mixins': [
           'gpu-swarming-pool',
           'no_gpu',
-          'linux-bionic',
+          'linux-jammy',
           'timeout_15m',
           'x86-64',
         ],
         'test_suites': {
-          'gtest_tests': 'swangle_gtests',
+          'gtest_tests': 'swangle_slow_flaky_gtests',
         },
       },
       'mac-amd': {
@@ -174,10 +221,26 @@
           'gtest_tests': 'mac_amd_and_intel_gtests',
         },
       },
+      'mac-exp-amd': {
+        'os_type': 'mac',
+        'mixins': [
+          'mac_retina_amd_gpu_experimental',
+        ],
+        'test_suites': {
+        },
+      },
       'mac-exp-intel': {
         'os_type': 'mac',
         'mixins': [
           'mac_mini_intel_gpu_experimental',
+        ],
+        'test_suites': {
+        },
+      },
+      'mac-exp-nvidia': {
+        'os_type': 'mac',
+        'mixins': [
+          'mac_retina_nvidia_gpu_experimental',
         ],
         'test_suites': {
         },
@@ -201,23 +264,32 @@
           'gtest_tests': 'mac_nvidia_gtests',
         },
       },
+      'win10-x64-exp-intel': {
+        'os_type': 'win',
+        'mixins': [
+          'win10_intel_uhd_630_experimental',
+        ],
+        'test_suites': {
+        },
+      },
       'win10-x64-intel': {
         'os_type': 'win',
         'mixins': [
-          'win10_intel_hd_630_stable',
+          'win10_intel_uhd_630_stable',
         ],
         'test_suites': {
           'gtest_tests': 'win10_intel_gtests',
-          'isolated_scripts': 'common_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_common',
         },
       },
       'win10-x64-intel-perf': {
         'os_type': 'win',
         'mixins': [
           'timeout_120m',
-          'win10_intel_hd_630_stable',
+          'win10_intel_uhd_630_stable',
         ],
         'test_suites': {
+          'isolated_scripts': 'isolated_scripts_group_perf',
         },
       },
       'win10-x64-nvidia': {
@@ -227,7 +299,7 @@
         ],
         'test_suites': {
           'gtest_tests': 'win10_nvidia_gtests',
-          'isolated_scripts': 'common_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_common',
         },
       },
       'win10-x64-nvidia-perf': {
@@ -237,7 +309,7 @@
           'win10_nvidia_gtx_1660_stable',
         ],
         'test_suites': {
-          'isolated_scripts': 'angle_perf_isolated_scripts',
+          'isolated_scripts': 'isolated_scripts_group_perf',
         },
       },
       'win10-x64-swiftshader': {
@@ -259,7 +331,7 @@
         ],
         'test_suites': {
           # Clang-Win/ASAN has issues with dEQP's exceptions. http://crbug.com/1268912
-          'gtest_tests': 'swangle_non_deqp_slow_gtests',
+          'gtest_tests': 'swangle_non_deqp_slow_flaky_gtests',
         },
       },
       'win10-x86-swiftshader': {

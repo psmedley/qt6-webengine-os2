@@ -10,8 +10,8 @@ import type * as UI from '../../ui/legacy/legacy.js';
 
 const UIStrings = {
   /**
-  *@description Text in Layer View Host of the Layers panel
-  */
+   *@description Text in Layer View Host of the Layers panel
+   */
   showInternalLayers: 'Show internal layers',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/layer_viewer/LayerViewHost.ts', UIStrings);
@@ -61,7 +61,7 @@ export class LayerSelection extends Selection {
     super(Type.Layer, layer);
   }
 
-  isEqual(other: Selection): boolean {
+  override isEqual(other: Selection): boolean {
     return other.typeInternal === Type.Layer && other.layer().id() === this.layer().id();
   }
 }
@@ -73,7 +73,7 @@ export class ScrollRectSelection extends Selection {
     this.scrollRectIndex = scrollRectIndex;
   }
 
-  isEqual(other: Selection): boolean {
+  override isEqual(other: Selection): boolean {
     return other.typeInternal === Type.ScrollRect && this.layer().id() === other.layer().id() &&
         this.scrollRectIndex === (other as ScrollRectSelection).scrollRectIndex;
   }
@@ -86,7 +86,7 @@ export class SnapshotSelection extends Selection {
     this.snapshotInternal = snapshot;
   }
 
-  isEqual(other: Selection): boolean {
+  override isEqual(other: Selection): boolean {
     return other.typeInternal === Type.Snapshot && this.layer().id() === other.layer().id() &&
         this.snapshotInternal === (other as SnapshotSelection).snapshotInternal;
   }
@@ -171,7 +171,8 @@ export class LayerViewHost {
   showContextMenu(contextMenu: UI.ContextMenu.ContextMenu, selection: Selection|null): void {
     contextMenu.defaultSection().appendCheckboxItem(
         i18nString(UIStrings.showInternalLayers), this.toggleShowInternalLayers.bind(this),
-        this.showInternalLayersSettingInternal.get());
+        this.showInternalLayersSettingInternal.get(), undefined, undefined, undefined,
+        this.showInternalLayersSettingInternal.name);
     const node = selection && selection.layer() && selection.layer().nodeForSelfOrAncestor();
     if (node) {
       contextMenu.appendApplicableItems(node);

@@ -37,7 +37,7 @@ class AccountReconcilorDelegate {
   virtual bool ShouldAbortReconcileIfPrimaryHasError() const;
 
   // Returns the consent level that should be used for obtaining the primary
-  // account. Defaults to ConsentLevel::kSync.
+  // account. Defaults to ConsentLevel::kSignin.
   virtual ConsentLevel GetConsentLevelForPrimaryAccount() const;
 
   // Returns a pair of mode and accounts to send to Mutilogin endpoint.
@@ -126,7 +126,7 @@ class AccountReconcilorDelegate {
       bool first_execution,
       bool primary_has_error) const;
 
-  raw_ptr<AccountReconcilor> reconcilor_;
+  raw_ptr<AccountReconcilor, DanglingUntriaged> reconcilor_;
 };
 
 }  // namespace signin

@@ -36,6 +36,9 @@ enum class RenderTargetTransience
     // Multisampled-render-to-texture textures, where the implicit multisampled image is transient,
     // but the resolved image is persistent.
     MultisampledTransient,
+    // Renderable YUV textures, where the color attachment (if it exists at all) is transient,
+    // but the resolved image is persistent.
+    YuvResolveTransient,
     // Multisampled-render-to-texture depth/stencil textures.
     EntirelyTransient,
 };
@@ -56,6 +59,7 @@ class RenderTargetVk final : public FramebufferAttachmentRenderTarget
               vk::ImageViewHelper *imageViews,
               vk::ImageHelper *resolveImage,
               vk::ImageViewHelper *resolveImageViews,
+              UniqueSerial imageSiblingSerial,
               gl::LevelIndex levelIndexGL,
               uint32_t layerIndex,
               uint32_t layerCount,
@@ -102,6 +106,7 @@ class RenderTargetVk final : public FramebufferAttachmentRenderTarget
     gl::LevelIndex getLevelIndex() const { return mLevelIndexGL; }
     uint32_t getLayerIndex() const { return mLayerIndex; }
     uint32_t getLayerCount() const { return mLayerCount; }
+    bool is3DImage() const { return getOwnerOfData()->getType() == VK_IMAGE_TYPE_3D; }
 
     gl::ImageIndex getImageIndexForClear(uint32_t layerCount) const;
 
@@ -132,6 +137,10 @@ class RenderTargetVk final : public FramebufferAttachmentRenderTarget
     bool isEntirelyTransient() const
     {
         return mTransience == RenderTargetTransience::EntirelyTransient;
+    }
+    bool isYuvResolve() const
+    {
+        return mResolveImage != nullptr ? mResolveImage->isYuvResolve() : false;
     }
 
     void onNewFramebuffer(const vk::SharedFramebufferCacheKey &sharedFramebufferCacheKey)
@@ -170,6 +179,8 @@ class RenderTargetVk final : public FramebufferAttachmentRenderTarget
     // LOAD.
     vk::ImageHelper *mResolveImage;
     vk::ImageViewHelper *mResolveImageViews;
+
+    UniqueSerial mImageSiblingSerial;
 
     // Which subresource of the image is used as render target.  For single-layer render targets,
     // |mLayerIndex| will contain the layer index and |mLayerCount| will be 1.  For layered render

@@ -1,11 +1,10 @@
-// Copyright 2021 PDFium Authors. All rights reserved.
+// Copyright 2021 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "constants/stream_dict_common.h"
 
-namespace pdfium {
-namespace stream {
+namespace pdfium::stream {
 
 // PDF 1.7 spec, table 3.4.
 // Entries common to all stream dictionaries.
@@ -18,5 +17,4 @@ const char kDecodeParms[] = "DecodeParms";
 const char kF[] = "F";
 const char kDL[] = "DL";
 
-}  // namespace stream
-}  // namespace pdfium
+}  // namespace pdfium::stream

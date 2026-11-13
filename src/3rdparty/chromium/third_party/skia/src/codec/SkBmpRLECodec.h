@@ -8,11 +8,10 @@
 #define SkBmpRLECodec_DEFINED
 
 #include "include/codec/SkCodec.h"
-#include "include/core/SkColorType.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkTypes.h"
 #include "src/codec/SkBmpCodec.h"
-#include "src/codec/SkColorTable.h"
+#include "src/codec/SkColorPalette.h"
 #include "src/codec/SkSampler.h"
 
 #include <cstddef>
@@ -20,6 +19,7 @@
 #include <memory>
 
 class SkStream;
+enum SkColorType : int;
 struct SkEncodedInfo;
 struct SkImageInfo;
 
@@ -105,7 +105,7 @@ private:
 
     SkSampler* getSampler(bool createIfNecessary) override;
 
-    sk_sp<SkColorTable>               fColorTable;
+    sk_sp<SkColorPalette>             fColorTable;
     // fNumColors is the number specified in the header, or 0 if not present in the header.
     const uint32_t                    fNumColors;
     const uint32_t                    fBytesPerColor;

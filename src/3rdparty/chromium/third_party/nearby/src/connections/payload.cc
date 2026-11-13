@@ -15,9 +15,19 @@
 #include "connections/payload.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <functional>
+#include <memory>
 #include <string>
+#include <utility>
+#include <variant>
 
-namespace location {
+#include "connections/payload_type.h"
+#include "internal/platform/byte_array.h"
+#include "internal/platform/file.h"
+#include "internal/platform/input_stream.h"
+#include "internal/platform/prng.h"
+
 namespace nearby {
 namespace connections {
 
@@ -44,8 +54,7 @@ Payload::~Payload() = default;
 Payload& Payload::operator=(Payload&& other) noexcept = default;
 
 // Default (invalid) payload.
-Payload::Payload()
-    : type_(PayloadType::kUnknown), content_(absl::monostate()) {}
+Payload::Payload() : type_(PayloadType::kUnknown), content_(std::monostate()) {}
 
 // Constructors for outgoing payloads.
 Payload::Payload(ByteArray&& bytes)
@@ -74,7 +83,7 @@ Payload::Payload(std::string parent_folder, std::string file_name,
       type_(PayloadType::kFile),
       content_(std::move(input_file)) {}
 
-Payload::Payload(std::function<InputStream&()> stream)
+Payload::Payload(std::unique_ptr<InputStream> stream)
     : type_(PayloadType::kStream), content_(std::move(stream)) {}
 
 // Constructors for incoming payloads.
@@ -92,26 +101,23 @@ Payload::Payload(Id id, std::string parent_folder, std::string file_name,
       type_(PayloadType::kFile),
       content_(std::move(input_file)) {}
 
-Payload::Payload(Id id, std::function<InputStream&()> stream)
+Payload::Payload(Id id, std::unique_ptr<InputStream> stream)
     : id_(id), type_(PayloadType::kStream), content_(std::move(stream)) {}
 
 // Returns ByteArray payload, if it has been defined, or empty ByteArray.
 const ByteArray& Payload::AsBytes() const& {
   static const ByteArray empty;  // NOLINT: function-level static is OK.
-  auto* result = absl::get_if<ByteArray>(&content_);
+  auto* result = std::get_if<ByteArray>(&content_);
   return result ? *result : empty;
-}
-ByteArray&& Payload::AsBytes() && {
-  auto* result = absl::get_if<ByteArray>(&content_);
-  return result ? std::move(*result) : std::move(ByteArray());
 }
 // Returns InputStream* payload, if it has been defined, or nullptr.
 InputStream* Payload::AsStream() {
-  auto* result = absl::get_if<std::function<InputStream&()>>(&content_);
-  return result ? &(*result)() : nullptr;
+  auto* result = std::get_if<std::unique_ptr<InputStream>>(&content_);
+  return result ? result->get() : nullptr;
 }
+
 // Returns InputFile* payload, if it has been defined, or nullptr.
-InputFile* Payload::AsFile() { return absl::get_if<InputFile>(&content_); }
+InputFile* Payload::AsFile() { return std::get_if<InputFile>(&content_); }
 
 // Returns Payload unique ID.
 Payload::Id Payload::GetId() const { return id_; }
@@ -144,4 +150,3 @@ const std::string& Payload::GetFileName() const { return file_name_; }
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

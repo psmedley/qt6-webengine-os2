@@ -1,10 +1,12 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "core/fpdfapi/render/cpdf_devicebuffer.h"
+
+#include <utility>
 
 #include "build/build_config.h"
 #include "core/fpdfapi/page/cpdf_pageobject.h"
@@ -64,11 +66,14 @@ CPDF_DeviceBuffer::CPDF_DeviceBuffer(CPDF_RenderContext* pContext,
 
 CPDF_DeviceBuffer::~CPDF_DeviceBuffer() = default;
 
-bool CPDF_DeviceBuffer::Initialize() {
+RetainPtr<CFX_DIBitmap> CPDF_DeviceBuffer::Initialize() {
   FX_RECT bitmap_rect =
       m_Matrix.TransformRect(CFX_FloatRect(m_Rect)).GetOuterRect();
-  return m_pBitmap->Create(bitmap_rect.Width(), bitmap_rect.Height(),
-                           FXDIB_Format::kArgb);
+  if (!m_pBitmap->Create(bitmap_rect.Width(), bitmap_rect.Height(),
+                         FXDIB_Format::kArgb)) {
+    return nullptr;
+  }
+  return m_pBitmap;
 }
 
 void CPDF_DeviceBuffer::OutputToDevice() {
@@ -81,12 +86,14 @@ void CPDF_DeviceBuffer::OutputToDevice() {
     }
     return;
   }
-  auto pBuffer = pdfium::MakeRetain<CFX_DIBitmap>();
-  m_pDevice->CreateCompatibleBitmap(pBuffer, m_pBitmap->GetWidth(),
-                                    m_pBitmap->GetHeight());
-  m_pContext->GetBackground(pBuffer, m_pObject.Get(), nullptr, m_Matrix);
-  pBuffer->CompositeBitmap(0, 0, pBuffer->GetWidth(), pBuffer->GetHeight(),
-                           m_pBitmap, 0, 0, BlendMode::kNormal, nullptr, false);
-  m_pDevice->StretchDIBits(pBuffer, m_Rect.left, m_Rect.top, m_Rect.Width(),
-                           m_Rect.Height());
+  auto buffer = pdfium::MakeRetain<CFX_DIBitmap>();
+  if (!m_pDevice->CreateCompatibleBitmap(buffer, m_pBitmap->GetWidth(),
+                                         m_pBitmap->GetHeight())) {
+    return;
+  }
+  m_pContext->GetBackgroundToBitmap(buffer, m_pObject, m_Matrix);
+  buffer->CompositeBitmap(0, 0, buffer->GetWidth(), buffer->GetHeight(),
+                          m_pBitmap, 0, 0, BlendMode::kNormal, nullptr, false);
+  m_pDevice->StretchDIBits(std::move(buffer), m_Rect.left, m_Rect.top,
+                           m_Rect.Width(), m_Rect.Height());
 }

@@ -207,7 +207,14 @@ class Worker : public std::enable_shared_from_this<Worker> {
 
   // Start running the given worker in another thread.
   static bool StartWorkerThread(Isolate* requester,
-                                std::shared_ptr<Worker> worker);
+                                std::shared_ptr<Worker> worker,
+                                base::Thread::Priority priority);
+
+  // Enters State::kTerminated for the Worker and resets the task runner.
+  void EnterTerminatedState();
+
+  // Returns the Worker instance for this thread.
+  static Worker* GetCurrentWorker();
 
  private:
   friend class ProcessMessageTask;
@@ -227,8 +234,9 @@ class Worker : public std::enable_shared_from_this<Worker> {
 
   class WorkerThread : public base::Thread {
    public:
-    explicit WorkerThread(std::shared_ptr<Worker> worker)
-        : base::Thread(base::Thread::Options("WorkerThread")),
+    explicit WorkerThread(std::shared_ptr<Worker> worker,
+                          base::Thread::Priority priority)
+        : base::Thread(base::Thread::Options("WorkerThread", priority)),
           worker_(std::move(worker)) {}
 
     void Run() override;
@@ -238,7 +246,9 @@ class Worker : public std::enable_shared_from_this<Worker> {
   };
 
   void ExecuteInThread();
-  static void PostMessageOut(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void PostMessageOut(const v8::FunctionCallbackInfo<v8::Value>& info);
+
+  static void SetCurrentWorker(Worker* worker);
 
   i::ParkingSemaphore out_semaphore_{0};
   SerializationDataQueue out_queue_;
@@ -319,9 +329,6 @@ class PerIsolateData {
   Local<FunctionTemplate> GetTestApiObjectCtor() const;
   void SetTestApiObjectCtor(Local<FunctionTemplate> ctor);
 
-  Local<FunctionTemplate> GetSnapshotObjectCtor() const;
-  void SetSnapshotObjectCtor(Local<FunctionTemplate> ctor);
-
   Local<FunctionTemplate> GetDomNodeCtor() const;
   void SetDomNodeCtor(Local<FunctionTemplate> ctor);
 
@@ -344,10 +351,9 @@ class PerIsolateData {
   std::unordered_set<DynamicImportData*> import_data_;
 #endif
   Global<FunctionTemplate> test_api_object_ctor_;
-  Global<FunctionTemplate> snapshot_object_ctor_;
   Global<FunctionTemplate> dom_node_ctor_;
 
-  int RealmIndexOrThrow(const v8::FunctionCallbackInfo<v8::Value>& args,
+  int RealmIndexOrThrow(const v8::FunctionCallbackInfo<v8::Value>& info,
                         int arg_offset);
   int RealmFind(Local<Context> context);
 };
@@ -405,7 +411,7 @@ class ShellOptions {
   DisallowReassignment<bool> fuzzilli_coverage_statistics = {
       "fuzzilli-coverage-statistics", false};
   DisallowReassignment<bool> fuzzilli_enable_builtins_coverage = {
-      "fuzzilli-enable-builtins-coverage", true};
+      "fuzzilli-enable-builtins-coverage", false};
   DisallowReassignment<bool> send_idle_notification = {"send-idle-notification",
                                                        false};
   DisallowReassignment<bool> invoke_weak_callbacks = {"invoke-weak-callbacks",
@@ -421,16 +427,16 @@ class ShellOptions {
   DisallowReassignment<bool> no_fail = {"no-fail", false};
   DisallowReassignment<bool> dump_counters = {"dump-counters", false};
   DisallowReassignment<bool> dump_counters_nvp = {"dump-counters-nvp", false};
+  DisallowReassignment<bool> dump_system_memory_stats = {
+      "dump-system-memory-stats", false};
   DisallowReassignment<bool> ignore_unhandled_promises = {
       "ignore-unhandled-promises", false};
   DisallowReassignment<bool> mock_arraybuffer_allocator = {
       "mock-arraybuffer-allocator", false};
   DisallowReassignment<size_t> mock_arraybuffer_allocator_limit = {
       "mock-arraybuffer-allocator-limit", 0};
-#if MULTI_MAPPED_ALLOCATOR_AVAILABLE
   DisallowReassignment<bool> multi_mapped_mock_allocator = {
       "multi-mapped-mock-allocator", false};
-#endif
   DisallowReassignment<bool> enable_inspector = {"enable-inspector", false};
   int num_isolates = 1;
   DisallowReassignment<v8::ScriptCompiler::CompileOptions, true>
@@ -452,6 +458,7 @@ class ShellOptions {
   DisallowReassignment<int> read_from_tcp_port = {"read-from-tcp-port", -1};
   DisallowReassignment<bool> enable_os_system = {"enable-os-system", false};
   DisallowReassignment<bool> quiet_load = {"quiet-load", false};
+  DisallowReassignment<bool> apply_priority = {"apply-priority", true};
   DisallowReassignment<int> thread_pool_size = {"thread-pool-size", 0};
   DisallowReassignment<bool> stress_delay_tasks = {"stress-delay-tasks", false};
   std::vector<const char*> arguments;
@@ -464,13 +471,7 @@ class ShellOptions {
       "enable-system-instrumentation", false};
   DisallowReassignment<bool> enable_etw_stack_walking = {
       "enable-etw-stack-walking", false};
-  DisallowReassignment<const char*> web_snapshot_config = {
-      "web-snapshot-config", nullptr};
-  DisallowReassignment<const char*> web_snapshot_output = {
-      "web-snapshot-output", nullptr};
-  DisallowReassignment<bool> d8_web_snapshot_api = {
-      "experimental-d8-web-snapshot-api", false};
-  // Applies to web snapshot and JSON deserialization.
+  // Applies to JSON deserialization.
   DisallowReassignment<bool> stress_deserialize = {"stress-deserialize", false};
   DisallowReassignment<bool> compile_only = {"compile-only", false};
   DisallowReassignment<int> repeat_compile = {"repeat-compile", 1};
@@ -482,10 +483,8 @@ class ShellOptions {
   DisallowReassignment<bool> enable_sandbox_crash_filter = {
       "enable-sandbox-crash-filter", false};
 #endif  // V8_ENABLE_SANDBOX
-  DisallowReassignment<bool> throw_on_failed_access_check = {
-      "throw-on-failed-access-check", false};
-  DisallowReassignment<bool> noop_on_failed_access_check = {
-      "noop-on-failed-access-check", false};
+  DisallowReassignment<size_t> max_serializer_memory = {"max-serializer-memory",
+                                                        1 * i::MB};
 };
 
 class Shell : public i::AllStatic {
@@ -506,17 +505,15 @@ class Shell : public i::AllStatic {
                             ReportExceptions report_exceptions,
                             ProcessMessageQueue process_message_queue);
   static bool ExecuteModule(Isolate* isolate, const char* file_name);
-  static bool TakeWebSnapshot(Isolate* isolate);
-  static bool ExecuteWebSnapshot(Isolate* isolate, const char* file_name);
   static bool LoadJSON(Isolate* isolate, const char* file_name);
   static void ReportException(Isolate* isolate, Local<Message> message,
                               Local<Value> exception);
-  static void ReportException(Isolate* isolate, TryCatch* try_catch);
+  static void ReportException(Isolate* isolate, const TryCatch& try_catch);
   static MaybeLocal<String> ReadFile(Isolate* isolate, const char* name,
                                      bool should_throw = true);
   static Local<String> WasmLoadSourceMapCallback(Isolate* isolate,
                                                  const char* name);
-  static Local<Context> CreateEvaluationContext(Isolate* isolate);
+  static MaybeLocal<Context> CreateEvaluationContext(Isolate* isolate);
   static int RunMain(Isolate* isolate, bool last_run);
   static int Main(int argc, char* argv[]);
   static void Exit(int exit_code);
@@ -541,98 +538,106 @@ class Shell : public i::AllStatic {
   static void MapCounters(v8::Isolate* isolate, const char* name);
 
   static double GetTimestamp();
-  static int64_t GetTracingTimestampFromPerformanceTimestamp(
+  static uint64_t GetTracingTimestampFromPerformanceTimestamp(
       double performance_timestamp);
 
-  static void PerformanceNow(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void PerformanceMark(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void PerformanceNow(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void PerformanceMark(const v8::FunctionCallbackInfo<v8::Value>& info);
   static void PerformanceMeasure(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
   static void PerformanceMeasureMemory(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
 
-  static void RealmCurrent(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RealmOwner(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RealmGlobal(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RealmCreate(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RealmNavigate(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void RealmCurrent(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void RealmOwner(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void RealmGlobal(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void RealmCreate(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void RealmNavigate(const v8::FunctionCallbackInfo<v8::Value>& info);
   static void RealmCreateAllowCrossRealmAccess(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
   static void RealmDetachGlobal(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RealmDispose(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RealmSwitch(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RealmEval(const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void RealmDispose(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void RealmSwitch(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void RealmEval(const v8::FunctionCallbackInfo<v8::Value>& info);
   static void RealmSharedGet(Local<String> property,
                              const PropertyCallbackInfo<Value>& info);
   static void RealmSharedSet(Local<String> property, Local<Value> value,
                              const PropertyCallbackInfo<void>& info);
-  static void RealmTakeWebSnapshot(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RealmUseWebSnapshot(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  static void LogGetAndStop(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void LogGetAndStop(const v8::FunctionCallbackInfo<v8::Value>& info);
   static void TestVerifySourcePositions(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
 
   static void InstallConditionalFeatures(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
 
   static void AsyncHooksCreateHook(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
   static void AsyncHooksExecutionAsyncId(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
   static void AsyncHooksTriggerAsyncId(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
 
-  static void SetPromiseHooks(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void SetPromiseHooks(const v8::FunctionCallbackInfo<v8::Value>& info);
 
-  static void EnableDebugger(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void DisableDebugger(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void EnableDebugger(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void DisableDebugger(const v8::FunctionCallbackInfo<v8::Value>& info);
 
   static void SerializerSerialize(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
   static void SerializerDeserialize(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
 
-  static void Print(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void PrintErr(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void WriteStdout(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void WaitUntilDone(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void NotifyDone(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void QuitOnce(v8::FunctionCallbackInfo<v8::Value>* args);
-  static void Quit(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void Version(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void ReadFile(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void ProfilerSetOnProfileEndListener(
+      const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void ProfilerTriggerSample(
+      const v8::FunctionCallbackInfo<v8::Value>& info);
+
+  static bool HasOnProfileEndListener(Isolate* isolate);
+
+  static void TriggerOnProfileEndListener(Isolate* isolate,
+                                          std::string profile);
+
+  static void ResetOnProfileEndListener(Isolate* isolate);
+
+  static void Print(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void PrintErr(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void WriteStdout(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void WaitUntilDone(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void NotifyDone(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void QuitOnce(v8::FunctionCallbackInfo<v8::Value>* info);
+  static void Quit(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void Terminate(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void Version(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void WriteFile(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void ReadFile(const v8::FunctionCallbackInfo<v8::Value>& info);
   static char* ReadChars(const char* name, int* size_out);
   static MaybeLocal<PrimitiveArray> ReadLines(Isolate* isolate,
                                               const char* name);
-  static void ReadBuffer(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void ReadBuffer(const v8::FunctionCallbackInfo<v8::Value>& info);
   static Local<String> ReadFromStdin(Isolate* isolate);
-  static void ReadLine(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    args.GetReturnValue().Set(ReadFromStdin(args.GetIsolate()));
-  }
+  static void ReadLine(const v8::FunctionCallbackInfo<v8::Value>& info);
   static void WriteChars(const char* name, uint8_t* buffer, size_t buffer_size);
-  static void ExecuteFile(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void SetTimeout(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void ExecuteFile(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void SetTimeout(const v8::FunctionCallbackInfo<v8::Value>& info);
   static void ReadCodeTypeAndArguments(
-      const v8::FunctionCallbackInfo<v8::Value>& args, int index,
+      const v8::FunctionCallbackInfo<v8::Value>& info, int index,
       CodeType* code_type, Local<Value>* arguments = nullptr);
   static bool FunctionAndArgumentsToString(Local<Function> function,
                                            Local<Value> arguments,
                                            Local<String>* source,
                                            Isolate* isolate);
   static MaybeLocal<String> ReadSource(
-      const v8::FunctionCallbackInfo<v8::Value>& args, int index,
+      const v8::FunctionCallbackInfo<v8::Value>& info, int index,
       CodeType default_type);
-  static void WorkerNew(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void WorkerNew(const v8::FunctionCallbackInfo<v8::Value>& info);
   static void WorkerPostMessage(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void WorkerGetMessage(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void WorkerTerminate(const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void WorkerGetMessage(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void WorkerTerminate(const v8::FunctionCallbackInfo<v8::Value>& info);
   static void WorkerTerminateAndWait(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+      const v8::FunctionCallbackInfo<v8::Value>& info);
   // The OS object on the global object contains methods for performing
   // operating system calls:
   //
@@ -646,26 +651,26 @@ class Shell : public i::AllStatic {
   // milliseconds on the total running time of the program.  Exceptions are
   // thrown on timeouts or other errors or if the exit status of the program
   // indicates an error.
-  static void System(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void System(const v8::FunctionCallbackInfo<v8::Value>& info);
 
   // os.chdir(dir) changes directory to the given directory.  Throws an
   // exception/ on error.
-  static void ChangeDirectory(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void ChangeDirectory(const v8::FunctionCallbackInfo<v8::Value>& info);
 
   // os.setenv(variable, value) sets an environment variable.  Repeated calls to
   // this method leak memory due to the API of setenv in the standard C library.
-  static void SetEnvironment(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void UnsetEnvironment(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void SetEnvironment(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void UnsetEnvironment(const v8::FunctionCallbackInfo<v8::Value>& info);
 
   // os.umask(alue) calls the umask system call and returns the old umask.
-  static void SetUMask(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void SetUMask(const v8::FunctionCallbackInfo<v8::Value>& info);
 
   // os.mkdirp(name, mask) creates a directory.  The mask (if present) is anded
   // with the current umask.  Intermediate directories are created if necessary.
   // An exception is not thrown if the directory already exists.  Analogous to
   // the "mkdir -p" command.
-  static void MakeDirectory(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RemoveDirectory(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void MakeDirectory(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void RemoveDirectory(const v8::FunctionCallbackInfo<v8::Value>& info);
   static MaybeLocal<Promise> HostImportModuleDynamically(
       Local<Context> context, Local<Data> host_defined_options,
       Local<Value> resource_name, Local<String> specifier,
@@ -682,7 +687,7 @@ class Shell : public i::AllStatic {
       Local<Context> initiator_context);
 
 #ifdef V8_FUZZILLI
-  static void Fuzzilli(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void Fuzzilli(const v8::FunctionCallbackInfo<v8::Value>& info);
 #endif  // V8_FUZZILLI
 
   // Data is of type DynamicImportData*. We use void* here to be able
@@ -722,8 +727,6 @@ class Shell : public i::AllStatic {
 
   static void PromiseRejectCallback(v8::PromiseRejectMessage reject_message);
 
-  static Local<FunctionTemplate> CreateSnapshotTemplate(Isolate* isolate);
-
  private:
   static inline int DeserializationRunCount() {
     return options.stress_deserialize ? 1000 : 1;
@@ -732,6 +735,11 @@ class Shell : public i::AllStatic {
   static Global<Context> evaluation_context_;
   static base::OnceType quit_once_;
   static Global<Function> stringify_function_;
+
+  static base::Mutex profiler_end_callback_lock_;
+  static std::map<Isolate*, std::pair<Global<Function>, Global<Context>>>
+      profiler_end_callback_;
+
   static const char* stringify_source_;
   static CounterMap* counter_map_;
   static base::SharedMutex counter_mutex_;
@@ -757,9 +765,10 @@ class Shell : public i::AllStatic {
   static Counter* GetCounter(const char* name, bool is_histogram);
   static Local<String> Stringify(Isolate* isolate, Local<Value> value);
   static void RunShell(Isolate* isolate);
+  static bool RunMainIsolate(Isolate* isolate, bool keep_context_alive);
   static bool SetOptions(int argc, char* argv[]);
 
-  static void NodeTypeCallback(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void NodeTypeCallback(const v8::FunctionCallbackInfo<v8::Value>& info);
 
   static Local<FunctionTemplate> CreateEventTargetTemplate(Isolate* isolate);
   static Local<FunctionTemplate> CreateNodeTemplates(
@@ -777,9 +786,9 @@ class Shell : public i::AllStatic {
       Isolate* isolate);
 
   static MaybeLocal<Context> CreateRealm(
-      const v8::FunctionCallbackInfo<v8::Value>& args, int index,
+      const v8::FunctionCallbackInfo<v8::Value>& info, int index,
       v8::MaybeLocal<Value> global_object);
-  static void DisposeRealm(const v8::FunctionCallbackInfo<v8::Value>& args,
+  static void DisposeRealm(const v8::FunctionCallbackInfo<v8::Value>& info,
                            int index);
   static MaybeLocal<Module> FetchModuleTree(v8::Local<v8::Module> origin_module,
                                             v8::Local<v8::Context> context,

@@ -5,11 +5,21 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkShader.h"
-#include "include/private/SkTPin.h"
-#include "include/private/SkTo.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkTileMode.h"
+#include "include/core/SkTypes.h"
+#include "include/private/base/SkCPUTypes.h"
+#include "include/private/base/SkFixed.h"
+#include "include/private/base/SkMath.h"
+#include "include/private/base/SkTFitsIn.h"
+#include "include/private/base/SkTPin.h"
+#include "include/private/base/SkTo.h"
 #include "src/core/SkBitmapProcState.h"
-#include "src/core/SkOpts.h"
+#include "src/core/SkMemset.h"
+
+#include <cstdint>
+#include <cstring>
 
 /*
  *  The decal_ functions require that
@@ -169,7 +179,7 @@ static unsigned extract_low_bits_general(SkFixed fx, int max) {
 //
 // See also SK_OPTS_NS::decode_packed_coordinates_and_weight for unpacking this value.
 template <unsigned (*tile)(SkFixed, int), unsigned (*extract_low_bits)(SkFixed, int)>
-SK_ATTRIBUTE(no_sanitize("signed-integer-overflow"))
+SK_NO_SANITIZE("signed-integer-overflow")
 static uint32_t pack(SkFixed f, unsigned max, SkFixed one) {
     uint32_t packed = tile(f, max);                      // low coordinate in high bits
     packed = (packed <<  4) | extract_low_bits(f, max);  // (lerp weight _is_ coord fractional part)
@@ -378,7 +388,7 @@ static void clampx_nofilter_trans(const SkBitmapProcState& s,
     }
 
     // fill the remaining with the max value
-    sk_memset16(xptr, width - 1, count);
+    SkOpts::memset16(xptr, width - 1, count);
 }
 
 template< U16CPU (tiley)(int x, int n) >

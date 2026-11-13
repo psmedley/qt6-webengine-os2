@@ -9,7 +9,6 @@
 #include "devtools_frontend_qt.h"
 
 #include "profile_qt.h"
-#include "profile_adapter.h"
 #include "web_contents_adapter.h"
 #include "web_contents_delegate_qt.h"
 
@@ -78,6 +77,7 @@ DevToolsFrontendQt::DevToolsFrontendQt(QSharedPointer<WebContentsAdapter> webCon
     : content::WebContentsObserver(webContentsAdapter->webContents())
     , m_frontendAdapter(webContentsAdapter)
     , m_inspectedContents(inspectedContents)
+    , m_outermostContents(inspectedContents->GetOutermostWebContents())
     , m_bindings(new DevToolsUIBindings(webContentsAdapter->webContents()))
 {
     // bindings take ownership over devtools
@@ -136,19 +136,21 @@ WebContentsDelegateQt *DevToolsFrontendQt::frontendDelegate() const
 
 void DevToolsFrontendQt::ColorPickedInEyeDropper(int r, int g, int b, int a)
 {
-    base::DictionaryValue color;
-    color.SetInteger("r", r);
-    color.SetInteger("g", g);
-    color.SetInteger("b", b);
-    color.SetInteger("a", a);
-    m_bindings->CallClientMethod("DevToolsAPI", "eyeDropperPickedColor", std::move(color));
+    base::Value::Dict color;
+    color.Set("r", r);
+    color.Set("g", g);
+    color.Set("b", b);
+    color.Set("a", a);
+    m_bindings->CallClientMethod("DevToolsAPI", "eyeDropperPickedColor", base::Value(std::move(color)));
 }
 
 // content::WebContentsObserver implementation
 void DevToolsFrontendQt::WebContentsDestroyed()
 {
+    // If m_inspectedContents was a guest view it was probably already destroyed,
+    // but its embedder still lives.
     WebContentsAdapter *inspectedAdapter =
-            static_cast<WebContentsDelegateQt *>(m_inspectedContents->GetDelegate())
+            static_cast<WebContentsDelegateQt *>(m_outermostContents->GetDelegate())
                     ->webContentsAdapter();
     if (inspectedAdapter)
         inspectedAdapter->devToolsFrontendDestroyed(this);
@@ -201,7 +203,14 @@ bool DevToolsFrontendQt::IsValidFrontendURL(const GURL &url)
 
 void DevToolsFrontendQt::InspectedContentsClosing()
 {
+    // Called for already destroyed guest views
+    m_inspectedContents = nullptr;
     web_contents()->ClosePage();
+}
+
+std::string DevToolsFrontendQt::GetId(content::WebContents *inspectedContents)
+{
+    return content::DevToolsAgentHost::GetOrCreateFor(inspectedContents)->GetId();
 }
 
 void DevToolsFrontendQt::CloseWindow()

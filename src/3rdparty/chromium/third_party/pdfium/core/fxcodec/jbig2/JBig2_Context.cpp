@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,7 @@
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/pauseindicator_iface.h"
 #include "third_party/base/check.h"
-#include "third_party/base/ptr_util.h"
+#include "third_party/base/memory/ptr_util.h"
 
 namespace {
 
@@ -127,7 +127,7 @@ JBig2_Result CJBig2_Context::DecodeSequential(PauseIndicatorIface* pPause) {
   return JBig2_Result::kSuccess;
 }
 
-bool CJBig2_Context::GetFirstPage(uint8_t* pBuf,
+bool CJBig2_Context::GetFirstPage(pdfium::span<uint8_t> pBuf,
                                   int32_t width,
                                   int32_t height,
                                   int32_t stride,
@@ -529,8 +529,7 @@ JBig2_Result CJBig2_Context::ParseSymbolDict(CJBig2_Segment* pSegment) {
          ++it) {
       if (it->first == key) {
         pSegment->m_SymbolDict = it->second->DeepCopy();
-        m_pSymbolDictCache->push_front(
-            CJBig2_CachePair(key, std::move(it->second)));
+        m_pSymbolDictCache->emplace_front(key, std::move(it->second));
         m_pSymbolDictCache->erase(it);
         cache_hit = true;
         break;
@@ -563,7 +562,7 @@ JBig2_Result CJBig2_Context::ParseSymbolDict(CJBig2_Segment* pSegment) {
         m_pSymbolDictCache->pop_back();
         --size;
       }
-      m_pSymbolDictCache->push_front(CJBig2_CachePair(key, std::move(value)));
+      m_pSymbolDictCache->emplace_front(key, std::move(value));
     }
   }
   if (wFlags & 0x0200) {

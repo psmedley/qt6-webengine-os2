@@ -12,35 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {v4 as uuidv4} from 'uuid';
+
+import {BigintMath as BIMath} from '../../base/bigint_math';
 import {searchSegment} from '../../base/binary_search';
 import {assertTrue} from '../../base/logging';
-import {hueForCpu} from '../../common/colorizer';
-import {PluginContext} from '../../common/plugin_api';
-import {NUM, NUM_NULL, QueryResult} from '../../common/query_result';
-import {fromNs, toNs} from '../../common/time';
+import {duration, time, Time} from '../../base/time';
+import {calcCachedBucketSize} from '../../common/cache_utils';
+import {drawTrackHoverTooltip} from '../../common/canvas_utils';
+import {colorForCpu} from '../../common/colorizer';
 import {TrackData} from '../../common/track_data';
-import {
-  TrackController,
-} from '../../controller/track_controller';
+import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
-import {NewTrackArgs, Track} from '../../frontend/track';
-
+import {PanelSize} from '../../frontend/panel';
+import {
+  EngineProxy,
+  Plugin,
+  PluginContext,
+  PluginContextTrace,
+  PluginDescriptor,
+  Track,
+} from '../../public';
+import {
+  LONG,
+  LONG_NULL,
+  NUM,
+  NUM_NULL,
+  QueryResult,
+} from '../../trace_processor/query_result';
 
 export const CPU_FREQ_TRACK_KIND = 'CpuFreqTrack';
 
 export interface Data extends TrackData {
   maximumValue: number;
-  maxTsEnd: number;
+  maxTsEnd: time;
 
-  timestamps: Float64Array;
+  timestamps: BigInt64Array;
   minFreqKHz: Uint32Array;
   maxFreqKHz: Uint32Array;
   lastFreqKHz: Uint32Array;
   lastIdleValues: Int8Array;
 }
 
-export interface Config {
+interface Config {
   cpu: number;
   freqTrackId: number;
   idleTrackId?: number;
@@ -48,42 +63,73 @@ export interface Config {
   minimumValue?: number;
 }
 
-class CpuFreqTrackController extends TrackController<Config, Data> {
-  static readonly kind = CPU_FREQ_TRACK_KIND;
+// 0.5 Makes the horizontal lines sharp.
+const MARGIN_TOP = 4.5;
+const RECT_HEIGHT = 20;
 
-  private maxDurNs = 0;
-  private maxTsEndNs = 0;
+class CpuFreqTrack implements Track {
+  private mousePos = {x: 0, y: 0};
+  private hoveredValue: number|undefined = undefined;
+  private hoveredTs: time|undefined = undefined;
+  private hoveredTsEnd: time|undefined = undefined;
+  private hoveredIdle: number|undefined = undefined;
+  private fetcher = new TimelineFetcher<Data>(this.onBoundsChange.bind(this));
+
+  private maxDur: duration = 0n;
+  private maxTsEnd: time = Time.ZERO;
   private maximumValueSeen = 0;
-  private cachedBucketNs = Number.MAX_SAFE_INTEGER;
+  private cachedBucketSize = BIMath.INT64_MAX;
 
-  async onSetup() {
+  // This unique ID is just used to create the table names.
+  // In the future we should probably use the track instance ID, but for now we
+  // don't have access to it.
+  private uuid = uuidv4();
+
+  private engine: EngineProxy;
+  private config: Config;
+
+  constructor(config: Config, engine: EngineProxy) {
+    this.config = config;
+    this.engine = engine;
+  }
+
+  // Returns a valid SQL table name with the given prefix that should be unique
+  // for each track.
+  private tableName(prefix: string) {
+    // Derive table name from, since that is unique for each track.
+    // Track ID can be UUID but '-' is not valid for sql table name.
+    const idSuffix = this.uuid.split('-').join('_');
+    return `${prefix}_${idSuffix}`;
+  }
+
+  async onCreate() {
     await this.createFreqIdleViews();
 
     this.maximumValueSeen = await this.queryMaxFrequency();
-    this.maxDurNs = await this.queryMaxSourceDur();
+    this.maxDur = await this.queryMaxSourceDur();
 
-    const iter = (await this.query(`
+    const iter = (await this.engine.query(`
       select max(ts) as maxTs, dur, count(1) as rowCount
       from ${this.tableName('freq_idle')}
-    `)).firstRow({maxTs: NUM_NULL, dur: NUM_NULL, rowCount: NUM});
+    `)).firstRow({maxTs: LONG_NULL, dur: LONG_NULL, rowCount: NUM});
     if (iter.maxTs === null || iter.dur === null) {
       // We shoulnd't really hit this because trackDecider shouldn't create
       // the track in the first place if there are no entries. But could happen
       // if only one cpu has no cpufreq data.
       return;
     }
-    this.maxTsEndNs = iter.maxTs + iter.dur;
+    this.maxTsEnd = Time.add(Time.fromRaw(iter.maxTs), iter.dur);
 
     const rowCount = iter.rowCount;
-    const bucketNs = this.cachedBucketSizeNs(rowCount);
-    if (bucketNs === undefined) {
+    const bucketSize = calcCachedBucketSize(rowCount);
+    if (bucketSize === undefined) {
       return;
     }
 
-    await this.query(`
+    await this.engine.query(`
       create table ${this.tableName('freq_idle_cached')} as
       select
-        (ts + ${bucketNs / 2}) / ${bucketNs} * ${bucketNs} as cachedTsq,
+        (ts + ${bucketSize / 2n}) / ${bucketSize} * ${bucketSize} as cachedTsq,
         min(freqValue) as minFreq,
         max(freqValue) as maxFreq,
         value_at_max_ts(ts, freqValue) as lastFreq,
@@ -93,24 +139,20 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
       order by cachedTsq
     `);
 
-    this.cachedBucketNs = bucketNs;
+    this.cachedBucketSize = bucketSize;
   }
 
-  async onBoundsChange(start: number, end: number, resolution: number):
+  async onUpdate() {
+    await this.fetcher.requestDataForCurrentTime();
+  }
+
+  async onBoundsChange(start: time, end: time, resolution: duration):
       Promise<Data> {
     // The resolution should always be a power of two for the logic of this
     // function to make sense.
-    const resolutionNs = toNs(resolution);
-    assertTrue(Math.log2(resolutionNs) % 1 === 0);
+    assertTrue(BIMath.popcount(resolution) === 1, `${resolution} not pow of 2`);
 
-    const startNs = toNs(start);
-    const endNs = toNs(end);
-
-    // ns per quantization bucket (i.e. ns per pixel). /2 * 2 is to force it to
-    // be an even number, so we can snap in the middle.
-    const bucketNs =
-        Math.max(Math.round(resolutionNs * this.pxSize() / 2) * 2, 1);
-    const freqResult = await this.queryData(startNs, endNs, bucketNs);
+    const freqResult = await this.queryData(start, end, resolution);
     assertTrue(freqResult.isComplete());
 
     const numRows = freqResult.numRows();
@@ -120,8 +162,8 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
       resolution,
       length: numRows,
       maximumValue: this.maximumValue(),
-      maxTsEnd: this.maxTsEndNs,
-      timestamps: new Float64Array(numRows),
+      maxTsEnd: this.maxTsEnd,
+      timestamps: new BigInt64Array(numRows),
       minFreqKHz: new Uint32Array(numRows),
       maxFreqKHz: new Uint32Array(numRows),
       lastFreqKHz: new Uint32Array(numRows),
@@ -129,14 +171,14 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
     };
 
     const it = freqResult.iter({
-      'tsq': NUM,
+      'tsq': LONG,
       'minFreq': NUM,
       'maxFreq': NUM,
       'lastFreq': NUM,
       'lastIdleValue': NUM,
     });
     for (let i = 0; it.valid(); ++i, it.next()) {
-      data.timestamps[i] = fromNs(it.tsq);
+      data.timestamps[i] = it.tsq;
       data.minFreqKHz[i] = it.minFreq;
       data.maxFreqKHz[i] = it.maxFreq;
       data.lastFreqKHz[i] = it.lastFreq;
@@ -146,36 +188,36 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
     return data;
   }
 
-  private async queryData(startNs: number, endNs: number, bucketNs: number):
+  private async queryData(start: time, end: time, bucketSize: duration):
       Promise<QueryResult> {
-    const isCached = this.cachedBucketNs <= bucketNs;
+    const isCached = this.cachedBucketSize <= bucketSize;
 
     if (isCached) {
-      return this.query(`
+      return this.engine.query(`
         select
-          cachedTsq / ${bucketNs} * ${bucketNs} as tsq,
+          cachedTsq / ${bucketSize} * ${bucketSize} as tsq,
           min(minFreq) as minFreq,
           max(maxFreq) as maxFreq,
           value_at_max_ts(cachedTsq, lastFreq) as lastFreq,
           value_at_max_ts(cachedTsq, lastIdleValue) as lastIdleValue
         from ${this.tableName('freq_idle_cached')}
         where
-          cachedTsq >= ${startNs - this.maxDurNs} and
-          cachedTsq <= ${endNs}
+          cachedTsq >= ${start - this.maxDur} and
+          cachedTsq <= ${end}
         group by tsq
         order by tsq
       `);
     }
-    const minTsFreq = await this.query(`
+    const minTsFreq = await this.engine.query(`
       select ifnull(max(ts), 0) as minTs from ${this.tableName('freq')}
-      where ts < ${startNs}
+      where ts < ${start}
     `);
 
     let minTs = minTsFreq.iter({minTs: NUM}).minTs;
     if (this.config.idleTrackId !== undefined) {
-      const minTsIdle = await this.query(`
+      const minTsIdle = await this.engine.query(`
         select ifnull(max(ts), 0) as minTs from ${this.tableName('idle')}
-        where ts < ${startNs}
+        where ts < ${start}
       `);
       minTs = Math.min(minTsIdle.iter({minTs: NUM}).minTs, minTs);
     }
@@ -183,9 +225,9 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
     const geqConstraint = this.config.idleTrackId === undefined ?
         `ts >= ${minTs}` :
         `source_geq(ts, ${minTs})`;
-    return this.query(`
+    return this.engine.query(`
       select
-        (ts + ${bucketNs / 2}) / ${bucketNs} * ${bucketNs} as tsq,
+        (ts + ${bucketSize / 2n}) / ${bucketSize} * ${bucketSize} as tsq,
         min(freqValue) as minFreq,
         max(freqValue) as maxFreq,
         value_at_max_ts(ts, freqValue) as lastFreq,
@@ -193,35 +235,35 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
       from ${this.tableName('freq_idle')}
       where
         ${geqConstraint} and
-        ts <= ${endNs}
+        ts <= ${end}
       group by tsq
       order by tsq
     `);
   }
 
   private async queryMaxFrequency(): Promise<number> {
-    const result = await this.query(`
+    const result = await this.engine.query(`
       select max(freqValue) as maxFreq
       from ${this.tableName('freq')}
     `);
-    return result.firstRow({'maxFreq': NUM_NULL}).maxFreq || 0;
+    return result.firstRow({'maxFreq': NUM_NULL}).maxFreq ?? 0;
   }
 
-  private async queryMaxSourceDur(): Promise<number> {
-    const maxDurFreqResult = await this.query(
+  private async queryMaxSourceDur(): Promise<duration> {
+    const maxDurFreqResult = await this.engine.query(
         `select ifnull(max(dur), 0) as maxDur from ${this.tableName('freq')}`);
-    const maxDurNs = maxDurFreqResult.firstRow({'maxDur': NUM}).maxDur;
+    const maxDur = maxDurFreqResult.firstRow({'maxDur': LONG}).maxDur;
     if (this.config.idleTrackId === undefined) {
-      return maxDurNs;
+      return maxDur;
     }
 
-    const maxDurIdleResult = await this.query(
+    const maxDurIdleResult = await this.engine.query(
         `select ifnull(max(dur), 0) as maxDur from ${this.tableName('idle')}`);
-    return Math.max(maxDurNs, maxDurIdleResult.firstRow({maxDur: NUM}).maxDur);
+    return BIMath.max(maxDur, maxDurIdleResult.firstRow({maxDur: LONG}).maxDur);
   }
 
   private async createFreqIdleViews() {
-    await this.query(`create view ${this.tableName('freq')} as
+    await this.engine.query(`create view ${this.tableName('freq')} as
       select
         ts,
         dur,
@@ -231,7 +273,7 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
     `);
 
     if (this.config.idleTrackId === undefined) {
-      await this.query(`create view ${this.tableName('freq_idle')} as
+      await this.engine.query(`create view ${this.tableName('freq_idle')} as
         select
           ts,
           dur,
@@ -242,7 +284,7 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
       return;
     }
 
-    await this.query(`
+    await this.engine.query(`
       create view ${this.tableName('idle')} as
       select
         ts,
@@ -252,45 +294,27 @@ class CpuFreqTrackController extends TrackController<Config, Data> {
       where track_id = ${this.config.idleTrackId};
     `);
 
-    await this.query(`
+    await this.engine.query(`
       create virtual table ${this.tableName('freq_idle')}
       using span_join(${this.tableName('freq')}, ${this.tableName('idle')});
     `);
   }
 
   private maximumValue() {
-    return Math.max(this.config.maximumValue || 0, this.maximumValueSeen);
-  }
-}
-
-// 0.5 Makes the horizontal lines sharp.
-const MARGIN_TOP = 4.5;
-const RECT_HEIGHT = 20;
-
-class CpuFreqTrack extends Track<Config, Data> {
-  static readonly kind = CPU_FREQ_TRACK_KIND;
-  static create(args: NewTrackArgs): CpuFreqTrack {
-    return new CpuFreqTrack(args);
-  }
-
-  private mousePos = {x: 0, y: 0};
-  private hoveredValue: number|undefined = undefined;
-  private hoveredTs: number|undefined = undefined;
-  private hoveredTsEnd: number|undefined = undefined;
-  private hoveredIdle: number|undefined = undefined;
-
-  constructor(args: NewTrackArgs) {
-    super(args);
+    return Math.max(this.config.maximumValue ?? 0, this.maximumValueSeen);
   }
 
   getHeight() {
     return MARGIN_TOP + RECT_HEIGHT;
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  render(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
-    const {timeScale, visibleWindowTime} = globals.frontendLocalState;
-    const data = this.data();
+    const {
+      visibleTimeScale,
+      visibleWindowTime,
+    } = globals.timeline;
+    const data = this.fetcher.data;
 
     if (data === undefined || data.timestamps.length === 0) {
       // Can't possibly draw anything.
@@ -302,7 +326,7 @@ class CpuFreqTrack extends Track<Config, Data> {
     assertTrue(data.timestamps.length === data.maxFreqKHz.length);
     assertTrue(data.timestamps.length === data.lastIdleValues.length);
 
-    const endPx = timeScale.timeToPx(visibleWindowTime.end);
+    const endPx = size.width;
     const zeroY = MARGIN_TOP + RECT_HEIGHT;
 
     // Quantize the Y axis to quarters of powers of tens (7.5K, 10K, 12.5K).
@@ -317,34 +341,38 @@ class CpuFreqTrack extends Track<Config, Data> {
     const yLabel = `${num} ${kUnits[unitGroup + 1]}Hz`;
 
     // Draw the CPU frequency graph.
-    const hue = hueForCpu(this.config.cpu);
+    const color = colorForCpu(this.config.cpu);
     let saturation = 45;
     if (globals.state.hoveredUtid !== -1) {
       saturation = 0;
     }
-    ctx.fillStyle = `hsl(${hue}, ${saturation}%, 70%)`;
-    ctx.strokeStyle = `hsl(${hue}, ${saturation}%, 55%)`;
 
-    const calculateX = (timestamp: number) => {
-      return Math.floor(timeScale.timeToPx(timestamp));
+    ctx.fillStyle = color.setHSL({s: saturation, l: 70}).cssString;
+    ctx.strokeStyle = color.setHSL({s: saturation, l: 55}).cssString;
+
+    const calculateX = (timestamp: time) => {
+      return Math.floor(visibleTimeScale.timeToPx(timestamp));
     };
     const calculateY = (value: number) => {
       return zeroY - Math.round((value / yMax) * RECT_HEIGHT);
     };
 
-    const [rawStartIdx] =
-        searchSegment(data.timestamps, visibleWindowTime.start);
+    const start = visibleWindowTime.start;
+    const end = visibleWindowTime.end;
+    const [rawStartIdx] = searchSegment(data.timestamps, start.toTime());
     const startIdx = rawStartIdx === -1 ? 0 : rawStartIdx;
 
-    const [, rawEndIdx] = searchSegment(data.timestamps, visibleWindowTime.end);
+    const [, rawEndIdx] = searchSegment(data.timestamps, end.toTime());
     const endIdx = rawEndIdx === -1 ? data.timestamps.length : rawEndIdx;
 
     ctx.beginPath();
-    ctx.moveTo(Math.max(calculateX(data.timestamps[startIdx]), 0), zeroY);
+    const timestamp = Time.fromRaw(data.timestamps[startIdx]);
+    ctx.moveTo(Math.max(calculateX(timestamp), 0), zeroY);
 
     let lastDrawnY = zeroY;
     for (let i = startIdx; i < endIdx; i++) {
-      const x = calculateX(data.timestamps[i]);
+      const timestamp = Time.fromRaw(data.timestamps[i]);
+      const x = calculateX(timestamp);
 
       const minY = calculateY(data.minFreqKHz[i]);
       const maxY = calculateY(data.maxFreqKHz[i]);
@@ -374,7 +402,7 @@ class CpuFreqTrack extends Track<Config, Data> {
     // Draw CPU idle rectangles that overlay the CPU freq graph.
     ctx.fillStyle = `rgba(240, 240, 240, 1)`;
 
-    for (let i = 0; i < data.lastIdleValues.length; i++) {
+    for (let i = startIdx; i < endIdx; i++) {
       if (data.lastIdleValues[i] < 0) {
         continue;
       }
@@ -383,10 +411,11 @@ class CpuFreqTrack extends Track<Config, Data> {
       // coordinates. Instead we use floating point which prevents flickering as
       // we pan and zoom; this relies on the browser anti-aliasing pixels
       // correctly.
-      const x = timeScale.timeToPx(data.timestamps[i]);
+      const timestamp = Time.fromRaw(data.timestamps[i]);
+      const x = visibleTimeScale.timeToPx(timestamp);
       const xEnd = i === data.lastIdleValues.length - 1 ?
           finalX :
-          timeScale.timeToPx(data.timestamps[i + 1]);
+          visibleTimeScale.timeToPx(Time.fromRaw(data.timestamps[i + 1]));
 
       const width = xEnd - x;
       const height = calculateY(data.lastFreqKHz[i]) - zeroY;
@@ -399,13 +428,13 @@ class CpuFreqTrack extends Track<Config, Data> {
     if (this.hoveredValue !== undefined && this.hoveredTs !== undefined) {
       let text = `${this.hoveredValue.toLocaleString()}kHz`;
 
-      ctx.fillStyle = `hsl(${hue}, 45%, 75%)`;
-      ctx.strokeStyle = `hsl(${hue}, 45%, 45%)`;
+      ctx.fillStyle = color.setHSL({s: 45, l: 75}).cssString;
+      ctx.strokeStyle = color.setHSL({s: 45, l: 45}).cssString;
 
-      const xStart = Math.floor(timeScale.timeToPx(this.hoveredTs));
+      const xStart = Math.floor(visibleTimeScale.timeToPx(this.hoveredTs));
       const xEnd = this.hoveredTsEnd === undefined ?
           endPx :
-          Math.floor(timeScale.timeToPx(this.hoveredTsEnd));
+          Math.floor(visibleTimeScale.timeToPx(this.hoveredTsEnd));
       const y = zeroY - Math.round((this.hoveredValue / yMax) * RECT_HEIGHT);
 
       // Highlight line.
@@ -430,7 +459,7 @@ class CpuFreqTrack extends Track<Config, Data> {
       }
 
       // Draw the tooltip.
-      this.drawTrackHoverTooltip(ctx, this.mousePos, text);
+      drawTrackHoverTooltip(ctx, this.mousePos, this.getHeight(), text);
     }
 
     // Write the Y scale on the top left corner.
@@ -446,22 +475,24 @@ class CpuFreqTrack extends Track<Config, Data> {
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        timeScale.timeToPx(visibleWindowTime.start),
-        timeScale.timeToPx(visibleWindowTime.end),
-        timeScale.timeToPx(data.start),
-        timeScale.timeToPx(data.end));
+        0,
+        size.width,
+        visibleTimeScale.timeToPx(data.start),
+        visibleTimeScale.timeToPx(data.end));
   }
 
   onMouseMove(pos: {x: number, y: number}) {
-    const data = this.data();
+    const data = this.fetcher.data;
     if (data === undefined) return;
     this.mousePos = pos;
-    const {timeScale} = globals.frontendLocalState;
-    const time = timeScale.pxToTime(pos.x);
+    const {visibleTimeScale} = globals.timeline;
+    const time = visibleTimeScale.pxToHpTime(pos.x);
 
-    const [left, right] = searchSegment(data.timestamps, time);
-    this.hoveredTs = left === -1 ? undefined : data.timestamps[left];
-    this.hoveredTsEnd = right === -1 ? undefined : data.timestamps[right];
+    const [left, right] = searchSegment(data.timestamps, time.toTime());
+    this.hoveredTs =
+        left === -1 ? undefined : Time.fromRaw(data.timestamps[left]);
+    this.hoveredTsEnd =
+        right === -1 ? undefined : Time.fromRaw(data.timestamps[right]);
     this.hoveredValue = left === -1 ? undefined : data.lastFreqKHz[left];
     this.hoveredIdle = left === -1 ? undefined : data.lastIdleValues[left];
   }
@@ -474,12 +505,70 @@ class CpuFreqTrack extends Track<Config, Data> {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(CpuFreqTrackController);
-  ctx.registerTrack(CpuFreqTrack);
+class CpuFreq implements Plugin {
+  onActivate(_ctx: PluginContext): void {}
+
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    const {engine} = ctx;
+
+    const cpus = await engine.getCpus();
+
+    const maxCpuFreqResult = await engine.query(`
+      select ifnull(max(value), 0) as freq
+      from counter c
+      inner join cpu_counter_track t on c.track_id = t.id
+      where name = 'cpufreq';
+    `);
+    const maxCpuFreq = maxCpuFreqResult.firstRow({freq: NUM}).freq;
+
+    for (const cpu of cpus) {
+      // Only add a cpu freq track if we have
+      // cpu freq data.
+      // TODO(hjd): Find a way to display cpu idle
+      // events even if there are no cpu freq events.
+      const cpuFreqIdleResult = await engine.query(`
+        select
+          id as cpuFreqId,
+          (
+            select id
+            from cpu_counter_track
+            where name = 'cpuidle'
+            and cpu = ${cpu}
+            limit 1
+          ) as cpuIdleId
+        from cpu_counter_track
+        where name = 'cpufreq' and cpu = ${cpu}
+        limit 1;
+      `);
+
+      if (cpuFreqIdleResult.numRows() > 0) {
+        const row = cpuFreqIdleResult.firstRow({
+          cpuFreqId: NUM,
+          cpuIdleId: NUM_NULL,
+        });
+        const freqTrackId = row.cpuFreqId;
+        const idleTrackId = row.cpuIdleId === null ? undefined : row.cpuIdleId;
+
+        const config = {
+          cpu,
+          maximumValue: maxCpuFreq,
+          freqTrackId,
+          idleTrackId,
+        };
+
+        ctx.registerTrack({
+          uri: `perfetto.CpuFreq#${cpu}`,
+          displayName: `Cpu ${cpu} Frequency`,
+          kind: CPU_FREQ_TRACK_KIND,
+          cpu,
+          track: () => new CpuFreqTrack(config, ctx.engine),
+        });
+      }
+    }
+  }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.CpuFreq',
-  activate,
+  plugin: CpuFreq,
 };

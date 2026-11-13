@@ -10,60 +10,53 @@
 
 #include "include/core/SkSize.h"
 #include "include/core/SkTypes.h"
-#include "include/private/SkSLProgramElement.h"
-#include "include/private/SkSLProgramKind.h"
-#include "include/sksl/SkSLErrorReporter.h"
-#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/SkSLContext.h"  // IWYU pragma: keep
+#include "src/sksl/SkSLErrorReporter.h"
+#include "src/sksl/SkSLPosition.h"
+#include "src/sksl/ir/SkSLProgramElement.h"
+#include "src/sksl/ir/SkSLSymbolTable.h"
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
-#define SK_FRAGCOLOR_BUILTIN           10001
-#define SK_LASTFRAGCOLOR_BUILTIN       10008
-#define SK_MAIN_COORDS_BUILTIN         10009
-#define SK_INPUT_COLOR_BUILTIN         10010
-#define SK_DEST_COLOR_BUILTIN          10011
-#define SK_SECONDARYFRAGCOLOR_BUILTIN  10012
-#define SK_FRAGCOORD_BUILTIN              15
-#define SK_CLOCKWISE_BUILTIN              17
-#define SK_THREADPOSITION                 28
-#define SK_VERTEXID_BUILTIN               42
-#define SK_INSTANCEID_BUILTIN             43
-#define SK_POSITION_BUILTIN                0
-#define SK_POINTSIZE_BUILTIN               1
+constexpr int SK_FRAGCOLOR_BUILTIN =           10001;
+constexpr int SK_LASTFRAGCOLOR_BUILTIN =       10008;
+constexpr int SK_SECONDARYFRAGCOLOR_BUILTIN =  10012;
+constexpr int SK_FRAGCOORD_BUILTIN =              15;
+constexpr int SK_CLOCKWISE_BUILTIN =              17;
+constexpr int SK_SAMPLEMASKIN_BUILTIN =           20;
+constexpr int SK_SAMPLEMASK_BUILTIN =          10020;
+
+constexpr int SK_VERTEXID_BUILTIN =               42;
+constexpr int SK_INSTANCEID_BUILTIN =             43;
+constexpr int SK_POSITION_BUILTIN =                0;
+constexpr int SK_POINTSIZE_BUILTIN =               1;
+
+constexpr int SK_NUMWORKGROUPS_BUILTIN =          24;
+constexpr int SK_WORKGROUPID_BUILTIN =            26;
+constexpr int SK_LOCALINVOCATIONID_BUILTIN =      27;
+constexpr int SK_GLOBALINVOCATIONID_BUILTIN =     28;
+constexpr int SK_LOCALINVOCATIONINDEX_BUILTIN =   29;
 
 namespace SkSL {
 
-namespace dsl {
-    class DSLCore;
-}
-
-class BuiltinMap;
-class Expression;
 class Inliner;
-class ModifiersPool;
-class OutputStream;
+class Pool;
+struct ProgramConfig;
+class ProgramUsage;
+enum class ProgramKind : int8_t;
 struct Program;
 struct ProgramSettings;
-class ProgramUsage;
-struct ShaderCaps;
-class SymbolTable;
 
-struct LoadedModule {
-    std::shared_ptr<SymbolTable>                 fSymbols;
+struct Module {
+    const Module*                                fParent = nullptr;
+    std::unique_ptr<SymbolTable>                 fSymbols;
     std::vector<std::unique_ptr<ProgramElement>> fElements;
-
-    /**
-     * Converts a compiled LoadedModule (containing symbols and ProgramElements) into a BuiltinMap
-     * (useful for looking up symbols quickly by name). Most elements of `fElements` from this
-     * LoadedModule will be moved into the BuiltinMap, and the rest will be deleted.
-     */
-    std::unique_ptr<BuiltinMap> convertToBuiltinMap(const BuiltinMap* parent);
 };
 
 /**
@@ -110,8 +103,7 @@ public:
         return result;
     }
 
-    Compiler(const ShaderCaps* caps);
-
+    Compiler();
     ~Compiler();
 
     Compiler(const Compiler&) = delete;
@@ -129,34 +121,9 @@ public:
     static void EnableOptimizer(OverrideFlag flag) { sOptimizer = flag; }
     static void EnableInliner(OverrideFlag flag) { sInliner = flag; }
 
-    /**
-     * If fExternalFunctions is supplied in the settings, those values are registered in the symbol
-     * table of the Program, but ownership is *not* transferred. It is up to the caller to keep them
-     * alive.
-     */
     std::unique_ptr<Program> convertProgram(ProgramKind kind,
-                                            std::string text,
-                                            ProgramSettings settings);
-
-    std::unique_ptr<Expression> convertIdentifier(Position pos, std::string_view name);
-
-    bool toSPIRV(Program& program, OutputStream& out);
-
-    bool toSPIRV(Program& program, std::string* out);
-
-    bool toGLSL(Program& program, OutputStream& out);
-
-    bool toGLSL(Program& program, std::string* out);
-
-    bool toHLSL(Program& program, OutputStream& out);
-
-    bool toHLSL(Program& program, std::string* out);
-
-    bool toMetal(Program& program, OutputStream& out);
-
-    bool toMetal(Program& program, std::string* out);
-
-    bool toWGSL(Program& program, OutputStream& out);
+                                            std::string programSource,
+                                            const ProgramSettings& settings);
 
     void handleError(std::string_view msg, Position pos);
 
@@ -177,23 +144,27 @@ public:
         return *fContext;
     }
 
-    std::shared_ptr<SymbolTable> symbolTable() const {
-        return fSymbolTable;
+    SymbolTable* globalSymbols() {
+        return fGlobalSymbols.get();
     }
 
-    LoadedModule compileModule(ProgramKind kind,
-                               const char* moduleName,
-                               std::string moduleSource,
-                               const BuiltinMap* base,
-                               ModifiersPool& modifiersPool,
-                               bool shouldInline);
+    SymbolTable* symbolTable() {
+        return fContext->fSymbolTable;
+    }
+
+    std::unique_ptr<Module> compileModule(ProgramKind kind,
+                                          const char* moduleName,
+                                          std::string moduleSource,
+                                          const Module* parentModule,
+                                          bool shouldInline);
 
     /** Optimize a module at minification time, before writing it out. */
-    bool optimizeModuleBeforeMinifying(ProgramKind kind,
-                                       LoadedModule& module,
-                                       const BuiltinMap* base);
+    bool optimizeModuleBeforeMinifying(ProgramKind kind, Module& module, bool shrinkSymbols);
 
-    const BuiltinMap* moduleForProgramKind(ProgramKind kind);
+    const Module* moduleForProgramKind(ProgramKind kind);
+
+    /** Run the inliner on a program which was compiled earlier (with inlining turned off). */
+    void runInliner(Program& program);
 
 private:
     class CompilerErrorReporter : public ErrorReporter {
@@ -209,6 +180,27 @@ private:
         Compiler& fCompiler;
     };
 
+    /** Updates ProgramSettings to eliminate contradictions and to honor the ProgramKind. */
+    static void FinalizeSettings(ProgramSettings* settings, ProgramKind kind);
+
+    /** Prepares the Context for compilation of a program or module. */
+    void initializeContext(const SkSL::Module* module,
+                           ProgramKind kind,
+                           ProgramSettings settings,
+                           std::string_view source,
+                           bool isModule);
+
+    /** Cleans up the Context post-compilation. */
+    void cleanupContext();
+
+    /**
+     * Returns all global elements (functions and global variables) as a self-contained Program.
+     * The optional source string is retained as the program's source.
+     */
+    std::unique_ptr<SkSL::Program> releaseProgram(
+            std::unique_ptr<std::string> source,
+            std::vector<std::unique_ptr<SkSL::ProgramElement>> programElements);
+
     /** Optimize every function in the program. */
     bool optimize(Program& program);
 
@@ -216,29 +208,27 @@ private:
     bool finalize(Program& program);
 
     /** Optimize a module at Skia runtime, after loading it. */
-    bool optimizeModuleAfterLoading(ProgramKind kind, LoadedModule& module, const BuiltinMap* base);
+    bool optimizeModuleAfterLoading(ProgramKind kind, Module& module);
 
     /** Flattens out function calls when it is safe to do so. */
     bool runInliner(Inliner* inliner,
                     const std::vector<std::unique_ptr<ProgramElement>>& elements,
-                    std::shared_ptr<SymbolTable> symbols,
+                    SymbolTable* symbols,
                     ProgramUsage* usage);
 
     CompilerErrorReporter fErrorReporter;
     std::shared_ptr<Context> fContext;
-    const ShaderCaps* fCaps;
-
-    // This is the current symbol table of the code we are processing, and therefore changes during
-    // compilation
-    std::shared_ptr<SymbolTable> fSymbolTable;
+    std::unique_ptr<SymbolTable> fGlobalSymbols;
+    std::unique_ptr<ProgramConfig> fConfig;
+    std::unique_ptr<Pool> fPool;
 
     std::string fErrorText;
 
     static OverrideFlag sOptimizer;
     static OverrideFlag sInliner;
 
+    friend class Parser;
     friend class ThreadContext;
-    friend class dsl::DSLCore;
 };
 
 }  // namespace SkSL

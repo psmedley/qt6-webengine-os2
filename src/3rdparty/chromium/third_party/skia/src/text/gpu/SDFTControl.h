@@ -8,17 +8,21 @@
 #ifndef sktext_gpu_SDFTControl_DEFINED
 #define sktext_gpu_SDFTControl_DEFINED
 
-#include "include/core/SkFlattenable.h"
-#include "include/core/SkFont.h"
 #include "include/core/SkScalar.h"
+#include "include/core/SkTypes.h"
 
 #include <tuple>
 
+class SkFont;
 class SkMatrix;
-class SkSurfaceProps;
+class SkPaint;
+class SkReadBuffer;
+class SkWriteBuffer;
+struct SkPoint;
 
 namespace sktext::gpu {
 
+#if !defined(SK_DISABLE_SDF_TEXT)
 // Two numbers fMatrixMin and fMatrixMax such that if viewMatrix.getMaxScale() is between them then
 // this SDFT size can be reused.
 class SDFTMatrixRange {
@@ -32,9 +36,11 @@ private:
     const SkScalar fMatrixMin,
                    fMatrixMax;
 };
+#endif
 
 class SDFTControl {
 public:
+#if !defined(SK_DISABLE_SDF_TEXT)
     SDFTControl(bool ableToUseSDFT, bool useSDFTForSmallText, bool useSDFTForPerspectiveText,
                 SkScalar min, SkScalar max);
 
@@ -43,12 +49,18 @@ public:
     std::tuple<SkFont, SkScalar, SDFTMatrixRange>
     getSDFFont(const SkFont& font, const SkMatrix& viewMatrix, const SkPoint& textLocation) const;
 
-    bool isDirect(SkScalar approximateDeviceTextSize, const SkPaint& paint,
-                  const SkMatrix& matrix) const;
     bool isSDFT(SkScalar approximateDeviceTextSize, const SkPaint& paint,
                 const SkMatrix& matrix) const;
+    SkScalar maxSize() const { return fMaxDistanceFieldFontSize; }
+#else
+    SDFTControl() {}
+#endif
+    bool isDirect(SkScalar approximateDeviceTextSize, const SkPaint& paint,
+                  const SkMatrix& matrix) const;
+
 
 private:
+#if !defined(SK_DISABLE_SDF_TEXT)
     static SkScalar MinSDFTRange(bool useSDFTForSmallText, SkScalar min);
 
     // Below this size (in device space) distance field text will not be used.
@@ -60,6 +72,7 @@ private:
 
     const bool fAbleToUseSDFT;
     const bool fAbleToUsePerspectiveSDFT;
+#endif
 };
 
 }  // namespace sktext::gpu

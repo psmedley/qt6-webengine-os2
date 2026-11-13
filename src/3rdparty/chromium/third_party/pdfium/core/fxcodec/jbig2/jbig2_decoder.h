@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,8 @@
 #include <memory>
 
 #include "core/fxcodec/fx_codec_def.h"
-#include "third_party/base/span.h"
+#include "core/fxcrt/unowned_ptr_exclusion.h"
+#include "third_party/base/containers/span.h"
 
 class CJBig2_Context;
 class JBig2_DocumentContext;
@@ -29,7 +30,7 @@ class Jbig2Context {
   uint64_t m_nSrcKey = 0;
   pdfium::span<const uint8_t> m_pGlobalSpan;
   pdfium::span<const uint8_t> m_pSrcSpan;
-  uint8_t* m_dest_buf = nullptr;
+  UNOWNED_PTR_EXCLUSION uint8_t* m_dest_buf = nullptr;
   uint32_t m_dest_pitch = 0;
   std::unique_ptr<CJBig2_Context> m_pContext;
 };
@@ -45,7 +46,7 @@ class Jbig2Decoder {
       uint64_t src_key,
       pdfium::span<const uint8_t> global_span,
       uint64_t global_key,
-      uint8_t* dest_buf,
+      pdfium::span<uint8_t> dest_buf,
       uint32_t dest_pitch,
       PauseIndicatorIface* pPause);
 

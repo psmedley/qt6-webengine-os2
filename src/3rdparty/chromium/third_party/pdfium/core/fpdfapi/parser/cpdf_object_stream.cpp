@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,12 +17,11 @@
 #include "core/fxcrt/cfx_read_only_span_stream.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "third_party/base/check.h"
-#include "third_party/base/ptr_util.h"
+#include "third_party/base/memory/ptr_util.h"
 
 namespace {
 
-bool IsObjectStream(const CPDF_Object* object) {
-  const CPDF_Stream* stream = ToStream(object);
+bool IsObjectStream(const CPDF_Stream* stream) {
   if (!stream)
     return false;
 
@@ -54,20 +53,19 @@ bool IsObjectStream(const CPDF_Object* object) {
 
 //  static
 std::unique_ptr<CPDF_ObjectStream> CPDF_ObjectStream::Create(
-    const CPDF_Stream* stream) {
-  if (!IsObjectStream(stream))
+    RetainPtr<const CPDF_Stream> stream) {
+  if (!IsObjectStream(stream.Get()))
     return nullptr;
 
   // Protected constructor.
-  return pdfium::WrapUnique(new CPDF_ObjectStream(stream));
+  return pdfium::WrapUnique(new CPDF_ObjectStream(std::move(stream)));
 }
 
-CPDF_ObjectStream::CPDF_ObjectStream(const CPDF_Stream* obj_stream)
-    : stream_acc_(
-          pdfium::MakeRetain<CPDF_StreamAcc>(pdfium::WrapRetain(obj_stream))),
+CPDF_ObjectStream::CPDF_ObjectStream(RetainPtr<const CPDF_Stream> obj_stream)
+    : stream_acc_(pdfium::MakeRetain<CPDF_StreamAcc>(obj_stream)),
       first_object_offset_(obj_stream->GetDict()->GetIntegerFor("First")) {
-  DCHECK(IsObjectStream(obj_stream));
-  Init(obj_stream);
+  DCHECK(IsObjectStream(obj_stream.Get()));
+  Init(obj_stream.Get());
 }
 
 CPDF_ObjectStream::~CPDF_ObjectStream() = default;
@@ -106,7 +104,7 @@ void CPDF_ObjectStream::Init(const CPDF_Stream* stream) {
     if (!obj_num)
       continue;
 
-    object_info_.push_back({obj_num, obj_offset});
+    object_info_.emplace_back(obj_num, obj_offset);
   }
 }
 

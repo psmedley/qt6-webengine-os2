@@ -5,77 +5,86 @@
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
-import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
 import {
+  type EmulatedDevice,
   Horizontal,
   HorizontalSpanned,
+  type Mode,
   Vertical,
   VerticalSpanned,
-  type EmulatedDevice,
-  type Mode,
 } from './EmulatedDevices.js';
 
 const UIStrings = {
   /**
-  * @description Error message shown in the Devices settings pane when the user enters an invalid
-  * width for a custom device.
-  */
+   * @description Error message shown in the Devices settings pane when the user enters an empty
+   * width for a custom device.
+   */
+  widthCannotBeEmpty: 'Width cannot be empty.',
+  /**
+   * @description Error message shown in the Devices settings pane when the user enters an invalid
+   * width for a custom device.
+   */
   widthMustBeANumber: 'Width must be a number.',
   /**
-  * @description Error message shown in the Devices settings pane when the user has entered a width
-  * for a custom device that is too large.
-  * @example {9999} PH1
-  */
+   * @description Error message shown in the Devices settings pane when the user has entered a width
+   * for a custom device that is too large.
+   * @example {9999} PH1
+   */
   widthMustBeLessThanOrEqualToS: 'Width must be less than or equal to {PH1}.',
   /**
-  * @description Error message shown in the Devices settings pane when the user has entered a width
-  * for a custom device that is too small.
-  * @example {50} PH1
-  */
+   * @description Error message shown in the Devices settings pane when the user has entered a width
+   * for a custom device that is too small.
+   * @example {50} PH1
+   */
   widthMustBeGreaterThanOrEqualToS: 'Width must be greater than or equal to {PH1}.',
   /**
-  * @description Error message shown in the Devices settings pane when the user enters an invalid
-  * height for a custom device.
-  */
+   * @description Error message shown in the Devices settings pane when the user enters an empty
+   * height for a custom device.
+   */
+  heightCannotBeEmpty: 'Height cannot be empty.',
+  /**
+   * @description Error message shown in the Devices settings pane when the user enters an invalid
+   * height for a custom device.
+   */
   heightMustBeANumber: 'Height must be a number.',
   /**
-  * @description Error message shown in the Devices settings pane when the user has entered a height
-  * for a custom device that is too large.
-  * @example {9999} PH1
-  */
+   * @description Error message shown in the Devices settings pane when the user has entered a height
+   * for a custom device that is too large.
+   * @example {9999} PH1
+   */
   heightMustBeLessThanOrEqualToS: 'Height must be less than or equal to {PH1}.',
   /**
-  * @description Error message shown in the Devices settings pane when the user has entered a height
-  * for a custom device that is too small.
-  * @example {50} PH1
-  */
+   * @description Error message shown in the Devices settings pane when the user has entered a height
+   * for a custom device that is too small.
+   * @example {50} PH1
+   */
   heightMustBeGreaterThanOrEqualTo: 'Height must be greater than or equal to {PH1}.',
   /**
-  * @description Error message shown in the Devices settings pane when the user enters an invalid
-  * device pixel ratio for a custom device.
-  */
+   * @description Error message shown in the Devices settings pane when the user enters an invalid
+   * device pixel ratio for a custom device.
+   */
   devicePixelRatioMustBeANumberOr: 'Device pixel ratio must be a number or blank.',
   /**
-  * @description Error message shown in the Devices settings pane when the user enters a device
-  * pixel ratio for a custom device that is too large.
-  * @example {10} PH1
-  */
+   * @description Error message shown in the Devices settings pane when the user enters a device
+   * pixel ratio for a custom device that is too large.
+   * @example {10} PH1
+   */
   devicePixelRatioMustBeLessThanOr: 'Device pixel ratio must be less than or equal to {PH1}.',
   /**
-  * @description Error message shown in the Devices settings pane when the user enters a device
-  * pixel ratio for a custom device that is too small.
-  * @example {0} PH1
-  */
+   * @description Error message shown in the Devices settings pane when the user enters a device
+   * pixel ratio for a custom device that is too small.
+   * @example {0} PH1
+   */
   devicePixelRatioMustBeGreater: 'Device pixel ratio must be greater than or equal to {PH1}.',
 };
 const str_ = i18n.i18n.registerUIStrings('models/emulation/DeviceModeModel.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
-let deviceModeModelInstance: DeviceModeModel;
+let deviceModeModelInstance: DeviceModeModel|null;
 
 export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTypes> implements
     SDK.TargetManager.SDKModelObserver<SDK.EmulationModel.EmulationModel> {
@@ -87,7 +96,6 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
   #appliedDeviceSizeInternal: UI.Geometry.Size;
   #appliedDeviceScaleFactorInternal: number;
   #appliedUserAgentTypeInternal: UA;
-  readonly #experimentDualScreenSupport: boolean;
   readonly #webPlatformExperimentalFeaturesEnabledInternal: boolean;
   readonly #scaleSettingInternal: Common.Settings.Setting<number>;
   #scaleInternal: number;
@@ -117,8 +125,8 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     this.#appliedDeviceSizeInternal = new UI.Geometry.Size(1, 1);
     this.#appliedDeviceScaleFactorInternal = window.devicePixelRatio;
     this.#appliedUserAgentTypeInternal = UA.Desktop;
-    this.#experimentDualScreenSupport = Root.Runtime.experiments.isEnabled('dualScreenSupport');
-    this.#webPlatformExperimentalFeaturesEnabledInternal = 'segments' in window.visualViewport;
+    this.#webPlatformExperimentalFeaturesEnabledInternal =
+        window.visualViewport ? 'segments' in window.visualViewport : false;
 
     this.#scaleSettingInternal = Common.Settings.Settings.instance().createSetting('emulation.deviceScale', 1);
     // We've used to allow zero before.
@@ -171,10 +179,8 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     SDK.TargetManager.TargetManager.instance().observeModels(SDK.EmulationModel.EmulationModel, this);
   }
 
-  static instance(opts: {
-    forceNew: null,
-  } = {forceNew: null}): DeviceModeModel {
-    if (!deviceModeModelInstance || opts.forceNew) {
+  static instance(opts?: {forceNew: boolean}): DeviceModeModel {
+    if (!deviceModeModelInstance || opts?.forceNew) {
       deviceModeModelInstance = new DeviceModeModel();
     }
 
@@ -188,7 +194,9 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     let valid = false;
     let errorMessage;
 
-    if (!/^[\d]+$/.test(value)) {
+    if (!value) {
+      errorMessage = i18nString(UIStrings.widthCannotBeEmpty);
+    } else if (!/^[\d]+$/.test(value)) {
       errorMessage = i18nString(UIStrings.widthMustBeANumber);
     } else if (Number(value) > MaxDeviceSize) {
       errorMessage = i18nString(UIStrings.widthMustBeLessThanOrEqualToS, {PH1: MaxDeviceSize});
@@ -208,7 +216,9 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     let valid = false;
     let errorMessage;
 
-    if (!/^[\d]+$/.test(value)) {
+    if (!value) {
+      errorMessage = i18nString(UIStrings.heightCannotBeEmpty);
+    } else if (!/^[\d]+$/.test(value)) {
       errorMessage = i18nString(UIStrings.heightMustBeANumber);
     } else if (Number(value) > MaxDeviceSize) {
       errorMessage = i18nString(UIStrings.heightMustBeLessThanOrEqualToS, {PH1: MaxDeviceSize});
@@ -415,7 +425,8 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
   }
 
   modelAdded(emulationModel: SDK.EmulationModel.EmulationModel): void {
-    if (!this.#emulationModel && emulationModel.supportsDeviceEmulation()) {
+    if (emulationModel.target() === SDK.TargetManager.TargetManager.instance().primaryPageTarget() &&
+        emulationModel.supportsDeviceEmulation()) {
       this.#emulationModel = emulationModel;
       if (this.#onModelAvailable) {
         const callback = this.#onModelAvailable;
@@ -685,11 +696,15 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
         positionY: positionY,
         dontSetVisibleSize: true,
         displayFeature: undefined,
+        devicePosture: undefined,
         screenOrientation: undefined,
       };
       const displayFeature = this.getDisplayFeature();
       if (displayFeature) {
         metrics.displayFeature = displayFeature;
+        metrics.devicePosture = {type: Protocol.Emulation.DevicePostureType.Folded};
+      } else {
+        metrics.devicePosture = {type: Protocol.Emulation.DevicePostureType.Continuous};
       }
       if (screenOrientation) {
         metrics.screenOrientation = {type: screenOrientation, angle: screenOrientationAngle};
@@ -712,7 +727,7 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
   }
 
   shouldReportDisplayFeature(): boolean {
-    return this.#webPlatformExperimentalFeaturesEnabledInternal && this.#experimentDualScreenSupport;
+    return this.#webPlatformExperimentalFeaturesEnabledInternal;
   }
 
   async captureScreenshot(fullSize: boolean, clip?: Protocol.Page.Viewport): Promise<string|null> {
@@ -752,7 +767,7 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
         deviceMetrics.height = orientation.height;
         const dispFeature = this.getDisplayFeature();
         if (dispFeature) {
-          // @ts-ignore: displayFeature isn't in protocol.d.ts but is an
+          // @ts-ignore: displayFeature isn't in protocol.ts but is an
           // experimental flag:
           // https://chromedevtools.github.io/devtools-protocol/tot/Emulation/#method-setDeviceMetricsOverride
           deviceMetrics.displayFeature = dispFeature;
@@ -779,7 +794,7 @@ export class DeviceModeModel extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     const orientation = (this.#deviceInternal && this.#modeInternal) ?
         this.#deviceInternal.orientationByName(this.#modeInternal.orientation) :
         null;
-    if (this.#experimentDualScreenSupport && orientation && orientation.hinge) {
+    if (orientation && orientation.hinge) {
       overlayModel.showHingeForDualScreen(orientation.hinge);
       return;
     }
@@ -866,17 +881,13 @@ export type EventTypes = {
   [Events.Updated]: void,
 };
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
 export enum Type {
   None = 'None',
   Responsive = 'Responsive',
   Device = 'Device',
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum UA {
+export const enum UA {
   // TODO(crbug.com/1136655): This enum is used for both display and code functionality.
   // we should refactor this so localization of these strings only happens for user display.
   Mobile = 'Mobile',

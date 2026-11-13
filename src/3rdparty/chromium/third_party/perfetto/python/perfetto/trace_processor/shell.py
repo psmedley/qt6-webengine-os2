@@ -26,7 +26,8 @@ TP_PORT = 9001
 
 
 def load_shell(bin_path: str, unique_port: bool, verbose: bool,
-               ingest_ftrace_in_raw: bool, platform_delegate: PlatformDelegate):
+               ingest_ftrace_in_raw: bool, enable_dev_features: bool,
+               platform_delegate: PlatformDelegate):
   addr, port = platform_delegate.get_bind_addr(
       port=0 if unique_port else TP_PORT)
   url = f'{addr}:{str(port)}'
@@ -41,13 +42,17 @@ def load_shell(bin_path: str, unique_port: bool, verbose: bool,
   if not ingest_ftrace_in_raw:
     args.append('--no-ftrace-raw')
 
+  if enable_dev_features:
+    args.append('--dev')
+
   p = subprocess.Popen(
       tp_exec + args,
+      stdin=subprocess.DEVNULL,
       stdout=subprocess.DEVNULL,
       stderr=None if verbose else subprocess.DEVNULL)
 
   success = False
-  for i in range(3):
+  for _ in range(3):
     try:
       if p.poll() is None:
         _ = request.urlretrieve(f'http://{url}/status')

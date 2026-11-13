@@ -1,4 +1,4 @@
-// Copyright 2020 PDFium Authors. All rights reserved.
+// Copyright 2020 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,11 @@ class IPWL_FillerNotify {
     virtual std::unique_ptr<PerWindowData> Clone() const = 0;
   };
 
+  struct BeforeKeystrokeResult {
+    bool rc;
+    bool exit;
+  };
+
   virtual ~IPWL_FillerNotify() = default;
 
   virtual void InvalidateRect(PerWindowData* pWidgetData,
@@ -50,7 +55,7 @@ class IPWL_FillerNotify {
                                bool* bBottom,
                                float* fPopupRet) = 0;
 
-  virtual std::pair<bool, bool> OnBeforeKeyStroke(
+  virtual BeforeKeystrokeResult OnBeforeKeyStroke(
       const PerWindowData* pAttached,
       WideString& strChange,
       const WideString& strChangeEx,

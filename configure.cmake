@@ -11,9 +11,9 @@ if(QT_CONFIGURE_RUNNING)
 else()
     find_package(Ninja 1.7.2)
     find_package(Gn ${QT_REPO_MODULE_VERSION} EXACT)
-    find_program(Python3_EXECUTABLE NAMES python3 HINTS $ENV{PYTHON3_PATH})
+    find_program(Python3_EXECUTABLE NAMES python3 python HINTS $ENV{PYTHON3_PATH})
     if(NOT Python3_EXECUTABLE)
-        find_package(Python3 3.6)
+        find_package(Python3 3.8)
     endif()
     find_package(GPerf)
     find_package(BISON)
@@ -21,7 +21,7 @@ else()
     find_package(Perl)
     find_package(PkgConfig)
     find_package(Snappy)
-    find_package(Nodejs 12.0)
+    find_package(Nodejs 14.0)
 endif()
 
 if(PkgConfig_FOUND)
@@ -43,18 +43,25 @@ if(PkgConfig_FOUND)
     pkg_check_modules(LIBEVENT libevent)
     pkg_check_modules(MINIZIP minizip)
     pkg_check_modules(PNG libpng>=1.6.0)
+    pkg_check_modules(TIFF libtiff-4>=4.2.0)
     pkg_check_modules(ZLIB zlib)
-    pkg_check_modules(RE2 re2 IMPORTED_TARGET)
+    # TODO: chromium may replace base::StringView with std::string_view. See: crbug.com/691162
+    pkg_check_modules(RE2 re2>=11.0.0 IMPORTED_TARGET)
     pkg_check_modules(ICU icu-uc>=70 icu-i18n>=70)
     pkg_check_modules(WEBP libwebp libwebpmux libwebpdemux)
     pkg_check_modules(LCMS2 lcms2)
     pkg_check_modules(FREETYPE freetype2 IMPORTED_TARGET)
     pkg_check_modules(LIBXML2 libxml-2.0 libxslt IMPORTED_TARGET)
-    pkg_check_modules(FFMPEG libavcodec libavformat libavutil IMPORTED_TARGET)
+    pkg_check_modules(FFMPEG libavcodec>=60.31.102
+                             libavformat>=60.16.100
+                             libavutil>=58.29.100
+                             IMPORTED_TARGET)
     pkg_check_modules(OPUS opus>=1.3.1)
     pkg_check_modules(VPX vpx>=1.10.0 IMPORTED_TARGET)
     pkg_check_modules(LIBPCI libpci)
     pkg_check_modules(LIBOPENJP2 libopenjp2)
+    pkg_check_modules(XKBCOMMON xkbcommon)
+    pkg_check_modules(XKBFILE xkbfile)
 endif()
 
 if(Python3_EXECUTABLE)
@@ -122,21 +129,6 @@ int main() {
 }"
 )
 
-qt_config_compile_test(libxml2
-    LABEL "compatible libxml2 and libxslt"
-    LIBRARIES
-        PkgConfig::LIBXML2
-    CODE
-"
-#include \"libxml/xmlversion.h\"
-#if !defined(LIBXML_ICU_ENABLED)
-#error libxml icu not enabled
-#endif
-int main() {
-    return 0;
-}"
-)
-
 qt_config_compile_test(jpeg
     LABEL "compatible libjpeg"
     LIBRARIES
@@ -196,18 +188,6 @@ int main(void) {
 }"
 )
 
-qt_config_compile_test(winversion
-    LABEL "winversion"
-    CODE
-"
-#if !defined(__clang__) && _MSC_FULL_VER < 191426428
-#error unsupported Visual Studio version
-#endif
-int main(void){
-    return 0;
-}"
-)
-
 qt_config_compile_test(libavformat
     LABEL "libavformat"
     LIBRARIES
@@ -251,7 +231,6 @@ qt_feature("qtwebengine-quick-build" PRIVATE
 qt_feature("qtpdf-build" PUBLIC
     LABEL "Build Qt PDF"
     PURPOSE "Enables building the Qt Pdf modules."
-    CONDITION Qt6Core_VERSION VERSION_GREATER_EQUAL "6.3.0"
 )
 qt_feature("qtpdf-widgets-build" PRIVATE
     LABEL "Build QtPdfWidgets"
@@ -321,12 +300,13 @@ qt_feature("webengine-developer-build" PRIVATE
 )
 qt_feature("webengine-system-re2" PRIVATE
     LABEL "re2"
+    AUTODETECT FALSE
     CONDITION UNIX AND TEST_re2
 )
 qt_feature("webengine-system-icu" PRIVATE
     LABEL "icu"
     AUTODETECT FALSE
-    CONDITION ICU_FOUND
+    CONDITION UNIX AND NOT APPLE AND ICU_FOUND
 )
 qt_feature("webengine-system-libwebp" PRIVATE
     LABEL "libwebp, libwebpmux and libwebpdemux"
@@ -347,6 +327,7 @@ qt_feature("webengine-system-ffmpeg" PRIVATE
 )
 qt_feature("webengine-system-libvpx" PRIVATE
     LABEL "libvpx"
+    AUTODETECT FALSE
     CONDITION UNIX AND TEST_vpx
 )
 qt_feature("webengine-system-snappy" PRIVATE
@@ -377,7 +358,7 @@ qt_feature("webengine-system-libevent" PRIVATE
 )
 qt_feature("webengine-system-libxml" PRIVATE
     LABEL "libxml2 and libxslt"
-    CONDITION UNIX AND TEST_libxml2
+    CONDITION UNIX AND LIBXML2_FOUND
 )
 qt_feature("webengine-system-lcms2" PRIVATE
     LABEL "lcms2"
@@ -386,6 +367,10 @@ qt_feature("webengine-system-lcms2" PRIVATE
 qt_feature("webengine-system-libpng" PRIVATE
     LABEL "png"
     CONDITION UNIX AND TARGET Qt::Gui AND PNG_FOUND AND QT_FEATURE_system_png
+)
+qt_feature("webengine-system-libtiff" PRIVATE
+    LABEL "tiff"
+    CONDITION UNIX AND TARGET Qt::Gui AND TIFF_FOUND
 )
 qt_feature("webengine-qt-libpng" PRIVATE
     LABEL "qtpng"
@@ -433,7 +418,7 @@ qt_feature("webengine-system-libpci" PRIVATE
 )
 
 qt_feature("webengine-ozone-x11" PRIVATE
-    LABEL "Support GLX on qpa-xcb"
+    LABEL "Support X11 on qpa-xcb"
     CONDITION LINUX
         AND TARGET Qt::Gui
         AND QT_FEATURE_xcb
@@ -446,10 +431,13 @@ qt_feature("webengine-ozone-x11" PRIVATE
         AND XRANDR_FOUND
         AND XTST_FOUND
         AND XSHMFENCE_FOUND
+        AND XKBCOMMON_FOUND
+        AND XKBFILE_FOUND
 )
 
 #### Support Checks
-if(WIN32 AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_CROSSCOMPILING))
+if(WIN32 AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64"
+        OR CMAKE_CROSSCOMPILING))
    set(WIN_ARM_64 ON)
 else()
    set(WIN_ARM_64 OFF)
@@ -476,16 +464,17 @@ add_check_for_support(
 )
 add_check_for_support(
    MODULES QtPdf
-   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR IOS OR (ANDROID AND NOT CMAKE_HOST_WIN32)
-   MESSAGE "Build can be done only on Linux, Windows, macO, iOS and Android(on non-Windows hosts only)."
+   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR IOS OR ANDROID
+   MESSAGE "Build can be done only on Linux, Windows, macO, iOS and Android."
 )
 if(LINUX AND CMAKE_CROSSCOMPILING)
-   get_gn_arch(testArch ${TEST_architecture_arch})
+   set(supportedTargets "arm" "arm64" "armv7-a" "x86_64")
    add_check_for_support(
        MODULES QtWebEngine QtPdf
-       CONDITION testArch
+       CONDITION TEST_architecture_arch IN_LIST supportedTargets
        MESSAGE "Cross compiling is not supported for ${TEST_architecture_arch}."
    )
+   unset(supportedTargets)
 endif()
 add_check_for_support(
    MODULES QtWebEngine
@@ -493,32 +482,39 @@ add_check_for_support(
    MESSAGE "Static build is not supported."
 )
 add_check_for_support(
-   MODULES QtWebEngine QtPdf
+   MODULES QtWebEngine
    CONDITION TARGET Nodejs::Nodejs
-   MESSAGE "node.js version 12 or later is required."
+   MESSAGE "node.js version 14 or later is required."
+)
+add_check_for_support(
+    MODULES QtWebEngine
+    CONDITION NOT (Nodejs_ARCH STREQUAL "ia32") AND
+              NOT (Nodejs_ARCH STREQUAL "x86") AND
+              NOT (Nodejs_ARCH STREQUAL "arm")
+    MESSAGE "32bit version of Nodejs is not supported."
 )
 add_check_for_support(
    MODULES QtWebEngine QtPdf
    CONDITION Python3_EXECUTABLE
-   MESSAGE "Python version 3.6 or later is required."
+   MESSAGE "Python version 3.8 or later is required."
 )
 add_check_for_support(
-   MODULES QtWebEngine QtPdf
+   MODULES QtWebEngine
    CONDITION Python3_EXECUTABLE AND NOT html5lib_NOT_FOUND
    MESSAGE "Python3 html5lib is missing."
 )
 add_check_for_support(
-   MODULES QtWebEngine QtPdf
+   MODULES QtWebEngine
    CONDITION GPerf_FOUND
    MESSAGE "Tool gperf is required."
 )
 add_check_for_support(
-   MODULES QtWebEngine QtPdf
+   MODULES QtWebEngine
    CONDITION BISON_FOUND
    MESSAGE "Tool bison is required."
 )
 add_check_for_support(
-   MODULES QtWebEngine QtPdf
+   MODULES QtWebEngine
    CONDITION FLEX_FOUND
    MESSAGE "Tool flex is required."
 )
@@ -528,12 +524,12 @@ add_check_for_support(
    MESSAGE "A pkg-config support is required."
 )
 add_check_for_support(
-   MODULES QtWebEngine QtPdf
+   MODULES QtWebEngine
    CONDITION NOT LINUX OR TEST_glibc
    MESSAGE "A suitable version >= 2.17 of glibc is required."
 )
 add_check_for_support(
-   MODULES QtWebEngine QtPdf
+   MODULES QtWebEngine
    CONDITION NOT LINUX OR TEST_khr
    MESSAGE "Build requires Khronos development headers for build - see mesa/libegl1-mesa-dev"
 )
@@ -557,54 +553,68 @@ add_check_for_support(
     CONDITION NOT LINUX OR NOT QT_FEATURE_webengine_system_ffmpeg OR TEST_libavformat
     MESSAGE "Unmodified ffmpeg >= 5.0 is not supported."
 )
-# FIXME: This prevents non XCB Linux builds from building:
-set(xcbSupport X11 LIBDRM XCOMPOSITE XCURSOR XRANDR XI XPROTO XSHMFENCE XTST)
-foreach(xs ${xcbSupport})
-    if(${xs}_FOUND)
-       set(xcbErrorMessage "${xcbErrorMessage} ${xs}:YES")
-    else()
-       set(xcbErrorMessage "${xcbErrorMessage} ${xs}:NO")
-    endif()
-endforeach()
+
 add_check_for_support(
    MODULES QtWebEngine
-   CONDITION NOT LINUX OR NOT QT_FEATURE_xcb OR QT_FEATURE_webengine_ozone_x11
-   MESSAGE "Could not find all necessary libraries for qpa-xcb support.\
-${xcbErrorMessage}"
-)
-add_check_for_support(
-   MODULES QtWebEngine QtPdf
    CONDITION MSVC OR
-       (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL GNU) OR
-       (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL Clang) OR
-       (MACOS AND CMAKE_CXX_COMPILER_ID STREQUAL AppleClang) OR
-       (APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL AppleClang) OR
-       (ANDROID AND CMAKE_CXX_COMPILER_ID STREQUAL Clang)
-   MESSAGE "${CMAKE_CXX_COMPILER_ID} compiler is not supported."
+       (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR
+       (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang") OR
+       (MACOS AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+   MESSAGE
+       "${CMAKE_CXX_COMPILER_ID} compiler is not supported."
 )
+
+add_check_for_support(
+   MODULES QtPdf
+   CONDITION MSVC OR
+       (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR
+       (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang") OR
+       (APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang") OR
+       (ANDROID AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang") OR
+       (MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR
+       (MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+   MESSAGE
+       "${CMAKE_CXX_COMPILER_ID} compiler is not supported."
+)
+
+if (LINUX OR MINGW)
+    add_check_for_support(
+        MODULES QtWebEngine QtPdf
+        CONDITION NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
+                  NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 10.0
+        MESSAGE
+            "GCC build requires version 10.0 or later. Version ${CMAKE_CXX_COMPILER_VERSION} is not supported."
+    )
+endif()
+
 if(WIN32)
     if(MSVC)
-        add_check_for_support(
-            MODULES QtWebEngine QtPdf
-            CONDITION NOT MSVC_VERSION LESS 1929
-            MESSAGE "MSVC compiler version must be at least 14.29."
-        )
+        if(MSVC_TOOLSET_VERSION EQUAL 142) # VS 2019 (16.0)
+            add_check_for_support(
+                MODULES QtWebEngine QtPdf
+                CONDITION NOT MSVC_VERSION LESS 1929
+                MESSAGE "VS compiler version must be at least 14.29"
+            )
+        elseif(MSVC_TOOLSET_VERSION EQUAL 143) # VS 2022 (17.0)
+            add_check_for_support(
+                MODULES QtWebEngine QtPdf
+                CONDITION NOT MSVC_VERSION LESS 1936
+                MESSAGE "VS compiler version must be at least 14.36"
+            )
+        else()
+            message(FATAL_ERROR "Build requires Visual Studio 2019 or higher.")
+        endif()
     endif()
     set(windowsSdkVersion $ENV{WindowsSDKVersion})
     string(REGEX REPLACE "([0-9.]+).*" "\\1" windowsSdkVersion "${windowsSdkVersion}")
     string(REGEX REPLACE "^[0-9]+\\.[0-9]+\\.([0-9]+)\\.[0-9]+" "\\1" sdkMinor "${windowsSdkVersion}")
     message("-- Windows 10 SDK version: ${windowsSdkVersion}")
     add_check_for_support(
-        MODULES QtWebEngine QtPdf
-        CONDITION sdkMinor GREATER_EQUAL 20348
-        MESSAGE "Build requires Windows 10 SDK at least version 10.0.20348.0"
+        MODULES QtWebEngine
+        CONDITION sdkMinor GREATER_EQUAL 22621
+        MESSAGE "Build requires Windows 11 SDK at least version 10.0.22621.0"
     )
 endif()
-add_check_for_support(
-   MODULES QtWebEngine QtPdf
-   CONDITION NOT MSVC OR TEST_winversion
-   MESSAGE "Build requires Visual Studio 2019 or higher."
-)
 
 #### Summary
 
@@ -640,6 +650,7 @@ if(UNIX)
     qt_configure_add_summary_entry(ARGS "webengine-system-libxml")
     qt_configure_add_summary_entry(ARGS "webengine-system-lcms2")
     qt_configure_add_summary_entry(ARGS "webengine-system-libpng")
+    qt_configure_add_summary_entry(ARGS "webengine-system-libtiff")
     qt_configure_add_summary_entry(ARGS "webengine-system-libjpeg")
     qt_configure_add_summary_entry(ARGS "webengine-system-libopenjpeg2")
     qt_configure_add_summary_entry(ARGS "webengine-system-harfbuzz")
@@ -678,6 +689,25 @@ qt_configure_add_report_entry(
     MESSAGE "Building fat libray with device and simulator architectures will disable NEON."
     CONDITION IOS AND simulator AND device AND QT_FEATURE_qtpdf_build
 )
+
+if(LINUX AND QT_FEATURE_xcb AND TARGET Qt::Gui)
+    set(ozone_x11_support X11 LIBDRM XCOMPOSITE XCURSOR XRANDR XI XPROTO XSHMFENCE XTST XKBCOMMON XKBFILE)
+    set(ozone_x11_error OFF)
+    foreach(xs ${ozone_x11_support})
+        if(NOT ${xs}_FOUND)
+            set(ozone_x11_error ON)
+            set(ozone_x11_error_message "${ozone_x11_error_message}\n-- ${xs} libray not found")
+        endif()
+    endforeach()
+    if(ozone_x11_error)
+        qt_configure_add_report_entry(
+            TYPE WARNING
+            MESSAGE
+            "Could not find all necessary libraries for qpa-xcb support.${ozone_x11_error_message}"
+        )
+    endif()
+endif()
+
 if(PRINT_BFD_LINKER_WARNING)
     qt_configure_add_report_entry(
         TYPE WARNING

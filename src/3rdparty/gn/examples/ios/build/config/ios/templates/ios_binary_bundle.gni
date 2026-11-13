@@ -94,6 +94,7 @@ template("ios_binary_bundle") {
   }
 
   bundle_data(_plist_bundle) {
+    product_type = invoker.product_type
     public_deps = [ ":$_plist_target" ]
     sources = [ "$target_out_dir/$_plist_target/Info.plist" ]
     outputs = [ "{{bundle_contents_dir}}/Info.plist" ]
@@ -117,5 +118,11 @@ template("ios_binary_bundle") {
     bundle_contents_dir = bundle_root_dir
     bundle_executable_dir = bundle_contents_dir
     bundle_resources_dir = bundle_contents_dir
+
+    xcode_extra_attributes = {
+      CODE_SIGN_IDENTITY = ""
+      CODE_SIGNING_REQUIRED = "NO"
+      CODE_SIGNING_ALLOWED = "NO"
+    }
   }
 }

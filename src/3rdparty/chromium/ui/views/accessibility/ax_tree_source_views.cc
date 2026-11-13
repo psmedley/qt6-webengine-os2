@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_tree_data.h"
@@ -19,11 +20,10 @@
 
 namespace views {
 
-AXTreeSourceViews::AXTreeSourceViews(AXAuraObjWrapper* root,
+AXTreeSourceViews::AXTreeSourceViews(ui::AXNodeID root_id,
                                      const ui::AXTreeID& tree_id,
                                      views::AXAuraObjCache* cache)
-    : root_(root), tree_id_(tree_id), cache_(cache) {
-  DCHECK(root_);
+    : root_id_(root_id), tree_id_(tree_id), cache_(cache) {
   DCHECK_NE(tree_id_, ui::AXTreeIDUnknown());
 }
 
@@ -35,10 +35,7 @@ void AXTreeSourceViews::HandleAccessibleAction(const ui::AXActionData& action) {
   // In Views, we only support setting the selection within a single node,
   // not across multiple nodes like on the web.
   if (action.action == ax::mojom::Action::kSetSelection) {
-    if (action.anchor_node_id != action.focus_node_id) {
-      NOTREACHED();
-      return;
-    }
+    CHECK_EQ(action.anchor_node_id, action.focus_node_id);
     id = action.anchor_node_id;
   }
 
@@ -58,7 +55,7 @@ bool AXTreeSourceViews::GetTreeData(ui::AXTreeData* tree_data) const {
 }
 
 AXAuraObjWrapper* AXTreeSourceViews::GetRoot() const {
-  return root_;
+  return cache_->Get(root_id_);
 }
 
 AXAuraObjWrapper* AXTreeSourceViews::GetFromId(int32_t id) const {
@@ -82,10 +79,31 @@ int32_t AXTreeSourceViews::GetId(AXAuraObjWrapper* node) const {
   return node->GetUniqueId();
 }
 
-void AXTreeSourceViews::GetChildren(
-    AXAuraObjWrapper* node,
-    std::vector<AXAuraObjWrapper*>* out_children) const {
-  node->GetChildren(out_children);
+void AXTreeSourceViews::CacheChildrenIfNeeded(AXAuraObjWrapper* node) {
+  if (node->cached_children_) {
+    return;
+  }
+
+  node->cached_children_.emplace();
+
+  node->GetChildren(&(*node->cached_children_));
+}
+
+size_t AXTreeSourceViews::GetChildCount(AXAuraObjWrapper* node) const {
+  std::vector<raw_ptr<AXAuraObjWrapper, VectorExperimental>> children;
+  node->GetChildren(&children);
+  return children.size();
+}
+
+AXAuraObjWrapper* AXTreeSourceViews::ChildAt(AXAuraObjWrapper* node,
+                                             size_t index) const {
+  std::vector<raw_ptr<AXAuraObjWrapper, VectorExperimental>> children;
+  node->GetChildren(&children);
+  return children[index];
+}
+
+void AXTreeSourceViews::ClearChildCache(AXAuraObjWrapper* node) {
+  node->cached_children_.reset();
 }
 
 AXAuraObjWrapper* AXTreeSourceViews::GetParent(AXAuraObjWrapper* node) const {
@@ -106,10 +124,6 @@ bool AXTreeSourceViews::IsIgnored(AXAuraObjWrapper* node) const {
   ui::AXNodeData out_data;
   node->Serialize(&out_data);
   return out_data.IsIgnored();
-}
-
-bool AXTreeSourceViews::IsValid(AXAuraObjWrapper* node) const {
-  return node;
 }
 
 bool AXTreeSourceViews::IsEqual(AXAuraObjWrapper* node1,
@@ -156,7 +170,7 @@ std::string AXTreeSourceViews::ToString(AXAuraObjWrapper* root,
   root->Serialize(&data);
   std::string output = prefix + data.ToString() + '\n';
 
-  std::vector<AXAuraObjWrapper*> children;
+  std::vector<raw_ptr<AXAuraObjWrapper, VectorExperimental>> children;
   root->GetChildren(&children);
 
   prefix += prefix[0];

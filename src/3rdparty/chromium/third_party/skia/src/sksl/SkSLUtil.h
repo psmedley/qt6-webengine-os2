@@ -8,15 +8,13 @@
 #ifndef SKSL_UTIL
 #define SKSL_UTIL
 
+#include "include/core/SkTypes.h"
 #include "include/sksl/SkSLVersion.h"
-#include "src/core/SkSLTypeShared.h"
 #include "src/sksl/SkSLGLSL.h"
 
 #include <memory>
 
-#ifndef SKSL_STANDALONE
-#include "include/core/SkTypes.h"
-#endif // SKSL_STANDALONE
+enum class SkSLType : char;
 
 namespace SkSL {
 
@@ -83,6 +81,7 @@ struct ShaderCaps {
 
     SkSL::GLSLGeneration fGLSLGeneration = SkSL::GLSLGeneration::k330;
 
+    bool fDualSourceBlendingSupport = false;
     bool fShaderDerivativeSupport = false;
     /** Enables sampleGrad and sampleLod functions that don't rely on implicit derivatives */
     bool fExplicitTextureLodSupport = false;
@@ -100,11 +99,15 @@ struct ShaderCaps {
     bool fExternalTextureSupport = false;
     bool fFloatIs32Bits = true;
 
+    // isinf() is defined, and floating point infinities are handled according to IEEE standards.
+    bool fInfinitySupport = false;
+
     // Used by SkSL to know when to generate polyfills.
     bool fBuiltinFMASupport = true;
     bool fBuiltinDeterminantSupport = true;
 
     // Used for specific driver bug work arounds
+    bool fCanUseVoidInSequenceExpressions = true;
     bool fCanUseMinAndAbsTogether = true;
     bool fCanUseFractForNegativeValues = true;
     bool fMustForceNegatedAtanParamToFloat = false;
@@ -120,9 +123,6 @@ struct ShaderCaps {
     bool fMustGuardDivisionEvenAfterExplicitZeroCheck = false;
     // If false, SkSL uses a workaround so that sk_FragCoord doesn't actually query gl_FragCoord
     bool fCanUseFragCoord = true;
-    // If true, short ints can't represent every integer in the 16-bit two's complement range as
-    // required by the spec. SKSL will always emit full ints.
-    bool fIncompleteShortIntPrecision = false;
     // If true, then conditions in for loops need "&& true" to work around driver bugs.
     bool fAddAndTrueToLoopCondition = false;
     // If true, then expressions such as "x && y" or "x || y" are rewritten as ternary to work
@@ -140,6 +140,15 @@ struct ShaderCaps {
     bool fRewriteMatrixVectorMultiply = false;
     // Rewrites matrix equality comparisons to avoid an Adreno driver bug. (skia:11308)
     bool fRewriteMatrixComparisons = false;
+    // Strips const from function parameters in the GLSL code generator. (skia:13858)
+    bool fRemoveConstFromFunctionParameters = false;
+    // On some Android devices colors aren't accurate enough for the double lookup in the
+    // Perlin noise shader. This workaround aggressively snaps colors to multiples of 1/255.
+    bool fPerlinNoiseRoundingFix = false;
+    // Vulkan requires certain builtin variables be present, even if they're unused. At one time,
+    // validation errors would result if sk_Clockwise was missing. Now, it's just (Adreno) driver
+    // bugs that drop or corrupt draws if they're missing.
+    bool fMustDeclareFragmentFrontFacing = false;
 
     const char* fVersionDeclString = "";
 
@@ -173,9 +182,7 @@ protected:
     static std::unique_ptr<ShaderCaps> MakeShaderCaps();
 };
 
-#if !defined(SKSL_STANDALONE) && (SK_SUPPORT_GPU || defined(SK_GRAPHITE_ENABLED))
 bool type_to_sksltype(const Context& context, const Type& type, SkSLType* outType);
-#endif
 
 void write_stringstream(const StringStream& d, OutputStream& out);
 

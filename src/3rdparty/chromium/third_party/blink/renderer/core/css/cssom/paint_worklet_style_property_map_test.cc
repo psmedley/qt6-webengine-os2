@@ -67,7 +67,8 @@ class PaintWorkletStylePropertyMapTest : public PageTestBase {
     CSSStyleValue* style_value = data.at("--x")->ToCSSStyleValue();
     EXPECT_EQ(style_value->GetType(),
               CSSStyleValue::StyleValueType::kUnparsedType);
-    EXPECT_EQ(static_cast<CSSUnparsedValue*>(style_value)->ToString(), "50");
+    EXPECT_EQ(static_cast<CSSUnparsedValue*>(style_value)->ToUnparsedString(),
+              "50");
     waitable_event->Signal();
   }
 
@@ -112,15 +113,15 @@ class PaintWorkletStylePropertyMapTest : public PageTestBase {
 };
 
 TEST_F(PaintWorkletStylePropertyMapTest, UnregisteredCustomProperty) {
-  CustomProperty property("--x", GetDocument());
+  CustomProperty property(AtomicString("--x"), GetDocument());
   Vector<CSSPropertyID> native_properties;
-  Vector<AtomicString> custom_properties({"--x"});
+  Vector<AtomicString> custom_properties({AtomicString("--x")});
 
   GetDocument().documentElement()->setInnerHTML(
       "<div id='target' style='--x:50'></div>");
   UpdateAllLifecyclePhasesForTest();
 
-  Element* node = GetDocument().getElementById("target");
+  Element* node = GetDocument().getElementById(AtomicString("target"));
   node->GetLayoutObject()->GetMutableForPainting().EnsureId();
   CompositorPaintWorkletInput::PropertyKeys input_property_keys;
   auto data = PaintWorkletStylePropertyMap::BuildCrossThreadData(
@@ -153,7 +154,9 @@ TEST_F(PaintWorkletStylePropertyMapTest, UnregisteredCustomProperty) {
 
 TEST_F(PaintWorkletStylePropertyMapTest, SupportedCrossThreadData) {
   Vector<CSSPropertyID> native_properties({CSSPropertyID::kDisplay});
-  Vector<AtomicString> custom_properties({"--foo", "--bar", "--loo", "--gar"});
+  Vector<AtomicString> custom_properties(
+      {AtomicString("--foo"), AtomicString("--bar"), AtomicString("--loo"),
+       AtomicString("--gar")});
   css_test_helpers::RegisterProperty(GetDocument(), "--foo", "<length>",
                                      "134px", false);
   css_test_helpers::RegisterProperty(GetDocument(), "--bar", "<number>", "42",
@@ -168,7 +171,7 @@ TEST_F(PaintWorkletStylePropertyMapTest, SupportedCrossThreadData) {
       "0)'></div>");
   UpdateAllLifecyclePhasesForTest();
 
-  Element* node = GetDocument().getElementById("target");
+  Element* node = GetDocument().getElementById(AtomicString("target"));
   node->GetLayoutObject()->GetMutableForPainting().EnsureId();
   Vector<std::unique_ptr<CrossThreadStyleValue>> input_arguments;
   CompositorPaintWorkletInput::PropertyKeys input_property_keys;
@@ -201,7 +204,8 @@ TEST_F(PaintWorkletStylePropertyMapTest, SupportedCrossThreadData) {
 
 TEST_F(PaintWorkletStylePropertyMapTest, UnsupportedCrossThreadData) {
   Vector<CSSPropertyID> native_properties1;
-  Vector<AtomicString> custom_properties1({"--foo", "--bar", "--loo"});
+  Vector<AtomicString> custom_properties1(
+      {AtomicString("--foo"), AtomicString("--bar"), AtomicString("--loo")});
   css_test_helpers::RegisterProperty(GetDocument(), "--foo", "<url>",
                                      "url(https://google.com)", false);
   css_test_helpers::RegisterProperty(GetDocument(), "--bar", "<number>", "42",
@@ -214,7 +218,7 @@ TEST_F(PaintWorkletStylePropertyMapTest, UnsupportedCrossThreadData) {
       "--bar:15;'></div>");
   UpdateAllLifecyclePhasesForTest();
 
-  Element* node = GetDocument().getElementById("target");
+  Element* node = GetDocument().getElementById(AtomicString("target"));
   node->GetLayoutObject()->GetMutableForPainting().EnsureId();
 
   Vector<std::unique_ptr<CrossThreadStyleValue>> input_arguments;

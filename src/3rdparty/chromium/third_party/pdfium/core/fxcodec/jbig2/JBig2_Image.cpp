@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <memory>
 
+#include "core/fxcrt/fx_2d_size.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_memory.h"
 #include "core/fxcrt/fx_safe_types.h"
@@ -62,7 +63,7 @@ CJBig2_Image::CJBig2_Image(int32_t w, int32_t h) {
 CJBig2_Image::CJBig2_Image(int32_t w,
                            int32_t h,
                            int32_t stride,
-                           uint8_t* pBuf) {
+                           pdfium::span<uint8_t> pBuf) {
   if (w < 0 || h < 0)
     return;
 
@@ -77,7 +78,7 @@ CJBig2_Image::CJBig2_Image(int32_t w,
   m_nWidth = w;
   m_nHeight = h;
   m_nStride = stride;
-  m_pData.Reset(pBuf);
+  m_pData.Reset(pBuf.data());
 }
 
 CJBig2_Image::CJBig2_Image(const CJBig2_Image& other)
@@ -153,7 +154,7 @@ void CJBig2_Image::Fill(bool v) {
   if (!m_pData)
     return;
 
-  memset(data(), v ? 0xff : 0, m_nStride * m_nHeight);
+  memset(data(), v ? 0xff : 0, Fx2DSizeOrDie(m_nStride, m_nHeight));
 }
 
 bool CJBig2_Image::ComposeTo(CJBig2_Image* pDst,
@@ -247,17 +248,20 @@ void CJBig2_Image::Expand(int32_t h, bool v) {
   if (!m_pData || h <= m_nHeight || h > kMaxImageBytes / m_nStride)
     return;
 
+  // Won't die unless kMaxImageBytes were to be increased someday.
+  const size_t current_size = Fx2DSizeOrDie(m_nHeight, m_nStride);
+  const size_t desired_size = Fx2DSizeOrDie(h, m_nStride);
+
   if (m_pData.IsOwned()) {
     m_pData.Reset(std::unique_ptr<uint8_t, FxFreeDeleter>(FX_Realloc(
-        uint8_t, m_pData.ReleaseAndClear().release(), h * m_nStride)));
+        uint8_t, m_pData.ReleaseAndClear().release(), desired_size)));
   } else {
     uint8_t* pExternalBuffer = data();
     m_pData.Reset(std::unique_ptr<uint8_t, FxFreeDeleter>(
-        FX_Alloc(uint8_t, h * m_nStride)));
-    memcpy(data(), pExternalBuffer, m_nHeight * m_nStride);
+        FX_Alloc(uint8_t, desired_size)));
+    memcpy(data(), pExternalBuffer, current_size);
   }
-  memset(data() + m_nHeight * m_nStride, v ? 0xff : 0,
-         (h - m_nHeight) * m_nStride);
+  memset(data() + current_size, v ? 0xff : 0, desired_size - current_size);
   m_nHeight = h;
 }
 
@@ -310,7 +314,7 @@ bool CJBig2_Image::ComposeToInternal(CJBig2_Image* pDst,
   uint32_t maskM = maskL & maskR;
   const uint8_t* lineSrc =
       GetLineUnsafe(rtSrc.top + ys0) + BitIndexToAlignedByte(xs0 + rtSrc.left);
-  const uint8_t* lineSrcEnd = data() + m_nHeight * m_nStride;
+  const uint8_t* lineSrcEnd = data() + Fx2DSizeOrDie(m_nHeight, m_nStride);
   int32_t lineLeft = m_nStride - BitIndexToAlignedByte(xs0);
   uint8_t* lineDst = pDst->GetLineUnsafe(yd0) + BitIndexToAlignedByte(xd0);
   if ((xd0 & ~31) == ((xd1 - 1) & ~31)) {

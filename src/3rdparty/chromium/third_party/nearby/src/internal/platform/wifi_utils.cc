@@ -14,7 +14,14 @@
 
 #include "internal/platform/wifi_utils.h"
 
-namespace location {
+#include <string>
+#include <vector>
+
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
+
 namespace nearby {
 
 // Utility function to convert channel number to frequency in MHz
@@ -39,23 +46,19 @@ int WifiUtils::ConvertChannelToFrequencyMhz(int channel, WifiBandType band) {
   }
 
   if (band == WifiBandType::kBand6Ghz) {
-    if (channel >= kBand6GhzFirstChNum &&
-        channel <= kBand6GhzLastChNum) {
+    if (channel >= kBand6GhzFirstChNum && channel <= kBand6GhzLastChNum) {
       if (channel == 2) {
         return kBand6GhzOpClass136Ch2FreqMhz;
       }
-      return ((channel - kBand6GhzFirstChNum) * 5) +
-             kBand6GhzStartFreqMhz;
+      return ((channel - kBand6GhzFirstChNum) * 5) + kBand6GhzStartFreqMhz;
     } else {
       return kUnspecified;
     }
   }
 
   if (band == WifiBandType::kBand60Ghz) {
-    if (channel >= kBand60GhzFirstChNum &&
-        channel <= kBand60GhzLastChNum) {
-      return ((channel - kBand60GhzFirstChNum) * 2160) +
-             kBand60GhzStartFreqMhz;
+    if (channel >= kBand60GhzFirstChNum && channel <= kBand60GhzLastChNum) {
+      return ((channel - kBand60GhzFirstChNum) * 2160) + kBand60GhzStartFreqMhz;
     } else {
       return kUnspecified;
     }
@@ -92,5 +95,35 @@ int WifiUtils::ConvertFrequencyMhzToChannel(int freq_mhz) {
   return kUnspecified;
 }
 
+// Function to validate an IP address
+bool WifiUtils::ValidateIPV4(std::string ipv4) {
+  int result;
+  // split the string into tokens
+  std::vector<absl::string_view> list = absl::StrSplit(ipv4, '.');
+
+  // if the token size is not equal to four
+  if (list.size() != 4) {
+    return false;
+  }
+
+  // validate each token
+  for (absl::string_view str : list) {
+    // verify that the string is a number or not, and the numbers are in the
+    // valid range
+    if (!absl::SimpleAtoi(str, &result)) return false;
+    if (result > 255 || result < 0) return false;
+  }
+
+  return true;
+}
+
+std::string WifiUtils::GetHumanReadableIpAddress(
+    absl::string_view binary_address) {
+  std::vector<std::string> parts;
+  for (unsigned int b : binary_address) {
+    parts.push_back(absl::StrFormat("%d", b));
+  }
+  return absl::StrJoin(parts, ".");
+}
+
 }  // namespace nearby
-}  // namespace location

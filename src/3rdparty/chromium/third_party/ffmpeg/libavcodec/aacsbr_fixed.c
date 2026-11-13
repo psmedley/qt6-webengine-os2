@@ -60,7 +60,6 @@
 #include "sbr.h"
 #include "aacsbr.h"
 #include "aacsbrdata.h"
-#include "fft.h"
 #include "aacps.h"
 #include "sbrdsp.h"
 #include "libavutil/internal.h"
@@ -71,7 +70,6 @@
 #include <float.h>
 #include <math.h>
 
-static VLC vlc_sbr[10];
 static void aacsbr_func_ptr_init(AACSBRContext *c);
 static const int CONST_LN2       = Q31(0.6931471806/256);  // ln(2)/256
 static const int CONST_RECIP_LN2 = Q31(0.7213475204);      // 0.5/ln(2)

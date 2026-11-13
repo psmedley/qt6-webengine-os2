@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <memory>
 
 #include "build/build_config.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "core/fxcrt/data_vector.h"
@@ -49,7 +49,7 @@ class FaxModule {
 
 #if BUILDFLAG(IS_WIN)
   // `src` must have a BPP value of 1.
-  static DataVector<uint8_t> FaxEncode(RetainPtr<CFX_DIBBase> src);
+  static DataVector<uint8_t> FaxEncode(RetainPtr<const CFX_DIBBase> src);
 #endif  // BUILDFLAG(IS_WIN)
 
   FaxModule() = delete;

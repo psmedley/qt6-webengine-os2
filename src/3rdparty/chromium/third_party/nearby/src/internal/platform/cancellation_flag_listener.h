@@ -17,7 +17,6 @@
 
 #include "internal/platform/cancellation_flag.h"
 
-namespace location {
 namespace nearby {
 
 // An RAII mechanism to register CancelListener over a life cycle of medium
@@ -25,7 +24,7 @@ namespace nearby {
 class CancellationFlagListener {
  public:
   CancellationFlagListener(CancellationFlag* flag,
-                           std::function<void()> listener)
+                           CancellationFlag::CancelListener listener)
       : flag_(flag), listener_(std::move(listener)) {
     flag_->RegisterOnCancelListener(&listener_);
   }
@@ -34,10 +33,9 @@ class CancellationFlagListener {
 
  private:
   CancellationFlag* flag_;
-  std::function<void()> listener_;
+  CancellationFlag::CancelListener listener_;
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_BASE_CANCELLATION_FLAG_LISTENER_H_

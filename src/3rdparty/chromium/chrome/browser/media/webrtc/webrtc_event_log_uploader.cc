@@ -4,15 +4,18 @@
 
 #include "chrome/browser/media/webrtc/webrtc_event_log_uploader.h"
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
+#include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/sequenced_task_runner.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#if !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_QTWEBENGINE)
 #include "chrome/browser/browser_process.h"
 #endif
+#include "chrome/browser/media/webrtc/webrtc_log_uploader.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -34,23 +37,6 @@ const char kUploadContentType[] = "multipart/form-data";
 const char kBoundary[] = "----**--yradnuoBgoLtrapitluMklaTelgooG--**----";
 
 constexpr size_t kExpectedMimeOverheadBytes = 1000;  // Intentional overshot.
-
-// TODO(crbug.com/817495): Eliminate the duplication with other uploaders.
-#if BUILDFLAG(IS_WIN)
-const char kProduct[] = "Chrome";
-#elif BUILDFLAG(IS_MAC)
-const char kProduct[] = "Chrome_Mac";
-#elif BUILDFLAG(IS_CHROMEOS_ASH)
-const char kProduct[] = "Chrome_ChromeOS";
-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
-const char kProduct[] = "Chrome_Linux";
-#elif BUILDFLAG(IS_ANDROID)
-const char kProduct[] = "Chrome_Android";
-#elif BUILDFLAG(IS_FUCHSIA)
-const char kProduct[] = "Chrome_Fuchsia";
-#else
-#error Platform not supported.
-#endif
 
 constexpr net::NetworkTrafficAnnotationTag
     kWebrtcEventLogUploaderTrafficAnnotation =
@@ -111,7 +97,7 @@ std::string MimeContentType() {
 void BindURLLoaderFactoryReceiver(
     mojo::PendingReceiver<network::mojom::URLLoaderFactory>
         url_loader_factory_receiver) {
-#if !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_QTWEBENGINE)
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory =
       g_browser_process->shared_url_loader_factory();
@@ -119,7 +105,7 @@ void BindURLLoaderFactoryReceiver(
   shared_url_loader_factory->Clone(std::move(url_loader_factory_receiver));
 #else
   NOTREACHED();
-#endif // !defined(TOOLKIT_QT)
+#endif  // !BUILDFLAG(IS_QTWEBENGINE)
 }
 
 void OnURLLoadUploadProgress(uint64_t current, uint64_t total) {
@@ -268,11 +254,10 @@ bool WebRtcEventLogUploaderImpl::PrepareUploadData(std::string* upload_data) {
 
   const char* filename = filename_str.c_str();
 
-  net::AddMultipartValueForUpload("prod", kProduct, kBoundary, std::string(),
-                                  upload_data);
-  net::AddMultipartValueForUpload("ver",
-                                  version_info::GetVersionNumber() + "-webrtc",
-                                  kBoundary, std::string(), upload_data);
+  net::AddMultipartValueForUpload("prod", GetLogUploadProduct(), kBoundary,
+                                  std::string(), upload_data);
+  net::AddMultipartValueForUpload("ver", GetLogUploadVersion(), kBoundary,
+                                  std::string(), upload_data);
   net::AddMultipartValueForUpload("guid", "0", kBoundary, std::string(),
                                   upload_data);
   net::AddMultipartValueForUpload("type", filename, kBoundary, std::string(),

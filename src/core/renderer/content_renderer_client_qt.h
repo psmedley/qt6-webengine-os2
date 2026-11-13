@@ -1,5 +1,7 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
+
 #ifndef CONTENT_RENDERER_CLIENT_QT_H
 #define CONTENT_RENDERER_CLIENT_QT_H
 
@@ -66,7 +68,7 @@ public:
                                             int http_status,
                                             content::mojom::AlternativeErrorPageOverrideInfoPtr alternative_error_page_info,
                                             std::string *error_html)  override;
-    uint64_t VisitedLinkHash(const char *canonical_url, size_t length) override;
+    uint64_t VisitedLinkHash(std::string_view canonical_url) override;
     bool IsLinkVisited(uint64_t linkHash) override;
     std::unique_ptr<blink::WebPrescientNetworking> CreatePrescientNetworking(content::RenderFrame *render_frame) override;
     void GetSupportedKeySystems(media::GetSupportedKeySystemsCB cb) override;

@@ -22,8 +22,15 @@ import "protos/perfetto/config/android/android_game_intervention_list_config.pro
 import "protos/perfetto/config/android/android_log_config.proto";
 import "protos/perfetto/config/android/android_polled_state_config.proto";
 import "protos/perfetto/config/android/android_system_property_config.proto";
+import "protos/perfetto/config/android/android_sdk_sysprop_guard_config.proto";
+import "protos/perfetto/config/android/network_trace_config.proto";
 import "protos/perfetto/config/android/packages_list_config.proto";
+import "protos/perfetto/config/android/protolog_config.proto";
+import "protos/perfetto/config/android/surfaceflinger_layers_config.proto";
+import "protos/perfetto/config/android/surfaceflinger_transactions_config.proto";
 import "protos/perfetto/config/chrome/chrome_config.proto";
+import "protos/perfetto/config/chrome/v8_config.proto";
+import "protos/perfetto/config/etw/etw_config.proto";
 import "protos/perfetto/config/ftrace/ftrace_config.proto";
 import "protos/perfetto/config/gpu/gpu_counter_config.proto";
 import "protos/perfetto/config/gpu/vulkan_memory_config.proto";
@@ -41,7 +48,7 @@ import "protos/perfetto/config/track_event/track_event_config.proto";
 import "protos/perfetto/config/system_info/system_info.proto";
 
 // The configuration that is passed to each data source when starting tracing.
-// Next id: 120
+// Next id: 126
 message DataSourceConfig {
   enum SessionInitiator {
     SESSION_INITIATOR_UNSPECIFIED = 0;
@@ -67,6 +74,10 @@ message DataSourceConfig {
   // Set by the service to indicate the duration of the trace.
   // DO NOT SET in consumer as this will be overridden by the service.
   optional uint32 trace_duration_ms = 3;
+
+  // If true, |trace_duration_ms| should count also time in suspend. This
+  // is propagated from TraceConfig.prefer_suspend_clock_for_duration.
+  optional bool prefer_suspend_clock_for_duration = 122;
 
   // Set by the service to indicate how long it waits after StopDataSource.
   // DO NOT SET in consumer as this will be overridden by the service.
@@ -145,6 +156,9 @@ message DataSourceConfig {
   // C++ class for it so it can pass around plain C++ objets.
   optional ChromeConfig chrome_config = 101;
 
+  // Data source name: code.v8.dev
+  optional V8Config v8_config = 127 [lazy = true];
+
   // If an interceptor is specified here, packets for this data source will be
   // rerouted to the interceptor instead of the main trace buffer. This can be
   // used, for example, to write trace data into ETW or for logging trace points
@@ -154,6 +168,30 @@ message DataSourceConfig {
   // through the Perfetto SDK API. Data sources that don't use that API (e.g.,
   // traced_probes) may not support interception.
   optional InterceptorConfig interceptor_config = 115;
+
+  // Data source name: android.network_packets.
+  // Introduced in Android 14 (U).
+  optional NetworkPacketTraceConfig network_packet_trace_config = 120
+      [lazy = true];
+
+  // Data source name: android.surfaceflinger.layers
+  optional SurfaceFlingerLayersConfig surfaceflinger_layers_config = 121
+      [lazy = true];
+
+  // Data source name: android.surfaceflinger.transactions
+  optional SurfaceFlingerTransactionsConfig surfaceflinger_transactions_config =
+      123 [lazy = true];
+
+  // Data source name: android.sdk_sysprop_guard
+  // Introduced in Android 14 (U) QPR1.
+  optional AndroidSdkSyspropGuardConfig android_sdk_sysprop_guard_config = 124
+      [lazy = true];
+
+  // Data source name: windows.etw
+  optional EtwConfig etw_config = 125 [lazy = true];
+
+  // Data source name: android.protolog
+  optional ProtoLogConfig protolog_config = 126 [lazy = true];
 
   // This is a fallback mechanism to send a free-form text config to the
   // producer. In theory this should never be needed. All the code that

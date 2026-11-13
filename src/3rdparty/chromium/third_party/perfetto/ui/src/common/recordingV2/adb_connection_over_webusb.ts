@@ -16,6 +16,7 @@ import {_TextDecoder, _TextEncoder} from 'custom_utils';
 
 import {defer, Deferred} from '../../base/deferred';
 import {assertExists, assertFalse, assertTrue} from '../../base/logging';
+import {isString} from '../../base/object_utils';
 import {CmdType} from '../../controller/adb_interfaces';
 
 import {AdbConnectionImpl} from './adb_connection_impl';
@@ -139,7 +140,9 @@ export class AdbConnectionOverWebusb extends AdbConnectionImpl {
 
     if (this.state === AdbState.DISCONNECTED) {
       await this.device.open();
-      await this.device.reset();
+      if (!(await this.canConnectWithoutContention())) {
+        await this.device.reset();
+      }
       const usbInterfaceNumber = await this.setupUsbInterface();
       await this.device.claimInterface(usbInterfaceNumber);
     }
@@ -194,7 +197,7 @@ export class AdbConnectionOverWebusb extends AdbConnectionImpl {
   }
 
   streamWrite(msg: string|Uint8Array, stream: AdbOverWebusbStream): void {
-    const raw = (typeof msg === 'string') ? textEncoder.encode(msg) : msg;
+    const raw = (isString(msg)) ? textEncoder.encode(msg) : msg;
     if (this.writeInProgress) {
       this.writeQueue.push({message: raw, localStreamId: stream.localStreamId});
       return;
@@ -283,7 +286,13 @@ export class AdbConnectionOverWebusb extends AdbConnectionImpl {
         this.isUsbReceiveLoopRunning = false;
         return;
       }
-      assertTrue(res.status === 'ok');
+      if (res.status !== 'ok') {
+        // Log and ignore messages with invalid status. These can occur
+        // when the device is connected/disconnected repeatedly.
+        console.error(
+            `Received message with unexpected status '${res.status}'`);
+        continue;
+      }
 
       const msg = AdbMsg.decodeHeader(res.data!);
       if (msg.dataLen > 0) {
@@ -554,7 +563,7 @@ class AdbMsg {
   }
 
   // A brief description of the message can be found here:
-  // https://android.googlesource.com/platform/system/core/+/master/adb/protocol.txt
+  // https://android.googlesource.com/platform/system/core/+/main/adb/protocol.txt
   //
   // struct amessage {
   //     uint32_t command;    // command identifier constant
@@ -596,7 +605,7 @@ class AdbMsg {
 
   static encodeData(data?: Uint8Array|string): Uint8Array {
     if (data === undefined) return new Uint8Array([]);
-    if (typeof data === 'string') return textEncoder.encode(data + '\0');
+    if (isString(data)) return textEncoder.encode(data + '\0');
     return data;
   }
 }

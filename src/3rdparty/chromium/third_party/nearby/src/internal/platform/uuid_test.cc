@@ -22,7 +22,6 @@
 #include "internal/platform/crypto.h"
 #include "internal/platform/logging.h"
 
-namespace location {
 namespace nearby {
 namespace {
 
@@ -125,6 +124,12 @@ TEST(UuidTest, ComparisonEqualWorksForString) {
   EXPECT_FALSE(uuid_3 == uuid_4);
 }
 
+TEST(UuidTest, OperatorGreaterThan) {
+  Uuid a("12345678-1234-1234-1234-123456789012");
+  Uuid b("12345678-1234-1234-1234-123456789013");
+
+  EXPECT_TRUE(a < b);
+}
+
 }  // namespace
 }  // namespace nearby
-}  // namespace location

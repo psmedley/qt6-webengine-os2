@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 
 //================ Based on ChromeProxyConfigService =======================
@@ -27,7 +28,6 @@ net::ProxyServer ProxyConfigServiceQt::fromQNetworkProxy(const QNetworkProxy &qt
         return net::ProxyServer::FromSchemeHostAndPort(net::ProxyServer::SCHEME_HTTP, host, port);
     case QNetworkProxy::NoProxy:
     case QNetworkProxy::DefaultProxy:
-        return net::ProxyServer(net::ProxyServer::SCHEME_DIRECT, net::HostPortPair());
     default:
         return net::ProxyServer(net::ProxyServer::SCHEME_INVALID, net::HostPortPair());
     }

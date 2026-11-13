@@ -46,12 +46,12 @@ const Substitution CSubstitutionCFlagsC = {"{{cflags_c}}", "cflags_c"};
 const Substitution CSubstitutionCFlagsCc = {"{{cflags_cc}}", "cflags_cc"};
 const Substitution CSubstitutionCFlagsObjC = {"{{cflags_objc}}", "cflags_objc"};
 const Substitution CSubstitutionCFlagsObjCc = {"{{cflags_objcc}}",
-                                              "cflags_objcc"};
+                                               "cflags_objcc"};
 const Substitution CSubstitutionDefines = {"{{defines}}", "defines"};
 const Substitution CSubstitutionFrameworkDirs = {"{{framework_dirs}}",
                                                  "framework_dirs"};
 const Substitution CSubstitutionIncludeDirs = {"{{include_dirs}}",
-                                              "include_dirs"};
+                                               "include_dirs"};
 const Substitution CSubstitutionModuleDeps = {"{{module_deps}}", "module_deps"};
 const Substitution CSubstitutionModuleDepsNoSelf = {"{{module_deps_no_self}}",
                                                     "module_deps_no_self"};
@@ -90,6 +90,19 @@ bool IsValidCompilerSubstitution(const Substitution* type) {
          type == &CSubstitutionIncludeDirs ||
          type == &CSubstitutionModuleDeps ||
          type == &CSubstitutionModuleDepsNoSelf;
+}
+
+bool IsValidCompilerScriptArgsSubstitution(const Substitution* type) {
+  return type == &CSubstitutionAsmFlags || type == &CSubstitutionCFlags ||
+         type == &CSubstitutionCFlagsC || type == &CSubstitutionCFlagsCc ||
+         type == &CSubstitutionCFlagsObjC ||
+         type == &CSubstitutionCFlagsObjCc || type == &CSubstitutionDefines ||
+         type == &CSubstitutionFrameworkDirs ||
+         type == &CSubstitutionIncludeDirs ||
+         type == &CSubstitutionSwiftModuleName ||
+         type == &CSubstitutionSwiftBridgeHeader ||
+         type == &CSubstitutionSwiftModuleDirs ||
+         type == &CSubstitutionSwiftFlags;
 }
 
 bool IsValidCompilerOutputsSubstitution(const Substitution* type) {
@@ -131,8 +144,7 @@ bool IsValidLinkerOutputsSubstitution(const Substitution* type) {
 }
 
 bool IsValidALinkSubstitution(const Substitution* type) {
-  return IsValidToolSubstitution(type) ||
-         type == &SubstitutionOutputDir ||
+  return IsValidToolSubstitution(type) || type == &SubstitutionOutputDir ||
          type == &SubstitutionOutputExtension ||
          type == &CSubstitutionLinkerInputs ||
          type == &CSubstitutionLinkerInputsNewline ||

@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 CPDF_Path::CPDF_Path() = default;
 
-CPDF_Path::CPDF_Path(const CPDF_Path& that) : m_Ref(that.m_Ref) {}
+CPDF_Path::CPDF_Path(const CPDF_Path& that) = default;
 
 CPDF_Path::~CPDF_Path() = default;
 

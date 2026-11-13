@@ -16,15 +16,16 @@
 
 #include "src/trace_processor/importers/proto/heap_graph_module.h"
 
+#include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/proto/heap_graph_tracker.h"
 #include "src/trace_processor/importers/proto/profiler_util.h"
-#include "src/trace_processor/parser_types.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
 #include "protos/perfetto/trace/profiling/deobfuscation.pbzero.h"
 #include "protos/perfetto/trace/profiling/heap_graph.pbzero.h"
+#include "protos/perfetto/trace/profiling/profile_common.pbzero.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -34,72 +35,6 @@ namespace {
 using ClassTable = tables::HeapGraphClassTable;
 using ObjectTable = tables::HeapGraphObjectTable;
 using ReferenceTable = tables::HeapGraphReferenceTable;
-
-const char* HeapGraphRootTypeToString(int32_t type) {
-  switch (type) {
-    case protos::pbzero::HeapGraphRoot::ROOT_UNKNOWN:
-      return "ROOT_UNKNOWN";
-    case protos::pbzero::HeapGraphRoot::ROOT_JNI_GLOBAL:
-      return "ROOT_JNI_GLOBAL";
-    case protos::pbzero::HeapGraphRoot::ROOT_JNI_LOCAL:
-      return "ROOT_JNI_LOCAL";
-    case protos::pbzero::HeapGraphRoot::ROOT_JAVA_FRAME:
-      return "ROOT_JAVA_FRAME";
-    case protos::pbzero::HeapGraphRoot::ROOT_NATIVE_STACK:
-      return "ROOT_NATIVE_STACK";
-    case protos::pbzero::HeapGraphRoot::ROOT_STICKY_CLASS:
-      return "ROOT_STICKY_CLASS";
-    case protos::pbzero::HeapGraphRoot::ROOT_THREAD_BLOCK:
-      return "ROOT_THREAD_BLOCK";
-    case protos::pbzero::HeapGraphRoot::ROOT_MONITOR_USED:
-      return "ROOT_MONITOR_USED";
-    case protos::pbzero::HeapGraphRoot::ROOT_THREAD_OBJECT:
-      return "ROOT_THREAD_OBJECT";
-    case protos::pbzero::HeapGraphRoot::ROOT_INTERNED_STRING:
-      return "ROOT_INTERNED_STRING";
-    case protos::pbzero::HeapGraphRoot::ROOT_FINALIZING:
-      return "ROOT_FINALIZING";
-    case protos::pbzero::HeapGraphRoot::ROOT_DEBUGGER:
-      return "ROOT_DEBUGGER";
-    case protos::pbzero::HeapGraphRoot::ROOT_REFERENCE_CLEANUP:
-      return "ROOT_REFERENCE_CLEANUP";
-    case protos::pbzero::HeapGraphRoot::ROOT_VM_INTERNAL:
-      return "ROOT_VM_INTERNAL";
-    case protos::pbzero::HeapGraphRoot::ROOT_JNI_MONITOR:
-      return "ROOT_JNI_MONITOR";
-    default:
-      return "ROOT_UNKNOWN";
-  }
-}
-
-const char* HeapGraphTypeKindToString(int32_t type) {
-  switch (type) {
-    case protos::pbzero::HeapGraphType::KIND_NORMAL:
-      return "KIND_NORMAL";
-    case protos::pbzero::HeapGraphType::KIND_NOREFERENCES:
-      return "KIND_NOREFERENCES";
-    case protos::pbzero::HeapGraphType::KIND_STRING:
-      return "KIND_STRING";
-    case protos::pbzero::HeapGraphType::KIND_ARRAY:
-      return "KIND_ARRAY";
-    case protos::pbzero::HeapGraphType::KIND_CLASS:
-      return "KIND_CLASS";
-    case protos::pbzero::HeapGraphType::KIND_CLASSLOADER:
-      return "KIND_CLASSLOADER";
-    case protos::pbzero::HeapGraphType::KIND_DEXCACHE:
-      return "KIND_DEXCACHE";
-    case protos::pbzero::HeapGraphType::KIND_SOFT_REFERENCE:
-      return "KIND_SOFT_REFERENCE";
-    case protos::pbzero::HeapGraphType::KIND_WEAK_REFERENCE:
-      return "KIND_WEAK_REFERENCE";
-    case protos::pbzero::HeapGraphType::KIND_FINALIZER_REFERENCE:
-      return "KIND_FINALIZER_REFERENCE";
-    case protos::pbzero::HeapGraphType::KIND_PHANTOM_REFERENCE:
-      return "KIND_PHANTOM_REFERENCE";
-    default:
-      return "KIND_UNKNOWN";
-  }
-}
 
 // Iterate over a repeated field of varints, independent of whether it is
 // packed or not.
@@ -236,9 +171,14 @@ void HeapGraphModule::ParseHeapGraph(uint32_t seq_id,
         entry.kind() == protos::pbzero::HeapGraphType::KIND_ARRAY ||
         entry.kind() == protos::pbzero::HeapGraphType::KIND_STRING;
 
-    StringId kind = context_->storage->InternString(
-        HeapGraphTypeKindToString(entry.kind()));
-    base::Optional<uint64_t> location_id;
+    protos::pbzero::HeapGraphType::Kind kind =
+        protos::pbzero::HeapGraphType::KIND_UNKNOWN;
+    if (protos::pbzero::HeapGraphType_Kind_MIN <= entry.kind() &&
+        entry.kind() <= protos::pbzero::HeapGraphType_Kind_MAX) {
+      kind = protos::pbzero::HeapGraphType::Kind(entry.kind());
+    }
+
+    std::optional<uint64_t> location_id;
     if (entry.has_location_id())
       location_id = entry.location_id();
 
@@ -264,11 +204,15 @@ void HeapGraphModule::ParseHeapGraph(uint32_t seq_id,
   }
   for (auto it = heap_graph.roots(); it; ++it) {
     protos::pbzero::HeapGraphRoot::Decoder entry(*it);
-    const char* str = HeapGraphRootTypeToString(entry.root_type());
-    auto str_view = base::StringView(str);
 
     HeapGraphTracker::SourceRoot src_root;
-    src_root.root_type = context_->storage->InternString(str_view);
+    if (protos::pbzero::HeapGraphRoot_Type_MIN <= entry.root_type() &&
+        entry.root_type() <= protos::pbzero::HeapGraphRoot_Type_MAX) {
+      src_root.root_type =
+          protos::pbzero::HeapGraphRoot::Type(entry.root_type());
+    } else {
+      src_root.root_type = protos::pbzero::HeapGraphRoot::ROOT_UNKNOWN;
+    }
     // grep-friendly: object_ids
     bool parse_error =
         ForEachVarInt<protos::pbzero::HeapGraphRoot::kObjectIdsFieldNumber>(
@@ -288,7 +232,7 @@ void HeapGraphModule::ParseHeapGraph(uint32_t seq_id,
 }
 
 void HeapGraphModule::DeobfuscateClass(
-    base::Optional<StringId> package_name_id,
+    std::optional<StringId> package_name_id,
     StringId obfuscated_class_name_id,
     const protos::pbzero::ObfuscatedClass::Decoder& cls) {
   auto* heap_graph_tracker = HeapGraphTracker::GetOrCreate(context_);
@@ -319,7 +263,7 @@ void HeapGraphModule::ParseDeobfuscationMapping(protozero::ConstBytes blob) {
   auto* heap_graph_tracker = HeapGraphTracker::GetOrCreate(context_);
   protos::pbzero::DeobfuscationMapping::Decoder deobfuscation_mapping(
       blob.data, blob.size);
-  base::Optional<StringId> package_name_id;
+  std::optional<StringId> package_name_id;
   if (deobfuscation_mapping.package_name().size > 0) {
     package_name_id = context_->storage->string_pool().GetId(
         deobfuscation_mapping.package_name());
@@ -339,7 +283,7 @@ void HeapGraphModule::ParseDeobfuscationMapping(protozero::ConstBytes blob) {
       // TODO(b/153552977): Remove this work-around for legacy traces.
       // For traces without location information, deobfuscate all matching
       // classes.
-      DeobfuscateClass(base::nullopt, *obfuscated_class_name_id, cls);
+      DeobfuscateClass(std::nullopt, *obfuscated_class_name_id, cls);
       if (package_name_id) {
         DeobfuscateClass(package_name_id, *obfuscated_class_name_id, cls);
       }

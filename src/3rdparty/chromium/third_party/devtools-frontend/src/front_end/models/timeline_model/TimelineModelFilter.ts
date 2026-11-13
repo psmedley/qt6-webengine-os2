@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import type * as SDK from '../../core/sdk/sdk.js';
+import * as TraceEngine from '../../models/trace/trace.js';
 
 import {RecordType, TimelineModelImpl} from './TimelineModel.js';
 
-export class TimelineModelFilter {
-  accept(_event: SDK.TracingModel.Event): boolean {
-    return true;
-  }
+export abstract class TimelineModelFilter {
+  abstract accept(
+      _event: TraceEngine.Legacy.CompatibleTraceEvent,
+      traceParsedData?: TraceEngine.Handlers.Types.TraceParseData): boolean;
 }
 
 export class TimelineVisibleEventsFilter extends TimelineModelFilter {
@@ -19,19 +19,22 @@ export class TimelineVisibleEventsFilter extends TimelineModelFilter {
     this.visibleTypes = new Set(visibleTypes);
   }
 
-  accept(event: SDK.TracingModel.Event): boolean {
+  accept(event: TraceEngine.Legacy.CompatibleTraceEvent): boolean {
     return this.visibleTypes.has(TimelineVisibleEventsFilter.eventType(event));
   }
 
-  static eventType(event: SDK.TracingModel.Event): RecordType {
-    if (event.hasCategory(TimelineModelImpl.Category.Console)) {
+  static eventType(event: TraceEngine.Legacy.CompatibleTraceEvent): RecordType {
+    if (TraceEngine.Legacy.eventHasCategory(event, TimelineModelImpl.Category.Console)) {
       return RecordType.ConsoleTime;
     }
-    if (event.hasCategory(TimelineModelImpl.Category.UserTiming)) {
+    if (TraceEngine.Legacy.eventHasCategory(event, TimelineModelImpl.Category.UserTiming)) {
       return RecordType.UserTiming;
     }
-    if (event.hasCategory(TimelineModelImpl.Category.LatencyInfo)) {
-      return RecordType.LatencyInfo;
+    if (TraceEngine.Legacy.eventIsFromNewEngine(event) && TraceEngine.Types.TraceEvents.isProfileCall(event)) {
+      // ProfileCalls from the new engine are broadly equivalent to JSFrames in
+      // the old engine, so map them as such, as we do not have a RecordType to
+      // represent ProfileCalls.
+      return RecordType.JSFrame;
     }
     return event.name as RecordType;
   }
@@ -44,7 +47,7 @@ export class TimelineInvisibleEventsFilter extends TimelineModelFilter {
     this.invisibleTypes = new Set(invisibleTypes);
   }
 
-  accept(event: SDK.TracingModel.Event): boolean {
+  accept(event: TraceEngine.Legacy.CompatibleTraceEvent): boolean {
     return !this.invisibleTypes.has(TimelineVisibleEventsFilter.eventType(event));
   }
 }
@@ -56,7 +59,7 @@ export class ExclusiveNameFilter extends TimelineModelFilter {
     this.excludeNames = new Set(excludeNames);
   }
 
-  accept(event: SDK.TracingModel.Event): boolean {
+  accept(event: TraceEngine.Legacy.CompatibleTraceEvent): boolean {
     return !this.excludeNames.has(event.name);
   }
 }

@@ -8,19 +8,19 @@
   overflow: auto;
   padding: 12px;
   height: 100%;
-  background-color: var(--color-background);
+  background-color: var(--sys-color-cdt-base-container);
 }
 
 .request-cookies-view .request-cookies-title {
   font-size: 12px;
   font-weight: bold;
   margin-right: 30px;
-  color: var(--color-text-primary);
+  color: var(--sys-color-on-surface);
 }
 
 .request-cookies-view .cookie-line {
   margin-top: 6px;
-  display: inline-block;
+  display: flex;
 }
 
 .request-cookies-view .cookies-panel-item {

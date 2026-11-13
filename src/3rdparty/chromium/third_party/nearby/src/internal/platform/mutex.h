@@ -21,8 +21,10 @@
 #include "internal/platform/implementation/mutex.h"
 #include "internal/platform/implementation/platform.h"
 
-namespace location {
 namespace nearby {
+
+#pragma push_macro("CreateMutex")
+#undef CreateMutex
 
 // This is a classic mutex can be acquired at most once.
 // Atttempt to acuire mutex from the same thread that is holding it will likely
@@ -72,7 +74,8 @@ class ABSL_LOCKABLE RecursiveMutex final {
   std::unique_ptr<api::Mutex> impl_;
 };
 
+#pragma pop_macro("CreateMutex")
+
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_PUBLIC_MUTEX_H_

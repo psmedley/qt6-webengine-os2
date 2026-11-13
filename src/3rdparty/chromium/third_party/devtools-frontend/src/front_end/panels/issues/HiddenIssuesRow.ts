@@ -9,12 +9,12 @@ import * as UI from '../../ui/legacy/legacy.js';
 
 const UIStrings = {
   /**
-  * @description Title for the hidden issues row
-  */
+   * @description Title for the hidden issues row
+   */
   hiddenIssues: 'Hidden issues',
   /**
-  * @description Label for the button to unhide all hidden issues
-  */
+   * @description Label for the button to unhide all hidden issues
+   */
   unhideAll: 'Unhide all',
 };
 
@@ -37,8 +37,7 @@ export class HiddenIssuesRow extends UI.TreeOutline.TreeElement {
     const unhideAllIssuesBtn = UI.UIUtils.createTextButton(
         i18nString(UIStrings.unhideAll),
         (): void => IssuesManager.IssuesManager.IssuesManager.instance().unhideAllIssues(),
-        'unhide-all-issues-button',
-    );
+        {className: 'unhide-all-issues-button', jslogContext: 'issues.unhide-all-hiddes'});
     const countAdorner = new Adorners.Adorner.Adorner();
     countAdorner.data = {
       name: 'countWrapper',

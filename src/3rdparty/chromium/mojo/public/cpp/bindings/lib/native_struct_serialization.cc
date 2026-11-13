@@ -23,16 +23,16 @@ void UnmappedNativeStructSerializerImpl::Serialize(
 
   fragment.Allocate();
   MessageFragment<Array_Data<uint8_t>> data_fragment(fragment.message());
-  const mojo::internal::ContainerValidateParams data_validate_params(0, false,
-                                                                     nullptr);
+  constexpr const ContainerValidateParams& data_validate_params =
+      GetArrayValidator<0, false, nullptr>();
   mojo::internal::Serialize<ArrayDataView<uint8_t>>(input->data, data_fragment,
                                                     &data_validate_params);
   fragment->data.Set(data_fragment.data());
 
   MessageFragment<Array_Data<Pointer<native::internal::SerializedHandle_Data>>>
       handles_fragment(fragment.message());
-  const mojo::internal::ContainerValidateParams handles_validate_params(
-      0, false, nullptr);
+  constexpr const ContainerValidateParams& handles_validate_params =
+      GetArrayValidator<0, false, nullptr>();
   mojo::internal::Serialize<
       mojo::ArrayDataView<::mojo::native::SerializedHandleDataView>>(
       input->handles, handles_fragment, &handles_validate_params);
@@ -87,7 +87,9 @@ void UnmappedNativeStructSerializerImpl::SerializeMessageContents(
     internal::Serializer<ScopedHandle, ScopedHandle>::Serialize(
         handle, &handle_fragment->the_handle, &fragment.message());
     handle_fragment->type = static_cast<int32_t>(
-        mojo::ConvertTo<native::SerializedHandleType>(attachment->GetType()));
+        mojo::TypeConverter<
+            native::SerializedHandleType,
+            IPC::MessageAttachment::Type>::Convert(attachment->GetType()));
     handles_fragment->at(i).Set(handle_fragment.data());
   }
   fragment->handles.Set(handles_fragment.data());
@@ -111,8 +113,10 @@ bool UnmappedNativeStructSerializerImpl::DeserializeMessageAttachments(
         &handle_data->the_handle, &handle, message);
     auto attachment = IPC::MessageAttachment::CreateFromMojoHandle(
         std::move(handle),
-        mojo::ConvertTo<IPC::MessageAttachment::Type>(
-            static_cast<native::SerializedHandleType>(handle_data->type)));
+        mojo::TypeConverter<IPC::MessageAttachment::Type,
+                            native::SerializedHandleType>::
+            Convert(
+                static_cast<native::SerializedHandleType>(handle_data->type)));
     ipc_message->attachment_set()->AddAttachment(std::move(attachment));
   }
   return true;

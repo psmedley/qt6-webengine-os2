@@ -32,6 +32,8 @@ struct AV1RateControlRtcConfig {
 
   int width;
   int height;
+  // Flag indicating if the content is screen or not.
+  bool is_screen = false;
   // 0-63
   int max_quantizer;
   int min_quantizer;
@@ -43,6 +45,8 @@ struct AV1RateControlRtcConfig {
   int overshoot_pct;
   int max_intra_bitrate_pct;
   int max_inter_bitrate_pct;
+  int frame_drop_thresh;
+  int max_consec_drop;
   double framerate;
   int layer_target_bitrate[kAV1MaxLayers];
   int ts_rate_decimator[kAV1MaxTemporalLayers];
@@ -63,24 +67,56 @@ struct AV1FrameParamsRTC {
   int temporal_layer_id;
 };
 
+struct AV1LoopfilterLevel {
+  int filter_level[2];
+  int filter_level_u;
+  int filter_level_v;
+};
+
+struct AV1CdefInfo {
+  int cdef_strength_y;
+  int cdef_strength_uv;
+  int damping;
+};
+
+struct AV1SegmentationData {
+  const uint8_t *segmentation_map;
+  size_t segmentation_map_size;
+  const int *delta_q;
+  size_t delta_q_size;
+};
+
+enum class FrameDropDecision {
+  kOk,    // Frame is encoded.
+  kDrop,  // Frame is dropped.
+};
+
 class AV1RateControlRTC {
  public:
   static std::unique_ptr<AV1RateControlRTC> Create(
       const AV1RateControlRtcConfig &cfg);
   ~AV1RateControlRTC();
 
-  void UpdateRateControl(const AV1RateControlRtcConfig &rc_cfg);
+  bool UpdateRateControl(const AV1RateControlRtcConfig &rc_cfg);
   // GetQP() needs to be called after ComputeQP() to get the latest QP
   int GetQP() const;
-  signed char *GetCyclicRefreshMap() const;
-  int *GetDeltaQ() const;
-  void ComputeQP(const AV1FrameParamsRTC &frame_params);
+  // GetLoopfilterLevel() needs to be called after ComputeQP()
+  AV1LoopfilterLevel GetLoopfilterLevel() const;
+  // GetCdefInfo() needs to be called after ComputeQP()
+  AV1CdefInfo GetCdefInfo() const;
+  // Returns the segmentation map used for cyclic refresh, based on 4x4 blocks.
+  bool GetSegmentationData(AV1SegmentationData *segmentation_data) const;
+  // ComputeQP returns the QP if the frame is not dropped (kOk return),
+  // otherwise it returns kDrop and subsequent GetQP and PostEncodeUpdate
+  // are not to be called (av1_rc_postencode_update_drop_frame is already
+  // called via ComputeQP if drop is decided).
+  FrameDropDecision ComputeQP(const AV1FrameParamsRTC &frame_params);
   // Feedback to rate control with the size of current encoded frame
   void PostEncodeUpdate(uint64_t encoded_frame_size);
 
  private:
   AV1RateControlRTC() = default;
-  void InitRateControl(const AV1RateControlRtcConfig &cfg);
+  bool InitRateControl(const AV1RateControlRtcConfig &cfg);
   AV1_COMP *cpi_;
   int initial_width_;
   int initial_height_;

@@ -30,7 +30,6 @@
 #include "connections/strategy.h"
 #include "internal/platform/atomic_boolean.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -58,17 +57,38 @@ class PcpManager {
                         DiscoveryListener listener);
   void StopDiscovery(ClientProxy* client);
 
+  std::pair<Status, std::vector<ConnectionInfoVariant>>
+  StartListeningForIncomingConnections(
+      ClientProxy* client, absl::string_view service_id,
+      v3::ConnectionListener listener,
+      const v3::ConnectionListeningOptions& options);
+
+  void StopListeningForIncomingConnections(ClientProxy* client);
+
   void InjectEndpoint(ClientProxy* client, const std::string& service_id,
                       const OutOfBandConnectionMetadata& metadata);
 
   Status RequestConnection(ClientProxy* client, const string& endpoint_id,
                            const ConnectionRequestInfo& info,
                            const ConnectionOptions& connection_options);
+
+  Status RequestConnectionV3(ClientProxy* client,
+                             const NearbyDevice& remote_device,
+                             const ConnectionRequestInfo& info,
+                             const ConnectionOptions& connection_options);
   Status AcceptConnection(ClientProxy* client, const string& endpoint_id,
-                          const PayloadListener& payload_listener);
+                          PayloadListener payload_listener);
   Status RejectConnection(ClientProxy* client, const string& endpoint_id);
 
-  proto::connections::Medium GetBandwidthUpgradeMedium();
+  Status UpdateAdvertisingOptions(
+      ClientProxy* client, absl::string_view service_id,
+      const AdvertisingOptions& advertising_options);
+
+  Status UpdateDiscoveryOptions(ClientProxy* client,
+                                absl::string_view service_id,
+                                const DiscoveryOptions& discovery_options);
+
+  location::nearby::proto::connections::Medium GetBandwidthUpgradeMedium();
   void DisconnectFromEndpointManager();
 
  private:
@@ -82,6 +102,5 @@ class PcpManager {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_PCP_MANAGER_H_

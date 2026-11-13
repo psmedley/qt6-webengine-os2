@@ -13,16 +13,17 @@ import './customize_backgrounds.js';
 import './customize_shortcuts.js';
 import './customize_modules.js';
 
-import {CustomizeThemesElement} from 'chrome://resources/cr_components/customize_themes/customize_themes.js';
-import {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
-import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import type {CustomizeThemesElement} from 'chrome://resources/cr_components/customize_themes/customize_themes.js';
+import type {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
+import type {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {CustomizeBackgroundsElement} from './customize_backgrounds.js';
+import type {CustomizeBackgroundsElement} from './customize_backgrounds.js';
 import {getTemplate} from './customize_dialog.html.js';
 import {CustomizeDialogPage} from './customize_dialog_types.js';
 import {loadTimeData} from './i18n_setup.js';
-import {BackgroundCollection, CustomizeDialogAction, PageHandlerRemote, Theme} from './new_tab_page.mojom-webui.js';
+import type {BackgroundCollection, PageHandlerRemote, Theme} from './new_tab_page.mojom-webui.js';
+import {CustomizeDialogAction} from './new_tab_page.mojom-webui.js';
 import {NewTabPageProxy} from './new_tab_page_proxy.js';
 import {createScrollBorders} from './utils.js';
 
@@ -167,8 +168,8 @@ export class CustomizeDialogElement extends PolymerElement {
     if (!this.selectedCollection_) {
       return false;
     }
-    return !!this.theme &&
-        this.selectedCollection_.id === this.theme.dailyRefreshCollectionId;
+    return !!this.theme && this.theme.dailyRefreshEnabled &&
+        this.selectedCollection_!.id === this.theme.backgroundImageCollectionId;
   }
 
   private computeShowTitleNavigation_(): boolean {

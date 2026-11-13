@@ -12,35 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Duration, time} from '../base/time';
+import {exists} from '../base/utils';
 import {Actions} from '../common/actions';
-import {Engine} from '../common/engine';
 import {
-  ALLOC_SPACE_MEMORY_ALLOCATED_KEY,
-  DEFAULT_VIEWING_OPTION,
+  defaultViewingOption,
   expandCallsites,
   findRootSize,
   mergeCallsites,
-  OBJECTS_ALLOCATED_KEY,
-  OBJECTS_ALLOCATED_NOT_FREED_KEY,
-  PERF_SAMPLES_KEY,
-  SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY,
 } from '../common/flamegraph_util';
-import {NUM, STR} from '../common/query_result';
-import {CallsiteInfo, FlamegraphState, ProfileType} from '../common/state';
-import {toNs} from '../common/time';
+import {pluginManager} from '../common/plugins';
 import {
-  FlamegraphDetails,
-  globals as frontendGlobals,
-} from '../frontend/globals';
+  CallsiteInfo,
+  FlamegraphState,
+  FlamegraphStateViewingOption,
+  ProfileType,
+} from '../common/state';
+import {FlamegraphDetails, globals} from '../frontend/globals';
 import {publishFlamegraphDetails} from '../frontend/publish';
-import {
-  Config as PerfSampleConfig,
-  PERF_SAMPLES_PROFILE_TRACK_KIND,
-} from '../tracks/perf_samples_profile';
+import {Engine} from '../trace_processor/engine';
+import {NUM, STR} from '../trace_processor/query_result';
+import {PERF_SAMPLES_PROFILE_TRACK_KIND} from '../tracks/perf_samples_profile';
 
 import {AreaSelectionHandler} from './area_selection_handler';
 import {Controller} from './controller';
-import {globals} from './globals';
 
 export function profileType(s: string): ProfileType {
   if (isProfileType(s)) {
@@ -59,15 +54,17 @@ function isProfileType(s: string): s is ProfileType {
 function getFlamegraphType(type: ProfileType) {
   switch (type) {
     case ProfileType.HEAP_PROFILE:
+    case ProfileType.MIXED_HEAP_PROFILE:
     case ProfileType.NATIVE_HEAP_PROFILE:
-    case ProfileType.JAVA_HEAP_PROFILE:
+    case ProfileType.JAVA_HEAP_SAMPLES:
       return 'native';
     case ProfileType.JAVA_HEAP_GRAPH:
       return 'graph';
     case ProfileType.PERF_SAMPLE:
       return 'perf';
     default:
-      throw new Error(`Unexpected profile type ${profileType}`);
+      const exhaustiveCheck: never = type;
+      throw new Error(`Unhandled case: ${exhaustiveCheck}`);
   }
 }
 
@@ -131,31 +128,32 @@ export class FlamegraphController extends Controller<'main'> {
       const upids = [];
       if (!area) {
         this.checkCompletionAndPublishFlamegraph(
-            {...frontendGlobals.flamegraphDetails, isInAreaSelection: false});
+            {...globals.flamegraphDetails, isInAreaSelection: false});
         return;
       }
       for (const trackId of area.tracks) {
-        const trackState = frontendGlobals.state.tracks[trackId];
-        if (!trackState ||
-            trackState.kind !== PERF_SAMPLES_PROFILE_TRACK_KIND) {
-          continue;
+        const track = globals.state.tracks[trackId];
+        if (track?.uri) {
+          const trackInfo = pluginManager.resolveTrackInfo(track.uri);
+          if (trackInfo?.kind === PERF_SAMPLES_PROFILE_TRACK_KIND) {
+            exists(trackInfo.upid) && upids.push(trackInfo.upid);
+          }
         }
-        upids.push((trackState.config as PerfSampleConfig).upid);
       }
       if (upids.length === 0) {
         this.checkCompletionAndPublishFlamegraph(
-            {...frontendGlobals.flamegraphDetails, isInAreaSelection: false});
+            {...globals.flamegraphDetails, isInAreaSelection: false});
         return;
       }
-      frontendGlobals.dispatch(Actions.openFlamegraph({
+      globals.dispatch(Actions.openFlamegraph({
         upids,
-        startNs: toNs(area.startSec),
-        endNs: toNs(area.endSec),
+        start: area.start,
+        end: area.end,
         type: ProfileType.PERF_SAMPLE,
-        viewingOption: PERF_SAMPLES_KEY,
+        viewingOption: defaultViewingOption(ProfileType.PERF_SAMPLE),
       }));
     }
-    const selection = frontendGlobals.state.currentFlamegraphState;
+    const selection = globals.state.currentFlamegraphState;
     if (!selection || !this.shouldRequestData(selection)) {
       return;
     }
@@ -173,8 +171,8 @@ export class FlamegraphController extends Controller<'main'> {
     const selectedFlamegraphState = {...selection};
     const flamegraphMetadata = await this.getFlamegraphMetadata(
         selection.type,
-        selectedFlamegraphState.startNs,
-        selectedFlamegraphState.endNs,
+        selectedFlamegraphState.start,
+        selectedFlamegraphState.end,
         selectedFlamegraphState.upids);
     if (flamegraphMetadata !== undefined) {
       Object.assign(this.flamegraphDetails, flamegraphMetadata);
@@ -196,23 +194,26 @@ export class FlamegraphController extends Controller<'main'> {
         selectedFlamegraphState.expandedCallsite.totalSize;
 
     const key = `${selectedFlamegraphState.upids};${
-        selectedFlamegraphState.startNs};${selectedFlamegraphState.endNs}`;
+        selectedFlamegraphState.start};${selectedFlamegraphState.end}`;
 
     try {
       const flamegraphData = await this.getFlamegraphData(
           key,
+          /* eslint-disable @typescript-eslint/strict-boolean-expressions */
           selectedFlamegraphState.viewingOption ?
+              /* eslint-enable */
               selectedFlamegraphState.viewingOption :
-              DEFAULT_VIEWING_OPTION,
-          selection.startNs,
-          selection.endNs,
+              defaultViewingOption(selectedFlamegraphState.type),
+          selection.start,
+          selection.end,
           selectedFlamegraphState.upids,
           selectedFlamegraphState.type,
           selectedFlamegraphState.focusRegex);
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (flamegraphData !== undefined && selection &&
           selection.kind === selectedFlamegraphState.kind &&
-          selection.startNs === selectedFlamegraphState.startNs &&
-          selection.endNs === selectedFlamegraphState.endNs) {
+          selection.start === selectedFlamegraphState.start &&
+          selection.end === selectedFlamegraphState.end) {
         const expandedFlamegraphData =
             expandCallsites(flamegraphData, expandedId);
         this.prepareAndMergeCallsites(
@@ -234,8 +235,8 @@ export class FlamegraphController extends Controller<'main'> {
   private shouldRequestData(selection: FlamegraphState) {
     return selection.kind === 'FLAMEGRAPH_STATE' &&
         (this.lastSelectedFlamegraphState === undefined ||
-         (this.lastSelectedFlamegraphState.startNs !== selection.startNs ||
-          this.lastSelectedFlamegraphState.endNs !== selection.endNs ||
+         (this.lastSelectedFlamegraphState.start !== selection.start ||
+          this.lastSelectedFlamegraphState.end !== selection.end ||
           this.lastSelectedFlamegraphState.type !== selection.type ||
           !FlamegraphController.areArraysEqual(
               this.lastSelectedFlamegraphState.upids, selection.upids) ||
@@ -249,9 +250,8 @@ export class FlamegraphController extends Controller<'main'> {
 
   private prepareAndMergeCallsites(
       flamegraphData: CallsiteInfo[],
-      viewingOption: string|undefined = DEFAULT_VIEWING_OPTION,
-      isInAreaSelection: boolean, rootSize?: number,
-      expandedCallsite?: CallsiteInfo) {
+      viewingOption: FlamegraphStateViewingOption, isInAreaSelection: boolean,
+      rootSize?: number, expandedCallsite?: CallsiteInfo) {
     this.flamegraphDetails.flamegraph = mergeCallsites(
         flamegraphData, this.getMinSizeDisplayed(flamegraphData, rootSize));
     this.flamegraphDetails.expandedCallsite = expandedCallsite;
@@ -271,8 +271,8 @@ export class FlamegraphController extends Controller<'main'> {
   }
 
   async getFlamegraphData(
-      baseKey: string, viewingOption: string, startNs: number, endNs: number,
-      upids: number[], type: ProfileType,
+      baseKey: string, viewingOption: FlamegraphStateViewingOption, start: time,
+      end: time, upids: number[], type: ProfileType,
       focusRegex: string): Promise<CallsiteInfo[]> {
     let currentData: CallsiteInfo[];
     const key = `${baseKey}-${viewingOption}`;
@@ -284,8 +284,8 @@ export class FlamegraphController extends Controller<'main'> {
       // Collecting data for drawing flamegraph for selected profile.
       // Data needs to be in following format:
       // id, name, parent_id, depth, total_size
-      const tableName = await this.prepareViewsAndTables(
-          startNs, endNs, upids, type, focusRegex);
+      const tableName =
+          await this.prepareViewsAndTables(start, end, upids, type, focusRegex);
       currentData = await this.getFlamegraphDataFromTables(
           tableName, viewingOption, focusRegex);
       this.flamegraphDatasets.set(key, currentData);
@@ -294,7 +294,7 @@ export class FlamegraphController extends Controller<'main'> {
   }
 
   async getFlamegraphDataFromTables(
-      tableName: string, viewingOption = DEFAULT_VIEWING_OPTION,
+      tableName: string, viewingOption: FlamegraphStateViewingOption,
       focusRegex: string) {
     let orderBy = '';
     let totalColumnName: 'cumulativeSize'|'cumulativeAllocSize'|
@@ -304,29 +304,29 @@ export class FlamegraphController extends Controller<'main'> {
     // Alternatively consider collapsing frames of the same label.
     const maxDepth = 100;
     switch (viewingOption) {
-      case ALLOC_SPACE_MEMORY_ALLOCATED_KEY:
+      case FlamegraphStateViewingOption.ALLOC_SPACE_MEMORY_ALLOCATED_KEY:
         orderBy = `where cumulative_alloc_size > 0 and depth < ${
             maxDepth} order by depth, parent_id,
             cumulative_alloc_size desc, name`;
         totalColumnName = 'cumulativeAllocSize';
         selfColumnName = 'size';
         break;
-      case OBJECTS_ALLOCATED_NOT_FREED_KEY:
+      case FlamegraphStateViewingOption.OBJECTS_ALLOCATED_NOT_FREED_KEY:
         orderBy = `where cumulative_count > 0 and depth < ${
             maxDepth} order by depth, parent_id,
             cumulative_count desc, name`;
         totalColumnName = 'cumulativeCount';
         selfColumnName = 'count';
         break;
-      case OBJECTS_ALLOCATED_KEY:
+      case FlamegraphStateViewingOption.OBJECTS_ALLOCATED_KEY:
         orderBy = `where cumulative_alloc_count > 0 and depth < ${
             maxDepth} order by depth, parent_id,
             cumulative_alloc_count desc, name`;
         totalColumnName = 'cumulativeAllocCount';
         selfColumnName = 'count';
         break;
-      case PERF_SAMPLES_KEY:
-      case SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY:
+      case FlamegraphStateViewingOption.PERF_SAMPLES_KEY:
+      case FlamegraphStateViewingOption.SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY:
         orderBy = `where cumulative_size > 0 and depth < ${
             maxDepth} order by depth, parent_id,
             cumulative_size desc, name`;
@@ -334,6 +334,8 @@ export class FlamegraphController extends Controller<'main'> {
         selfColumnName = 'size';
         break;
       default:
+        const exhaustiveCheck: never = viewingOption;
+        throw new Error(`Unhandled case: ${exhaustiveCheck}`);
         break;
     }
 
@@ -417,7 +419,7 @@ export class FlamegraphController extends Controller<'main'> {
   }
 
   private async prepareViewsAndTables(
-      startNs: number, endNs: number, upids: number[], type: ProfileType,
+      start: time, end: time, upids: number[], type: ProfileType,
       focusRegex: string): Promise<string> {
     // Creating unique names for views so we can reuse and not delete them
     // for each marker.
@@ -441,8 +443,8 @@ export class FlamegraphController extends Controller<'main'> {
           cumulative_alloc_size, cumulative_count, cumulative_alloc_count,
           size, alloc_size, count, alloc_count, source_file, line_number
           from experimental_flamegraph
-          where profile_type = '${flamegraphType}' and ${startNs} <= ts and
-              ts <= ${endNs} and ${upidConditional}
+          where profile_type = '${flamegraphType}' and ${start} <= ts and
+              ts <= ${end} and ${upidConditional}
           ${focusRegexConditional}`);
     }
     return this.cache.getTableName(
@@ -451,7 +453,7 @@ export class FlamegraphController extends Controller<'main'> {
           size, alloc_size, count, alloc_count, source_file, line_number
           from experimental_flamegraph
           where profile_type = '${flamegraphType}'
-            and ts = ${endNs}
+            and ts = ${end}
             and upid = ${upids[0]}
             ${focusRegexConditional}`);
   }
@@ -459,7 +461,9 @@ export class FlamegraphController extends Controller<'main'> {
   getMinSizeDisplayed(flamegraphData: CallsiteInfo[], rootSize?: number):
       number {
     const timeState = globals.state.frontendLocalState.visibleState;
-    let width = (timeState.endSec - timeState.startSec) / timeState.resolution;
+    const dur = globals.stateVisibleTime().duration;
+    // TODO(stevegolton): Does this actually do what we want???
+    let width = Duration.toSeconds(dur / timeState.resolution);
     // TODO(168048193): Remove screen size hack:
     width = Math.max(width, 800);
     if (rootSize === undefined) {
@@ -469,11 +473,12 @@ export class FlamegraphController extends Controller<'main'> {
   }
 
   async getFlamegraphMetadata(
-      type: ProfileType, startNs: number, endNs: number, upids: number[]) {
+      type: ProfileType, start: time, end: time,
+      upids: number[]): Promise<FlamegraphDetails|undefined> {
     // Don't do anything if selection of the marker stayed the same.
     if ((this.lastSelectedFlamegraphState !== undefined &&
-         ((this.lastSelectedFlamegraphState.startNs === startNs &&
-           this.lastSelectedFlamegraphState.endNs === endNs &&
+         ((this.lastSelectedFlamegraphState.start === start &&
+           this.lastSelectedFlamegraphState.end === end &&
            FlamegraphController.areArraysEqual(
                this.lastSelectedFlamegraphState.upids, upids))))) {
       return undefined;
@@ -490,7 +495,7 @@ export class FlamegraphController extends Controller<'main'> {
     for (let i = 0; it.valid(); ++i, it.next()) {
       pids.push(it.pid);
     }
-    return {startNs, durNs: endNs - startNs, pids, upids, type};
+    return {start, dur: end - start, pids, upids, type};
   }
 
   private static areArraysEqual(a: number[], b: number[]) {

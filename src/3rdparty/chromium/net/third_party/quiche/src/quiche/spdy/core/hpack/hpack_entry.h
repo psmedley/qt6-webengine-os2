@@ -6,7 +6,6 @@
 #define QUICHE_SPDY_CORE_HPACK_HPACK_ENTRY_H_
 
 #include <cstddef>
-#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -20,10 +19,10 @@ namespace spdy {
 
 // The constant amount added to name().size() and value().size() to
 // get the size of an HpackEntry as defined in 5.1.
-constexpr size_t kHpackEntrySizeOverhead = 32;
+inline constexpr size_t kHpackEntrySizeOverhead = 32;
 
 // A structure for looking up entries in the static and dynamic tables.
-struct QUICHE_EXPORT_PRIVATE HpackLookupEntry {
+struct QUICHE_EXPORT HpackLookupEntry {
   absl::string_view name;
   absl::string_view value;
 
@@ -40,7 +39,7 @@ struct QUICHE_EXPORT_PRIVATE HpackLookupEntry {
 
 // A structure for an entry in the static table (3.3.1)
 // and the header table (3.3.2).
-class QUICHE_EXPORT_PRIVATE HpackEntry {
+class QUICHE_EXPORT HpackEntry {
  public:
   HpackEntry(std::string name, std::string value);
 

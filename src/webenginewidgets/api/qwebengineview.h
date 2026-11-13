@@ -1,12 +1,12 @@
 // Copyright (C) 2021 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:data-parser
 
 #ifndef QWEBENGINEVIEW_H
 #define QWEBENGINEVIEW_H
 
 #include <QtGui/QPageLayout>
 #include <QtGui/qpageranges.h>
-#include <QtWidgets/qmenu.h>
 #include <QtWidgets/qwidget.h>
 
 #include <QtWebEngineWidgets/qtwebenginewidgetsglobal.h>
@@ -27,7 +27,6 @@ class QWebEngineHttpRequest;
 class QWebEngineSettings;
 class QWebEngineViewAccessible;
 class QWebEngineViewPrivate;
-class QMenu;
 
 class QWEBENGINEWIDGETS_EXPORT QWebEngineView : public QWidget
 {
@@ -116,6 +115,7 @@ Q_SIGNALS:
                                  int exitCode);
     void pdfPrintingFinished(const QString &filePath, bool success);
     void printRequested();
+    void printRequestedByFrame(QWebEngineFrame frame);
     void printFinished(bool success);
 
 protected:

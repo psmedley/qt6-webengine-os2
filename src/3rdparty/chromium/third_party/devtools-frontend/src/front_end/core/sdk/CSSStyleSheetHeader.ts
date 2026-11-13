@@ -17,12 +17,12 @@ import {ResourceTreeModel} from './ResourceTreeModel.js';
 
 const UIStrings = {
   /**
-  *@description Error message for when a CSS file can't be loaded
-  */
+   *@description Error message for when a CSS file can't be loaded
+   */
   couldNotFindTheOriginalStyle: 'Could not find the original style sheet.',
   /**
-  *@description Error message to display when a source CSS file could not be retrieved.
-  */
+   *@description Error message to display when a source CSS file could not be retrieved.
+   */
   thereWasAnErrorRetrievingThe: 'There was an error retrieving the source styles.',
 };
 const str_ = i18n.i18n.registerUIStrings('core/sdk/CSSStyleSheetHeader.ts', UIStrings);
@@ -47,6 +47,7 @@ export class CSSStyleSheetHeader implements TextUtils.ContentProvider.ContentPro
   contentLength: number;
   ownerNode: DeferredDOMNode|undefined;
   sourceMapURL: Platform.DevToolsPath.UrlString|undefined;
+  readonly loadingFailed: boolean;
   #originalContentProviderInternal: TextUtils.StaticContentProvider.StaticContentProvider|null;
 
   constructor(cssModel: CSSModel, payload: Protocol.CSS.CSSStyleSheetHeader) {
@@ -70,6 +71,7 @@ export class CSSStyleSheetHeader implements TextUtils.ContentProvider.ContentPro
       this.ownerNode = new DeferredDOMNode(cssModel.target(), payload.ownerNode);
     }
     this.sourceMapURL = payload.sourceMapURL as Platform.DevToolsPath.UrlString;
+    this.loadingFailed = payload.loadingFailed ?? false;
     this.#originalContentProviderInternal = null;
   }
 
@@ -194,7 +196,7 @@ export class CSSStyleSheetHeader implements TextUtils.ContentProvider.ContentPro
 
   createPageResourceLoadInitiator(): PageResourceLoadInitiator {
     return {
-      target: null,
+      target: this.#cssModelInternal.target(),
       frameId: this.frameId,
       initiatorUrl: this.hasSourceURL ? Platform.DevToolsPath.EmptyUrlString : this.sourceURL,
     };

@@ -4,6 +4,7 @@
 
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/protobuf_matchers.h"
 #include "components/feed/core/proto/v2/wire/web_feeds.pb.h"
 #include "components/feed/core/v2/api_test/feed_api_test.h"
 #include "components/feed/core/v2/config.h"
@@ -111,7 +112,8 @@ class FeedApiSubscriptionsTest : public FeedApiTest {
     };
     std::sort(stored.begin(), stored.end(), sort_fn);
     std::sort(in_memory.begin(), in_memory.end(), sort_fn);
-    EXPECT_EQ(PrintToString(stored), PrintToString(in_memory));
+    EXPECT_THAT(stored,
+                ::testing::Pointwise(::base::test::EqualsProto(), in_memory));
   }
 
   std::vector<feedstore::PendingWebFeedOperation> GetAllPendingOperations() {
@@ -227,6 +229,60 @@ TEST_F(FeedApiSubscriptionsTest, FollowWebFeedSuccess) {
   histograms.ExpectUniqueSample(
       "ContentSuggestions.Feed.WebFeed.NewFollow.ChangeReason",
       WebFeedChangeReason::WEB_PAGE_MENU, 1);
+}
+
+TEST_F(FeedApiSubscriptionsTest, QueryWebFeedSuccess) {
+  {
+    auto metadata = stream_->GetMetadata();
+    metadata.set_consistency_token("token");
+    stream_->SetMetadata(metadata);
+  }
+
+  base::HistogramTester histograms;
+  network_.InjectResponse(SuccessfulQueryResponse("cats"));
+  CallbackReceiver<WebFeedSubscriptions::QueryWebFeedResult> callback;
+
+  WebFeedPageInformation page_info =
+      MakeWebFeedPageInformation("http://cats.com");
+  subscriptions().QueryWebFeed(page_info.url(), callback.Bind());
+  EXPECT_EQ(WebFeedQueryRequestStatus::kSuccess,
+            callback.RunAndGetResult().request_status);
+  auto sent_request = network_.GetApiRequestSent<QueryWebFeedDiscoverApi>();
+  EXPECT_STREQ("http://cats.com/",
+               sent_request->web_feed_uris().web_page_uri().c_str());
+  EXPECT_EQ("token", sent_request->consistency_token().token());
+  EXPECT_EQ("id_cats", callback.RunAndGetResult().web_feed_id);
+  EXPECT_EQ("query-ct", stream_->GetMetadata().consistency_token());
+
+  histograms.ExpectUniqueSample("ContentSuggestions.Feed.WebFeed.QueryResult",
+                                WebFeedSubscriptionRequestStatus::kSuccess, 1);
+}
+
+TEST_F(FeedApiSubscriptionsTest, QueryWebFeedError) {
+  base::HistogramTester histograms;
+  network_.InjectQueryResponse(MakeFailedResponse());
+  CallbackReceiver<WebFeedSubscriptions::QueryWebFeedResult> callback;
+  subscriptions().QueryWebFeed(GURL("http://cats.com"), callback.Bind());
+
+  EXPECT_EQ(WebFeedQueryRequestStatus::kFailedUnknownError,
+            callback.RunAndGetResult().request_status);
+
+  histograms.ExpectUniqueSample("ContentSuggestions.Feed.WebFeed.QueryResult",
+                                WebFeedQueryRequestStatus::kFailedUnknownError,
+                                1);
+}
+
+TEST_F(FeedApiSubscriptionsTest, QueryWebFeedInvalidUrlError) {
+  base::HistogramTester histograms;
+  CallbackReceiver<WebFeedSubscriptions::QueryWebFeedResult> callback;
+  subscriptions().QueryWebFeed(GURL(), callback.Bind());
+
+  EXPECT_EQ(WebFeedQueryRequestStatus::kFailedInvalidUrl,
+            callback.RunAndGetResult().request_status);
+
+  histograms.ExpectUniqueSample("ContentSuggestions.Feed.WebFeed.QueryResult",
+                                WebFeedQueryRequestStatus::kFailedInvalidUrl,
+                                1);
 }
 
 TEST_F(FeedApiSubscriptionsTest, FollowWebFeedAbortOnClearAll) {

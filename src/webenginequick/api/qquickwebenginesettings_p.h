@@ -23,7 +23,7 @@
 QT_BEGIN_NAMESPACE
 
 class QWebEngineSettings;
-class Q_WEBENGINEQUICK_PRIVATE_EXPORT QQuickWebEngineSettings : public QObject {
+class Q_WEBENGINEQUICK_EXPORT QQuickWebEngineSettings : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool autoLoadImages READ autoLoadImages WRITE setAutoLoadImages NOTIFY autoLoadImagesChanged FINAL)
     Q_PROPERTY(bool javascriptEnabled READ javascriptEnabled WRITE setJavascriptEnabled NOTIFY javascriptEnabledChanged FINAL)
@@ -57,6 +57,10 @@ class Q_WEBENGINEQUICK_PRIVATE_EXPORT QQuickWebEngineSettings : public QObject {
     Q_PROPERTY(bool dnsPrefetchEnabled READ dnsPrefetchEnabled WRITE setDnsPrefetchEnabled NOTIFY dnsPrefetchEnabledChanged REVISION(1,7) FINAL)
     Q_PROPERTY(bool pdfViewerEnabled READ pdfViewerEnabled WRITE setPdfViewerEnabled NOTIFY pdfViewerEnabledChanged REVISION(1,8) FINAL)
     Q_PROPERTY(bool navigateOnDropEnabled READ navigateOnDropEnabled WRITE setNavigateOnDropEnabled NOTIFY navigateOnDropEnabledChanged REVISION(6,4) FINAL)
+    Q_PROPERTY(bool readingFromCanvasEnabled READ readingFromCanvasEnabled WRITE setReadingFromCanvasEnabled NOTIFY readingFromCanvasEnabledChanged REVISION(6,6) FINAL)
+    Q_PROPERTY(bool forceDarkMode READ forceDarkMode WRITE setForceDarkMode NOTIFY forceDarkModeChanged REVISION(6,7) FINAL)
+    Q_PROPERTY(bool scrollAnimatorEnabled READ scrollAnimatorEnabled WRITE setScrollAnimatorEnabled NOTIFY scrollAnimatorEnabledChanged REVISION(6,8) FINAL)
+    Q_PROPERTY(ImageAnimationPolicy imageAnimationPolicy READ imageAnimationPolicy WRITE setImageAnimationPolicy NOTIFY imageAnimationPolicyChanged REVISION(6,8) FINAL)
     QML_NAMED_ELEMENT(WebEngineSettings)
     QML_ADDED_IN_VERSION(1, 1)
     QML_EXTRA_VERSION(2, 0)
@@ -69,6 +73,14 @@ public:
     };
 
     Q_ENUM(UnknownUrlSchemePolicy)
+
+    enum class ImageAnimationPolicy : uint8_t {
+        Allow = 1,
+        AnimateOnce,
+        Disallow,
+    };
+
+    Q_ENUM(ImageAnimationPolicy)
 
     ~QQuickWebEngineSettings();
 
@@ -104,6 +116,10 @@ public:
     bool dnsPrefetchEnabled() const;
     bool pdfViewerEnabled() const;
     bool navigateOnDropEnabled() const;
+    bool readingFromCanvasEnabled() const;
+    bool forceDarkMode() const;
+    bool scrollAnimatorEnabled() const;
+    ImageAnimationPolicy imageAnimationPolicy() const;
 
     void setAutoLoadImages(bool on);
     void setJavascriptEnabled(bool on);
@@ -137,6 +153,10 @@ public:
     void setDnsPrefetchEnabled(bool on);
     void setPdfViewerEnabled(bool on);
     void setNavigateOnDropEnabled(bool on);
+    void setReadingFromCanvasEnabled(bool on);
+    void setForceDarkMode(bool on);
+    void setScrollAnimatorEnabled(bool on);
+    void setImageAnimationPolicy(ImageAnimationPolicy policy);
 
 signals:
     void autoLoadImagesChanged();
@@ -171,6 +191,10 @@ signals:
     Q_REVISION(1,7) void dnsPrefetchEnabledChanged();
     Q_REVISION(1,8) void pdfViewerEnabledChanged();
     Q_REVISION(6,4) void navigateOnDropEnabledChanged();
+    Q_REVISION(6,6) void readingFromCanvasEnabledChanged();
+    Q_REVISION(6,7) void forceDarkModeChanged();
+    Q_REVISION(6,8) void scrollAnimatorEnabledChanged();
+    Q_REVISION(6,8) void imageAnimationPolicyChanged();
 
 private:
     explicit QQuickWebEngineSettings(QQuickWebEngineSettings *parentSettings = nullptr);

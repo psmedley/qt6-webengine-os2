@@ -4,6 +4,7 @@
 #include <functional>
 
 #include "quiche/common/platform/api/quiche_export.h"
+#include "quiche/common/quiche_callbacks.h"
 #include "quiche/spdy/core/http2_frame_decoder_adapter.h"
 
 namespace http2 {
@@ -13,11 +14,10 @@ namespace adapter {
 // provided predicate succeeds. Currently, OnHeaderFrameStart() is always
 // forwarded regardless of the predicate.
 // TODO(diannahu): Add a NoOpHeadersHandler if needed.
-class QUICHE_EXPORT_PRIVATE EventForwarder
-    : public spdy::SpdyFramerVisitorInterface {
+class QUICHE_EXPORT EventForwarder : public spdy::SpdyFramerVisitorInterface {
  public:
   // Whether the forwarder can forward events to the receiver.
-  using ForwardPredicate = std::function<bool()>;
+  using ForwardPredicate = quiche::MultiUseCallback<bool()>;
 
   EventForwarder(ForwardPredicate can_forward,
                  spdy::SpdyFramerVisitorInterface& receiver);

@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "components/feed/core/proto/v2/store.pb.h"
@@ -94,6 +94,8 @@ class FeedStore {
   void ClearStreamData(const StreamType& stream_type,
                        base::OnceCallback<void(bool)> callback);
 
+  void ClearAllStreamData(StreamKind stream_kind,
+                          base::OnceCallback<void(bool)> callback);
   void WriteOperations(const StreamType& stream_type,
                        int32_t sequence_number,
                        std::vector<feedstore::DataOperation> operations);
@@ -148,6 +150,11 @@ class FeedStore {
   void RemovePendingWebFeedOperation(int64_t operation_id);
   void WritePendingWebFeedOperation(
       feedstore::PendingWebFeedOperation operation);
+
+  void WriteDocView(feedstore::DocView doc_view);
+  void RemoveDocViews(std::vector<feedstore::DocView> doc_ids);
+  void ReadDocViews(
+      base::OnceCallback<void(std::vector<feedstore::DocView>)> callback);
 
   bool IsInitializedForTesting() const;
 

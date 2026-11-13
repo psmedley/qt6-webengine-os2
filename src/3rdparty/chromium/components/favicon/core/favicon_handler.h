@@ -9,11 +9,10 @@
 
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/cancelable_callback.h"
 #include "base/containers/flat_set.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "components/favicon/core/favicon_driver_observer.h"
 #include "components/favicon/core/favicon_url.h"
@@ -125,7 +124,7 @@ class FaviconHandler {
         const GURL& page_url,
         FaviconDriverObserver::NotificationIconType notification_icon_type) = 0;
 
-#if defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_QTWEBENGINE)
     virtual void OnHandlerCompleted(FaviconHandler *handler) {}
 #endif
   };
@@ -171,7 +170,7 @@ class FaviconHandler {
       FaviconDriverObserver::NotificationIconType handler_type,
       bool candidates_from_web_manifest);
 
-#if defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_QTWEBENGINE)
   FaviconDriverObserver::NotificationIconType Type() const { return handler_type_; }
 #endif
 

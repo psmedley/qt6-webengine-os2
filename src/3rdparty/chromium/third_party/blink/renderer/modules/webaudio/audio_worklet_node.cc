@@ -39,7 +39,9 @@ AudioWorkletNode::AudioWorkletNode(
     const AudioWorkletNodeOptions* options,
     const Vector<CrossThreadAudioParamInfo> param_info_list,
     MessagePort* node_port)
-    : AudioNode(context), node_port_(node_port) {
+    : AudioNode(context),
+      ActiveScriptWrappable<AudioWorkletNode>({}),
+      node_port_(node_port) {
   HeapHashMap<String, Member<AudioParam>> audio_param_map;
   HashMap<String, scoped_refptr<AudioParamHandler>> param_handler_map;
   for (const auto& param_info : param_info_list) {
@@ -173,8 +175,7 @@ AudioWorkletNode* AudioWorkletNode::Create(
   scoped_refptr<SerializedScriptValue> serialized_node_options =
       SerializedScriptValue::Serialize(
           isolate,
-          ToV8Traits<AudioWorkletNodeOptions>::ToV8(script_state, options)
-              .ToLocalChecked(),
+          ToV8Traits<AudioWorkletNodeOptions>::ToV8(script_state, options),
           serialize_options, exception_state);
 
   // `serialized_node_options` can be nullptr if the option dictionary is not
@@ -201,15 +202,15 @@ AudioWorkletNode* AudioWorkletNode::Create(
 }
 
 bool AudioWorkletNode::HasPendingActivity() const {
-  return !context()->IsContextCleared();
+  return GetWorkletHandler()->IsProcessorActive();
 }
 
 AudioParamMap* AudioWorkletNode::parameters() const {
-  return parameter_map_;
+  return parameter_map_.Get();
 }
 
 MessagePort* AudioWorkletNode::port() const {
-  return node_port_;
+  return node_port_.Get();
 }
 
 void AudioWorkletNode::FireProcessorError(

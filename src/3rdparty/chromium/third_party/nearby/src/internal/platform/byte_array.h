@@ -25,7 +25,6 @@
 
 #include "absl/strings/str_cat.h"
 
-namespace location {
 namespace nearby {
 
 class ByteArray {
@@ -79,6 +78,7 @@ class ByteArray {
   }
 
   char* data() { return &data_[0]; }
+  std::string string_data() const { return data_; }
   const char* data() const { return data_.data(); }
   size_t size() const { return data_.size(); }
   bool Empty() const { return data_.empty(); }
@@ -122,6 +122,5 @@ inline bool operator<(const ByteArray& lhs, const ByteArray& rhs) {
 }
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_BASE_BYTE_ARRAY_H_

@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import type * as Protocol from '../../generated/protocol.js';
 import * as TextUtils from '../../models/text_utils/text_utils.js';
 import * as Common from '../common/common.js';
 import * as HostModule from '../host/host.js';
 import * as Platform from '../platform/platform.js';
-import type * as Protocol from '../../generated/protocol.js';
 
 import {cssMetadata, GridAreaRowRegex} from './CSSMetadata.js';
 import {type Edit} from './CSSModel.js';
+import {stripComments} from './CSSPropertyParser.js';
 import {type CSSStyleDeclaration} from './CSSStyleDeclaration.js';
 
 export class CSSProperty {
@@ -49,9 +50,8 @@ export class CSSProperty {
 
     if (longhandProperties && longhandProperties.length > 0) {
       for (const property of longhandProperties) {
-        this.#longhandProperties.push(new CSSProperty(
-            ownerStyle, this.#longhandProperties.length, property.name, property.value, important, disabled, parsedOk,
-            true));
+        this.#longhandProperties.push(
+            new CSSProperty(ownerStyle, ++index, property.name, property.value, important, disabled, parsedOk, true));
       }
     } else {
       // Blink would not parse shorthands containing 'var()' functions:
@@ -60,8 +60,8 @@ export class CSSProperty {
       // and fills its longhand components with empty values.
       const longhandNames = cssMetadata().getLonghands(name);
       for (const longhandName of longhandNames || []) {
-        this.#longhandProperties.push(new CSSProperty(
-            ownerStyle, this.#longhandProperties.length, longhandName, '', important, disabled, parsedOk, true));
+        this.#longhandProperties.push(
+            new CSSProperty(ownerStyle, ++index, longhandName, '', important, disabled, parsedOk, true));
       }
     }
   }
@@ -171,6 +171,10 @@ export class CSSProperty {
 
     if (majorChange) {
       HostModule.userMetrics.actionTaken(HostModule.UserMetrics.Action.StyleRuleEdited);
+      if (this.ownerStyle.parentRule?.isKeyframeRule()) {
+        HostModule.userMetrics.actionTaken(HostModule.UserMetrics.Action.StylePropertyInsideKeyframeEdited);
+      }
+
       if (this.name.startsWith('--')) {
         HostModule.userMetrics.actionTaken(HostModule.UserMetrics.Action.CustomPropertyEdited);
       }
@@ -215,8 +219,9 @@ export class CSSProperty {
       if (!insideProperty) {
         const disabledProperty = tokenType?.includes('comment') && isDisabledProperty(token);
         const isPropertyStart =
-            (tokenType?.includes('string') || tokenType?.includes('meta') || tokenType?.includes('property') ||
-             tokenType?.includes('variableName'));
+            (tokenType?.includes('def') || tokenType?.includes('string') || tokenType?.includes('meta') ||
+             tokenType?.includes('property') ||
+             (tokenType?.includes('variableName') && tokenType !== ('variableName.function')));
         if (disabledProperty) {
           result = result.trimEnd() + indentation + token;
         } else if (isPropertyStart) {
@@ -302,7 +307,11 @@ export class CSSProperty {
         propertyText + (propertyText.endsWith(';') ? '' : ';');
     let text: string;
     if (disabled) {
-      text = '/* ' + appendSemicolonIfMissing(propertyText) + ' */';
+      // We remove comments before wrapping comment tags around propertyText, because otherwise it will
+      // create an unmatched trailing `*/`, making the text invalid. This will result in disabled
+      // CSSProperty losing its original comments, but since escaping comments will result in the parser
+      // to completely ignore and then lose this declaration, this is the best compromise so far.
+      text = '/* ' + appendSemicolonIfMissing(stripComments(propertyText)) + ' */';
     } else {
       text = appendSemicolonIfMissing(this.text.substring(2, propertyText.length - 2).trim());
     }

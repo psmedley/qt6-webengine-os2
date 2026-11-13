@@ -13,16 +13,17 @@
 #include <limits.h>
 #include <math.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/cxx17_backports.h"
 #include "base/debug/alias.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "base/metrics/dummy_histogram.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/metrics_hashes.h"
@@ -98,7 +99,7 @@ typedef HistogramBase::Sample Sample;
 
 class Histogram::Factory {
  public:
-  Factory(const std::string& name,
+  Factory(std::string_view name,
           HistogramBase::Sample minimum,
           HistogramBase::Sample maximum,
           size_t bucket_count,
@@ -113,7 +114,7 @@ class Histogram::Factory {
   HistogramBase* Build();
 
  protected:
-  Factory(const std::string& name,
+  Factory(std::string_view name,
           HistogramType histogram_type,
           HistogramBase::Sample minimum,
           HistogramBase::Sample maximum,
@@ -147,7 +148,7 @@ class Histogram::Factory {
   // These values are protected (instead of private) because they need to
   // be accessible to methods of sub-classes in order to avoid passing
   // unnecessary parameters everywhere.
-  const std::string& name_;
+  const std::string_view name_;
   const HistogramType histogram_type_;
   HistogramBase::Sample minimum_;
   HistogramBase::Sample maximum_;
@@ -192,12 +193,7 @@ HistogramBase* Histogram::Factory::Build() {
     PersistentHistogramAllocator* allocator = GlobalHistogramAllocator::Get();
     if (allocator) {
       tentative_histogram = allocator->AllocateHistogram(
-          histogram_type_,
-          name_,
-          minimum_,
-          maximum_,
-          registered_ranges,
-          flags_,
+          histogram_type_, name_, minimum_, maximum_, registered_ranges, flags_,
           &histogram_ref);
     }
 
@@ -205,7 +201,6 @@ HistogramBase* Histogram::Factory::Build() {
     // persistent allocation fails (perhaps because it is full).
     if (!tentative_histogram) {
       DCHECK(!histogram_ref);  // Should never have been set.
-      DCHECK(!allocator);  // Shouldn't have failed.
       flags_ &= ~HistogramBase::kIsPersistent;
       tentative_histogram = HeapAlloc(registered_ranges);
       tentative_histogram->SetFlags(flags_);
@@ -250,15 +245,7 @@ HistogramBase* Histogram::FactoryGet(const std::string& name,
                                      Sample maximum,
                                      size_t bucket_count,
                                      int32_t flags) {
-  bool valid_arguments =
-      InspectConstructionArguments(name, &minimum, &maximum, &bucket_count);
-  DCHECK(valid_arguments) << name;
-  if (!valid_arguments) {
-    DLOG(ERROR) << "Histogram " << name << " dropped for invalid parameters.";
-    return DummyHistogram::GetInstance();
-  }
-
-  return Factory(name, minimum, maximum, bucket_count, flags).Build();
+  return FactoryGetInternal(name, minimum, maximum, bucket_count, flags);
 }
 
 HistogramBase* Histogram::FactoryTimeGet(const std::string& name,
@@ -266,11 +253,7 @@ HistogramBase* Histogram::FactoryTimeGet(const std::string& name,
                                          TimeDelta maximum,
                                          size_t bucket_count,
                                          int32_t flags) {
-  DCHECK_LT(minimum.InMilliseconds(), std::numeric_limits<Sample>::max());
-  DCHECK_LT(maximum.InMilliseconds(), std::numeric_limits<Sample>::max());
-  return FactoryGet(name, static_cast<Sample>(minimum.InMilliseconds()),
-                    static_cast<Sample>(maximum.InMilliseconds()), bucket_count,
-                    flags);
+  return FactoryTimeGetInternal(name, minimum, maximum, bucket_count, flags);
 }
 
 HistogramBase* Histogram::FactoryMicrosecondsTimeGet(const std::string& name,
@@ -278,11 +261,8 @@ HistogramBase* Histogram::FactoryMicrosecondsTimeGet(const std::string& name,
                                                      TimeDelta maximum,
                                                      size_t bucket_count,
                                                      int32_t flags) {
-  DCHECK_LT(minimum.InMicroseconds(), std::numeric_limits<Sample>::max());
-  DCHECK_LT(maximum.InMicroseconds(), std::numeric_limits<Sample>::max());
-  return FactoryGet(name, static_cast<Sample>(minimum.InMicroseconds()),
-                    static_cast<Sample>(maximum.InMicroseconds()), bucket_count,
-                    flags);
+  return FactoryMicrosecondsTimeGetInternal(name, minimum, maximum,
+                                            bucket_count, flags);
 }
 
 HistogramBase* Histogram::FactoryGet(const char* name,
@@ -290,7 +270,7 @@ HistogramBase* Histogram::FactoryGet(const char* name,
                                      Sample maximum,
                                      size_t bucket_count,
                                      int32_t flags) {
-  return FactoryGet(std::string(name), minimum, maximum, bucket_count, flags);
+  return FactoryGetInternal(name, minimum, maximum, bucket_count, flags);
 }
 
 HistogramBase* Histogram::FactoryTimeGet(const char* name,
@@ -298,8 +278,7 @@ HistogramBase* Histogram::FactoryTimeGet(const char* name,
                                          TimeDelta maximum,
                                          size_t bucket_count,
                                          int32_t flags) {
-  return FactoryTimeGet(std::string(name), minimum, maximum, bucket_count,
-                        flags);
+  return FactoryTimeGetInternal(name, minimum, maximum, bucket_count, flags);
 }
 
 HistogramBase* Histogram::FactoryMicrosecondsTimeGet(const char* name,
@@ -307,8 +286,8 @@ HistogramBase* Histogram::FactoryMicrosecondsTimeGet(const char* name,
                                                      TimeDelta maximum,
                                                      size_t bucket_count,
                                                      int32_t flags) {
-  return FactoryMicrosecondsTimeGet(std::string(name), minimum, maximum,
-                                    bucket_count, flags);
+  return FactoryMicrosecondsTimeGetInternal(name, minimum, maximum,
+                                            bucket_count, flags);
 }
 
 std::unique_ptr<HistogramBase> Histogram::PersistentCreate(
@@ -533,7 +512,22 @@ std::unique_ptr<HistogramSamples> Histogram::SnapshotSamples() const {
   return SnapshotAllSamples();
 }
 
+std::unique_ptr<HistogramSamples> Histogram::SnapshotUnloggedSamples() const {
+  return SnapshotUnloggedSamplesImpl();
+}
+
+void Histogram::MarkSamplesAsLogged(const HistogramSamples& samples) {
+  // |final_delta_created_| only exists when DCHECK is on.
+#if DCHECK_IS_ON()
+  DCHECK(!final_delta_created_);
+#endif
+
+  unlogged_samples_->Subtract(samples);
+  logged_samples_->Add(samples);
+}
+
 std::unique_ptr<HistogramSamples> Histogram::SnapshotDelta() {
+  // |final_delta_created_| only exists when DCHECK is on.
 #if DCHECK_IS_ON()
   DCHECK(!final_delta_created_);
 #endif
@@ -550,14 +544,16 @@ std::unique_ptr<HistogramSamples> Histogram::SnapshotDelta() {
   // vector: this way, the next snapshot will include any concurrent updates
   // missed by the current snapshot.
 
-  std::unique_ptr<HistogramSamples> snapshot = SnapshotUnloggedSamples();
-  unlogged_samples_->Subtract(*snapshot);
+  std::unique_ptr<HistogramSamples> snapshot =
+      std::make_unique<SampleVector>(unlogged_samples_->id(), bucket_ranges());
+  snapshot->Extract(*unlogged_samples_);
   logged_samples_->Add(*snapshot);
 
   return snapshot;
 }
 
 std::unique_ptr<HistogramSamples> Histogram::SnapshotFinalDelta() const {
+  // |final_delta_created_| only exists when DCHECK is on.
 #if DCHECK_IS_ON()
   DCHECK(!final_delta_created_);
   final_delta_created_ = true;
@@ -649,13 +645,57 @@ HistogramBase* Histogram::DeserializeInfoImpl(PickleIterator* iter) {
   return histogram;
 }
 
+// static
+HistogramBase* Histogram::FactoryGetInternal(std::string_view name,
+                                             Sample minimum,
+                                             Sample maximum,
+                                             size_t bucket_count,
+                                             int32_t flags) {
+  bool valid_arguments =
+      InspectConstructionArguments(name, &minimum, &maximum, &bucket_count);
+  DCHECK(valid_arguments) << name;
+  if (!valid_arguments) {
+    DLOG(ERROR) << "Histogram " << name << " dropped for invalid parameters.";
+    return DummyHistogram::GetInstance();
+  }
+
+  return Factory(name, minimum, maximum, bucket_count, flags).Build();
+}
+
+// static
+HistogramBase* Histogram::FactoryTimeGetInternal(std::string_view name,
+                                                 TimeDelta minimum,
+                                                 TimeDelta maximum,
+                                                 size_t bucket_count,
+                                                 int32_t flags) {
+  DCHECK_LT(minimum.InMilliseconds(), std::numeric_limits<Sample>::max());
+  DCHECK_LT(maximum.InMilliseconds(), std::numeric_limits<Sample>::max());
+  return FactoryGetInternal(name, static_cast<Sample>(minimum.InMilliseconds()),
+                            static_cast<Sample>(maximum.InMilliseconds()),
+                            bucket_count, flags);
+}
+
+// static
+HistogramBase* Histogram::FactoryMicrosecondsTimeGetInternal(
+    std::string_view name,
+    TimeDelta minimum,
+    TimeDelta maximum,
+    size_t bucket_count,
+    int32_t flags) {
+  DCHECK_LT(minimum.InMicroseconds(), std::numeric_limits<Sample>::max());
+  DCHECK_LT(maximum.InMicroseconds(), std::numeric_limits<Sample>::max());
+  return FactoryGetInternal(name, static_cast<Sample>(minimum.InMicroseconds()),
+                            static_cast<Sample>(maximum.InMicroseconds()),
+                            bucket_count, flags);
+}
+
 std::unique_ptr<SampleVector> Histogram::SnapshotAllSamples() const {
-  std::unique_ptr<SampleVector> samples = SnapshotUnloggedSamples();
+  std::unique_ptr<SampleVector> samples = SnapshotUnloggedSamplesImpl();
   samples->Add(*logged_samples_);
   return samples;
 }
 
-std::unique_ptr<SampleVector> Histogram::SnapshotUnloggedSamples() const {
+std::unique_ptr<SampleVector> Histogram::SnapshotUnloggedSamplesImpl() const {
   std::unique_ptr<SampleVector> samples(
       new SampleVector(unlogged_samples_->id(), bucket_ranges()));
   samples->Add(*unlogged_samples_);
@@ -678,7 +718,7 @@ Value::Dict Histogram::GetParameters() const {
 
 class LinearHistogram::Factory : public Histogram::Factory {
  public:
-  Factory(const std::string& name,
+  Factory(std::string_view name,
           HistogramBase::Sample minimum,
           HistogramBase::Sample maximum,
           size_t bucket_count,
@@ -726,7 +766,7 @@ class LinearHistogram::Factory : public Histogram::Factory {
   }
 
  private:
-  raw_ptr<const DescriptionPair> descriptions_;
+  raw_ptr<const DescriptionPair, AllowPtrArithmetic> descriptions_;
 };
 
 LinearHistogram::~LinearHistogram() = default;
@@ -736,8 +776,7 @@ HistogramBase* LinearHistogram::FactoryGet(const std::string& name,
                                            Sample maximum,
                                            size_t bucket_count,
                                            int32_t flags) {
-  return FactoryGetWithRangeDescription(name, minimum, maximum, bucket_count,
-                                        flags, NULL);
+  return FactoryGetInternal(name, minimum, maximum, bucket_count, flags);
 }
 
 HistogramBase* LinearHistogram::FactoryTimeGet(const std::string& name,
@@ -745,11 +784,7 @@ HistogramBase* LinearHistogram::FactoryTimeGet(const std::string& name,
                                                TimeDelta maximum,
                                                size_t bucket_count,
                                                int32_t flags) {
-  DCHECK_LT(minimum.InMilliseconds(), std::numeric_limits<Sample>::max());
-  DCHECK_LT(maximum.InMilliseconds(), std::numeric_limits<Sample>::max());
-  return FactoryGet(name, static_cast<Sample>(minimum.InMilliseconds()),
-                    static_cast<Sample>(maximum.InMilliseconds()), bucket_count,
-                    flags);
+  return FactoryTimeGetInternal(name, minimum, maximum, bucket_count, flags);
 }
 
 HistogramBase* LinearHistogram::FactoryGet(const char* name,
@@ -757,7 +792,7 @@ HistogramBase* LinearHistogram::FactoryGet(const char* name,
                                            Sample maximum,
                                            size_t bucket_count,
                                            int32_t flags) {
-  return FactoryGet(std::string(name), minimum, maximum, bucket_count, flags);
+  return FactoryGetInternal(name, minimum, maximum, bucket_count, flags);
 }
 
 HistogramBase* LinearHistogram::FactoryTimeGet(const char* name,
@@ -765,8 +800,7 @@ HistogramBase* LinearHistogram::FactoryTimeGet(const char* name,
                                                TimeDelta maximum,
                                                size_t bucket_count,
                                                int32_t flags) {
-  return FactoryTimeGet(std::string(name),  minimum, maximum, bucket_count,
-                        flags);
+  return FactoryTimeGetInternal(name, minimum, maximum, bucket_count, flags);
 }
 
 std::unique_ptr<HistogramBase> LinearHistogram::PersistentCreate(
@@ -781,7 +815,7 @@ std::unique_ptr<HistogramBase> LinearHistogram::PersistentCreate(
 }
 
 HistogramBase* LinearHistogram::FactoryGetWithRangeDescription(
-    const std::string& name,
+    std::string_view name,
     Sample minimum,
     Sample maximum,
     size_t bucket_count,
@@ -854,6 +888,29 @@ void LinearHistogram::InitializeBucketRanges(Sample minimum,
 }
 
 // static
+HistogramBase* LinearHistogram::FactoryGetInternal(std::string_view name,
+                                                   Sample minimum,
+                                                   Sample maximum,
+                                                   size_t bucket_count,
+                                                   int32_t flags) {
+  return FactoryGetWithRangeDescription(name, minimum, maximum, bucket_count,
+                                        flags, nullptr);
+}
+
+// static
+HistogramBase* LinearHistogram::FactoryTimeGetInternal(std::string_view name,
+                                                       TimeDelta minimum,
+                                                       TimeDelta maximum,
+                                                       size_t bucket_count,
+                                                       int32_t flags) {
+  DCHECK_LT(minimum.InMilliseconds(), std::numeric_limits<Sample>::max());
+  DCHECK_LT(maximum.InMilliseconds(), std::numeric_limits<Sample>::max());
+  return FactoryGetInternal(name, static_cast<Sample>(minimum.InMilliseconds()),
+                            static_cast<Sample>(maximum.InMilliseconds()),
+                            bucket_count, flags);
+}
+
+// static
 HistogramBase* LinearHistogram::DeserializeInfoImpl(PickleIterator* iter) {
   std::string histogram_name;
   int flags;
@@ -884,20 +941,20 @@ HistogramBase* LinearHistogram::DeserializeInfoImpl(PickleIterator* iter) {
 // scales input counts.
 //------------------------------------------------------------------------------
 
-ScaledLinearHistogram::ScaledLinearHistogram(const char* name,
+ScaledLinearHistogram::ScaledLinearHistogram(const std::string& name,
                                              Sample minimum,
                                              Sample maximum,
                                              size_t bucket_count,
                                              int32_t scale,
                                              int32_t flags)
-    : ScaledLinearHistogram(std::string(name),
+    : ScaledLinearHistogram(name.data(),
                             minimum,
                             maximum,
                             bucket_count,
                             scale,
                             flags) {}
 
-ScaledLinearHistogram::ScaledLinearHistogram(const std::string& name,
+ScaledLinearHistogram::ScaledLinearHistogram(const char* name,
                                              Sample minimum,
                                              Sample maximum,
                                              size_t bucket_count,
@@ -927,7 +984,7 @@ ScaledLinearHistogram::ScaledLinearHistogram(const std::string& name,
 
 ScaledLinearHistogram::~ScaledLinearHistogram() = default;
 
-void ScaledLinearHistogram::AddScaledCount(Sample value, int count) {
+void ScaledLinearHistogram::AddScaledCount(Sample value, int64_t count) {
   if (histogram_->GetHistogramType() == DUMMY_HISTOGRAM)
     return;
   if (count == 0)
@@ -940,10 +997,10 @@ void ScaledLinearHistogram::AddScaledCount(Sample value, int count) {
   DCHECK_EQ(histogram_->GetHistogramType(), LINEAR_HISTOGRAM);
   LinearHistogram* histogram = static_cast<LinearHistogram*>(histogram_);
   const auto max_value = static_cast<Sample>(histogram->bucket_count() - 1);
-  value = base::clamp(value, 0, max_value);
+  value = std::clamp(value, 0, max_value);
 
-  int scaled_count = count / scale_;
-  subtle::Atomic32 remainder = count - scaled_count * scale_;
+  int64_t scaled_count = count / scale_;
+  subtle::Atomic32 remainder = static_cast<int>(count - scaled_count * scale_);
 
   // ScaledLinearHistogram currently requires 1-to-1 mappings between value
   // and bucket which alleviates the need to do a bucket lookup here (something
@@ -962,8 +1019,10 @@ void ScaledLinearHistogram::AddScaledCount(Sample value, int count) {
     }
   }
 
-  if (scaled_count > 0)
-    histogram->AddCount(value, scaled_count);
+  if (scaled_count > 0) {
+    DCHECK(scaled_count <= std::numeric_limits<int>::max());
+    histogram->AddCount(value, static_cast<int>(scaled_count));
+  }
 }
 
 //------------------------------------------------------------------------------
@@ -972,8 +1031,8 @@ void ScaledLinearHistogram::AddScaledCount(Sample value, int count) {
 
 class BooleanHistogram::Factory : public Histogram::Factory {
  public:
-  Factory(const std::string& name, int32_t flags)
-    : Histogram::Factory(name, BOOLEAN_HISTOGRAM, 1, 2, 3, flags) {}
+  Factory(std::string_view name, int32_t flags)
+      : Histogram::Factory(name, BOOLEAN_HISTOGRAM, 1, 2, 3, flags) {}
 
   Factory(const Factory&) = delete;
   Factory& operator=(const Factory&) = delete;
@@ -993,11 +1052,11 @@ class BooleanHistogram::Factory : public Histogram::Factory {
 
 HistogramBase* BooleanHistogram::FactoryGet(const std::string& name,
                                             int32_t flags) {
-  return Factory(name, flags).Build();
+  return FactoryGetInternal(name, flags);
 }
 
 HistogramBase* BooleanHistogram::FactoryGet(const char* name, int32_t flags) {
-  return FactoryGet(std::string(name), flags);
+  return FactoryGetInternal(name, flags);
 }
 
 std::unique_ptr<HistogramBase> BooleanHistogram::PersistentCreate(
@@ -1013,6 +1072,12 @@ std::unique_ptr<HistogramBase> BooleanHistogram::PersistentCreate(
 
 HistogramType BooleanHistogram::GetHistogramType() const {
   return BOOLEAN_HISTOGRAM;
+}
+
+// static
+HistogramBase* BooleanHistogram::FactoryGetInternal(std::string_view name,
+                                                    int32_t flags) {
+  return Factory(name, flags).Build();
 }
 
 BooleanHistogram::BooleanHistogram(const char* name, const BucketRanges* ranges)
@@ -1058,10 +1123,10 @@ HistogramBase* BooleanHistogram::DeserializeInfoImpl(PickleIterator* iter) {
 
 class CustomHistogram::Factory : public Histogram::Factory {
  public:
-  Factory(const std::string& name,
+  Factory(std::string_view name,
           const std::vector<Sample>* custom_ranges,
           int32_t flags)
-    : Histogram::Factory(name, CUSTOM_HISTOGRAM, 0, 0, 0, flags) {
+      : Histogram::Factory(name, CUSTOM_HISTOGRAM, 0, 0, 0, flags) {
     custom_ranges_ = custom_ranges;
   }
 
@@ -1098,16 +1163,14 @@ HistogramBase* CustomHistogram::FactoryGet(
     const std::string& name,
     const std::vector<Sample>& custom_ranges,
     int32_t flags) {
-  CHECK(ValidateCustomRanges(custom_ranges));
-
-  return Factory(name, &custom_ranges, flags).Build();
+  return FactoryGetInternal(name, custom_ranges, flags);
 }
 
 HistogramBase* CustomHistogram::FactoryGet(
     const char* name,
     const std::vector<Sample>& custom_ranges,
     int32_t flags) {
-  return FactoryGet(std::string(name), custom_ranges, flags);
+  return FactoryGetInternal(name, custom_ranges, flags);
 }
 
 std::unique_ptr<HistogramBase> CustomHistogram::PersistentCreate(
@@ -1192,6 +1255,16 @@ HistogramBase* CustomHistogram::DeserializeInfoImpl(PickleIterator* iter) {
     return nullptr;
   }
   return histogram;
+}
+
+// static
+HistogramBase* CustomHistogram::FactoryGetInternal(
+    std::string_view name,
+    const std::vector<Sample>& custom_ranges,
+    int32_t flags) {
+  CHECK(ValidateCustomRanges(custom_ranges));
+
+  return Factory(name, &custom_ranges, flags).Build();
 }
 
 // static

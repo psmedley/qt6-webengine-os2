@@ -369,10 +369,6 @@ sk_sp<const GrGLInterface> GrGLMakeAssembledGLInterface(void *ctx, GrGLGetProc g
         GET_PROC(CopyBufferSubData);
     }
 
-    if (extensions.has("GL_NV_framebuffer_mixed_samples")) {
-        GET_PROC_SUFFIX(CoverageModulation, NV);
-    }
-
     if (glVer >= GR_GL_VER(4,3)) {
         GET_PROC(DebugMessageCallback);
         GET_PROC(DebugMessageControl);
@@ -442,7 +438,7 @@ sk_sp<const GrGLInterface> GrGLMakeAssembledGLInterface(void *ctx, GrGLGetProc g
 
     GET_PROC(GetQueryObjectiv);
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     GET_PROC(BeginQuery);
     GET_PROC(DeleteQueries);
     GET_PROC(EndQuery);
@@ -507,6 +503,6 @@ sk_sp<const GrGLInterface> GrGLMakeAssembledGLInterface(void *ctx, GrGLGetProc g
     interface->fStandard = kGL_GrGLStandard;
     interface->fExtensions.swap(&extensions);
 
-    return std::move(interface);
+    return interface;
 }
 #endif

@@ -9,7 +9,6 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
@@ -112,7 +111,11 @@ class ScriptPromiseProperty final
 
   void ResolveWithUndefined() {
     CHECK(!ScriptForbiddenScope::IsScriptForbidden());
-    DCHECK(!ScriptForbiddenScope::WillBeScriptForbidden());
+    if (RuntimeEnabledFeatures::BlinkLifecycleScriptForbiddenEnabled()) {
+      CHECK(!ScriptForbiddenScope::WillBeScriptForbidden());
+    } else {
+      DCHECK(!ScriptForbiddenScope::WillBeScriptForbidden());
+    }
     DCHECK_EQ(GetState(), kPending);
     if (!GetExecutionContext()) {
       return;
@@ -129,7 +132,11 @@ class ScriptPromiseProperty final
   template <typename PassRejectedType>
   void Reject(PassRejectedType value) {
     CHECK(!ScriptForbiddenScope::IsScriptForbidden());
-    DCHECK(!ScriptForbiddenScope::WillBeScriptForbidden());
+    if (RuntimeEnabledFeatures::BlinkLifecycleScriptForbiddenEnabled()) {
+      CHECK(!ScriptForbiddenScope::WillBeScriptForbidden());
+    } else {
+      DCHECK(!ScriptForbiddenScope::WillBeScriptForbidden());
+    }
     DCHECK_EQ(GetState(), kPending);
     if (!GetExecutionContext()) {
       return;

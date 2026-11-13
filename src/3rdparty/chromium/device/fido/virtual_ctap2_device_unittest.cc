@@ -5,9 +5,10 @@
 #include "device/fido/virtual_ctap2_device.h"
 
 #include <memory>
+#include <string_view>
 
-#include "base/callback.h"
-#include "base/callback_helpers.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
@@ -19,9 +20,11 @@
 #include "device/fido/device_response_converter.h"
 #include "device/fido/fido_parsing_utils.h"
 #include "device/fido/fido_test_data.h"
+#include "device/fido/large_blob.h"
 #include "device/fido/test_callback_receiver.h"
 #include "net/cert/asn1_util.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -66,6 +69,11 @@ std::vector<uint8_t> ToCTAP2Command(
 class VirtualCtap2DeviceTest : public ::testing::Test {
  protected:
   void MakeDevice() { device_ = std::make_unique<VirtualCtap2Device>(); }
+
+  void MakeDevice(scoped_refptr<VirtualFidoDevice::State>& state,
+                  const VirtualCtap2Device::Config& config) {
+    device_ = std::make_unique<VirtualCtap2Device>(state, config);
+  }
 
   void MakeSelfDestructingDevice() {
     MakeDevice();
@@ -204,13 +212,13 @@ TEST_F(VirtualCtap2DeviceTest, AttestationCertificateIsValid) {
 
   bool present;
   bool critical;
-  base::StringPiece contents;
+  std::string_view contents;
   ASSERT_TRUE(net::asn1::ExtractExtensionFromDERCert(
       net::x509_util::CryptoBufferAsStringPiece(cert->cert_buffer()),
-      base::StringPiece("\x55\x1d\x13"), &present, &critical, &contents));
+      std::string_view("\x55\x1d\x13"), &present, &critical, &contents));
   EXPECT_TRUE(present);
   EXPECT_TRUE(critical);
-  EXPECT_EQ(base::StringPiece("\x30\x00", 2), contents);
+  EXPECT_EQ(std::string_view("\x30\x00", 2), contents);
 }
 
 TEST_F(VirtualCtap2DeviceTest, RejectsCredentialsWithExtraKeys) {
@@ -266,14 +274,6 @@ TEST_F(VirtualCtap2DeviceTest, OnGetAssertionBogusSignature) {
 
   constexpr uint8_t bogus_sig[] = {0x00};
   static constexpr uint8_t kCredentialId[] = {1, 2, 3, 4};
-  CtapGetAssertionRequest request_param(test_data::kRelyingPartyId,
-                                        test_data::kClientDataJson);
-
-  auto allowed_credential = PublicKeyCredentialDescriptor(
-      CredentialType::kPublicKey,
-      fido_parsing_utils::Materialize(kCredentialId));
-  request_param.allow_list.push_back(std::move(allowed_credential));
-
   device_->mutable_state()->InjectRegistration(kCredentialId,
                                                test_data::kRelyingPartyId);
 
@@ -287,11 +287,9 @@ TEST_F(VirtualCtap2DeviceTest, OnGetAssertionBogusSignature) {
       {FidoTransportProtocol::kUsbHumanInterfaceDevice});
 
   request.allow_list.push_back(std::move(descriptor));
-  std::pair<device::CtapRequestCommand, absl::optional<cbor::Value>>
-      request_cbor = AsCTAPRequestValuePair(request);
-
-  device_->DeviceTransact(ToCTAP2Command(std::move(request_cbor)),
-                          base::BindOnce(callback_receiver.callback()));
+  device_->DeviceTransact(
+      ToCTAP2Command(AsCTAPRequestValuePair(std::move(request))),
+      base::BindOnce(callback_receiver.callback()));
   callback_receiver.WaitForCallback();
 
   absl::optional<cbor::Value> cbor = DecodeCBOR(*callback_receiver.value());
@@ -325,6 +323,156 @@ TEST_F(VirtualCtap2DeviceTest, OnMakeCredentialBogusSignature) {
   const auto type_it = map.find(cbor::Value("sig"));
   EXPECT_THAT(type_it->second.GetBytestring(),
               testing::ElementsAreArray(bogus_sig));
+}
+
+TEST_F(VirtualCtap2DeviceTest, OnGetAssertionUnsetUPBit) {
+  MakeDevice();
+  device_->mutable_state()->unset_up_bit = true;
+
+  static constexpr uint8_t kCredentialId[] = {1, 2, 3, 4};
+  device_->mutable_state()->InjectRegistration(kCredentialId,
+                                               test_data::kRelyingPartyId);
+
+  TestCallbackReceiver callback_receiver;
+  device::CtapGetAssertionRequest request = CtapGetAssertionRequest(
+      test_data::kRelyingPartyId, test_data::kClientDataJson);
+  std::vector<uint8_t> credential_id =
+      fido_parsing_utils::Materialize(kCredentialId);
+  PublicKeyCredentialDescriptor descriptor(
+      CredentialType::kPublicKey, std::move(credential_id),
+      {FidoTransportProtocol::kUsbHumanInterfaceDevice});
+
+  request.allow_list.push_back(std::move(descriptor));
+  device_->DeviceTransact(
+      ToCTAP2Command(AsCTAPRequestValuePair(std::move(request))),
+      base::BindOnce(callback_receiver.callback()));
+  callback_receiver.WaitForCallback();
+
+  absl::optional<cbor::Value> cbor = DecodeCBOR(*callback_receiver.value());
+  ASSERT_TRUE(cbor);
+
+  absl::optional<AuthenticatorGetAssertionResponse> response =
+      ReadCTAPGetAssertionResponse(
+          FidoTransportProtocol::kUsbHumanInterfaceDevice, std::move(cbor));
+  ASSERT_TRUE(response);
+  EXPECT_FALSE(response->authenticator_data.obtained_user_presence());
+}
+
+TEST_F(VirtualCtap2DeviceTest, OnGetAssertionUnsetUVBit) {
+  static constexpr uint8_t kCredentialId[] = {1, 2, 3, 4};
+
+  device::VirtualCtap2Device::Config config;
+  config.internal_uv_support = true;
+  scoped_refptr<VirtualFidoDevice::State> state =
+      base::MakeRefCounted<VirtualFidoDevice::State>();
+  state->fingerprints_enrolled = true;
+  state->unset_uv_bit = true;
+  state->InjectRegistration(kCredentialId, test_data::kRelyingPartyId);
+  MakeDevice(state, config);
+
+  TestCallbackReceiver callback_receiver;
+  device::CtapGetAssertionRequest request = CtapGetAssertionRequest(
+      test_data::kRelyingPartyId, test_data::kClientDataJson);
+  std::vector<uint8_t> credential_id =
+      fido_parsing_utils::Materialize(kCredentialId);
+  PublicKeyCredentialDescriptor descriptor(
+      CredentialType::kPublicKey, std::move(credential_id),
+      {FidoTransportProtocol::kUsbHumanInterfaceDevice});
+
+  request.allow_list.push_back(std::move(descriptor));
+  request.user_verification = UserVerificationRequirement::kRequired;
+  device_->DeviceTransact(
+      ToCTAP2Command(AsCTAPRequestValuePair(std::move(request))),
+      base::BindOnce(callback_receiver.callback()));
+  callback_receiver.WaitForCallback();
+
+  absl::optional<cbor::Value> cbor = DecodeCBOR(*callback_receiver.value());
+  ASSERT_TRUE(cbor);
+
+  absl::optional<AuthenticatorGetAssertionResponse> response =
+      ReadCTAPGetAssertionResponse(
+          FidoTransportProtocol::kUsbHumanInterfaceDevice, std::move(cbor));
+  ASSERT_TRUE(response);
+  EXPECT_FALSE(response->authenticator_data.obtained_user_verification());
+}
+
+TEST_F(VirtualCtap2DeviceTest, OnMakeCredentialUnsetUPBit) {
+  MakeDevice();
+  device_->mutable_state()->unset_up_bit = true;
+
+  TestCallbackReceiver callback_receiver;
+  SendCommand(device_.get(), test_data::kCtapSimpleMakeCredentialRequest,
+              callback_receiver.callback());
+  callback_receiver.WaitForCallback();
+  absl::optional<cbor::Value> cbor = DecodeCBOR(*callback_receiver.value());
+  ASSERT_TRUE(cbor);
+  absl::optional<AuthenticatorMakeCredentialResponse> response =
+      ReadCTAPMakeCredentialResponse(
+          FidoTransportProtocol::kUsbHumanInterfaceDevice, std::move(cbor));
+
+  EXPECT_FALSE(response->attestation_object.authenticator_data()
+                   .obtained_user_presence());
+}
+
+TEST_F(VirtualCtap2DeviceTest, OnMakeCredentialUnsetUVBit) {
+  device::VirtualCtap2Device::Config config;
+  config.internal_uv_support = true;
+  config.resident_key_support = true;
+  scoped_refptr<VirtualFidoDevice::State> state =
+      base::MakeRefCounted<VirtualFidoDevice::State>();
+  state->fingerprints_enrolled = true;
+  state->unset_uv_bit = true;
+  MakeDevice(state, config);
+
+  TestCallbackReceiver callback_receiver;
+  SendCommand(device_.get(), test_data::kCtapMakeCredentialRequest,
+              callback_receiver.callback());
+  callback_receiver.WaitForCallback();
+
+  absl::optional<cbor::Value> cbor = DecodeCBOR(*callback_receiver.value());
+  ASSERT_TRUE(cbor);
+  absl::optional<AuthenticatorMakeCredentialResponse> response =
+      ReadCTAPMakeCredentialResponse(
+          FidoTransportProtocol::kUsbHumanInterfaceDevice, std::move(cbor));
+
+  EXPECT_FALSE(response->attestation_object.authenticator_data()
+                   .obtained_user_verification());
+}
+
+// Tests injecting and getting a large blob.
+TEST_F(VirtualCtap2DeviceTest, InjectLargeBlob) {
+  MakeDevice();
+  std::vector<uint8_t> credential1 = {1, 2, 3, 4};
+  ASSERT_TRUE(device_->mutable_state()->InjectResidentKey(
+      credential1, test_data::kRelyingPartyId, std::vector<uint8_t>{5, 6, 7, 8},
+      absl::nullopt, absl::nullopt));
+
+  std::vector<uint8_t> credential2 = {5, 6, 7, 8};
+  ASSERT_TRUE(device_->mutable_state()->InjectResidentKey(
+      credential2, test_data::kRelyingPartyId, std::vector<uint8_t>{9, 0, 1, 2},
+      absl::nullopt, absl::nullopt));
+
+  // Inject two large blobs.
+  LargeBlob blob1({'b', 'l', 'o', 'b', '1'}, 5);
+  device_->mutable_state()->InjectLargeBlob(
+      &device_->mutable_state()->registrations.at(credential1), blob1);
+
+  LargeBlob blob2({'b', 'l', 'o', 'b', '2'}, 5);
+  device_->mutable_state()->InjectLargeBlob(
+      &device_->mutable_state()->registrations.at(credential2), blob2);
+
+  // Replace the first one with a new one.
+  LargeBlob blob3({'b', 'l', 'o', 'b', '3'}, 5);
+  device_->mutable_state()->InjectLargeBlob(
+      &device_->mutable_state()->registrations.at(credential1), blob3);
+
+  absl::optional<LargeBlob> blob_cred1 = device_->mutable_state()->GetLargeBlob(
+      device_->mutable_state()->registrations.at(credential1));
+  EXPECT_EQ(*blob_cred1, blob3);
+
+  absl::optional<LargeBlob> blob_cred2 = device_->mutable_state()->GetLargeBlob(
+      device_->mutable_state()->registrations.at(credential2));
+  EXPECT_EQ(*blob_cred2, blob2);
 }
 
 }  // namespace device

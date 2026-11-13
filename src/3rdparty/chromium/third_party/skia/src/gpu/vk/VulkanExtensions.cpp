@@ -7,20 +7,22 @@
 
 #include "include/gpu/vk/VulkanExtensions.h"
 
-#include "src/core/SkTSearch.h"
-#include "src/core/SkTSort.h"
+#include "src/base/SkTSearch.h"
+#include "src/base/SkTSort.h"
+
+using namespace skia_private;
 
 namespace skgpu {
 
 // finds the index of ext in infos or a negative result if ext is not found.
-static int find_info(const SkTArray<VulkanExtensions::Info>& infos, const char ext[]) {
+static int find_info(const TArray<VulkanExtensions::Info>& infos, const char ext[]) {
     if (infos.empty()) {
         return -1;
     }
     SkString extensionStr(ext);
     VulkanExtensions::Info::Less less;
     int idx = SkTSearch<VulkanExtensions::Info, SkString, VulkanExtensions::Info::Less>(
-            &infos.front(), infos.count(), extensionStr, sizeof(VulkanExtensions::Info),
+            &infos.front(), infos.size(), extensionStr, sizeof(VulkanExtensions::Info),
             less);
     return idx;
 }
@@ -54,13 +56,13 @@ void VulkanExtensions::init(VulkanGetProc getProc,
             SkTQSort(fExtensions.begin(), fExtensions.end(), extension_compare);
         }
     }
-    this->getSpecVersions(getProc, instance, physDev);
+    this->getSpecVersions(std::move(getProc), instance, physDev);
 }
 
 #define GET_PROC(F, inst)                                                        \
         PFN_vk##F grVk##F = (PFN_vk ## F) getProc("vk" #F, inst, VK_NULL_HANDLE)
 
-void VulkanExtensions::getSpecVersions(VulkanGetProc getProc,
+void VulkanExtensions::getSpecVersions(const VulkanGetProc& getProc,
                                        VkInstance instance,
                                        VkPhysicalDevice physDevice) {
     // We grab all the extensions for the VkInstance and VkDevice so we can look up what spec

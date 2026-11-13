@@ -22,7 +22,7 @@
 
 // Non-windows and non-apple only header file, guard it so that accidental
 // inclusion doesn't cause unknown header include errors
-#ifdef LOADER_ENABLE_LINUX_SORT
+#if defined(LOADER_ENABLE_LINUX_SORT)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,12 +30,12 @@
 #include "loader_linux.h"
 
 #include "allocation.h"
-#include "get_environment.h"
+#include "loader_environment.h"
 #include "loader.h"
 #include "log.h"
 
 // Determine a priority based on device type with the higher value being higher priority.
-static uint32_t determine_priority_type_value(VkPhysicalDeviceType type) {
+uint32_t determine_priority_type_value(VkPhysicalDeviceType type) {
     switch (type) {
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
             return 10;
@@ -55,7 +55,7 @@ static uint32_t determine_priority_type_value(VkPhysicalDeviceType type) {
 
 // Compare the two device types.
 // This behaves similar to a qsort compare.
-static int32_t device_type_compare(VkPhysicalDeviceType a, VkPhysicalDeviceType b) {
+int32_t device_type_compare(VkPhysicalDeviceType a, VkPhysicalDeviceType b) {
     uint32_t a_value = determine_priority_type_value(a);
     uint32_t b_value = determine_priority_type_value(b);
     if (a_value > b_value) {
@@ -204,12 +204,12 @@ int32_t compare_device_groups(const void *a, const void *b) {
 }
 
 // Search for the default device using the loader environment variable.
-static void linux_env_var_default_device(struct loader_instance *inst, uint32_t device_count,
-                                         struct LinuxSortedDeviceInfo *sorted_device_info) {
+void linux_env_var_default_device(struct loader_instance *inst, uint32_t device_count,
+                                  struct LinuxSortedDeviceInfo *sorted_device_info) {
     char *selection = loader_getenv("VK_LOADER_DEVICE_SELECT", inst);
     if (NULL != selection) {
         loader_log(inst, VULKAN_LOADER_DEBUG_BIT | VULKAN_LOADER_DRIVER_BIT, 0,
-                   "linux_env_var_default_device:  Found VK_LOADER_DEVICE_SELECT set to %s", selection);
+                   "linux_env_var_default_device:  Found \'VK_LOADER_DEVICE_SELECT\' set to %s", selection);
 
         // The environment variable exists, so grab the vendor ID and device ID of the
         // selected default device
@@ -233,7 +233,7 @@ static void linux_env_var_default_device(struct loader_instance *inst, uint32_t 
 
 // This function allocates an array in sorted_devices which must be freed by the caller if not null
 VkResult linux_read_sorted_physical_devices(struct loader_instance *inst, uint32_t icd_count,
-                                            struct loader_phys_dev_per_icd *icd_devices, uint32_t phys_dev_count,
+                                            struct loader_icd_physical_devices *icd_devices, uint32_t phys_dev_count,
                                             struct loader_physical_device_term **sorted_device_term) {
     VkResult res = VK_SUCCESS;
     bool app_is_vulkan_1_1 = loader_check_version_meets_required(LOADER_VERSION_1_1_0, inst->app_api_version);
@@ -269,7 +269,7 @@ VkResult linux_read_sorted_physical_devices(struct loader_instance *inst, uint32
             bool device_is_1_1_capable =
                 loader_check_version_meets_required(LOADER_VERSION_1_1_0, loader_make_version(dev_props.apiVersion));
             if (!sorted_device_info[index].has_pci_bus_info) {
-                uint32_t ext_count;
+                uint32_t ext_count = 0;
                 icd_term->dispatch.EnumerateDeviceExtensionProperties(sorted_device_info[index].physical_device, NULL, &ext_count,
                                                                       NULL);
                 if (ext_count > 0) {
@@ -437,16 +437,14 @@ VkResult linux_sort_physical_device_groups(struct loader_instance *inst, uint32_
     // Sort device groups by PCI info
     qsort(sorted_group_term, group_count, sizeof(struct loader_physical_device_group_term), compare_device_groups);
 
-    if (loader_get_debug_level() & (VULKAN_LOADER_INFO_BIT | VULKAN_LOADER_DRIVER_BIT)) {
-        loader_log(inst, VULKAN_LOADER_INFO_BIT | VULKAN_LOADER_DRIVER_BIT, 0, "linux_sort_physical_device_groups:  Sorted order:");
-        for (uint32_t group = 0; group < group_count; ++group) {
-            loader_log(inst, VULKAN_LOADER_INFO_BIT | VULKAN_LOADER_DRIVER_BIT, 0, "           Group %u", group);
-            for (uint32_t gpu = 0; gpu < sorted_group_term[group].group_props.physicalDeviceCount; ++gpu) {
-                loader_log(inst, VULKAN_LOADER_INFO_BIT | VULKAN_LOADER_DRIVER_BIT, 0, "               [%u] %s %p %s", gpu,
-                           sorted_group_term[group].internal_device_info[gpu].device_name,
-                           sorted_group_term[group].internal_device_info[gpu].physical_device,
-                           (sorted_group_term[group].internal_device_info[gpu].default_device ? "[default]" : ""));
-            }
+    loader_log(inst, VULKAN_LOADER_INFO_BIT | VULKAN_LOADER_DRIVER_BIT, 0, "linux_sort_physical_device_groups:  Sorted order:");
+    for (uint32_t group = 0; group < group_count; ++group) {
+        loader_log(inst, VULKAN_LOADER_INFO_BIT | VULKAN_LOADER_DRIVER_BIT, 0, "           Group %u", group);
+        for (uint32_t gpu = 0; gpu < sorted_group_term[group].group_props.physicalDeviceCount; ++gpu) {
+            loader_log(inst, VULKAN_LOADER_INFO_BIT | VULKAN_LOADER_DRIVER_BIT, 0, "               [%u] %s %p %s", gpu,
+                       sorted_group_term[group].internal_device_info[gpu].device_name,
+                       sorted_group_term[group].internal_device_info[gpu].physical_device,
+                       (sorted_group_term[group].internal_device_info[gpu].default_device ? "[default]" : ""));
         }
     }
 

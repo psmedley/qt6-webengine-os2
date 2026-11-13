@@ -32,7 +32,7 @@ import * as Platform from '../../core/platform/platform.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
-import {type ConsoleViewMessage} from './ConsoleViewMessage.js';
+import {ConsoleViewMessage, getMessageForElement} from './ConsoleViewMessage.js';
 
 interface SelectionModel {
   item: number;
@@ -247,6 +247,10 @@ export class ConsoleViewport {
     }
     if (selectedElement && (focusLastChild || changed || containerHasFocus) && this.element.hasFocus()) {
       selectedElement.classList.add('console-selected');
+      const consoleViewMessage = getMessageForElement(selectedElement);
+      if (consoleViewMessage) {
+        UI.Context.Context.instance().setFlavor(ConsoleViewMessage, consoleViewMessage);
+      }
       // Do not focus the message if something within holds focus (e.g. object).
       if (focusLastChild) {
         this.setStickToBottom(false);
@@ -637,8 +641,9 @@ export class ConsoleViewport {
     let node: Node|null = itemElement;
     while ((node = node.traverseNextNode(itemElement)) && node !== selectionNode) {
       if (node.nodeType !== Node.TEXT_NODE ||
-          (node.parentElement &&
-           (node.parentElement.nodeName === 'STYLE' || node.parentElement.nodeName === 'SCRIPT'))) {
+          (node.parentNode &&
+           (node.parentNode.nodeName === 'STYLE' || node.parentNode.nodeName === 'SCRIPT' ||
+            node.parentNode.nodeName === '#document-fragment'))) {
         continue;
       }
       chars += Components.Linkifier.Linkifier.untruncatedNodeText(node).length;

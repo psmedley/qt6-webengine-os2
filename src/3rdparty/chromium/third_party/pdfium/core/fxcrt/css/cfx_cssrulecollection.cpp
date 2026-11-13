@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,3 +44,5 @@ void CFX_CSSRuleCollection::AddRule(CFX_CSSStyleRule* pStyleRule) {
 CFX_CSSRuleCollection::Data::Data(CFX_CSSSelector* pSel,
                                   CFX_CSSDeclaration* pDecl)
     : pSelector(pSel), pDeclaration(pDecl) {}
+
+CFX_CSSRuleCollection::Data::~Data() = default;

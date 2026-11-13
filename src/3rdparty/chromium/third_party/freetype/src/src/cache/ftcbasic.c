@@ -4,7 +4,7 @@
  *
  *   The FreeType basic cache interface (body).
  *
- * Copyright (C) 2003-2022 by
+ * Copyright (C) 2003-2023 by
  * David Turner, Robert Wilhelm, and Werner Lemberg.
  *
  * This file is part of the FreeType project, and may only be used,
@@ -337,7 +337,7 @@
 #if 1  /* inlining is about 50% faster! */
     FTC_GCACHE_LOOKUP_CMP( cache,
                            ftc_basic_family_compare,
-                           FTC_GNode_Compare,
+                           ftc_gnode_compare,
                            hash, gindex,
                            &query,
                            node,
@@ -411,7 +411,7 @@
 
     FTC_GCACHE_LOOKUP_CMP( cache,
                            ftc_basic_family_compare,
-                           FTC_GNode_Compare,
+                           ftc_gnode_compare,
                            hash, gindex,
                            &query,
                            node,
@@ -537,7 +537,7 @@
 #if 1  /* inlining is about 50% faster! */
     FTC_GCACHE_LOOKUP_CMP( cache,
                            ftc_basic_family_compare,
-                           FTC_SNode_Compare,
+                           ftc_snode_compare,
                            hash, gindex,
                            &query,
                            node,
@@ -613,7 +613,7 @@
 
     FTC_GCACHE_LOOKUP_CMP( cache,
                            ftc_basic_family_compare,
-                           FTC_SNode_Compare,
+                           ftc_snode_compare,
                            hash, gindex,
                            &query,
                            node,

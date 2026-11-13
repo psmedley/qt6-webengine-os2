@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 
+#include "base/task/single_thread_task_runner.h"
 #include "media/media_buildflags.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -115,7 +116,7 @@ absl::optional<int16_t> RTCSctpTransport::maxChannels() const {
 }
 
 RTCDtlsTransport* RTCSctpTransport::transport() const {
-  return dtls_transport_;
+  return dtls_transport_.Get();
 }
 
 rtc::scoped_refptr<webrtc::SctpTransportInterface>
@@ -167,7 +168,7 @@ ExecutionContext* RTCSctpTransport::GetExecutionContext() const {
 
 void RTCSctpTransport::Trace(Visitor* visitor) const {
   visitor->Trace(dtls_transport_);
-  EventTargetWithInlineData::Trace(visitor);
+  EventTarget::Trace(visitor);
   ExecutionContextClient::Trace(visitor);
   SctpTransportProxy::Delegate::Trace(visitor);
 }

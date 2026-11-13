@@ -20,7 +20,7 @@
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/devtools_download_manager_delegate.h"
 #include "content/browser/devtools/protocol/page.h"
-#include "content/browser/preloading/prerender/prerender_host.h"
+#include "content/browser/preloading/prerender/prerender_final_status.h"
 #include "content/browser/renderer_host/back_forward_cache_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/public/browser/download_manager.h"
@@ -69,7 +69,7 @@ class PageHandler : public DevToolsDomainHandler,
               BrowserHandler* browser_handler,
               bool allow_unsafe_operations,
               bool is_trusted,
-              absl::optional<url::Origin> navigation_initiator_origin,
+              std::optional<url::Origin> navigation_initiator_origin,
               bool may_read_local_files);
 
   PageHandler(const PageHandler&) = delete;
@@ -87,7 +87,6 @@ class PageHandler : public DevToolsDomainHandler,
   // Instrumentation signals.
   void DidAttachInterstitialPage();
   void DidDetachInterstitialPage();
-  bool screencast_enabled() const { return enabled_ && screencast_enabled_; }
   using JavaScriptDialogCallback =
       content::JavaScriptDialogManager::DialogClosedCallback;
   void DidRunJavaScriptDialog(const GURL& url,
@@ -103,17 +102,16 @@ class PageHandler : public DevToolsDomainHandler,
   void NavigationReset(NavigationRequest* navigation_request);
   void DownloadWillBegin(FrameTreeNode* ftn, download::DownloadItem* item);
 
+  void OnFrameDetached(const base::UnguessableToken& frame_id);
+  void DidChangeFrameLoadingState(const FrameTreeNode& ftn);
+
   bool ShouldBypassCSP();
   void BackForwardCacheNotUsed(
       const NavigationRequest* nav_request,
       const BackForwardCacheCanStoreDocumentResult* result,
       const BackForwardCacheCanStoreTreeResult* tree_result);
 
-  void DidActivatePrerender(const NavigationRequest& nav_request);
-  void DidCancelPrerender(const GURL& prerendering_url,
-                          const std::string& initiating_frame_id,
-                          PrerenderHost::FinalStatus status,
-                          const std::string& disallowed_api_method);
+  void IsPrerenderingAllowed(bool& is_allowed);
 
   Response Enable() override;
   Response Disable() override;
@@ -122,6 +120,7 @@ class PageHandler : public DevToolsDomainHandler,
   Response Close() override;
   void Reload(Maybe<bool> bypassCache,
               Maybe<std::string> script_to_evaluate_on_load,
+              Maybe<std::string> loader_id,
               std::unique_ptr<ReloadCallback> callback) override;
   void Navigate(const std::string& url,
                 Maybe<std::string> referrer,
@@ -144,6 +143,7 @@ class PageHandler : public DevToolsDomainHandler,
       Maybe<Page::Viewport> clip,
       Maybe<bool> from_surface,
       Maybe<bool> capture_beyond_viewport,
+      Maybe<bool> optimize_for_speed,
       std::unique_ptr<CaptureScreenshotCallback> callback) override;
   void CaptureSnapshot(
       Maybe<std::string> format,
@@ -180,14 +180,19 @@ class PageHandler : public DevToolsDomainHandler,
   Response AddCompilationCache(const std::string& url,
                                const Binary& data) override;
 
+  Response SetPrerenderingAllowed(bool is_allowed) override;
+
   Response AssureTopLevelActiveFrame();
 
  private:
-  enum EncodingFormat { PNG, JPEG };
+  using BitmapEncoder =
+      base::RepeatingCallback<bool(const SkBitmap& bitmap,
+                                   std::vector<uint8_t>& output)>;
 
   void CaptureFullPageScreenshot(
       Maybe<std::string> format,
       Maybe<int> quality,
+      Maybe<bool> optimize_for_speed,
       std::unique_ptr<CaptureScreenshotCallback> callback,
       const gfx::Size& full_page_size);
   bool ShouldCaptureNextScreencastFrame();
@@ -198,16 +203,15 @@ class PageHandler : public DevToolsDomainHandler,
       const SkBitmap& bitmap);
   void ScreencastFrameEncoded(
       std::unique_ptr<Page::ScreencastFrameMetadata> metadata,
-      const protocol::Binary& data);
+      std::vector<uint8_t> data);
 
   void ScreenshotCaptured(
       std::unique_ptr<CaptureScreenshotCallback> callback,
-      const std::string& format,
-      int quality,
+      BitmapEncoder encoder,
       const gfx::Size& original_view_size,
       const gfx::Size& requested_image_size,
       const blink::DeviceEmulationParams& original_params,
-      const absl::optional<blink::web_pref::WebPreferences>& original_web_prefs,
+      const std::optional<blink::web_pref::WebPreferences>& original_web_prefs,
       const gfx::Image& image);
 
   void GotManifest(std::unique_ptr<GetAppManifestCallback> callback,
@@ -229,29 +233,21 @@ class PageHandler : public DevToolsDomainHandler,
   using ResponseOrWebContents = absl::variant<Response, WebContentsImpl*>;
   ResponseOrWebContents GetWebContentsForTopLevelActiveFrame();
 
-  void RetrievePrerenderActivationFromWebContents();
-
   const bool allow_unsafe_operations_;
   const bool is_trusted_;
-  const absl::optional<url::Origin> navigation_initiator_origin_;
+  const std::optional<url::Origin> navigation_initiator_origin_;
   const bool may_read_local_files_;
 
   bool enabled_;
   bool bypass_csp_ = false;
 
-  bool screencast_enabled_;
-  std::string screencast_format_;
-  int screencast_quality_;
+  BitmapEncoder screencast_encoder_;
   int screencast_max_width_;
   int screencast_max_height_;
   int capture_every_nth_frame_;
   int session_id_;
   int frame_counter_;
   int frames_in_flight_;
-
-  // Whether stored prerender activation has been dispatched to Devtools. Reset
-  // whenever a new prerender event received.
-  bool has_dispatched_stored_prerender_activation_ = false;
 
   // |video_consumer_| consumes video frames from FrameSinkVideoCapturerImpl,
   // and provides PageHandler with these frames via OnFrameFromVideoConsumer.
@@ -275,6 +271,8 @@ class PageHandler : public DevToolsDomainHandler,
   base::flat_map<base::UnguessableToken, std::unique_ptr<NavigateCallback>>
       navigate_callbacks_;
   base::flat_set<download::DownloadItem*> pending_downloads_;
+
+  bool is_prerendering_allowed_ = true;
 
   base::WeakPtrFactory<PageHandler> weak_factory_{this};
 };

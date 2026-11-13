@@ -101,7 +101,7 @@ cc_proto_library(
 
 cc_library(
     name = "embedding_options_cc_proto_inc",
-    srcs = ["embedding_options_proto_inc.h"],
+    hdrs = ["embedding_options_proto_inc.h"],
     deps = [
         ":embedding_options_cc_proto",
     ],
@@ -217,6 +217,11 @@ proto_library(
     ],
 )
 
+java_lite_proto_library(
+    name = "search_options_java_proto_lite",
+    deps = [":search_options_proto"],
+)
+
 cc_proto_library(
     name = "search_options_cc_proto",
     deps = [
@@ -226,7 +231,7 @@ cc_proto_library(
 
 cc_library(
     name = "search_options_cc_proto_inc",
-    srcs = ["search_options_proto_inc.h"],
+    hdrs = ["search_options_proto_inc.h"],
     deps = [
         ":search_options_cc_proto",
     ],
@@ -247,9 +252,22 @@ proto_library(
     srcs = ["search_result.proto"],
 )
 
+java_lite_proto_library(
+    name = "search_result_java_proto_lite",
+    deps = [":search_result_proto"],
+)
+
 cc_proto_library(
     name = "search_result_cc_proto",
     deps = [":search_result_proto"],
+)
+
+cc_library(
+    name = "search_result_cc_proto_inc",
+    hdrs = ["search_result_proto_inc.h"],
+    deps = [
+        ":search_result_cc_proto",
+    ],
 )
 
 support_py_proto_library(

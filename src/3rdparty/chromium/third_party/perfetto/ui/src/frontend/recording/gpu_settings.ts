@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {Probe, ProbeAttrs} from '../record_widgets';
 import {RecordingSectionAttrs} from './recording_sections';
@@ -36,6 +36,14 @@ export class GpuSettings implements m.ClassComponent<RecordingSectionAttrs> {
                 (Available on recent Android 12+ kernels)`,
           setEnabled: (cfg, val) => cfg.gpuMemTotal = val,
           isEnabled: (cfg) => cfg.gpuMemTotal,
+        } as ProbeAttrs),
+        m(Probe, {
+          title: 'GPU work period',
+          img: 'rec_cpu_voltage.png',
+          descr: `Allows to track per package GPU work.
+                (Available on recent Android 14+ kernels)`,
+          setEnabled: (cfg, val) => cfg.gpuWorkPeriod = val,
+          isEnabled: (cfg) => cfg.gpuWorkPeriod,
         } as ProbeAttrs));
   }
 }

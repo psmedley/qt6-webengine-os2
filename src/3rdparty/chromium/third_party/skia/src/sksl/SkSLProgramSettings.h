@@ -8,29 +8,28 @@
 #ifndef SKSL_PROGRAMSETTINGS
 #define SKSL_PROGRAMSETTINGS
 
-#include "include/private/SkSLDefines.h"
-#include "include/private/SkSLProgramKind.h"
 #include "include/sksl/SkSLVersion.h"
+#include "src/sksl/SkSLDefines.h"
+#include "src/sksl/SkSLProgramKind.h"
 
 #include <vector>
 
 namespace SkSL {
 
-class ExternalFunction;
-
 /**
  * Holds the compiler settings for a program.
  */
 struct ProgramSettings {
-    // If true the destination fragment color is read sk_FragColor. It must be declared inout.
+    // If true, the destination fragment color can be read from sk_FragColor. It must be declared
+    // inout. This is only supported in GLSL, when framebuffer-fetch is used.
     bool fFragColorIsInOut = false;
     // if true, all halfs are forced to be floats
     bool fForceHighPrecision = false;
     // if true, add -0.5 bias to LOD of all texture lookups
     bool fSharpenTextures = false;
     // If true, sk_FragCoord, the dFdy gradient, and sk_Clockwise won't be modified by the
-    // rtFlip. Additionally, the 'fUseFlipRTUniform' boolean will be forced to false so no rtFlip
-    // uniform will be emitted.
+    // rtFlip. Additionally, the program interface's 'fRTFlipUniform' value will be left as None,
+    // so no rtFlip uniform will be emitted.
     bool fForceNoRTFlip = false;
     // if the program needs to create an RTFlip uniform, this is its offset in the uniform buffer
     int fRTFlipOffset = -1;
@@ -68,24 +67,12 @@ struct ProgramSettings {
     // allowed at the requested version. For instance, a valid program must have fully-unrollable
     // `for` loops at version 100, but any loop structure is allowed at version 300.
     SkSL::Version fMaxVersionAllowed = SkSL::Version::k100;
-    // If true, SkVM debug traces will contain the `trace_var` opcode. This opcode can cause the
-    // generated code to contain a lot of extra computations, because we need to explicitly compute
-    // every temporary value, even ones that would otherwise be optimized away entirely. The other
-    // debug opcodes are much less invasive on the generated code.
-    bool fAllowTraceVarInSkVMDebugTrace = true;
     // If true, SkSL will use a memory pool for all IR nodes when compiling a program. This is
     // usually a significant speed increase, but uses more memory, so it is a good idea for programs
     // that will be freed shortly after compilation. It can also be useful to disable this flag when
     // investigating memory corruption. (This controls behavior of the SkSL compiler, not the code
     // we generate.)
     bool fUseMemoryPool = true;
-    // If true, VarDeclaration can be cloned for testing purposes. See VarDeclaration::clone for
-    // more information.
-    bool fAllowVarDeclarationCloneForTesting = false;
-    // External functions available for use in runtime effects. These values are registered in the
-    // symbol table of the Program, but ownership is *not* transferred. It is up to the caller to
-    // keep them alive.
-    const std::vector<std::unique_ptr<ExternalFunction>>* fExternalFunctions = nullptr;
 };
 
 /**
@@ -102,7 +89,7 @@ struct ProgramConfig {
     SkSL::Version fRequiredSkSLVersion = SkSL::Version::k100;
 
     bool enforcesSkSLVersion() const {
-        return IsRuntimeEffect(fKind) || fKind == ProgramKind::kGeneric;
+        return IsRuntimeEffect(fKind);
     }
 
     bool strictES2Mode() const {
@@ -125,12 +112,14 @@ struct ProgramConfig {
 
     static bool IsFragment(ProgramKind kind) {
         return kind == ProgramKind::kFragment ||
-               kind == ProgramKind::kGraphiteFragment;
+               kind == ProgramKind::kGraphiteFragment ||
+               kind == ProgramKind::kGraphiteFragmentES2;
     }
 
     static bool IsVertex(ProgramKind kind) {
         return kind == ProgramKind::kVertex ||
-               kind == ProgramKind::kGraphiteVertex;
+               kind == ProgramKind::kGraphiteVertex ||
+               kind == ProgramKind::kGraphiteVertexES2;
     }
 
     static bool IsCompute(ProgramKind kind) {
@@ -141,9 +130,34 @@ struct ProgramConfig {
         return (kind == ProgramKind::kRuntimeColorFilter ||
                 kind == ProgramKind::kRuntimeShader ||
                 kind == ProgramKind::kRuntimeBlender ||
+                kind == ProgramKind::kPrivateRuntimeColorFilter ||
                 kind == ProgramKind::kPrivateRuntimeShader ||
+                kind == ProgramKind::kPrivateRuntimeBlender ||
                 kind == ProgramKind::kMeshVertex ||
                 kind == ProgramKind::kMeshFragment);
+    }
+
+    static bool IsRuntimeShader(ProgramKind kind) {
+        return (kind == ProgramKind::kRuntimeShader ||
+                kind == ProgramKind::kPrivateRuntimeShader);
+    }
+
+    static bool IsRuntimeColorFilter(ProgramKind kind) {
+        return (kind == ProgramKind::kRuntimeColorFilter ||
+                kind == ProgramKind::kPrivateRuntimeColorFilter);
+    }
+
+    static bool IsRuntimeBlender(ProgramKind kind) {
+        return (kind == ProgramKind::kRuntimeBlender ||
+                kind == ProgramKind::kPrivateRuntimeBlender);
+    }
+
+    static bool AllowsPrivateIdentifiers(ProgramKind kind) {
+        return (kind != ProgramKind::kRuntimeColorFilter &&
+                kind != ProgramKind::kRuntimeShader &&
+                kind != ProgramKind::kRuntimeBlender &&
+                kind != ProgramKind::kMeshVertex &&
+                kind != ProgramKind::kMeshFragment);
     }
 };
 

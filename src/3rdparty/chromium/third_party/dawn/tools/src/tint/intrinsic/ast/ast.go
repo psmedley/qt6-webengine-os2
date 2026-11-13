@@ -1,16 +1,29 @@
-// Copyright 2021 The Tint Authors.
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // Package ast defines AST nodes that are produced by the Tint intrinsic
 // definition parser
@@ -113,7 +126,7 @@ func (m MatcherDecl) Format(w fmt.State, verb rune) {
 	m.Options.Format(w, verb)
 }
 
-// IntrinsicKind is either a Builtin, Operator, Constructor or Converter
+// IntrinsicKind is either a Builtin, Operator, Initializer or Converter
 type IntrinsicKind string
 
 const (
@@ -123,10 +136,10 @@ const (
 	// Operator is a unary or binary operator.
 	// Declared with 'op'.
 	Operator IntrinsicKind = "operator"
-	// Constructor is a type constructor function.
-	// Declared with 'ctor'.
+	// Constructor is a value constructor function.
+	// Declared with 'init'.
 	Constructor IntrinsicKind = "constructor"
-	// Converter is a type conversion function.
+	// Converter is a value conversion function.
 	// Declared with 'conv'.
 	Converter IntrinsicKind = "converter"
 )
@@ -219,7 +232,8 @@ func (o MatcherOptions) Format(w fmt.State, verb rune) {
 
 // TemplatedNames is a list of TemplatedName
 // Example:
-//   a<b>, c<d, e>
+//
+//	a<b>, c<d, e>
 type TemplatedNames []TemplatedName
 
 // Format implements the fmt.Formatter interface
@@ -234,7 +248,8 @@ func (l TemplatedNames) Format(w fmt.State, verb rune) {
 
 // TemplatedName is an identifier with optional templated arguments
 // Example:
-//  vec<N, T>
+//
+//	vec<N, T>
 type TemplatedName struct {
 	Source       tok.Source
 	Name         string
@@ -253,7 +268,8 @@ func (t TemplatedName) Format(w fmt.State, verb rune) {
 
 // MemberNames is a list of MemberName
 // Example:
-//   a.b, c.d
+//
+//	a.b, c.d
 type MemberNames []MemberName
 
 // Format implements the fmt.Formatter interface
@@ -298,7 +314,8 @@ func (p TypeDecl) Format(w fmt.State, verb rune) {
 
 // TemplateParams is a list of TemplateParam
 // Example:
-//   <A, B : TyB>
+//
+//	<A, B : TyB>
 type TemplateParams []TemplateParam
 
 // Format implements the fmt.Formatter interface
@@ -317,8 +334,9 @@ func (p TemplateParams) Format(w fmt.State, verb rune) {
 
 // TemplateParam describes a template parameter with optional type
 // Example:
-//   <Name>
-//   <Name: Type>
+//
+//	<Name>
+//	<Name: Type>
 type TemplateParam struct {
 	Source tok.Source
 	Name   string
@@ -336,7 +354,8 @@ func (t TemplateParam) Format(w fmt.State, verb rune) {
 
 // Attributes is a list of Attribute
 // Example:
-//   [[a(x), b(y)]]
+//
+//	[[a(x), b(y)]]
 type Attributes []Attribute
 
 // Format implements the fmt.Formatter interface
@@ -363,11 +382,12 @@ func (l *Attributes) Take(name string) *Attribute {
 
 // Attribute describes a single attribute
 // Example:
-//   @a(x)
+//
+//	@a(x)
 type Attribute struct {
 	Source tok.Source
 	Name   string
-	Values []string
+	Values []any
 }
 
 // Format implements the fmt.Formatter interface

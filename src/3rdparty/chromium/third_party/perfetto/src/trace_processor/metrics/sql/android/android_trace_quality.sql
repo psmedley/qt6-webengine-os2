@@ -15,20 +15,20 @@
 --
 
 DROP VIEW IF EXISTS android_trace_quality_failures;
-CREATE VIEW android_trace_quality_failures AS
+CREATE PERFETTO VIEW android_trace_quality_failures AS
 -- Check that all the sched slices are less than 1 week long.
 SELECT
-  'sched_slice_too_long' as name,
-  MAX(dur) > 1 * 7 * 24 * 60 * 60 * 1000 * 1000 * 1000 as failed
+  'sched_slice_too_long' AS name,
+  MAX(dur) > 1 * 7 * 24 * 60 * 60 * 1000 * 1000 * 1000 AS failed
 FROM sched;
 
 DROP VIEW IF EXISTS android_trace_quality_output;
-CREATE VIEW android_trace_quality_output AS
+CREATE PERFETTO VIEW android_trace_quality_output AS
 SELECT AndroidTraceQualityMetric(
   'failures', (
     SELECT RepeatedField(AndroidTraceQualityMetric_Failure(
       'name', name
-    ))
+      ))
     FROM android_trace_quality_failures
     WHERE failed
   )

@@ -21,6 +21,7 @@ enum class TExtension : uint8_t
 
     ANDROID_extension_pack_es31a,
     ANGLE_base_vertex_base_instance_shader_builtin,
+    ANGLE_clip_cull_distance,
     ANGLE_multi_draw,
     ANGLE_shader_pixel_local_storage,
     ANGLE_texture_multisample,
@@ -31,11 +32,13 @@ enum class TExtension : uint8_t
     EXT_YUV_target,
     EXT_blend_func_extended,
     EXT_clip_cull_distance,
+    EXT_conservative_depth,
     EXT_draw_buffers,
     EXT_frag_depth,
     EXT_geometry_shader,
     EXT_gpu_shader5,
     EXT_primitive_bounding_box,
+    EXT_separate_shader_objects,
     EXT_shader_framebuffer_fetch,
     EXT_shader_framebuffer_fetch_non_coherent,
     EXT_shader_io_blocks,
@@ -80,6 +83,7 @@ enum TBehavior : uint8_t
 
 const char *GetExtensionNameString(TExtension extension);
 TExtension GetExtensionByName(const char *extension);
+bool CheckExtensionVersion(TExtension extension, int version);
 
 const char *GetBehaviorString(TBehavior b);
 

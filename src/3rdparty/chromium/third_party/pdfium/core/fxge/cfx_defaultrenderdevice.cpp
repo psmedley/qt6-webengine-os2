@@ -1,4 +1,4 @@
-// Copyright 2022 PDFium Authors. All rights reserved.
+// Copyright 2022 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,57 +6,43 @@
 
 #include <utility>
 
+#include "core/fxge/agg/fx_agg_driver.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
+
+#if defined(PDF_USE_SKIA)
+#include "core/fxge/skia/fx_skia_device.h"
+#endif
 
 namespace {
 
 // When build variant is Skia then it is assumed as the default, but might be
 // overridden at runtime.
-#if defined(_SKIA_SUPPORT_)
-CFX_DefaultRenderDevice::RendererType g_default_renderer_type =
-    CFX_DefaultRenderDevice::RendererType::kSkia;
+#if defined(PDF_USE_SKIA)
+CFX_DefaultRenderDevice::RendererType g_renderer_type =
+    CFX_DefaultRenderDevice::kDefaultRenderer;
 #endif
 
 }  // namespace
 
 // static
-bool CFX_DefaultRenderDevice::SkiaIsDefaultRenderer() {
-#if defined(_SKIA_SUPPORT_)
-  return g_default_renderer_type == RendererType::kSkia;
+bool CFX_DefaultRenderDevice::UseSkiaRenderer() {
+#if defined(PDF_USE_SKIA)
+  return g_renderer_type == RendererType::kSkia;
 #else
   return false;
 #endif
 }
 
+#if defined(PDF_USE_SKIA)
 // static
-bool CFX_DefaultRenderDevice::SkiaPathsIsDefaultRenderer() {
-#if defined(_SKIA_SUPPORT_PATHS_)
-  return true;
-#else
-  return false;
-#endif
-}
-
-// static
-bool CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer() {
-  return SkiaIsDefaultRenderer() || SkiaPathsIsDefaultRenderer();
-}
-
-#if defined(_SKIA_SUPPORT_)
-// static
-void CFX_DefaultRenderDevice::SetDefaultRenderer(RendererType renderer_type) {
-  g_default_renderer_type = renderer_type;
+void CFX_DefaultRenderDevice::SetRendererType(RendererType renderer_type) {
+  g_renderer_type = renderer_type;
 }
 #endif
 
 CFX_DefaultRenderDevice::CFX_DefaultRenderDevice() = default;
 
-CFX_DefaultRenderDevice::~CFX_DefaultRenderDevice() {
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-  if (SkiaVariantIsDefaultRenderer())
-    Flush(true);
-#endif
-}
+CFX_DefaultRenderDevice::~CFX_DefaultRenderDevice() = default;
 
 bool CFX_DefaultRenderDevice::Attach(RetainPtr<CFX_DIBitmap> pBitmap) {
   return AttachWithRgbByteOrder(std::move(pBitmap), false);
@@ -81,22 +67,34 @@ bool CFX_DefaultRenderDevice::CFX_DefaultRenderDevice::AttachImpl(
     bool bRgbByteOrder,
     RetainPtr<CFX_DIBitmap> pBackdropBitmap,
     bool bGroupKnockout) {
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-  if (SkiaVariantIsDefaultRenderer()) {
-    return AttachSkiaImpl(pBitmap, bRgbByteOrder, pBackdropBitmap,
-                          bGroupKnockout);
+#if defined(PDF_USE_SKIA)
+  if (UseSkiaRenderer()) {
+    return AttachSkiaImpl(std::move(pBitmap), bRgbByteOrder,
+                          std::move(pBackdropBitmap), bGroupKnockout);
   }
 #endif
-  return AttachAggImpl(pBitmap, bRgbByteOrder, pBackdropBitmap, bGroupKnockout);
+  return AttachAggImpl(std::move(pBitmap), bRgbByteOrder,
+                       std::move(pBackdropBitmap), bGroupKnockout);
 }
 
 bool CFX_DefaultRenderDevice::Create(int width,
                                      int height,
                                      FXDIB_Format format,
                                      RetainPtr<CFX_DIBitmap> pBackdropBitmap) {
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-  if (SkiaVariantIsDefaultRenderer())
+#if defined(PDF_USE_SKIA)
+  if (UseSkiaRenderer()) {
     return CreateSkia(width, height, format, pBackdropBitmap);
+  }
 #endif
   return CreateAgg(width, height, format, pBackdropBitmap);
+}
+
+void CFX_DefaultRenderDevice::Clear(uint32_t color) {
+#if defined(PDF_USE_SKIA)
+  if (UseSkiaRenderer()) {
+    static_cast<CFX_SkiaDeviceDriver*>(GetDeviceDriver())->Clear(color);
+    return;
+  }
+#endif
+  static_cast<pdfium::CFX_AggDeviceDriver*>(GetDeviceDriver())->Clear(color);
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {time} from '../base/time';
 import {Actions} from '../common/actions';
 import {AggregateData, isEmptyData} from '../common/aggregation_data';
 import {ConversionJobStatusUpdate} from '../common/conversion_jobs';
@@ -23,12 +24,16 @@ import {
 } from '../common/logs';
 import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
+import {raf} from '../core/raf_scheduler';
+import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 
 import {
   CounterDetails,
   CpuProfileDetails,
   FlamegraphDetails,
   Flow,
+  FtracePanelData,
+  FtraceStat,
   globals,
   QuantizedLoad,
   SliceDetails,
@@ -49,16 +54,22 @@ export function publishOverviewData(
       globals.overviewStore.get(key)!.push(value);
     }
   }
-  globals.rafScheduler.scheduleRedraw();
+  raf.scheduleRedraw();
+}
+
+export function clearOverviewData() {
+  globals.overviewStore.clear();
+  raf.scheduleRedraw();
 }
 
 export function publishTrackData(args: {id: string, data: {}}) {
   globals.setTrackData(args.id, args.data);
   if ([LogExistsKey, LogBoundsKey, LogEntriesKey].includes(args.id)) {
-    const data = globals.trackDataStore.get(LogExistsKey) as LogExists;
-    if (data && data.exists) globals.rafScheduler.scheduleFullRedraw();
+    const trackDataStore = globals.trackDataStore;
+    const data = trackDataStore.get(LogExistsKey) as LogExists | undefined;
+    if (data && data.exists) raf.scheduleFullRedraw();
   } else {
-    globals.rafScheduler.scheduleRedraw();
+    raf.scheduleRedraw();
   }
 }
 
@@ -70,6 +81,11 @@ export function publishMetricResult(metricResult: MetricResult) {
 export function publishSelectedFlows(selectedFlows: Flow[]) {
   globals.selectedFlows = selectedFlows;
   globals.publishRedraw();
+}
+
+export function publishHttpRpcState(httpRpcState: HttpRpcState) {
+  globals.httpRpcState = httpRpcState;
+  raf.scheduleFullRedraw();
 }
 
 export function publishCounterDetails(click: CounterDetails) {
@@ -87,8 +103,16 @@ export function publishCpuProfileDetails(details: CpuProfileDetails) {
   globals.publishRedraw();
 }
 
-export function publishHasFtrace(hasFtrace: boolean) {
-  globals.hasFtrace = hasFtrace;
+export function publishFtraceCounters(counters: FtraceStat[]) {
+  globals.ftraceCounters = counters;
+  globals.publishRedraw();
+}
+
+export function publishRealtimeOffset(
+    offset: time, utcOffset: time, traceTzOffset: time) {
+  globals.realtimeOffset = offset;
+  globals.utcOffset = utcOffset;
+  globals.traceTzOffset = traceTzOffset;
   globals.publishRedraw();
 }
 
@@ -102,7 +126,7 @@ export function publishLoading(numQueuedQueries: number) {
   globals.numQueuedQueries = numQueuedQueries;
   // TODO(hjd): Clean up loadingAnimation given that this now causes a full
   // redraw anyways. Also this should probably just go via the global state.
-  globals.rafScheduler.scheduleFullRedraw();
+  raf.scheduleFullRedraw();
 }
 
 export function publishBufferUsage(args: {percentage: number}) {
@@ -132,7 +156,6 @@ export function publishTraceErrors(numErrors: number) {
 
 export function publishMetricError(error: string) {
   globals.setMetricError(error);
-  globals.logging.logError(error, false);
   globals.publishRedraw();
 }
 
@@ -194,5 +217,15 @@ export function publishConnectedFlows(connectedFlows: Flow[]) {
     }
   }
 
+  globals.publishRedraw();
+}
+
+export function publishFtracePanelData(data: FtracePanelData) {
+  globals.ftracePanelData = data;
+  globals.publishRedraw();
+}
+
+export function publishShowPanningHint() {
+  globals.showPanningHint = true;
   globals.publishRedraw();
 }

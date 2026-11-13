@@ -9,8 +9,10 @@
 #include <utility>
 
 #include "base/containers/span.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_piece.h"
 #include "base/test/bind.h"
+#include "base/test/gmock_expected_support.h"
 #include "components/web_package/signed_web_bundles/ed25519_public_key.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -43,7 +45,7 @@ class SignedWebBundleIdValidTest
     : public ::testing::TestWithParam<
           std::tuple<std::string,
                      SignedWebBundleId::Type,
-                     absl::optional<std::array<uint8_t, 32>>>> {
+                     absl::optional<Ed25519PublicKey>>> {
  public:
   SignedWebBundleIdValidTest()
       : raw_id_(std::get<0>(GetParam())),
@@ -53,16 +55,13 @@ class SignedWebBundleIdValidTest
  protected:
   std::string raw_id_;
   SignedWebBundleId::Type type_;
-  absl::optional<std::array<uint8_t, 32>> public_key_;
+  absl::optional<Ed25519PublicKey> public_key_;
 };
 
 TEST_P(SignedWebBundleIdValidTest, ParseValidIDs) {
-  const auto parsed_id = SignedWebBundleId::Create(raw_id_);
-  EXPECT_TRUE(parsed_id.has_value());
-  EXPECT_EQ(parsed_id->type(), type_);
-  if (type_ == SignedWebBundleId::Type::kEd25519PublicKey) {
-    EXPECT_EQ(parsed_id->GetEd25519PublicKey().bytes(), *public_key_);
-  }
+  EXPECT_THAT(SignedWebBundleId::Create(raw_id_),
+              base::test::ValueIs(
+                  ::testing::Property(&SignedWebBundleId::type, type_)));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -74,9 +73,10 @@ INSTANTIATE_TEST_SUITE_P(
                         SignedWebBundleId::Type::kDevelopment,
                         absl::nullopt),
         // Ed25519 key suffix
-        std::make_tuple(kEd25519SignedWebBundleId,
-                        SignedWebBundleId::Type::kEd25519PublicKey,
-                        kEd25519PublicKeyBytes)),
+        std::make_tuple(
+            kEd25519SignedWebBundleId,
+            SignedWebBundleId::Type::kEd25519PublicKey,
+            Ed25519PublicKey::Create(base::make_span(kEd25519PublicKeyBytes)))),
     [](const testing::TestParamInfo<SignedWebBundleIdValidTest::ParamType>&
            info) { return std::get<0>(info.param); });
 
@@ -121,6 +121,11 @@ TEST(SignedWebBundleIdTest, Comparators) {
   EXPECT_TRUE(a1 == a1);
   EXPECT_TRUE(a1 == a2);
   EXPECT_FALSE(a1 == b);
+
+  EXPECT_FALSE(a1 != a1);
+  EXPECT_FALSE(a1 != a2);
+  EXPECT_TRUE(a1 != b);
+
   EXPECT_TRUE(a1 < b);
   EXPECT_FALSE(b < a2);
 }
@@ -131,7 +136,6 @@ TEST(SignedWebBundleIdTest, CreateForEd25519PublicKey) {
 
   auto id = SignedWebBundleId::CreateForEd25519PublicKey(public_key);
   EXPECT_EQ(id.type(), SignedWebBundleId::Type::kEd25519PublicKey);
-  EXPECT_EQ(id.GetEd25519PublicKey().bytes(), public_key.bytes());
   EXPECT_EQ(id.id(), kEd25519SignedWebBundleId);
 }
 
@@ -149,10 +153,9 @@ TEST(SignedWebBundleIdTest, CreateRandomForDevelopmentDefaultGenerator) {
 
 TEST(SignedWebBundleIdTest, CreateRandomForDevelopmentCustomGenerator) {
   auto custom_callback =
-      base::BindLambdaForTesting([](void* ptr, size_t len) -> void {
-        DCHECK_EQ(len, kDevelopmentBytes.size());
-        std::copy(kDevelopmentBytes.begin(), kDevelopmentBytes.begin() + len,
-                  static_cast<uint8_t*>(ptr));
+      base::BindLambdaForTesting([](base::span<uint8_t> buffer) -> void {
+        DCHECK_EQ(buffer.size(), kDevelopmentBytes.size());
+        base::ranges::copy(kDevelopmentBytes, buffer.begin());
       });
 
   SignedWebBundleId id =

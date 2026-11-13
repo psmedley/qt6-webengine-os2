@@ -112,7 +112,8 @@ class Builder(object):
 
     ## @cond FLATBUFFERS_INTENRAL
     __slots__ = ("Bytes", "current_vtable", "head", "minalign", "objectEnd",
-                 "vtables", "nested", "forceDefaults", "finished", "vectorNumElems")
+                 "vtables", "nested", "forceDefaults", "finished", "vectorNumElems",
+                 "sharedStrings")
 
     """Maximum buffer size constant, in bytes.
 
@@ -141,6 +142,7 @@ class Builder(object):
         self.vtables = {}
         self.nested = False
         self.forceDefaults = False
+        self.sharedStrings = {}
         ## @endcond
         self.finished = False
 
@@ -405,6 +407,20 @@ class Builder(object):
         self.vectorNumElems = None
         return self.Offset()
 
+    def CreateSharedString(self, s, encoding='utf-8', errors='strict'):
+        """
+        CreateSharedString checks if the string is already written to the buffer
+        before calling CreateString.
+        """
+
+        if s in self.sharedStrings:
+            return self.sharedStrings[s]
+
+        off = self.CreateString(s, encoding, errors)
+        self.sharedStrings[s] = off
+
+        return off
+
     def CreateString(self, s, encoding='utf-8', errors='strict'):
         """CreateString writes a null-terminated byte string as a vector."""
 
@@ -578,9 +594,11 @@ class Builder(object):
         self.Place(off, flags)
 
     def PrependSlot(self, flags, o, x, d):
-        N.enforce_number(x, flags)
-        N.enforce_number(d, flags)
-        if x != d or self.forceDefaults:
+        if x is not None:
+            N.enforce_number(x, flags)
+        if d is not None:
+            N.enforce_number(d, flags)
+        if x != d or (self.forceDefaults and d is not None):
             self.Prepend(flags, x)
             self.Slot(o)
 

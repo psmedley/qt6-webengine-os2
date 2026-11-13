@@ -28,7 +28,6 @@ class ExternalVkImageOverlayImageRepresentation
   // OverlayImageRepresentation implementation
   bool BeginReadAccess(gfx::GpuFenceHandle& acquire_fence) override;
   void EndReadAccess(gfx::GpuFenceHandle release_fence) override;
-  gl::GLImage* GetGLImage() override;
 
  private:
   void GetAcquireFence(gfx::GpuFenceHandle& fence);

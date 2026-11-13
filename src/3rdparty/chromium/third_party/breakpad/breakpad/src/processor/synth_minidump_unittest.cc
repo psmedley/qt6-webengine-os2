@@ -1,5 +1,4 @@
-// Copyright (c) 2010, Google Inc.
-// All rights reserved.
+// Copyright 2010 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -31,6 +30,10 @@
 
 // synth_minidump_unittest.cc: Unit tests for google_breakpad::SynthMinidump
 // classes.
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>  // Must come first
+#endif
 
 #include <sstream>
 #include <string>
@@ -144,7 +147,12 @@ TEST(Context, ARM) {
               == 0);
 }
 
+#if GTEST_OS_WINDOWS && !GTEST_HAS_ABSL
+// GTest on Windows does not support complex regular expressions.
+TEST(ContextDeathTest, DISABLED_X86BadFlags) {
+#else
 TEST(ContextDeathTest, X86BadFlags) {
+#endif
   Dump dump(0, kLittleEndian);
   MDRawContextX86 raw;
   raw.context_flags = MD_CONTEXT_AMD64;
@@ -152,7 +160,12 @@ TEST(ContextDeathTest, X86BadFlags) {
                "context\\.context_flags & (0x[0-9a-f]+|MD_CONTEXT_X86)");
 }
 
+#if GTEST_OS_WINDOWS && !GTEST_HAS_ABSL
+// GTest on Windows does not support complex regular expressions.
+TEST(ContextDeathTest, DISABLED_X86BadEndianness) {
+#else
 TEST(ContextDeathTest, X86BadEndianness) {
+#endif
   Dump dump(0, kBigEndian);
   MDRawContextX86 raw;
   raw.context_flags = MD_CONTEXT_X86;

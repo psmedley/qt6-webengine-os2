@@ -16,13 +16,17 @@
 
 #include "src/trace_processor/importers/common/trace_parser.h"
 
+#include "perfetto/trace_processor/trace_blob_view.h"
+#include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
 #include "src/trace_processor/importers/systrace/systrace_line.h"
-#include "src/trace_processor/parser_types.h"
 
 namespace perfetto {
 namespace trace_processor {
 
+void TraceParser::ParseTraceBlobView(int64_t, TraceBlobView) {
+  PERFETTO_FATAL("Wrong parser type");
+}
 void TraceParser::ParseTracePacket(int64_t, TracePacketData) {
   PERFETTO_FATAL("Wrong parser type");
 }
@@ -38,7 +42,7 @@ void TraceParser::ParseTrackEvent(int64_t, TrackEventData) {
 void TraceParser::ParseSystraceLine(int64_t, SystraceLine) {
   PERFETTO_FATAL("Wrong parser type");
 }
-void TraceParser::ParseFtraceEvent(uint32_t, int64_t, FtraceEventData) {
+void TraceParser::ParseFtraceEvent(uint32_t, int64_t, TracePacketData) {
   PERFETTO_FATAL("Wrong parser type");
 }
 void TraceParser::ParseInlineSchedSwitch(uint32_t, int64_t, InlineSchedSwitch) {

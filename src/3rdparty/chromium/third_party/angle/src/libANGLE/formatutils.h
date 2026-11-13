@@ -66,11 +66,15 @@ ANGLE_INLINE GLenum GetNonLinearFormat(const GLenum format)
         case GL_RGBA8:
             return GL_SRGB8_ALPHA8;
         case GL_RGB8:
-        case GL_BGRX8_ANGLEX:
-        case GL_RGBX8_ANGLE:
             return GL_SRGB8;
+        case GL_BGRX8_ANGLEX:
+            return GL_BGRX8_SRGB_ANGLEX;
+        case GL_RGBX8_ANGLE:
+            return GL_RGBX8_SRGB_ANGLEX;
         case GL_RGBA16F:
             return GL_RGBA16F;
+        case GL_RGB10_A2_EXT:
+            return GL_RGB10_A2_EXT;
         default:
             return GL_NONE;
     }
@@ -83,6 +87,7 @@ ANGLE_INLINE bool ColorspaceFormatOverride(const EGLenum colorspace, GLenum *ren
     {
         case EGL_GL_COLORSPACE_LINEAR:                 // linear colorspace no translation needed
         case EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT:       // linear colorspace no translation needed
+        case EGL_GL_COLORSPACE_BT2020_LINEAR_EXT:      // linear colorspace no translation needed
         case EGL_GL_COLORSPACE_DISPLAY_P3_LINEAR_EXT:  // linear colorspace no translation needed
         case EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT:  // App, not the HW, will specify the
                                                             // transfer function
@@ -90,6 +95,8 @@ ANGLE_INLINE bool ColorspaceFormatOverride(const EGLenum colorspace, GLenum *ren
             // No translation
             return true;
         case EGL_GL_COLORSPACE_SRGB_KHR:
+        case EGL_GL_COLORSPACE_BT2020_PQ_EXT:
+        case EGL_GL_COLORSPACE_BT2020_HLG_EXT:
         case EGL_GL_COLORSPACE_DISPLAY_P3_EXT:
         {
             GLenum nonLinearFormat = GetNonLinearFormat(*rendertargetformat);
@@ -161,6 +168,12 @@ struct InternalFormat
                                          GLuint *resultOut) const;
 
     [[nodiscard]] bool computePalettedImageRowPitch(GLsizei width, GLuint *resultOut) const;
+
+    [[nodiscard]] bool computeCompressedImageRowPitch(GLsizei width, GLuint *resultOut) const;
+
+    [[nodiscard]] bool computeCompressedImageDepthPitch(GLsizei height,
+                                                        GLuint rowPitch,
+                                                        GLuint *resultOut) const;
 
     [[nodiscard]] bool computeCompressedImageSize(const Extents &size, GLuint *resultOut) const;
 
@@ -467,24 +480,24 @@ ANGLE_INLINE bool IsETC2EACFormat(const GLenum format)
     }
 }
 
-ANGLE_INLINE bool IsPVRTC1Format(const GLenum format)
+ANGLE_INLINE constexpr bool IsPVRTC1Format(const GLenum format)
 {
-    switch (format)
-    {
-        case GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG:
-        case GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG:
-        case GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG:
-        case GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG:
-        case GL_COMPRESSED_SRGB_PVRTC_2BPPV1_EXT:
-        case GL_COMPRESSED_SRGB_PVRTC_4BPPV1_EXT:
-        case GL_COMPRESSED_SRGB_ALPHA_PVRTC_2BPPV1_EXT:
-        case GL_COMPRESSED_SRGB_ALPHA_PVRTC_4BPPV1_EXT:
-            return true;
-
-        default:
-            return false;
-    }
+    // This function is called for all compressed texture uploads. The expression below generates
+    // fewer instructions than a regular switch statement. Two groups of four consecutive values,
+    // each group starts with two least significant bits unset.
+    return ((format & ~3) == GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG) ||
+           ((format & ~3) == GL_COMPRESSED_SRGB_PVRTC_2BPPV1_EXT);
 }
+static_assert(IsPVRTC1Format(GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG), "0x8C00");
+static_assert(IsPVRTC1Format(GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG), "0x8C01");
+static_assert(IsPVRTC1Format(GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG), "0x8C02");
+static_assert(IsPVRTC1Format(GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG), "0x8C03");
+static_assert(IsPVRTC1Format(GL_COMPRESSED_SRGB_PVRTC_2BPPV1_EXT), "0x8A54");
+static_assert(IsPVRTC1Format(GL_COMPRESSED_SRGB_PVRTC_4BPPV1_EXT), "0x8A55");
+static_assert(IsPVRTC1Format(GL_COMPRESSED_SRGB_ALPHA_PVRTC_2BPPV1_EXT), "0x8A56");
+static_assert(IsPVRTC1Format(GL_COMPRESSED_SRGB_ALPHA_PVRTC_4BPPV1_EXT), "0x8A57");
+static_assert(!IsPVRTC1Format(0x8BFF) && !IsPVRTC1Format(0x8C04), "invalid");
+static_assert(!IsPVRTC1Format(0x8A53) && !IsPVRTC1Format(0x8A58), "invalid");
 
 ANGLE_INLINE bool IsBGRAFormat(const GLenum internalFormat)
 {
@@ -495,7 +508,6 @@ ANGLE_INLINE bool IsBGRAFormat(const GLenum internalFormat)
         case GL_BGR5_A1_ANGLEX:
         case GL_BGRA8_SRGB_ANGLEX:
         case GL_BGRX8_ANGLEX:
-        case GL_RGBX8_ANGLE:
         case GL_BGR565_ANGLEX:
         case GL_BGR10_A2_ANGLEX:
             return true;

@@ -1,20 +1,34 @@
-// Copyright 2021 The Dawn Authors
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/webgpu_absl_format.h"
 
 #include <string>
+#include <vector>
 
 #include "dawn/native/AttachmentState.h"
 #include "dawn/native/BindingInfo.h"
@@ -22,11 +36,12 @@
 #include "dawn/native/Format.h"
 #include "dawn/native/ObjectBase.h"
 #include "dawn/native/PerStage.h"
+#include "dawn/native/ProgrammableEncoder.h"
+#include "dawn/native/RenderPipeline.h"
 #include "dawn/native/ShaderModule.h"
 #include "dawn/native/Subresource.h"
 #include "dawn/native/Surface.h"
 #include "dawn/native/Texture.h"
-#include "dawn/native/VertexFormat.h"
 
 namespace dawn::native {
 
@@ -46,6 +61,18 @@ AbslFormatConvert(const Color* value, const absl::FormatConversionSpec& spec, ab
 }
 
 absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const Extent2D* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    if (value == nullptr) {
+        s->Append("[null]");
+        return {true};
+    }
+    s->Append(absl::StrFormat("[Extent2D width:%u, height:%u]", value->width, value->height));
+    return {true};
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
     const Extent3D* value,
     const absl::FormatConversionSpec& spec,
     absl::FormatSink* s) {
@@ -55,6 +82,18 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
     }
     s->Append(absl::StrFormat("[Extent3D width:%u, height:%u, depthOrArrayLayers:%u]", value->width,
                               value->height, value->depthOrArrayLayers));
+    return {true};
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const Origin2D* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    if (value == nullptr) {
+        s->Append("[null]");
+        return {true};
+    }
+    s->Append(absl::StrFormat("[Origin2D x:%u, y:%u]", value->x, value->y));
     return {true};
 }
 
@@ -99,6 +138,49 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
     return {true};
 }
 
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const ImageCopyTexture* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    if (value == nullptr) {
+        s->Append("[null]");
+        return {true};
+    }
+    s->Append(
+        absl::StrFormat("[ImageCopyTexture texture: %s, mipLevel: %u, origin: %s, aspect: %s]",
+                        value->texture, value->mipLevel, &value->origin, value->aspect));
+    return {true};
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const TextureDataLayout* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    if (value == nullptr) {
+        s->Append("[null]");
+        return {true};
+    }
+    s->Append(absl::StrFormat("[TextureDataLayout offset:%u, bytesPerRow:%u, rowsPerImage:%u]",
+                              value->offset, value->bytesPerRow, value->rowsPerImage));
+    return {true};
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const ShaderModuleEntryPoint* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    if (value == nullptr) {
+        s->Append("[null]");
+        return {true};
+    }
+    s->Append(absl::StrFormat("[EntryPoint \"%s\"", value->name));
+    if (value->defaulted) {
+        s->Append(" (defaulted)");
+    }
+    s->Append("]");
+    return {true};
+}
+
 //
 // Objects
 //
@@ -132,36 +214,7 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
     if (value->IsError()) {
         s->Append("Invalid ");
     }
-    s->Append(ObjectTypeAsString(value->GetType()));
-    const std::string& label = value->GetLabel();
-    if (!label.empty()) {
-        s->Append(absl::StrFormat(" \"%s\"", label));
-    }
-    s->Append("]");
-    return {true};
-}
-
-absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
-    const TextureViewBase* value,
-    const absl::FormatConversionSpec& spec,
-    absl::FormatSink* s) {
-    if (value == nullptr) {
-        s->Append("[null]");
-        return {true};
-    }
-    s->Append("[");
-    if (value->IsError()) {
-        s->Append("Invalid ");
-    }
-    s->Append(ObjectTypeAsString(value->GetType()));
-    const std::string& label = value->GetLabel();
-    if (!label.empty()) {
-        s->Append(absl::StrFormat(" \"%s\"", label));
-    }
-    const std::string& textureLabel = value->GetTexture()->GetLabel();
-    if (!textureLabel.empty()) {
-        s->Append(absl::StrFormat(" of Texture \"%s\"", textureLabel));
-    }
+    value->FormatLabel(s);
     s->Append("]");
     return {true};
 }
@@ -177,10 +230,10 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
 
     s->Append("{ colorFormats: [");
 
-    ColorAttachmentIndex nextColorIndex(uint8_t(0));
+    ColorAttachmentIndex nextColorIndex{};
 
     bool needsComma = false;
-    for (ColorAttachmentIndex i : IterateBitSet(value->GetColorAttachmentsMask())) {
+    for (auto i : IterateBitSet(value->GetColorAttachmentsMask())) {
         if (needsComma) {
             s->Append(", ");
         }
@@ -203,7 +256,28 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
         s->Append(absl::StrFormat("depthStencilFormat: %s, ", value->GetDepthStencilFormat()));
     }
 
-    s->Append(absl::StrFormat("sampleCount: %u }", value->GetSampleCount()));
+    s->Append(absl::StrFormat("sampleCount: %u", value->GetSampleCount()));
+
+    if (value->GetDevice()->HasFeature(Feature::MSAARenderToSingleSampled)) {
+        s->Append(absl::StrFormat(", msaaRenderToSingleSampled: %d",
+                                  value->IsMSAARenderToSingleSampledEnabled()));
+    }
+
+    if (value->HasPixelLocalStorage()) {
+        const std::vector<wgpu::TextureFormat>& plsSlots = value->GetStorageAttachmentSlots();
+        s->Append(absl::StrFormat(", totalPixelLocalStorageSize: %d",
+                                  plsSlots.size() * kPLSSlotByteSize));
+        s->Append(", storageAttachments: [ ");
+        for (size_t i = 0; i < plsSlots.size(); i++) {
+            if (plsSlots[i] != wgpu::TextureFormat::Undefined) {
+                s->Append(absl::StrFormat("{format: %s, offset: %d}, ", plsSlots[i],
+                                          i * kPLSSlotByteSize));
+            }
+        }
+        s->Append("]");
+    }
+
+    s->Append(" }");
 
     return {true};
 }
@@ -385,14 +459,17 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
     const absl::FormatConversionSpec& spec,
     absl::FormatSink* s) {
     switch (value) {
-        case InterStageComponentType::Float:
-            s->Append("Float");
+        case InterStageComponentType::F32:
+            s->Append("f32");
             break;
-        case InterStageComponentType::Uint:
-            s->Append("Uint");
+        case InterStageComponentType::F16:
+            s->Append("f16");
             break;
-        case InterStageComponentType::Sint:
-            s->Append("Sint");
+        case InterStageComponentType::U32:
+            s->Append("u32");
+            break;
+        case InterStageComponentType::I32:
+            s->Append("i32");
             break;
     }
     return {true};
@@ -432,6 +509,42 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
             break;
         case InterpolationSampling::Sample:
             s->Append("Sample");
+            break;
+    }
+    return {true};
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    TextureComponentType value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    switch (value) {
+        case TextureComponentType::Float:
+            s->Append("Float");
+            break;
+        case TextureComponentType::Sint:
+            s->Append("Sint");
+            break;
+        case TextureComponentType::Uint:
+            s->Append("Uint");
+            break;
+    }
+    return {true};
+}
+
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    PixelLocalMemberType value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    switch (value) {
+        case PixelLocalMemberType::I32:
+            s->Append("i32");
+            break;
+        case PixelLocalMemberType::U32:
+            s->Append("u32");
+            break;
+        case PixelLocalMemberType::F32:
+            s->Append("f32");
             break;
     }
     return {true};

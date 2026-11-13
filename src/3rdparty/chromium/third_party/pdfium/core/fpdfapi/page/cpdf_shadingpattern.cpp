@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -120,8 +120,7 @@ bool CPDF_ShadingPattern::Validate() const {
       break;
     }
     default: {
-      NOTREACHED();
-      return false;
+      NOTREACHED_NORETURN();
     }
   }
 
@@ -148,10 +147,8 @@ bool CPDF_ShadingPattern::Validate() const {
              ValidateFunctions(nNumColorSpaceComponents, 1, 1);
     }
     default:
-      break;
+      NOTREACHED_NORETURN();
   }
-  NOTREACHED();
-  return false;
 }
 
 bool CPDF_ShadingPattern::ValidateFunctions(

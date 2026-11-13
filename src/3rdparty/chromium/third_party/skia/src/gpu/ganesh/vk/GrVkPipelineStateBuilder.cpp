@@ -20,6 +20,7 @@
 #include "src/gpu/ganesh/vk/GrVkPipeline.h"
 #include "src/gpu/ganesh/vk/GrVkRenderPass.h"
 #include "src/gpu/ganesh/vk/GrVkRenderTarget.h"
+#include "src/sksl/SkSLProgramSettings.h"
 #include "src/utils/SkShaderUtils.h"
 
 GrVkPipelineState* GrVkPipelineStateBuilder::CreatePipelineState(
@@ -59,14 +60,6 @@ const GrCaps* GrVkPipelineStateBuilder::caps() const {
     return fGpu->caps();
 }
 
-SkSL::Compiler* GrVkPipelineStateBuilder::shaderCompiler() const {
-    return fGpu->shaderCompiler();
-}
-
-void GrVkPipelineStateBuilder::finalizeFragmentOutputColor(GrShaderVar& outputColor) {
-    outputColor.addLayoutQualifier("location = 0, index = 0");
-}
-
 void GrVkPipelineStateBuilder::finalizeFragmentSecondaryColor(GrShaderVar& outputColor) {
     outputColor.addLayoutQualifier("location = 0, index = 1");
 }
@@ -77,12 +70,12 @@ bool GrVkPipelineStateBuilder::createVkShaderModule(VkShaderStageFlagBits stage,
                                                     VkPipelineShaderStageCreateInfo* stageInfo,
                                                     const SkSL::ProgramSettings& settings,
                                                     std::string* outSPIRV,
-                                                    SkSL::Program::Inputs* outInputs) {
+                                                    SkSL::Program::Interface* outInterface) {
     if (!GrCompileVkShaderModule(fGpu, sksl, stage, shaderModule,
-                                 stageInfo, settings, outSPIRV, outInputs)) {
+                                 stageInfo, settings, outSPIRV, outInterface)) {
         return false;
     }
-    if (outInputs->fUseFlipRTUniform) {
+    if (outInterface->fRTFlipUniform != SkSL::Program::Interface::kRTFlip_None) {
         this->addRTFlipUniform(SKSL_RTFLIP_NAME);
     }
     return true;
@@ -93,11 +86,11 @@ bool GrVkPipelineStateBuilder::installVkShaderModule(VkShaderStageFlagBits stage
                                                      VkShaderModule* shaderModule,
                                                      VkPipelineShaderStageCreateInfo* stageInfo,
                                                      std::string spirv,
-                                                     SkSL::Program::Inputs inputs) {
+                                                     SkSL::Program::Interface interface) {
     if (!GrInstallVkShaderModule(fGpu, spirv, stage, shaderModule, stageInfo)) {
         return false;
     }
-    if (inputs.fUseFlipRTUniform) {
+    if (interface.fRTFlipUniform != SkSL::Program::Interface::kRTFlip_None) {
         this->addRTFlipUniform(SKSL_RTFLIP_NAME);
     }
     return true;
@@ -110,9 +103,10 @@ int GrVkPipelineStateBuilder::loadShadersFromCache(SkReadBuffer* cached,
                                                    VkShaderModule outShaderModules[],
                                                    VkPipelineShaderStageCreateInfo* outStageInfo) {
     std::string shaders[kGrShaderTypeCount];
-    SkSL::Program::Inputs inputs[kGrShaderTypeCount];
+    SkSL::Program::Interface interfaces[kGrShaderTypeCount];
 
-    if (!GrPersistentCacheUtils::UnpackCachedShaders(cached, shaders, inputs, kGrShaderTypeCount)) {
+    if (!GrPersistentCacheUtils::UnpackCachedShaders(
+                cached, shaders, interfaces, kGrShaderTypeCount)) {
         return 0;
     }
 
@@ -121,14 +115,14 @@ int GrVkPipelineStateBuilder::loadShadersFromCache(SkReadBuffer* cached,
                                                &outShaderModules[kVertex_GrShaderType],
                                                &outStageInfo[0],
                                                shaders[kVertex_GrShaderType],
-                                               inputs[kVertex_GrShaderType]);
+                                               interfaces[kVertex_GrShaderType]);
 
     success = success && this->installVkShaderModule(VK_SHADER_STAGE_FRAGMENT_BIT,
                                                      fFS,
                                                      &outShaderModules[kFragment_GrShaderType],
                                                      &outStageInfo[1],
                                                      shaders[kFragment_GrShaderType],
-                                                     inputs[kFragment_GrShaderType]);
+                                                     interfaces[kFragment_GrShaderType]);
 
     if (!success) {
         for (int i = 0; i < kGrShaderTypeCount; ++i) {
@@ -143,7 +137,7 @@ int GrVkPipelineStateBuilder::loadShadersFromCache(SkReadBuffer* cached,
 }
 
 void GrVkPipelineStateBuilder::storeShadersInCache(const std::string shaders[],
-                                                   const SkSL::Program::Inputs inputs[],
+                                                   const SkSL::Program::Interface interfaces[],
                                                    bool isSkSL) {
     // Here we shear off the Vk-specific portion of the Desc in order to create the
     // persistent key. This is bc Vk only caches the SPIRV code, not the fully compiled
@@ -156,7 +150,7 @@ void GrVkPipelineStateBuilder::storeShadersInCache(const std::string shaders[],
 
     sk_sp<SkData> data = GrPersistentCacheUtils::PackCachedShaders(isSkSL ? kSKSL_Tag : kSPIRV_Tag,
                                                                    shaders,
-                                                                   inputs, kGrShaderTypeCount);
+                                                                   interfaces, kGrShaderTypeCount);
 
     this->gpu()->getContext()->priv().getPersistentCache()->store(*key, *data, description);
 }
@@ -224,7 +218,7 @@ GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
     if (!numShaderStages) {
         numShaderStages = 2; // We always have at least vertex and fragment stages.
         std::string shaders[kGrShaderTypeCount];
-        SkSL::Program::Inputs inputs[kGrShaderTypeCount];
+        SkSL::Program::Interface interfaces[kGrShaderTypeCount];
 
         std::string* sksl[kGrShaderTypeCount] = {
             &fVS.fCompilerString,
@@ -232,7 +226,7 @@ GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
         };
         std::string cached_sksl[kGrShaderTypeCount];
         if (kSKSL_Tag == shaderType) {
-            if (GrPersistentCacheUtils::UnpackCachedShaders(&reader, cached_sksl, inputs,
+            if (GrPersistentCacheUtils::UnpackCachedShaders(&reader, cached_sksl, interfaces,
                                                             kGrShaderTypeCount)) {
                 for (int i = 0; i < kGrShaderTypeCount; ++i) {
                     sksl[i] = &cached_sksl[i];
@@ -246,7 +240,7 @@ GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
                                                   &shaderStageInfo[0],
                                                   settings,
                                                   &shaders[kVertex_GrShaderType],
-                                                  &inputs[kVertex_GrShaderType]);
+                                                  &interfaces[kVertex_GrShaderType]);
 
         success = success && this->createVkShaderModule(VK_SHADER_STAGE_FRAGMENT_BIT,
                                                         *sksl[kFragment_GrShaderType],
@@ -254,7 +248,7 @@ GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
                                                         &shaderStageInfo[1],
                                                         settings,
                                                         &shaders[kFragment_GrShaderType],
-                                                        &inputs[kFragment_GrShaderType]);
+                                                        &interfaces[kFragment_GrShaderType]);
 
         if (!success) {
             for (int i = 0; i < kGrShaderTypeCount; ++i) {
@@ -275,7 +269,7 @@ GrVkPipelineState* GrVkPipelineStateBuilder::finalize(const GrProgramDesc& desc,
                 }
                 isSkSL = true;
             }
-            this->storeShadersInCache(shaders, inputs, isSkSL);
+            this->storeShadersInCache(shaders, interfaces, isSkSL);
         }
     }
 

@@ -38,7 +38,6 @@
 #include "src/traced/probes/android_game_intervention_list/android_game_intervention_list_data_source.h"
 #include "src/traced/probes/android_log/android_log_data_source.h"
 #include "src/traced/probes/android_system_property/android_system_property_data_source.h"
-#include "src/traced/probes/common/cpu_freq_info.h"
 #include "src/traced/probes/filesystem/inode_file_data_source.h"
 #include "src/traced/probes/ftrace/ftrace_data_source.h"
 #include "src/traced/probes/initial_display_state/initial_display_state_data_source.h"
@@ -48,7 +47,7 @@
 #include "src/traced/probes/power/linux_power_sysfs_data_source.h"
 #include "src/traced/probes/probes_data_source.h"
 #include "src/traced/probes/ps/process_stats_data_source.h"
-#include "src/traced/probes/statsd_client/statsd_data_source.h"
+#include "src/traced/probes/statsd_client/statsd_binder_data_source.h"
 #include "src/traced/probes/sys_stats/sys_stats_data_source.h"
 #include "src/traced/probes/system_info/system_info_data_source.h"
 
@@ -125,6 +124,8 @@ ProbesProducer::CreateDSInstance<FtraceDataSource>(
   if (ftrace_creation_failed_)
     return nullptr;
 
+  FtraceConfig ftrace_config;
+  ftrace_config.ParseFromString(config.ftrace_config_raw());
   // Lazily create on the first instance.
   if (!ftrace_) {
     ftrace_ = FtraceController::Create(task_runner_, this);
@@ -134,15 +135,10 @@ ProbesProducer::CreateDSInstance<FtraceDataSource>(
       ftrace_creation_failed_ = true;
       return nullptr;
     }
-
-    ftrace_->DisableAllEvents();
-    ftrace_->ClearTrace();
   }
 
   PERFETTO_LOG("Ftrace setup (target_buf=%" PRIu32 ")", config.target_buffer());
   const BufferID buffer_id = static_cast<BufferID>(config.target_buffer());
-  FtraceConfig ftrace_config;
-  ftrace_config.ParseFromString(config.ftrace_config_raw());
   std::unique_ptr<FtraceDataSource> data_source(new FtraceDataSource(
       ftrace_->GetWeakPtr(), session_id, std::move(ftrace_config),
       endpoint_->CreateTraceWriter(buffer_id)));
@@ -175,19 +171,19 @@ ProbesProducer::CreateDSInstance<ProcessStatsDataSource>(
     const DataSourceConfig& config) {
   auto buffer_id = static_cast<BufferID>(config.target_buffer());
   return std::unique_ptr<ProcessStatsDataSource>(new ProcessStatsDataSource(
-      task_runner_, session_id, endpoint_->CreateTraceWriter(buffer_id), config,
-      std::unique_ptr<CpuFreqInfo>(new CpuFreqInfo())));
+      task_runner_, session_id, endpoint_->CreateTraceWriter(buffer_id),
+      config));
 }
 
 template <>
 std::unique_ptr<ProbesDataSource>
-ProbesProducer::CreateDSInstance<StatsdDataSource>(
+ProbesProducer::CreateDSInstance<StatsdBinderDataSource>(
     TracingSessionID session_id,
     const DataSourceConfig& config) {
   auto buffer_id = static_cast<BufferID>(config.target_buffer());
-  return std::unique_ptr<StatsdDataSource>(
-      new StatsdDataSource(task_runner_, session_id,
-                           endpoint_->CreateTraceWriter(buffer_id), config));
+  return std::unique_ptr<StatsdBinderDataSource>(new StatsdBinderDataSource(
+      task_runner_, session_id, endpoint_->CreateTraceWriter(buffer_id),
+      config));
 }
 
 template <>
@@ -328,7 +324,9 @@ constexpr const DataSourceTraits kAllDataSources[] = {
     Ds<MetatraceDataSource>(),
     Ds<PackagesListDataSource>(),
     Ds<ProcessStatsDataSource>(),
-    Ds<StatsdDataSource>(),
+#if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
+    Ds<StatsdBinderDataSource>(),
+#endif
     Ds<SysStatsDataSource>(),
     Ds<SystemInfoDataSource>(),
 };
@@ -435,6 +433,10 @@ void ProbesProducer::StartDataSource(DataSourceInstanceID instance_id,
     // We need to ensure this timeout is worse than the worst case
     // time from us starting to traced managing to disable us.
     // See b/236814186#comment8 for context
+    // Note: when using prefer_suspend_clock_for_duration the actual duration
+    // might be < timeout measured in in wall time. But this is fine
+    // because the resulting timeout will be conservative (it will be accurate
+    // if the device never suspends, and will be more lax if it does).
     uint32_t timeout =
         2 * (kDefaultFlushTimeoutMs + config.trace_duration_ms() +
              config.stop_timeout_ms());
@@ -500,39 +502,53 @@ void ProbesProducer::OnTracingSetup() {
 
 void ProbesProducer::Flush(FlushRequestID flush_request_id,
                            const DataSourceInstanceID* data_source_ids,
-                           size_t num_data_sources) {
+                           size_t num_data_sources,
+                           FlushFlags) {
+  PERFETTO_DLOG("ProbesProducer::Flush(%" PRIu64 ") begin", flush_request_id);
   PERFETTO_DCHECK(flush_request_id);
-  auto weak_this = weak_factory_.GetWeakPtr();
+  auto log_on_exit = base::OnScopeExit([&] {
+    PERFETTO_DLOG("ProbesProducer::Flush(%" PRIu64 ") end", flush_request_id);
+  });
 
   // Issue a Flush() to all started data sources.
-  bool flush_queued = false;
+  std::vector<std::pair<DataSourceInstanceID, ProbesDataSource*>> ds_to_flush;
   for (size_t i = 0; i < num_data_sources; i++) {
     DataSourceInstanceID ds_id = data_source_ids[i];
     auto it = data_sources_.find(ds_id);
     if (it == data_sources_.end() || !it->second->started)
       continue;
     pending_flushes_.emplace(flush_request_id, ds_id);
-    flush_queued = true;
-    auto flush_callback = [weak_this, flush_request_id, ds_id] {
-      if (weak_this)
-        weak_this->OnDataSourceFlushComplete(flush_request_id, ds_id);
-    };
-    it->second->Flush(flush_request_id, flush_callback);
+    ds_to_flush.emplace_back(std::make_pair(ds_id, it->second.get()));
   }
 
   // If there is nothing to flush, ack immediately.
-  if (!flush_queued) {
+  if (ds_to_flush.empty()) {
     endpoint_->NotifyFlushComplete(flush_request_id);
     return;
   }
 
-  // Otherwise, post the timeout task.
+  // Otherwise post the timeout task and issue all flushes in order.
+  auto weak_this = weak_factory_.GetWeakPtr();
   task_runner_->PostDelayedTask(
       [weak_this, flush_request_id] {
         if (weak_this)
           weak_this->OnFlushTimeout(flush_request_id);
       },
       kFlushTimeoutMs);
+
+  // Issue all the flushes in order. We do this in a separate loop to deal with
+  // the case of data sources invoking the callback synchronously (b/295189870).
+  for (const auto& kv : ds_to_flush) {
+    const DataSourceInstanceID ds_id = kv.first;
+    ProbesDataSource* const data_source = kv.second;
+    auto flush_callback = [weak_this, flush_request_id, ds_id] {
+      if (weak_this)
+        weak_this->OnDataSourceFlushComplete(flush_request_id, ds_id);
+    };
+    PERFETTO_DLOG("Flushing data source %" PRIu64 " %s", ds_id,
+                  data_source->descriptor->name);
+    data_source->Flush(flush_request_id, flush_callback);
+  }
 }
 
 void ProbesProducer::OnDataSourceFlushComplete(FlushRequestID flush_request_id,
@@ -608,6 +624,8 @@ void ProbesProducer::OnFtraceDataWrittenIntoDataSourceBuffers() {
           ps_ds->OnRenamePids(metadata->rename_pids);
         if (!metadata->pids.empty())
           ps_ds->OnPids(metadata->pids);
+        if (!metadata->fds.empty())
+          ps_ds->OnFds(metadata->fds);
       }
       for (auto in_it = ino_range.first; in_it != ino_range.second; in_it++) {
         auto* inode_ds = static_cast<InodeFileDataSource*>(in_it->second);

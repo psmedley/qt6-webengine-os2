@@ -36,6 +36,7 @@ enum TraceType {
   kCtraceTraceType,
   kNinjaLogTraceType,
   kAndroidBugreportTraceType,
+  kPerfDataTraceType,
 };
 
 class ArgsTracker;
@@ -44,6 +45,8 @@ class AsyncTrackSetTracker;
 class AndroidProbesTracker;
 class ChunkedTraceReader;
 class ClockTracker;
+class ClockConverter;
+class DeobfuscationMappingTable;
 class EventTracker;
 class ForwardingTraceParser;
 class FtraceModule;
@@ -53,6 +56,7 @@ class HeapGraphTracker;
 class HeapProfileTracker;
 class PerfSampleTracker;
 class MetadataTracker;
+class PacketAnalyzer;
 class ProtoImporterModule;
 class TrackEventModule;
 class ProcessTracker;
@@ -95,6 +99,7 @@ class TraceProcessorContext {
   std::unique_ptr<ProcessTracker> process_tracker;
   std::unique_ptr<EventTracker> event_tracker;
   std::unique_ptr<ClockTracker> clock_tracker;
+  std::unique_ptr<ClockConverter> clock_converter;
   std::unique_ptr<HeapProfileTracker> heap_profile_tracker;
   std::unique_ptr<PerfSampleTracker> perf_sample_tracker;
   std::unique_ptr<GlobalStackProfileTracker> global_stack_profile_tracker;
@@ -116,21 +121,29 @@ class TraceProcessorContext {
   std::unique_ptr<Destructible> systrace_parser;         // SystraceParser
   std::unique_ptr<Destructible> thread_state_tracker;    // ThreadStateTracker
   std::unique_ptr<Destructible> i2c_tracker;             // I2CTracker
+  std::unique_ptr<Destructible> perf_data_tracker;       // PerfDataTracker
+  std::unique_ptr<Destructible> content_analyzer;        // ProtoContentAnalyzer
+  std::unique_ptr<Destructible>
+      shell_transitions_tracker;             // ShellTransitionsTracker
+  std::unique_ptr<Destructible> v8_tracker;  // V8Tracker
 
   // These fields are trace readers which will be called by |forwarding_parser|
   // once the format of the trace is discovered. They are placed here as they
-  // are only available in the storage_full target.
+  // are only available in the lib target.
   std::unique_ptr<ChunkedTraceReader> json_trace_tokenizer;
   std::unique_ptr<ChunkedTraceReader> fuchsia_trace_tokenizer;
+  std::unique_ptr<ChunkedTraceReader> ninja_log_parser;
   std::unique_ptr<ChunkedTraceReader> android_bugreport_parser;
   std::unique_ptr<ChunkedTraceReader> systrace_trace_parser;
   std::unique_ptr<ChunkedTraceReader> gzip_trace_parser;
+  std::unique_ptr<ChunkedTraceReader> perf_data_trace_tokenizer;
 
   // These fields are trace parsers which will be called by |forwarding_parser|
   // once the format of the trace is discovered. They are placed here as they
-  // are only available in the storage_full target.
+  // are only available in the lib target.
   std::unique_ptr<TraceParser> json_trace_parser;
   std::unique_ptr<TraceParser> fuchsia_trace_parser;
+  std::unique_ptr<TraceParser> perf_data_parser;
 
   // This field contains the list of proto descriptors that can be used by
   // reflection-based parsers.

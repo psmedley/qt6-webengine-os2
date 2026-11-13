@@ -53,9 +53,6 @@ extern const char kGooglePlayMusicAppId[];
 // The extension id of the Google+ application.
 extern const char kGooglePlusAppId[];
 
-// The extension id of the Identity API UI application.
-extern const char kIdentityApiUiAppId[];
-
 // The extension id of the Text Editor application.
 extern const char kTextEditorAppId[];
 
@@ -171,6 +168,10 @@ extern const char kContactCenterInsightsExtensionId[];
 extern const char kDeskApiExtensionId[];
 // The extension id of the Bruschetta Security Key Forwarder extension.
 extern const char kBruSecurityKeyForwarderExtensionId[];
+// The extension id of the OneDrive FS external component extension.
+extern const char kODFSExtensionId[];
+// The extension id of Perfetto UI extension.
+extern const char kPerfettoUIExtensionId[];
 #endif
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 // The extension id of the Accessibility Common extension.
@@ -180,15 +181,25 @@ extern const char kAccessibilityCommonExtensionId[];
 extern const char kAccessibilityCommonExtensionPath[];
 // The manifest filename of the Accessibility Common extension.
 extern const char kAccessibilityCommonManifestFilename[];
+// The manifest v3 filename of the Accessibility Common extension.
+extern const char kAccessibilityCommonManifestV3Filename[];
 // The guest manifest filename of the Accessibility Common extension.
 extern const char kAccessibilityCommonGuestManifestFilename[];
+// The guest manifest v3 filename of the Accessibility Common extension.
+extern const char kAccessibilityCommonGuestManifestV3Filename[];
 // Path to preinstalled ChromeVox screen reader extension (relative to
 // |chrome::DIR_RESOURCES|).
 extern const char kChromeVoxExtensionPath[];
 // The manifest filename of the ChromeVox extension.
 extern const char kChromeVoxManifestFilename[];
+// The manifest v3 filename of the ChromeVox extension.
+extern const char kChromeVoxManifestV3Filename[];
 // The guest manifest filename of the ChromeVox extension.
 extern const char kChromeVoxGuestManifestFilename[];
+// The guest manifest v3 filename of the ChromeVox etension.
+extern const char kChromeVoxGuestManifestV3Filename[];
+// The path to the ChromeVox extension's options page.
+extern const char kChromeVoxOptionsPath[];
 // The extension id of the Enhanced network TTS engine extension.
 extern const char kEnhancedNetworkTtsExtensionId[];
 // Path to preinstalled Enhanced network TTS engine extension (relative to
@@ -196,8 +207,12 @@ extern const char kEnhancedNetworkTtsExtensionId[];
 extern const char kEnhancedNetworkTtsExtensionPath[];
 // The manifest filename of the Enhanced network TTS engine extension.
 extern const char kEnhancedNetworkTtsManifestFilename[];
+// The manifest v3 filename of the Enhanced network TTS engine extension.
+extern const char kEnhancedNetworkTtsManifestV3Filename[];
 // The guest manifest filename of the Enhanced network TTS engine extension.
 extern const char kEnhancedNetworkTtsGuestManifestFilename[];
+// The guest manifest v3 filename of the Enhanced network TTS engine extension.
+extern const char kEnhancedNetworkTtsGuestManifestV3Filename[];
 // The extension id of the Select-to-speak extension.
 extern const char kSelectToSpeakExtensionId[];
 // Path to preinstalled Select-to-speak extension (relative to
@@ -205,8 +220,12 @@ extern const char kSelectToSpeakExtensionId[];
 extern const char kSelectToSpeakExtensionPath[];
 // The manifest filename of the Select to Speak extension.
 extern const char kSelectToSpeakManifestFilename[];
+// The manifest v3 filename of the Select to Speak extension.
+extern const char kSelectToSpeakManifestV3Filename[];
 // The guest manifest filename of the Select to Speak extension.
 extern const char kSelectToSpeakGuestManifestFilename[];
+// The guest manifest v3 filename of the Select to Speak extension.
+extern const char kSelectToSpeakGuestManifestV3Filename[];
 // The extension id of the Switch Access extension.
 extern const char kSwitchAccessExtensionId[];
 // Path to preinstalled Switch Access extension (relative to
@@ -214,8 +233,12 @@ extern const char kSwitchAccessExtensionId[];
 extern const char kSwitchAccessExtensionPath[];
 // The manifest filename of the Switch Access extension.
 extern const char kSwitchAccessManifestFilename[];
+// The manifest v3 filename of the Switch Access extension.
+extern const char kSwitchAccessManifestV3Filename[];
 // The guest manifest filename of the Switch Access extension.
 extern const char kSwitchAccessGuestManifestFilename[];
+// The guest manifest v3 filename of the Switch Access extension.
+extern const char kSwitchAccessGuestManifestV3Filename[];
 // Name of the manifest file in an extension when a special manifest is used
 // for guest mode.
 extern const char kGuestManifestFilename[];
@@ -225,13 +248,30 @@ extern const char kFirstRunDialogId[];
 extern const char kGoogleSpeechSynthesisExtensionPath[];
 // The extension id of the Google speech synthesis extension.
 extern const char kGoogleSpeechSynthesisExtensionId[];
+// The path to the Google speech synthesis extension's options page.
+extern const char kGoogleSpeechSynthesisOptionsPath[];
 // Path to preinstalled eSpeak-NG speech synthesis extension.
 extern const char kEspeakSpeechSynthesisExtensionPath[];
 // The extension id of the eSpeak-NG speech synthesis extension.
 extern const char kEspeakSpeechSynthesisExtensionId[];
+// The path to the eSpeak-NG speech synthesis extension's options page.
+extern const char kEspeakSpeechSynthesisOptionsPath[];
 // The extension id of official HelpApp extension.
 extern const char kHelpAppExtensionId[];
-#endif
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+// The extension id of the Lacros accessibility helper extension.
+extern const char kEmbeddedA11yHelperExtensionId[];
+// The path to the Lacros accessibility helper extension.
+extern const char kEmbeddedA11yHelperExtensionPath[];
+// The name of the manifest file for the Lacros accessibility helper extension.
+extern const char kEmbeddedA11yHelperManifestFilename[];
+// The extension id of the Lacros ChromeVox helper extension.
+extern const char kChromeVoxHelperExtensionId[];
+// The path to the Lacros ChromeVox helper extension.
+extern const char kChromeVoxHelperExtensionPath[];
+// The name of the manifest file for the Lacros ChromeVox helper extension.
+extern const char kChromeVoxHelperManifestFilename[];
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 // What causes an extension to be installed? Used in histograms, so don't
 // change existing values.

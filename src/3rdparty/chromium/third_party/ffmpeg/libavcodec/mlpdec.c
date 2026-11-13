@@ -42,6 +42,7 @@
 #include "mlpdsp.h"
 #include "mlp.h"
 #include "config.h"
+#include "profiles.h"
 
 /** number of bits used for VLC lookup - longest Huffman code is 9 */
 #if ARCH_ARM
@@ -92,14 +93,6 @@ typedef struct SubStream {
 
     /// Bitmask of which parameter sets are conveyed in a decoding parameter block.
     uint8_t     param_presence_flags;
-#define PARAM_BLOCKSIZE     (1 << 7)
-#define PARAM_MATRIX        (1 << 6)
-#define PARAM_OUTSHIFT      (1 << 5)
-#define PARAM_QUANTSTEP     (1 << 4)
-#define PARAM_FIR           (1 << 3)
-#define PARAM_IIR           (1 << 2)
-#define PARAM_HUFFOFFSET    (1 << 1)
-#define PARAM_PRESENCE      (1 << 0)
     //@}
 
     //@{
@@ -152,6 +145,12 @@ typedef struct MLPDecodeContext {
 
     /// Number of substreams contained within this stream.
     uint8_t     num_substreams;
+
+    /// Which substream of substreams carry 16-channel presentation
+    uint8_t     extended_substream_info;
+
+    /// Which substream of substreams carry 2/6/8-channel presentation
+    uint8_t     substream_info;
 
     /// Index of the last substream to decode - further substreams are skipped.
     uint8_t     max_decoded_substream;
@@ -223,9 +222,9 @@ static av_cold void init_static(void)
         static VLCElem vlc_buf[3 * VLC_STATIC_SIZE];
         huff_vlc[i].table           = &vlc_buf[i * VLC_STATIC_SIZE];
         huff_vlc[i].table_allocated = VLC_STATIC_SIZE;
-        init_vlc(&huff_vlc[i], VLC_BITS, 18,
+        vlc_init(&huff_vlc[i], VLC_BITS, 18,
                  &ff_mlp_huffman_tables[i][0][1], 2, 1,
-                 &ff_mlp_huffman_tables[i][0][0], 2, 1, INIT_VLC_USE_NEW_STATIC);
+                 &ff_mlp_huffman_tables[i][0][0], 2, 1, VLC_INIT_USE_STATIC);
     }
 
     ff_mlp_init_crc();
@@ -384,6 +383,16 @@ static int read_major_sync(MLPDecodeContext *m, GetBitContext *gb)
     m->access_unit_size_pow2 = mh.access_unit_size_pow2;
 
     m->num_substreams        = mh.num_substreams;
+    m->extended_substream_info = mh.extended_substream_info;
+    m->substream_info        = mh.substream_info;
+
+    /*  If there is a 4th substream and the MSB of substream_info is set,
+     *  there is a 16-channel spatial presentation (Atmos in TrueHD).
+     */
+    if (m->avctx->codec_id == AV_CODEC_ID_TRUEHD
+            && m->num_substreams == 4 && m->substream_info >> 7 == 1) {
+        m->avctx->profile     = AV_PROFILE_TRUEHD_ATMOS;
+    }
 
     /* limit to decoding 3 substreams, as the 4th is used by Dolby Atmos for non-audio data */
     m->max_decoded_substream = FFMIN(m->num_substreams - 1, 2);
@@ -443,7 +452,10 @@ static int read_major_sync(MLPDecodeContext *m, GetBitContext *gb)
             else
                 m->substream[2].mask = mh.channel_layout_thd_stream1;
         if (m->avctx->ch_layout.nb_channels > 2)
-            m->substream[mh.num_substreams > 1].mask = mh.channel_layout_thd_stream1;
+            if (mh.num_substreams > 2)
+                m->substream[1].mask = mh.channel_layout_thd_stream1;
+            else
+                m->substream[mh.num_substreams > 1].mask = mh.channel_layout_thd_stream2;
     }
 
     m->needs_reordering = mh.channel_arrangement >= 18 && mh.channel_arrangement <= 20;
@@ -539,13 +551,16 @@ static int read_restart_header(MLPDecodeContext *m, GetBitContext *gbp,
 
     /* This should happen for TrueHD streams with >6 channels and MLP's noise
      * type. It is not yet known if this is allowed. */
-    if (max_channel > MAX_MATRIX_CHANNEL_MLP && !noise_type) {
+    if (max_matrix_channel > MAX_MATRIX_CHANNEL_MLP && !noise_type) {
         avpriv_request_sample(m->avctx,
                               "%d channels (more than the "
                               "maximum supported by the decoder)",
                               max_channel + 2);
         return AVERROR_PATCHWELCOME;
     }
+
+    if (max_channel + 1 > MAX_CHANNELS || max_channel + 1 < min_channel)
+        return AVERROR_INVALIDDATA;
 
     s->min_channel        = min_channel;
     s->max_channel        = max_channel;
@@ -1283,7 +1298,13 @@ static int read_access_unit(AVCodecContext *avctx, AVFrame *frame,
             if (!s->restart_seen)
                 goto next_substr;
 
-            if (substr > 0 && substr < m->max_decoded_substream &&
+            if (((avctx->ch_layout.nb_channels == 6 &&
+                  ((m->substream_info >> 2) & 0x3) != 0x3) ||
+                 (avctx->ch_layout.nb_channels == 8 &&
+                  ((m->substream_info >> 4) & 0x7) != 0x7 &&
+                  ((m->substream_info >> 4) & 0x7) != 0x6 &&
+                  ((m->substream_info >> 4) & 0x7) != 0x3)) &&
+                substr > 0 && substr < m->max_decoded_substream &&
                 (s->min_channel <= m->substream[substr - 1].max_channel)) {
                 av_log(avctx, AV_LOG_DEBUG,
                        "Previous substream(%d) channels overlaps current substream(%d) channels, skipping.\n",
@@ -1436,5 +1457,6 @@ const FFCodec ff_truehd_decoder = {
     FF_CODEC_DECODE_CB(read_access_unit),
     .flush          = mlp_decode_flush,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
+    .p.profiles     = NULL_IF_CONFIG_SMALL(ff_truehd_profiles),
 };
 #endif /* CONFIG_TRUEHD_DECODER */

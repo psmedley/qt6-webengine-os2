@@ -23,6 +23,57 @@ const kValidIdentifiers = new Set([
   'שָׁלוֹם',
   'गुलाबी',
   'փիրուզ',
+  // Builtin type identifiers:
+  'array',
+  'atomic',
+  'bool',
+  'bf16',
+  'bitcast',
+  'f32',
+  'f16',
+  'f64',
+  'i32',
+  'i16',
+  'i64',
+  'i8',
+  'mat2x2',
+  'mat2x3',
+  'mat2x4',
+  'mat3x2',
+  'mat3x3',
+  'mat3x4',
+  'mat4x2',
+  'mat4x3',
+  'mat4x4',
+  'ptr',
+  'quat',
+  'sampler',
+  'sampler_comparison',
+  'signed',
+  'texture_1d',
+  'texture_2d',
+  'texture_2d_array',
+  'texture_3d',
+  'texture_cube',
+  'texture_cube_array',
+  'texture_multisampled_2d',
+  'texture_storage_1d',
+  'texture_storage_2d',
+  'texture_storage_2d_array',
+  'texture_storage_3d',
+  'texture_depth_2d',
+  'texture_depth_2d_array',
+  'texture_depth_cube',
+  'texture_depth_cube_array',
+  'texture_depth_multisampled_2d',
+  'u32',
+  'u16',
+  'u64',
+  'u8',
+  'unsigned',
+  'vec2',
+  'vec3',
+  'vec4',
 ]);
 const kInvalidIdentifiers = new Set([
   '_', // Single underscore is a syntactic token for phony assignment.
@@ -41,118 +92,35 @@ const kInvalidIdentifiers = new Set([
   'foo@bar',
   'foo::bar',
   // Keywords:
-  'array',
-  'atomic',
-  'bool',
-  'f32',
-  'f16',
-  'i32',
-  'mat2x2',
-  'mat2x3',
-  'mat2x4',
-  'mat3x2',
-  'mat3x3',
-  'mat3x4',
-  'mat4x2',
-  'mat4x3',
-  'mat4x4',
-  'override',
-  'ptr',
-  'sampler',
-  'sampler_comparison',
-  'struct',
-  'texture_1d',
-  'texture_2d',
-  'texture_2d_array',
-  'texture_3d',
-  'texture_cube',
-  'texture_cube_array',
-  'texture_multisampled_2d',
-  'texture_storage_1d',
-  'texture_storage_2d',
-  'texture_storage_2d_array',
-  'texture_storage_3d',
-  'texture_depth_2d',
-  'texture_depth_2d_array',
-  'texture_depth_cube',
-  'texture_depth_cube_array',
-  'texture_depth_multisampled_2d',
-  'u32',
-  'vec2',
-  'vec3',
-  'vec4',
-  'bitcast',
+  'alias',
   'break',
   'case',
   'const',
+  'const_assert',
   'continue',
   'continuing',
   'default',
+  'diagnostic',
   'discard',
   'else',
   'enable',
-  'fallthrough',
   'false',
   'fn',
   'for',
-  'function',
   'if',
   'let',
   'loop',
-  'private',
+  'override',
+  'requires',
   'return',
-  'storage',
+  'struct',
   'switch',
   'true',
-  'type',
-  'uniform',
   'var',
   'while',
-  'workgroup',
   // Reserved Words
-  'AppendStructuredBuffer',
-  'BlendState',
-  'Buffer',
-  'ByteAddressBuffer',
-  'CompileShader',
-  'ComputeShader',
-  'ConsumeStructuredBuffer',
-  'DepthStencilState',
-  'DepthStencilView',
-  'DomainShader',
-  'GeometryShader',
-  'Hullshader',
-  'InputPatch',
-  'LineStream',
   'NULL',
-  'OutputPatch',
-  'PixelShader',
-  'PointStream',
-  'RWBuffer',
-  'RWByteAddressBuffer',
-  'RWStructuredBuffer',
-  'RWTexture1D',
-  'RWTexture1DArray',
-  'RWTexture2D',
-  'RWTexture2DArray',
-  'RWTexture3D',
-  'RasterizerState',
-  'RenderTargetView',
-  'SamplerComparisonState',
-  'SamplerState',
   'Self',
-  'StructuredBuffer',
-  'Texture1D',
-  'Texture1DArray',
-  'Texture2D',
-  'Texture2DArray',
-  'Texture2DMS',
-  'Texture2DMSArray',
-  'Texture3D',
-  'TextureCube',
-  'TextureCubeArray',
-  'TriangleStream',
-  'VertexShader',
   'abstract',
   'active',
   'alignas',
@@ -161,18 +129,13 @@ const kInvalidIdentifiers = new Set([
   'asm',
   'asm_fragment',
   'async',
-  'atomic_uint',
   'attribute',
   'auto',
   'await',
   'become',
-  'bf16',
   'binding_array',
   'cast',
   'catch',
-  'cbuffer',
-  'centroid',
-  'char',
   'class',
   'co_await',
   'co_return',
@@ -194,7 +157,6 @@ const kInvalidIdentifiers = new Set([
   'demote',
   'demote_to_helper',
   'do',
-  'dword',
   'dynamic_cast',
   'enum',
   'explicit',
@@ -202,93 +164,28 @@ const kInvalidIdentifiers = new Set([
   'extends',
   'extern',
   'external',
-  'f64',
+  'fallthrough',
   'filter',
   'final',
   'finally',
-  'fixed',
-  'flat',
   'friend',
   'from',
-  'fvec2',
-  'fvec3',
-  'fvec4',
   'fxgroup',
   'get',
   'goto',
   'groupshared',
-  'handle',
   'highp',
-  'hvec2',
-  'hvec3',
-  'hvec4',
-  'i16',
-  'i64',
-  'i8',
-  'iimage1D',
-  'iimage1DArray',
-  'iimage2D',
-  'iimage2DArray',
-  'iimage2DMS',
-  'iimage2DMSArray',
-  'iimage2DRect',
-  'iimage3D',
-  'iimageBuffer',
-  'iimageCube',
-  'iimageCubeArray',
-  'image1D',
-  'image1DArray',
-  'image2D',
-  'image2DArray',
-  'image2DMS',
-  'image2DMSArray',
-  'image2DRect',
-  'image3D',
-  'imageBuffer',
-  'imageCube',
-  'imageCubeArray',
   'impl',
   'implements',
   'import',
   'inline',
-  'inout',
   'instanceof',
   'interface',
-  'invariant',
-  'isampler1D',
-  'isampler1DArray',
-  'isampler2D',
-  'isampler2DArray',
-  'isampler2DMS',
-  'isampler2DMSArray',
-  'isampler2DRect',
-  'isampler3D',
-  'isamplerBuffer',
-  'isamplerCube',
-  'isamplerCubeArray',
-  'isubpassInput',
-  'isubpassInputMS',
-  'itexture1D',
-  'itexture1DArray',
-  'itexture2D',
-  'itexture2DArray',
-  'itexture2DMS',
-  'itexture2DMSArray',
-  'itexture2DRect',
-  'itexture3D',
-  'itextureBuffer',
-  'itextureCube',
-  'itextureCubeArray',
   'layout',
-  'line',
-  'lineadj',
-  'linear',
   'lowp',
   'macro',
   'macro_rules',
-  'mat',
   'match',
-  'matrix',
   'mediump',
   'meta',
   'mod',
@@ -313,7 +210,6 @@ const kInvalidIdentifiers = new Set([
   'pass',
   'patch',
   'pixelfragment',
-  'point',
   'precise',
   'precision',
   'premerge',
@@ -326,146 +222,179 @@ const kInvalidIdentifiers = new Set([
   'regardless',
   'register',
   'reinterpret_cast',
-  'requires',
+  'require',
   'resource',
   'restrict',
-  'row_major',
-  'samper',
-  'sample',
-  'sampler1D',
-  'sampler1DArray',
-  'sampler1DArrayShadow',
-  'sampler1DShadow',
-  'sampler2D',
-  'sampler2DArray',
-  'sampler2DArrayShadow',
-  'sampler2DMS',
-  'sampler2DMSArray',
-  'sampler2DRect',
-  'sampler2DRectShadow',
-  'sampler2DShadow',
-  'sampler3D',
-  'sampler3DRect',
-  'samplerBuffer',
-  'samplerCube',
-  'samplerCubeArray',
-  'samplerCubeArrayShadow',
-  'samplerCubeShadow',
-  'samplerShadow',
   'self',
   'set',
   'shared',
-  'signed',
   'sizeof',
   'smooth',
   'snorm',
-  'stateblock',
-  'stateblock_state',
   'static',
   'static_assert',
   'static_cast',
   'std',
-  'string',
-  'subpassInput',
-  'subpassInputMS',
   'subroutine',
   'super',
-  'superp',
   'target',
-  'tbuffer',
-  'technique',
-  'technique10',
-  'technique11',
   'template',
-  'texture1D',
-  'texture1DArray',
-  'texture2D',
-  'texture2DArray',
-  'texture2DMS',
-  'texture2DMSArray',
-  'texture2DRect',
-  'texture3D',
-  'textureBuffer',
-  'textureCube',
-  'textureCubeArray',
   'this',
   'thread_local',
   'throw',
   'trait',
-  'triangle',
-  'triangleadj',
   'try',
+  'type',
   'typedef',
   'typeid',
   'typename',
   'typeof',
-  'u16',
-  'u64',
-  'u8',
-  'uimage1D',
-  'uimage1DArray',
-  'uimage2D',
-  'uimage2DArray',
-  'uimage2DMS',
-  'uimage2DMSArray',
-  'uimage2DRect',
-  'uimage3D',
-  'uimageBuffer',
-  'uimageCube',
-  'uimageCubeArray',
   'union',
   'unless',
   'unorm',
   'unsafe',
-  'unsigned',
   'unsized',
-  'usampler1D',
-  'usampler1DArray',
-  'usampler2D',
-  'usampler2DArray',
-  'usampler2DMS',
-  'usampler2DMSArray',
-  'usampler2DRect',
-  'usampler3D',
-  'usamplerBuffer',
-  'usamplerCube',
-  'usamplerCubeArray',
   'use',
   'using',
-  'usubpassInput',
-  'usubpassInputMS',
-  'utexture1D',
-  'utexture1DArray',
-  'utexture2D',
-  'utexture2DArray',
-  'utexture2DMS',
-  'utexture2DMSArray',
-  'utexture2DRect',
-  'utexture3D',
-  'utextureBuffer',
-  'utextureCube',
-  'utextureCubeArray',
   'varying',
-  'vec',
-  'vector',
-  'vertexfragment',
   'virtual',
-  'void',
   'volatile',
-  'wchar_t',
   'wgsl',
   'where',
   'with',
   'writeonly',
   'yield',
 ]);
-g.test('identifiers')
-  .desc(`Test that valid identifiers are accepted, and invalid identifiers are rejected.`)
+
+g.test('module_var_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of module-scope 'var's, and invalid identifiers are rejected.`
+  )
   .params(u =>
     u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
   )
   .fn(t => {
-    const code = `var<private> ${t.params.ident} : i32;`;
+    const type = t.params.ident === 'i32' ? 'u32' : 'i32';
+    const code = `var<private> ${t.params.ident} : ${type};`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('module_const_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of module-scope 'const's, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const type = t.params.ident === 'i32' ? 'u32' : 'i32';
+    const code = `const ${t.params.ident} : ${type} = 0;`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('override_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of 'override's, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const type = t.params.ident === 'i32' ? 'u32' : 'i32';
+    const code = `override ${t.params.ident} : ${type} = 0;`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('function_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of functions, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const code = `fn ${t.params.ident}() {}`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('struct_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of structs, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const type = t.params.ident === 'i32' ? 'u32' : 'i32';
+    const code = `struct ${t.params.ident} { i : ${type} }`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('alias_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of aliases, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const type = t.params.ident === 'i32' ? 'u32' : 'i32';
+    const code = `alias ${t.params.ident} = ${type};`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('function_param_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of function parameters, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const type = t.params.ident === 'i32' ? 'u32' : 'i32';
+    const code = `fn F(${t.params.ident} : ${type}) {}`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('function_const_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of function-scoped 'const's, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const code = `fn F() {
+  const ${t.params.ident} = 1;
+}`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('function_let_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of function-scoped 'let's, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const code = `fn F() {
+  let ${t.params.ident} = 1;
+}`;
+    t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
+  });
+
+g.test('function_var_name')
+  .desc(
+    `Test that valid identifiers are accepted for names of function-scoped 'var's, and invalid identifiers are rejected.`
+  )
+  .params(u =>
+    u.combine('ident', new Set([...kValidIdentifiers, ...kInvalidIdentifiers])).beginSubcases()
+  )
+  .fn(t => {
+    const code = `fn F() {
+  var ${t.params.ident} = 1;
+}`;
     t.expectCompileResult(kValidIdentifiers.has(t.params.ident), code);
   });
 

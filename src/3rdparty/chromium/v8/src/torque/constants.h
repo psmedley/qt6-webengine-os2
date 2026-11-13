@@ -42,6 +42,7 @@ static const char* const UNINITIALIZED_HEAP_OBJECT_TYPE_STRING =
     "UninitializedHeapObject";
 static const char* const RAWPTR_TYPE_STRING = "RawPtr";
 static const char* const EXTERNALPTR_TYPE_STRING = "ExternalPointer";
+static const char* const INDIRECTPTR_TYPE_STRING = "IndirectPointer";
 static const char* const CONST_STRING_TYPE_STRING = "constexpr string";
 static const char* const STRING_TYPE_STRING = "String";
 static const char* const NUMBER_TYPE_STRING = "Number";
@@ -113,6 +114,9 @@ static const char* const ANNOTATION_USE_PARENT_TYPE_CHECKER =
     "@useParentTypeChecker";
 static const char* const ANNOTATION_CPP_OBJECT_DEFINITION =
     "@cppObjectDefinition";
+static const char* const ANNOTATION_CPP_OBJECT_LAYOUT_DEFINITION =
+    "@cppObjectLayoutDefinition";
+static const char* const ANNOTATION_SAME_ENUM_VALUE_AS = "@sameEnumValueAs";
 // Generate C++ accessors with relaxed store semantics.
 // Weak<T> and MaybeObject fields always use relaxed store.
 static const char* const ANNOTATION_CPP_RELAXED_STORE = "@cppRelaxedStore";
@@ -124,6 +128,9 @@ static const char* const ANNOTATION_CPP_RELEASE_STORE = "@cppReleaseStore";
 static const char* const ANNOTATION_CPP_ACQUIRE_LOAD = "@cppAcquireLoad";
 // Generate BodyDescriptor using IterateCustomWeakPointers.
 static const char* const ANNOTATION_CUSTOM_WEAK_MARKING = "@customWeakMarking";
+// Do not generate a interface descriptor for this builtin.
+static const char* const ANNOTATION_CUSTOM_INTERFACE_DESCRIPTOR =
+    "@customInterfaceDescriptor";
 
 inline bool IsConstexprName(const std::string& name) {
   return name.substr(0, std::strlen(CONSTEXPR_TYPE_PREFIX)) ==
@@ -165,6 +172,7 @@ enum class ClassFlag {
   kGenerateUniqueMap = 1 << 12,
   kGenerateFactoryFunction = 1 << 13,
   kCppObjectDefinition = 1 << 14,
+  kCppObjectLayoutDefinition = 1 << 15,
 };
 using ClassFlags = base::Flags<ClassFlag>;
 

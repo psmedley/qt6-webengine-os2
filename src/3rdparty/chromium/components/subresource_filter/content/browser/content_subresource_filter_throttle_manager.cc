@@ -6,13 +6,12 @@
 
 #include <utility>
 
-#include "base/bind.h"
 #include "base/check_op.h"
 #include "base/containers/contains.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/trace_event/trace_conversion_helper.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
 #include "components/subresource_filter/content/browser/activation_state_computing_navigation_throttle.h"
@@ -153,7 +152,7 @@ ContentSubresourceFilterThrottleManager::
 
 ContentSubresourceFilterThrottleManager::
     ~ContentSubresourceFilterThrottleManager() {
-  web_contents_helper_.WillDestroyThrottleManager(this);
+  web_contents_helper_->WillDestroyThrottleManager(this);
 }
 
 void ContentSubresourceFilterThrottleManager::RenderFrameDeleted(
@@ -467,10 +466,10 @@ ContentSubresourceFilterThrottleManager::FilterForFinishedNavigation(
       weak_ptr_factory_.GetWeakPtr(), frame_host));
   filter->set_first_disallowed_load_callback(std::move(disallowed_callback));
 
-  AsyncDocumentSubresourceFilter* raw_ptr = filter.get();
+  AsyncDocumentSubresourceFilter* filter_ptr = filter.get();
   frame_host_filter_map_[frame_host] = std::move(filter);
 
-  return raw_ptr;
+  return filter_ptr;
 }
 
 void ContentSubresourceFilterThrottleManager::
@@ -649,7 +648,8 @@ ContentSubresourceFilterThrottleManager::
       GetParentFrameFilter(navigation_handle);
   return parent_filter
              ? std::make_unique<ChildFrameNavigationFilteringThrottle>(
-                   navigation_handle, parent_filter)
+                   navigation_handle, parent_filter,
+                   EnsureFrameAdEvidence(navigation_handle))
              : nullptr;
 }
 
@@ -867,14 +867,6 @@ void ContentSubresourceFilterThrottleManager::AdScriptDidCreateFencedFrame(
     mojo::ReportBadMessage(
         "AdScriptDidCreateFencedFrame can only be called when fenced frames "
         "are enabled.");
-    return;
-  }
-
-  if (blink::features::kFencedFramesImplementationTypeParam.Get() !=
-      blink::features::FencedFramesImplementationType::kMPArch) {
-    mojo::ReportBadMessage(
-        "AdScriptDidCreateFencedFrame can only be called in MPArch-based "
-        "fenced frames.");
     return;
   }
 

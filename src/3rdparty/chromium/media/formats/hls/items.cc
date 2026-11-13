@@ -50,7 +50,7 @@ ParseStatus::Or<GetNextLineItemResult> GetNextLineItem(
     SourceLineIterator* src) {
   while (true) {
     auto result = src->Next();
-    if (result.has_error()) {
+    if (!result.has_value()) {
       // Forward error to caller
       return std::move(result).error();
     }
@@ -77,7 +77,7 @@ ParseStatus::Or<GetNextLineItemResult> GetNextLineItem(
     // If not empty, tag, or comment, it must be a URI.
     // This line may contain leading, trailing, or interior whitespace,
     // but that's the URI parser's responsibility.
-    return GetNextLineItemResult{UriItem{/*.content =*/ line}};
+    return GetNextLineItemResult{UriItem{.content = line}};
   }
 }
 

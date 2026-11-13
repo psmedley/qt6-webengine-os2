@@ -9,13 +9,15 @@
 #define SKSL_FLOATLITERAL
 
 #include "include/core/SkTypes.h"
-#include "include/private/SkSLDefines.h"
-#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLContext.h"
+#include "src/sksl/SkSLDefines.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 #include "src/sksl/ir/SkSLType.h"
 
+#include <cstdint>
 #include <cinttypes>
 #include <memory>
 #include <optional>
@@ -23,21 +25,22 @@
 
 namespace SkSL {
 
+enum class OperatorPrecedence : uint8_t;
+
 /**
  * A literal value. These can contain ints, floats, or booleans.
  */
 
 class Literal : public Expression {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kLiteral;
+    inline static constexpr Kind kIRNodeKind = Kind::kLiteral;
 
     Literal(Position pos, double value, const Type* type)
-        : INHERITED(pos, kExpressionKind, type)
+        : INHERITED(pos, kIRNodeKind, type)
         , fValue(value) {}
 
     // Makes a literal of $floatLiteral type.
-    static std::unique_ptr<Literal> MakeFloat(const Context& context, Position pos,
-            float value) {
+    static std::unique_ptr<Literal> MakeFloat(const Context& context, Position pos, float value) {
         return std::make_unique<Literal>(pos, value, context.fTypes.fFloatLiteral.get());
     }
 
@@ -48,8 +51,7 @@ public:
     }
 
     // Makes a literal of $intLiteral type.
-    static std::unique_ptr<Literal> MakeInt(const Context& context, Position pos,
-            SKSL_INT value) {
+    static std::unique_ptr<Literal> MakeInt(const Context& context, Position pos, SKSL_INT value) {
         return std::make_unique<Literal>(pos, value, context.fTypes.fIntLiteral.get());
     }
 

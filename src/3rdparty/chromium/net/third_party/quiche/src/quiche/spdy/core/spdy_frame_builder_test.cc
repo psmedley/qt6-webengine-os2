@@ -4,19 +4,21 @@
 
 #include "quiche/spdy/core/spdy_frame_builder.h"
 
-#include <memory>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 
+#include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/common/platform/api/quiche_test.h"
 #include "quiche/spdy/core/array_output_buffer.h"
-#include "quiche/spdy/core/spdy_framer.h"
 #include "quiche/spdy/core/spdy_protocol.h"
 
 namespace spdy {
 
 namespace test {
 
-class QUICHE_EXPORT_PRIVATE SpdyFrameBuilderPeer {
+class QUICHE_EXPORT SpdyFrameBuilderPeer {
  public:
   static char* GetWritableBuffer(SpdyFrameBuilder* builder, size_t length) {
     return builder->GetWritableBuffer(length);

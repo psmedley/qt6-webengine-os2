@@ -306,8 +306,10 @@ std::map<std::string, DescHandlerFunc> GetHandlers() {
           {variables::kWriteOutputConversion, DefaultHandler},
           {variables::kRustCrateName, DefaultHandler},
           {variables::kRustCrateRoot, DefaultHandler},
+          {variables::kRustflags, DefaultHandler},
           {variables::kSwiftModuleName, DefaultHandler},
           {variables::kSwiftBridgeHeader, DefaultHandler},
+          {variables::kMnemonic, DefaultHandler},
           {"runtime_deps", DefaultHandler}};
 }
 
@@ -398,6 +400,7 @@ bool PrintTarget(const Target* target,
   HandleProperty(variables::kLibDirs, handler_map, v, dict);
   HandleProperty(variables::kDataKeys, handler_map, v, dict);
   HandleProperty(variables::kRebase, handler_map, v, dict);
+  HandleProperty(variables::kRustflags, handler_map, v, dict);
   HandleProperty(variables::kWalkKeys, handler_map, v, dict);
   HandleProperty(variables::kWeakFrameworks, handler_map, v, dict);
   HandleProperty(variables::kWriteOutputConversion, handler_map, v, dict);
@@ -462,6 +465,7 @@ bool PrintConfig(const Config* config,
   HandleProperty(variables::kLibDirs, handler_map, v, dict);
   HandleProperty(variables::kPrecompiledHeader, handler_map, v, dict);
   HandleProperty(variables::kPrecompiledSource, handler_map, v, dict);
+  HandleProperty(variables::kRustflags, handler_map, v, dict);
   HandleProperty(variables::kWeakFrameworks, handler_map, v, dict);
 
 #undef HandleProperty
@@ -653,7 +657,7 @@ int RunDesc(const std::vector<std::string>& args) {
   if (args.size() == 3)
     what_to_print = args[2];
 
-  bool json = cmdline->GetSwitchValueASCII("format") == "json";
+  bool json = cmdline->GetSwitchValueString("format") == "json";
 
   if (target_matches.empty() && config_matches.empty()) {
     OutputString(

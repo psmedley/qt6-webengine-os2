@@ -1,16 +1,29 @@
-// Copyright 2021 The Dawn Authors
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <vector>
 
@@ -19,31 +32,23 @@
 
 namespace dawn::wire::server {
 
-bool Server::DoAdapterRequestDevice(ObjectId adapterId,
-                                    uint64_t requestSerial,
-                                    ObjectHandle deviceHandle,
-                                    const WGPUDeviceDescriptor* descriptor) {
-    auto* adapter = AdapterObjects().Get(adapterId);
-    if (adapter == nullptr) {
-        return false;
-    }
-
-    auto* resultData = DeviceObjects().Allocate(deviceHandle.id, AllocationState::Reserved);
-    if (resultData == nullptr) {
-        return false;
-    }
-
-    resultData->generation = deviceHandle.generation;
+WireResult Server::DoAdapterRequestDevice(Known<WGPUAdapter> adapter,
+                                          ObjectHandle eventManager,
+                                          WGPUFuture future,
+                                          ObjectHandle deviceHandle,
+                                          const WGPUDeviceDescriptor* descriptor) {
+    Known<WGPUDevice> device;
+    WIRE_TRY(DeviceObjects().Allocate(&device, deviceHandle, AllocationState::Reserved));
 
     auto userdata = MakeUserdata<RequestDeviceUserdata>();
-    userdata->adapter = ObjectHandle{adapterId, adapter->generation};
-    userdata->requestSerial = requestSerial;
-    userdata->deviceObjectId = deviceHandle.id;
+    userdata->eventManager = eventManager;
+    userdata->future = future;
+    userdata->deviceObjectId = device.id;
 
     mProcs.adapterRequestDevice(adapter->handle, descriptor,
                                 ForwardToServer<&Server::OnRequestDeviceCallback>,
                                 userdata.release());
-    return true;
+    return WireResult::Success;
 }
 
 void Server::OnRequestDeviceCallback(RequestDeviceUserdata* data,
@@ -51,15 +56,15 @@ void Server::OnRequestDeviceCallback(RequestDeviceUserdata* data,
                                      WGPUDevice device,
                                      const char* message) {
     ReturnAdapterRequestDeviceCallbackCmd cmd = {};
-    cmd.adapter = data->adapter;
-    cmd.requestSerial = data->requestSerial;
+    cmd.eventManager = data->eventManager;
+    cmd.future = data->future;
     cmd.status = status;
     cmd.message = message;
 
     if (status != WGPURequestDeviceStatus_Success) {
         // Free the ObjectId which will make it unusable.
         DeviceObjects().Free(data->deviceObjectId);
-        ASSERT(device == nullptr);
+        DAWN_ASSERT(device == nullptr);
         SerializeCommand(cmd);
         return;
     }
@@ -88,19 +93,23 @@ void Server::OnRequestDeviceCallback(RequestDeviceUserdata* data,
         }
     }
 
-    cmd.featuresCount = static_cast<uint32_t>(features.size());
+    cmd.featuresCount = features.size();
     cmd.features = features.data();
 
     WGPUSupportedLimits limits = {};
+    // Also query the DawnExperimentalSubgroupLimits and report to client.
+    WGPUDawnExperimentalSubgroupLimits experimentalSubgroupLimits = {};
+    experimentalSubgroupLimits.chain.sType = WGPUSType_DawnExperimentalSubgroupLimits;
+    limits.nextInChain = &experimentalSubgroupLimits.chain;
     mProcs.deviceGetLimits(device, &limits);
     cmd.limits = &limits;
 
     // Assign the handle and allocated status if the device is created successfully.
-    auto* deviceObject = DeviceObjects().FillReservation(data->deviceObjectId, device);
-    ASSERT(deviceObject != nullptr);
-    deviceObject->info->server = this;
-    deviceObject->info->self = ObjectHandle{data->deviceObjectId, deviceObject->generation};
-    SetForwardingDeviceCallbacks(deviceObject);
+    Known<WGPUDevice> reservation = DeviceObjects().FillReservation(data->deviceObjectId, device);
+    DAWN_ASSERT(reservation.data != nullptr);
+    reservation->info->server = this;
+    reservation->info->self = reservation.AsHandle();
+    SetForwardingDeviceCallbacks(reservation);
 
     SerializeCommand(cmd);
 }

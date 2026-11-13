@@ -58,6 +58,7 @@ const char* QuicRstStreamErrorCodeToString(QuicRstStreamErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_STREAM_WEBTRANSPORT_SESSION_GONE);
     RETURN_STRING_LITERAL(
         QUIC_STREAM_WEBTRANSPORT_BUFFERED_STREAMS_LIMIT_EXCEEDED);
+    RETURN_STRING_LITERAL(QUIC_APPLICATION_DONE_WITH_STREAM);
     RETURN_STRING_LITERAL(QUIC_STREAM_LAST_ERROR);
   }
   // Return a default value so that we return this when |error| doesn't match
@@ -93,6 +94,7 @@ const char* QuicErrorCodeToString(QuicErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_PACKET_TOO_LARGE);
     RETURN_STRING_LITERAL(QUIC_PEER_GOING_AWAY);
     RETURN_STRING_LITERAL(QUIC_HANDSHAKE_FAILED);
+    RETURN_STRING_LITERAL(QUIC_HANDSHAKE_FAILED_PACKETS_BUFFERED_TOO_LONG);
     RETURN_STRING_LITERAL(QUIC_CRYPTO_TAGS_OUT_OF_ORDER);
     RETURN_STRING_LITERAL(QUIC_CRYPTO_TOO_MANY_ENTRIES);
     RETURN_STRING_LITERAL(QUIC_CRYPTO_TOO_MANY_REJECTS);
@@ -793,6 +795,8 @@ QuicErrorCodeToIetfMapping QuicErrorCodeToTransportErrorCode(
       return {true, static_cast<uint64_t>(PROTOCOL_VIOLATION)};
     case QUIC_SERVER_UNHEALTHY:
       return {true, static_cast<uint64_t>(INTERNAL_ERROR)};
+    case QUIC_HANDSHAKE_FAILED_PACKETS_BUFFERED_TOO_LONG:
+      return {true, static_cast<uint64_t>(NO_IETF_QUIC_ERROR)};
     case QUIC_LAST_ERROR:
       return {false, static_cast<uint64_t>(QUIC_LAST_ERROR)};
   }
@@ -907,6 +911,8 @@ uint64_t RstStreamErrorCodeToIetfResetStreamErrorCode(
       return static_cast<uint64_t>(QuicHttp3ErrorCode::CONNECT_ERROR);
     case QUIC_STREAM_WEBTRANSPORT_BUFFERED_STREAMS_LIMIT_EXCEEDED:
       return static_cast<uint64_t>(QuicHttp3ErrorCode::CONNECT_ERROR);
+    case QUIC_APPLICATION_DONE_WITH_STREAM:
+      return static_cast<uint64_t>(QuicHttp3ErrorCode::GENERAL_PROTOCOL_ERROR);
     case QUIC_STREAM_LAST_ERROR:
       return static_cast<uint64_t>(QuicHttp3ErrorCode::INTERNAL_ERROR);
   }

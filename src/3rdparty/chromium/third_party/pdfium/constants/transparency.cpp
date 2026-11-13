@@ -1,11 +1,10 @@
-// Copyright 2021 PDFium Authors. All rights reserved.
+// Copyright 2021 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "constants/transparency.h"
 
-namespace pdfium {
-namespace transparency {
+namespace pdfium::transparency {
 
 // PDF 1.7 spec, table 7.2.
 // Standard separable blend modes.
@@ -44,5 +43,4 @@ const char kTransparency[] = "Transparency";
 const char kCS[] = "CS";
 const char kI[] = "I";
 
-}  // namespace transparency
-}  // namespace pdfium
+}  // namespace pdfium::transparency

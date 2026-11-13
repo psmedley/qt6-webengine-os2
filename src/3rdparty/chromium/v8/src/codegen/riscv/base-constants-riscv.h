@@ -17,8 +17,9 @@
 #define UNIMPLEMENTED_RISCV()
 #endif
 
-#define UNSUPPORTED_RISCV() \
-  v8::internal::PrintF("Unsupported instruction %d.\n", __LINE__)
+#define UNSUPPORTED_RISCV()                                        \
+  v8::internal::PrintF("Unsupported instruction %d.\n", __LINE__); \
+  UNIMPLEMENTED();
 
 enum Endianness { kLittle, kBig };
 
@@ -53,10 +54,10 @@ const uint32_t kLessSignificantWordInDoublewordOffset = 4;
 // Try https://content.riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf.
 namespace v8 {
 namespace internal {
+using Opcode = uint32_t;
 
 // Actual value of root register is offset from the root array's start
 // to take advantage of negative displacement values.
-// TODO(sigurds): Choose best value.
 constexpr int kRootRegisterBias = 256;
 
 #define RVV_LMUL(V) \
@@ -198,14 +199,40 @@ enum SoftwareInterruptCodes {
 //   instructions (see Assembler::stop()).
 // - Breaks larger than kMaxStopCode are simple breaks, dropping you into the
 //   debugger.
+const uint32_t kMaxTracepointCode = 63;
 const uint32_t kMaxWatchpointCode = 31;
 const uint32_t kMaxStopCode = 127;
 static_assert(kMaxWatchpointCode < kMaxStopCode);
+static_assert(kMaxTracepointCode < kMaxStopCode);
+
+// Debug parameters.
+//
+// For example:
+//
+// __ Debug(TRACE_ENABLE | LOG_TRACE);
+// starts tracing: set v8_flags.trace-sim is true.
+// __ Debug(TRACE_ENABLE | LOG_REGS);
+// PrintAllregs.
+// __ Debug(TRACE_DISABLE | LOG_TRACE);
+// stops tracing: set v8_flags.trace-sim is false.
+const unsigned kDebuggerTracingDirectivesMask = 0b111 << 3;
+enum DebugParameters : uint32_t {
+  NO_PARAM = 1 << 5,
+  BREAK = 1 << 0,
+  LOG_TRACE = 1 << 1,
+  LOG_REGS = 1 << 2,
+  LOG_ALL = LOG_TRACE,
+  // Trace control.
+  TRACE_ENABLE = 1 << 3 | NO_PARAM,
+  TRACE_DISABLE = 1 << 4 | NO_PARAM,
+};
 
 // ----- Fields offset and length.
 // RISCV constants
 const int kBaseOpcodeShift = 0;
 const int kBaseOpcodeBits = 7;
+const int kFunct6Shift = 26;
+const int kFunct6Bits = 6;
 const int kFunct7Shift = 25;
 const int kFunct7Bits = 7;
 const int kFunct5Shift = 27;
@@ -236,6 +263,7 @@ const int kImm11Shift = 2;
 const int kImm11Bits = 11;
 const int kShamtShift = 20;
 const int kShamtBits = 5;
+const uint32_t kShamtMask = (((1 << kShamtBits) - 1) << kShamtShift);
 const int kShamtWShift = 20;
 // FIXME: remove this once we have a proper way to handle the wide shift amount
 const int kShamtWBits = 6;
@@ -288,8 +316,17 @@ const uint32_t kRvcBImm8Mask = (((1 << 5) - 1) << 2) | (((1 << 3) - 1) << 10);
 
 // for RVV extension
 constexpr int kRvvELEN = 64;
+#ifdef RVV_VLEN
+constexpr int kRvvVLEN = RVV_VLEN;
+// TODO(riscv): support rvv 256/512/1024
+static_assert(
+    kRvvVLEN == 128,
+    "RVV extension only supports 128bit wide VLEN at current RISC-V backend.");
+#else
 constexpr int kRvvVLEN = 128;
+#endif
 constexpr int kRvvSLEN = kRvvVLEN;
+
 const int kRvvFunct6Shift = 26;
 const int kRvvFunct6Bits = 6;
 const uint32_t kRvvFunct6Mask =
@@ -356,6 +393,7 @@ const uint32_t kBaseOpcodeMask = ((1 << kBaseOpcodeBits) - 1)
                                  << kBaseOpcodeShift;
 const uint32_t kFunct3Mask = ((1 << kFunct3Bits) - 1) << kFunct3Shift;
 const uint32_t kFunct5Mask = ((1 << kFunct5Bits) - 1) << kFunct5Shift;
+const uint32_t kFunct6Mask = ((1 << kFunct6Bits) - 1) << kFunct6Shift;
 const uint32_t kFunct7Mask = ((1 << kFunct7Bits) - 1) << kFunct7Shift;
 const uint32_t kFunct2Mask = 0b11 << kFunct7Shift;
 const uint32_t kRTypeMask = kBaseOpcodeMask | kFunct3Mask | kFunct7Mask;
@@ -390,7 +428,7 @@ const uint32_t kImm16Mask = ((1 << kImm16Bits) - 1) << kImm16Shift;
 // The 'U' prefix is used to specify unsigned comparisons.
 // Opposite conditions must be paired as odd/even numbers
 // because 'NegateCondition' function flips LSB to negate condition.
-enum Condition {  // Any value < 0 is considered no_condition.
+enum Condition : int {  // Any value < 0 is considered no_condition.
   overflow = 0,
   no_overflow = 1,
   Uless = 2,
@@ -417,6 +455,22 @@ enum Condition {  // Any value < 0 is considered no_condition.
   uge = Ugreater_equal,
   ule = Uless_equal,
   ugt = Ugreater,
+
+  // Unified cross-platform condition names/aliases.
+  kEqual = equal,
+  kNotEqual = not_equal,
+  kLessThan = less,
+  kGreaterThan = greater,
+  kLessThanEqual = less_equal,
+  kGreaterThanEqual = greater_equal,
+  kUnsignedLessThan = Uless,
+  kUnsignedGreaterThan = Ugreater,
+  kUnsignedLessThanEqual = Uless_equal,
+  kUnsignedGreaterThanEqual = Ugreater_equal,
+  kOverflow = overflow,
+  kNoOverflow = no_overflow,
+  kZero = equal,
+  kNotZero = not_equal,
 };
 
 // Returns the equivalent of !cc.
@@ -489,7 +543,7 @@ enum ControlStatusReg {
 enum FFlagsMask {
   kInvalidOperation = 0b10000,  // NV: Invalid
   kDivideByZero = 0b1000,       // DZ:  Divide by Zero
-  kOverflow = 0b100,            // OF: Overflow
+  kFPUOverflow = 0b100,         // OF: Overflow
   kUnderflow = 0b10,            // UF: Underflow
   kInexact = 0b1                // NX:  Inexact
 };
@@ -699,6 +753,9 @@ class InstructionBase {
   // Safe to call within R-type instructions
   inline int Funct7FieldRaw() const { return InstructionBits() & kFunct7Mask; }
 
+  // Safe to call within R-type instructions
+  inline int Funct6FieldRaw() const { return InstructionBits() & kFunct6Mask; }
+
   // Safe to call within R-, I-, S-, or B-type instructions
   inline int Funct3FieldRaw() const { return InstructionBits() & kFunct3Mask; }
 
@@ -737,6 +794,11 @@ class InstructionBase {
 template <class T>
 class InstructionGetters : public T {
  public:
+  uint32_t OperandFunct3() const {
+    return this->InstructionBits() & (kBaseOpcodeMask | kFunct3Mask);
+  }
+  bool IsLoad();
+  bool IsStore();
   inline int BaseOpcode() const {
     return this->InstructionBits() & kBaseOpcodeMask;
   }
@@ -921,7 +983,8 @@ class InstructionGetters : public T {
 
   inline int Shamt() const {
     // Valid only for shift instructions (SLLI, SRLI, SRAI)
-    DCHECK((this->InstructionBits() & kBaseOpcodeMask) == OP_IMM &&
+    DCHECK(((this->InstructionBits() & kBaseOpcodeMask) == OP_IMM ||
+            (this->InstructionBits() & kBaseOpcodeMask) == OP_IMM_32) &&
            (this->Funct3Value() == 0b001 || this->Funct3Value() == 0b101));
     // | 0A0000 | shamt | rs1 | funct3 | rd | opcode |
     //  31       25    20
@@ -1173,7 +1236,7 @@ class Instruction : public InstructionGetters<InstructionBase> {
   // reference to an instruction is to convert a pointer. There is no way
   // to allocate or create instances of class Instruction.
   // Use the At(pc) function to create references to Instruction.
-  static Instruction* At(byte* pc) {
+  static Instruction* At(uint8_t* pc) {
     return reinterpret_cast<Instruction*>(pc);
   }
 

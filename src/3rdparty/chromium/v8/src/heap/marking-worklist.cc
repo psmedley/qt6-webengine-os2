@@ -24,7 +24,6 @@ namespace internal {
 void MarkingWorklists::Clear() {
   shared_.Clear();
   on_hold_.Clear();
-  wrapper_.Clear();
   other_.Clear();
   for (auto& cw : context_worklists_) {
     cw.worklist->Clear();
@@ -56,9 +55,9 @@ void MarkingWorklists::PrintWorklist(const char* worklist_name,
 #ifdef DEBUG
   std::map<InstanceType, int> count;
   int total_count = 0;
-  worklist->Iterate([&count, &total_count](HeapObject obj) {
+  worklist->Iterate([&count, &total_count](Tagged<HeapObject> obj) {
     ++total_count;
-    count[obj.map().instance_type()]++;
+    count[obj->map()->instance_type()]++;
   });
   std::vector<std::pair<int, InstanceType>> rank;
   rank.reserve(count.size());
@@ -94,7 +93,7 @@ GetLocalPerContextMarkingWorklists(bool is_per_context_mode,
   worklist_by_context.reserve(global->context_worklists().size());
   for (auto& cw : global->context_worklists()) {
     worklist_by_context[cw.context] =
-        std::make_unique<MarkingWorklist::Local>(*cw.worklist.get());
+        std::make_unique<MarkingWorklist::Local>(*cw.worklist);
   }
   return worklist_by_context;
 }
@@ -107,7 +106,6 @@ MarkingWorklists::Local::Local(
     : active_(&shared_),
       shared_(*global->shared()),
       on_hold_(*global->on_hold()),
-      wrapper_(*global->wrapper()),
       active_context_(kSharedContext),
       is_per_context_mode_(!global->context_worklists().empty()),
       worklist_by_context_(
@@ -118,7 +116,6 @@ MarkingWorklists::Local::Local(
 void MarkingWorklists::Local::Publish() {
   shared_.Publish();
   on_hold_.Publish();
-  wrapper_.Publish();
   other_.Publish();
   if (is_per_context_mode_) {
     for (auto& cw : worklist_by_context_) {
@@ -153,11 +150,7 @@ bool MarkingWorklists::Local::IsEmpty() {
 }
 
 bool MarkingWorklists::Local::IsWrapperEmpty() const {
-  if (cpp_marking_state_) {
-    DCHECK(wrapper_.IsLocalAndGlobalEmpty());
-    return cpp_marking_state_->IsLocalEmpty();
-  }
-  return wrapper_.IsLocalAndGlobalEmpty();
+  return !cpp_marking_state_ || cpp_marking_state_->IsLocalEmpty();
 }
 
 void MarkingWorklists::Local::ShareWork() {
@@ -171,9 +164,14 @@ void MarkingWorklists::Local::ShareWork() {
   }
 }
 
+void MarkingWorklists::Local::PublishWork() {
+  DCHECK(!is_per_context_mode_);
+  shared_.Publish();
+}
+
 void MarkingWorklists::Local::MergeOnHold() { shared_.Merge(on_hold_); }
 
-bool MarkingWorklists::Local::PopContext(HeapObject* object) {
+bool MarkingWorklists::Local::PopContext(Tagged<HeapObject>* object) {
   DCHECK(is_per_context_mode_);
   // As an optimization we first check only the local segments to avoid locks.
   for (auto& cw : worklist_by_context_) {

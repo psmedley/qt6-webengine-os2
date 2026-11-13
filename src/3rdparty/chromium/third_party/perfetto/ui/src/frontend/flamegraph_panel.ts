@@ -12,36 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
+import {findRef} from '../base/dom_utils';
 import {assertExists, assertTrue} from '../base/logging';
+import {Time} from '../base/time';
 import {Actions} from '../common/actions';
-import {
-  ALLOC_SPACE_MEMORY_ALLOCATED_KEY,
-  OBJECTS_ALLOCATED_KEY,
-  OBJECTS_ALLOCATED_NOT_FREED_KEY,
-  PERF_SAMPLES_KEY,
-  SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY,
-} from '../common/flamegraph_util';
+import {viewingOptions} from '../common/flamegraph_util';
 import {
   CallsiteInfo,
   FlamegraphStateViewingOption,
   ProfileType,
 } from '../common/state';
-import {timeToCode} from '../common/time';
 import {profileType} from '../controller/flamegraph_controller';
+import {raf} from '../core/raf_scheduler';
+import {Button} from '../widgets/button';
+import {Icon} from '../widgets/icon';
+import {Modal, ModalAttrs} from '../widgets/modal';
+import {Popup} from '../widgets/popup';
 
-import {PerfettoMouseEvent} from './events';
 import {Flamegraph, NodeRendering} from './flamegraph';
 import {globals} from './globals';
-import {Modal, ModalDefinition} from './modal';
-import {Panel, PanelSize} from './panel';
 import {debounce} from './rate_limiters';
 import {Router} from './router';
 import {getCurrentTrace} from './sidebar';
 import {convertTraceToPprofAndDownload} from './trace_converter';
-
-interface FlamegraphDetailsPanelAttrs {}
+import {DurationWidget} from './widgets/duration';
 
 const HEADER_HEIGHT = 30;
 
@@ -61,25 +57,26 @@ const RENDER_OBJ_COUNT: NodeRendering = {
   totalSize: 'Subtree objects',
 };
 
-export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
+export class FlamegraphDetailsPanel implements m.ClassComponent {
   private profileType?: ProfileType = undefined;
-  private ts = 0;
+  private ts = Time.ZERO;
   private pids: number[] = [];
   private flamegraph: Flamegraph = new Flamegraph([]);
   private focusRegex = '';
   private updateFocusRegexDebounced = debounce(() => {
     this.updateFocusRegex();
   }, 20);
+  private canvas?: HTMLCanvasElement;
 
   view() {
     const flamegraphDetails = globals.flamegraphDetails;
-    if (flamegraphDetails && flamegraphDetails.type !== undefined &&
-        flamegraphDetails.startNs !== undefined &&
-        flamegraphDetails.durNs !== undefined &&
+    if (flamegraphDetails.type !== undefined &&
+        flamegraphDetails.start !== undefined &&
+        flamegraphDetails.dur !== undefined &&
         flamegraphDetails.pids !== undefined &&
         flamegraphDetails.upids !== undefined) {
       this.profileType = profileType(flamegraphDetails.type);
-      this.ts = flamegraphDetails.startNs + flamegraphDetails.durNs;
+      this.ts = Time.add(flamegraphDetails.start, flamegraphDetails.dur);
       this.pids = flamegraphDetails.pids;
       if (flamegraphDetails.flamegraph) {
         this.flamegraph.updateDataIfChanged(
@@ -90,32 +87,23 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
           0;
       return m(
           '.details-panel',
-          {
-            onclick: (e: PerfettoMouseEvent) => {
-              if (this.flamegraph !== undefined) {
-                this.onMouseClick({y: e.layerY, x: e.layerX});
-              }
-              return false;
-            },
-            onmousemove: (e: PerfettoMouseEvent) => {
-              if (this.flamegraph !== undefined) {
-                this.onMouseMove({y: e.layerY, x: e.layerX});
-                globals.rafScheduler.scheduleRedraw();
-              }
-            },
-            onmouseout: () => {
-              if (this.flamegraph !== undefined) {
-                this.onMouseOut();
-              }
-            },
-          },
           this.maybeShowModal(flamegraphDetails.graphIncomplete),
           m('.details-panel-heading.flamegraph-profile',
             {onclick: (e: MouseEvent) => e.stopPropagation()},
             [
               m('div.options',
                 [
-                  m('div.title', this.getTitle()),
+                  m('div.title',
+                    this.getTitle(),
+                    (this.profileType === ProfileType.MIXED_HEAP_PROFILE) &&
+                        m(Popup,
+                          {
+                            trigger: m(Icon, {icon: 'warning'}),
+                          },
+                          m('',
+                            {style: {width: '300px'}},
+                            'This is a mixed java/native heap profile, free()s are not visualized. To visualize free()s, remove "all_heaps: true" from the config.')),
+                    ':'),
                   this.getViewingOptionButtons(),
                 ]),
               m('div.details',
@@ -125,7 +113,8 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
                         toSelectedCallsite(
                             flamegraphDetails.expandedCallsite)}`),
                   m('div.time',
-                    `Snapshot time: ${timeToCode(flamegraphDetails.durNs)}`),
+                    `Snapshot time: `,
+                    m(DurationWidget, {dur: flamegraphDetails.dur})),
                   m('input[type=text][placeholder=Focus]', {
                     oninput: (e: Event) => {
                       const target = (e.target as HTMLInputElement);
@@ -135,19 +124,30 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
                     // Required to stop hot-key handling:
                     onkeydown: (e: Event) => e.stopPropagation(),
                   }),
-                  this.profileType === ProfileType.NATIVE_HEAP_PROFILE ?
-                      m('button.download',
-                        {
-                          onclick: () => {
-                            this.downloadPprof();
-                          },
+                  (this.profileType === ProfileType.NATIVE_HEAP_PROFILE ||
+                   this.profileType === ProfileType.JAVA_HEAP_SAMPLES) &&
+                      m(Button, {
+                        icon: 'file_download',
+                        onclick: () => {
+                          this.downloadPprof();
                         },
-                        m('i.material-icons', 'file_download'),
-                        'Download profile') :
-                      null,
+                      }),
                 ]),
             ]),
-          m(`div[style=height:${height}px]`),
+          m(`canvas[ref=canvas]`, {
+            style: `height:${height}px; width:100%`,
+            onmousemove: (e: MouseEvent) => {
+              const {offsetX, offsetY} = e;
+              this.onMouseMove({x: offsetX, y: offsetY});
+            },
+            onmouseout: () => {
+              this.onMouseOut();
+            },
+            onclick: (e: MouseEvent) => {
+              const {offsetX, offsetY} = e;
+              this.onMouseClick({x: offsetX, y: offsetY});
+            },
+          }),
       );
     } else {
       return m(
@@ -164,8 +164,8 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
     return m(Modal, {
       title: 'The flamegraph is incomplete',
       vAlign: 'TOP',
-      content: m('div',
-          'The current trace does not have a fully formed flamegraph'),
+      content:
+          m('div', 'The current trace does not have a fully formed flamegraph'),
       buttons: [
         {
           text: 'Show the errors',
@@ -176,25 +176,28 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
           text: 'Skip',
           action: () => {
             globals.dispatch(Actions.dismissFlamegraphModal({}));
-            globals.rafScheduler.scheduleFullRedraw();
+            raf.scheduleFullRedraw();
           },
         },
       ],
-    } as ModalDefinition);
+    } as ModalAttrs);
   }
 
   private getTitle(): string {
-    switch (this.profileType!) {
+    const profileType = this.profileType!;
+    switch (profileType) {
+      case ProfileType.MIXED_HEAP_PROFILE:
+        return 'Mixed heap profile';
       case ProfileType.HEAP_PROFILE:
-        return 'Heap profile:';
+        return 'Heap profile';
       case ProfileType.NATIVE_HEAP_PROFILE:
-        return 'Native heap profile:';
-      case ProfileType.JAVA_HEAP_PROFILE:
-        return 'Java heap profile:';
+        return 'Native heap profile';
+      case ProfileType.JAVA_HEAP_SAMPLES:
+        return 'Java heap samples';
       case ProfileType.JAVA_HEAP_GRAPH:
-        return 'Java heap graph:';
+        return 'Java heap graph';
       case ProfileType.PERF_SAMPLE:
-        return 'Profile:';
+        return 'Profile';
       default:
         throw new Error('unknown type');
     }
@@ -204,21 +207,26 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
     if (this.profileType === undefined) {
       return {};
     }
-    const viewingOption = globals.state.currentFlamegraphState!.viewingOption;
-    switch (this.profileType) {
+    const profileType = this.profileType;
+    const viewingOption: FlamegraphStateViewingOption =
+        globals.state.currentFlamegraphState!.viewingOption;
+    switch (profileType) {
       case ProfileType.JAVA_HEAP_GRAPH:
-        if (viewingOption === OBJECTS_ALLOCATED_NOT_FREED_KEY) {
+        if (viewingOption ===
+            FlamegraphStateViewingOption.OBJECTS_ALLOCATED_NOT_FREED_KEY) {
           return RENDER_OBJ_COUNT;
         } else {
           return RENDER_SELF_AND_TOTAL;
         }
+      case ProfileType.MIXED_HEAP_PROFILE:
       case ProfileType.HEAP_PROFILE:
       case ProfileType.NATIVE_HEAP_PROFILE:
-      case ProfileType.JAVA_HEAP_PROFILE:
+      case ProfileType.JAVA_HEAP_SAMPLES:
       case ProfileType.PERF_SAMPLE:
         return RENDER_SELF_AND_TOTAL;
       default:
-        throw new Error('unknown type');
+        const exhaustiveCheck: never = profileType;
+        throw new Error(`Unhandled case: ${exhaustiveCheck}`);
     }
   }
 
@@ -257,90 +265,100 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
         this.nodeRendering(), flamegraphData, data.expandedCallsite);
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
+  oncreate({dom}: m.CVnodeDOM) {
+    this.canvas = FlamegraphDetailsPanel.findCanvasElement(dom);
+    // TODO(stevegolton): If we truely want to be standalone, then we shouldn't
+    // rely on someone else calling the rafScheduler when the window is resized,
+    // but it's good enough for now as we know the ViewerPage will do it.
+    raf.addRedrawCallback(this.rafRedrawCallback);
+  }
+
+  onupdate({dom}: m.CVnodeDOM) {
+    this.canvas = FlamegraphDetailsPanel.findCanvasElement(dom);
+  }
+
+  onremove(_vnode: m.CVnodeDOM) {
+    raf.removeRedrawCallback(this.rafRedrawCallback);
+  }
+
+  private static findCanvasElement(dom: Element): HTMLCanvasElement|undefined {
+    const canvas = findRef(dom, 'canvas');
+    if (canvas && canvas instanceof HTMLCanvasElement) {
+      return canvas;
+    } else {
+      return undefined;
+    }
+  }
+
+  private rafRedrawCallback = () => {
+    if (this.canvas) {
+      const canvas = this.canvas;
+      canvas.width = canvas.offsetWidth * devicePixelRatio;
+      canvas.height = canvas.offsetHeight * devicePixelRatio;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.scale(devicePixelRatio, devicePixelRatio);
+        const {offsetWidth: width, offsetHeight: height} = canvas;
+        this.renderLocalCanvas(ctx, width, height);
+        ctx.restore();
+      }
+    }
+  };
+
+  private renderLocalCanvas(
+      ctx: CanvasRenderingContext2D, width: number, height: number) {
     this.changeFlamegraphData();
     const current = globals.state.currentFlamegraphState;
     if (current === null) return;
-    const unit =
-        current.viewingOption === SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY ||
-            current.viewingOption === ALLOC_SPACE_MEMORY_ALLOCATED_KEY ?
+    const unit = current.viewingOption ===
+                FlamegraphStateViewingOption
+                    .SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY ||
+            current.viewingOption ===
+                FlamegraphStateViewingOption.ALLOC_SPACE_MEMORY_ALLOCATED_KEY ?
         'B' :
         '';
-    this.flamegraph.draw(ctx, size.width, size.height, 0, HEADER_HEIGHT, unit);
+    this.flamegraph.draw(ctx, width, height, 0, 0, unit);
   }
 
-  onMouseClick({x, y}: {x: number, y: number}): boolean {
+  private onMouseClick({x, y}: {x: number, y: number}): boolean {
     const expandedCallsite = this.flamegraph.onMouseClick({x, y});
     globals.dispatch(Actions.expandFlamegraphState({expandedCallsite}));
     return true;
   }
 
-  onMouseMove({x, y}: {x: number, y: number}): boolean {
+  private onMouseMove({x, y}: {x: number, y: number}): boolean {
     this.flamegraph.onMouseMove({x, y});
+    raf.scheduleFullRedraw();
     return true;
   }
 
-  onMouseOut() {
+  private onMouseOut() {
     this.flamegraph.onMouseOut();
+    raf.scheduleFullRedraw();
   }
 
   private static selectViewingOptions(profileType: ProfileType) {
-    switch (profileType) {
-      case ProfileType.PERF_SAMPLE:
-        return [this.buildButtonComponent(PERF_SAMPLES_KEY, 'Samples')];
-      case ProfileType.JAVA_HEAP_GRAPH:
-        return [
-          this.buildButtonComponent(
-              SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY, 'Size'),
-          this.buildButtonComponent(OBJECTS_ALLOCATED_NOT_FREED_KEY, 'Objects'),
-        ];
-      case ProfileType.HEAP_PROFILE:
-        return [
-          this.buildButtonComponent(
-              SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY, 'Unreleased size'),
-          this.buildButtonComponent(OBJECTS_ALLOCATED_NOT_FREED_KEY, 'Count'),
-          this.buildButtonComponent(
-              ALLOC_SPACE_MEMORY_ALLOCATED_KEY, 'Total size'),
-          this.buildButtonComponent(OBJECTS_ALLOCATED_KEY, 'Total count'),
-        ];
-      case ProfileType.NATIVE_HEAP_PROFILE:
-        return [
-          this.buildButtonComponent(
-              SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY, 'Unreleased malloc size'),
-          this.buildButtonComponent(
-              OBJECTS_ALLOCATED_NOT_FREED_KEY, 'Unreleased malloc count'),
-          this.buildButtonComponent(
-              ALLOC_SPACE_MEMORY_ALLOCATED_KEY, 'Total malloc size'),
-          this.buildButtonComponent(
-              OBJECTS_ALLOCATED_KEY, 'Total malloc count'),
-        ];
-      case ProfileType.JAVA_HEAP_PROFILE:
-        return [
-          this.buildButtonComponent(
-              ALLOC_SPACE_MEMORY_ALLOCATED_KEY, 'Total allocation size'),
-          this.buildButtonComponent(
-              OBJECTS_ALLOCATED_KEY, 'Total allocation count'),
-        ];
-      default:
-        throw new Error(`Unexpected profile type ${profileType}`);
+    const ret = [];
+    for (const {option, name} of viewingOptions(profileType)) {
+      ret.push(this.buildButtonComponent(option, name));
     }
+    return ret;
   }
 
   private static buildButtonComponent(
       viewingOption: FlamegraphStateViewingOption, text: string) {
-    const buttonsClass =
-        (globals.state.currentFlamegraphState &&
-         globals.state.currentFlamegraphState.viewingOption === viewingOption) ?
-        '.chosen' :
-        '';
-    return m(
-        `button${buttonsClass}`,
-        {
-          onclick: () => {
-            globals.dispatch(
-                Actions.changeViewFlamegraphState({viewingOption}));
-          },
-        },
-        text);
+    const active =
+        (globals.state.currentFlamegraphState !== null &&
+         globals.state.currentFlamegraphState.viewingOption === viewingOption);
+    return m(Button, {
+      label: text,
+      active,
+      minimal: true,
+      onclick: () => {
+        globals.dispatch(Actions.changeViewFlamegraphState({viewingOption}));
+      },
+    });
   }
 }

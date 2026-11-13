@@ -7,7 +7,9 @@
 
 #include "src/base/small-vector.h"
 #include "src/common/globals.h"
-#include "src/compiler/turboshaft/operations.h"
+#include "src/compiler/frame-states.h"
+#include "src/compiler/turboshaft/index.h"
+#include "src/compiler/turboshaft/representations.h"
 
 namespace v8::internal::compiler::turboshaft {
 
@@ -75,6 +77,7 @@ struct FrameStateData {
     base::SmallVector<MachineType, 32> machine_types_;
     base::SmallVector<uint32_t, 16> int_operands_;
     base::SmallVector<OpIndex, 32> inputs_;
+
     bool inlined_ = false;
   };
 
@@ -84,7 +87,12 @@ struct FrameStateData {
     base::Vector<const uint32_t> int_operands;
     base::Vector<const OpIndex> inputs;
 
-    bool has_more() const { return !instructions.empty(); }
+    bool has_more() const {
+      DCHECK_IMPLIES(instructions.empty(), machine_types.empty());
+      DCHECK_IMPLIES(instructions.empty(), int_operands.empty());
+      DCHECK_IMPLIES(instructions.empty(), inputs.empty());
+      return !instructions.empty();
+    }
 
     Instr current_instr() { return instructions[0]; }
 
@@ -134,6 +142,13 @@ struct FrameStateData {
   base::Vector<MachineType> machine_types;
   base::Vector<uint32_t> int_operands;
 };
+
+inline bool operator==(const FrameStateData& lhs, const FrameStateData& rhs) {
+  return lhs.frame_state_info == rhs.frame_state_info &&
+         lhs.instructions == rhs.instructions &&
+         lhs.machine_types == rhs.machine_types &&
+         lhs.int_operands == rhs.int_operands;
+}
 
 }  // namespace v8::internal::compiler::turboshaft
 

@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <utility>
+#include <variant>
 
 #include "absl/types/variant.h"
 #include "connections/payload_type.h"
@@ -29,7 +30,6 @@
 #include "internal/platform/payload_id.h"
 #include "internal/platform/prng.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -41,8 +41,8 @@ class Payload {
   using Id = PayloadId;
   // Order of types in variant, and values in Type enum is important.
   // Enum values must match respective variant types.
-  using Content = absl::variant<absl::monostate, ByteArray,
-                                std::function<InputStream&()>, InputFile>;
+  using Content = std::variant<std::monostate, ByteArray,
+                               std::unique_ptr<InputStream>, InputFile>;
 
   Payload(Payload&& other) noexcept;
   ~Payload();
@@ -72,7 +72,7 @@ class Payload {
   explicit Payload(std::string parent_folder, std::string file_name,
                    InputFile file);
 
-  explicit Payload(std::function<InputStream&()> stream);
+  explicit Payload(std::unique_ptr<InputStream> stream);
 
   // Constructors for incoming payloads.
   Payload(Id id, ByteArray&& bytes);
@@ -80,11 +80,10 @@ class Payload {
   Payload(Id id, InputFile file);
   Payload(Id id, std::string parent_folder, std::string file_name,
           InputFile input_file);
-  Payload(Id id, std::function<InputStream&()> stream);
+  Payload(Id id, std::unique_ptr<InputStream> stream);
 
   // Returns ByteArray payload, if it has been defined, or empty ByteArray.
   const ByteArray& AsBytes() const&;
-  ByteArray&& AsBytes() &&;
   // Returns InputStream* payload, if it has been defined, or nullptr.
   InputStream* AsStream();
   // Returns InputFile* payload, if it has been defined, or nullptr.
@@ -122,6 +121,5 @@ class Payload {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_PAYLOAD_H_

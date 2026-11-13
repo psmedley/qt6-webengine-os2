@@ -5,8 +5,7 @@
 #include "src/builtins/builtins-async-gen.h"
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/codegen/code-factory.h"
-#include "src/codegen/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/execution/frames-inl.h"
 #include "src/objects/js-generator.h"
 #include "src/objects/js-promise.h"
@@ -246,8 +245,8 @@ void AsyncGeneratorBuiltinsAssembler::AsyncGeneratorAwaitResume(
   }
   BIND(&if_instrumentation_done);
 
-  CallStub(CodeFactory::ResumeGenerator(isolate()), context, value,
-           async_generator_object);
+  CallBuiltin(Builtin::kResumeGeneratorTrampoline, context, value,
+              async_generator_object);
 
   TailCallBuiltin(Builtin::kAsyncGeneratorResumeNext, context,
                   async_generator_object);
@@ -510,8 +509,21 @@ TF_BUILTIN(AsyncGeneratorResumeNext, AsyncGeneratorBuiltinsAssembler) {
     // Remember the {resume_type} for the {generator}.
     StoreObjectFieldNoWriteBarrier(
         generator, JSGeneratorObject::kResumeModeOffset, resume_type);
-    CallStub(CodeFactory::ResumeGenerator(isolate()), context,
-             LoadValueFromAsyncGeneratorRequest(next), generator);
+
+    Label if_instrumentation(this, Label::kDeferred),
+        if_instrumentation_done(this);
+    Branch(IsDebugActive(), &if_instrumentation, &if_instrumentation_done);
+    BIND(&if_instrumentation);
+    {
+      const TNode<JSPromise> promise = LoadObjectField<JSPromise>(
+          next, AsyncGeneratorRequest::kPromiseOffset);
+      CallRuntime(Runtime::kDebugPushPromise, context, promise);
+      Goto(&if_instrumentation_done);
+    }
+    BIND(&if_instrumentation_done);
+
+    CallBuiltin(Builtin::kResumeGeneratorTrampoline, context,
+                LoadValueFromAsyncGeneratorRequest(next), generator);
     var_state = LoadGeneratorState(generator);
     var_next = LoadFirstAsyncGeneratorRequestFromQueue(generator);
     Goto(&start);
@@ -598,14 +610,15 @@ TF_BUILTIN(AsyncGeneratorReject, AsyncGeneratorBuiltinsAssembler) {
       TakeFirstAsyncGeneratorRequestFromQueue(generator);
   TNode<JSPromise> promise = LoadPromiseFromAsyncGeneratorRequest(next);
 
+  // No debug event needed, there was already a debug event that got us here.
   Return(CallBuiltin(Builtin::kRejectPromise, context, promise, value,
-                     TrueConstant()));
+                     FalseConstant()));
 }
 
 TF_BUILTIN(AsyncGeneratorYieldWithAwait, AsyncGeneratorBuiltinsAssembler) {
   const auto generator = Parameter<JSGeneratorObject>(Descriptor::kGenerator);
   const auto value = Parameter<Object>(Descriptor::kValue);
-  const auto is_caught = Parameter<Oddball>(Descriptor::kIsCaught);
+  const auto is_caught = Parameter<Boolean>(Descriptor::kIsCaught);
   const auto context = Parameter<Context>(Descriptor::kContext);
 
   const TNode<AsyncGeneratorRequest> request =
@@ -657,7 +670,7 @@ TF_BUILTIN(AsyncGeneratorReturn, AsyncGeneratorBuiltinsAssembler) {
   const auto generator =
       Parameter<JSAsyncGeneratorObject>(Descriptor::kGenerator);
   const auto value = Parameter<Object>(Descriptor::kValue);
-  const auto is_caught = Parameter<Oddball>(Descriptor::kIsCaught);
+  const auto is_caught = Parameter<Boolean>(Descriptor::kIsCaught);
   const TNode<AsyncGeneratorRequest> req =
       CAST(LoadFirstAsyncGeneratorRequestFromQueue(generator));
 

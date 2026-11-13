@@ -1,7 +1,7 @@
 /**************************************************************************
  *
- * Copyright © 2007 Red Hat Inc.
- * Copyright © 2007-2012 Intel Corporation
+ * Copyright Â© 2007 Red Hat Inc.
+ * Copyright Â© 2007-2012 Intel Corporation
  * Copyright 2006 Tungsten Graphics, Inc., Bismarck, ND., USA
  * All Rights Reserved.
  *
@@ -28,7 +28,7 @@
  *
  **************************************************************************/
 /*
- * Authors: Thomas Hellström <thomas-at-tungstengraphics-dot-com>
+ * Authors: Thomas HellstrÃ¶m <thomas-at-tungstengraphics-dot-com>
  *          Keith Whitwell <keithw-at-tungstengraphics-dot-com>
  *	    Eric Anholt <eric@anholt.net>
  *	    Dave Airlie <airlied@linux.ie>
@@ -1379,25 +1379,26 @@ static void drm_intel_gem_bo_unreference_locked_timed(drm_intel_bo *bo,
 static void drm_intel_gem_bo_unreference(drm_intel_bo *bo)
 {
 	drm_intel_bo_gem *bo_gem = (drm_intel_bo_gem *) bo;
+	drm_intel_bufmgr_gem *bufmgr_gem;
+	struct timespec time;
 
 	assert(atomic_read(&bo_gem->refcount) > 0);
 
-	if (atomic_add_unless(&bo_gem->refcount, -1, 1)) {
-		drm_intel_bufmgr_gem *bufmgr_gem =
-		    (drm_intel_bufmgr_gem *) bo->bufmgr;
-		struct timespec time;
+	if (atomic_add_unless(&bo_gem->refcount, -1, 1))
+		return;
 
-		clock_gettime(CLOCK_MONOTONIC, &time);
+	bufmgr_gem = (drm_intel_bufmgr_gem *) bo->bufmgr;
 
-		pthread_mutex_lock(&bufmgr_gem->lock);
+	clock_gettime(CLOCK_MONOTONIC, &time);
 
-		if (atomic_dec_and_test(&bo_gem->refcount)) {
-			drm_intel_gem_bo_unreference_final(bo, time.tv_sec);
-			drm_intel_gem_cleanup_bo_cache(bufmgr_gem, time.tv_sec);
-		}
+	pthread_mutex_lock(&bufmgr_gem->lock);
 
-		pthread_mutex_unlock(&bufmgr_gem->lock);
+	if (atomic_dec_and_test(&bo_gem->refcount)) {
+		drm_intel_gem_bo_unreference_final(bo, time.tv_sec);
+		drm_intel_gem_cleanup_bo_cache(bufmgr_gem, time.tv_sec);
 	}
+
+	pthread_mutex_unlock(&bufmgr_gem->lock);
 }
 
 static int drm_intel_gem_bo_map(drm_intel_bo *bo, int write_enable)
@@ -3377,16 +3378,17 @@ drm_intel_bufmgr_gem_unref(drm_intel_bufmgr *bufmgr)
 {
 	drm_intel_bufmgr_gem *bufmgr_gem = (drm_intel_bufmgr_gem *)bufmgr;
 
-	if (atomic_add_unless(&bufmgr_gem->refcount, -1, 1)) {
-		pthread_mutex_lock(&bufmgr_list_mutex);
+	if (atomic_add_unless(&bufmgr_gem->refcount, -1, 1))
+		return;
 
-		if (atomic_dec_and_test(&bufmgr_gem->refcount)) {
-			DRMLISTDEL(&bufmgr_gem->managers);
-			drm_intel_bufmgr_gem_destroy(bufmgr);
-		}
+	pthread_mutex_lock(&bufmgr_list_mutex);
 
-		pthread_mutex_unlock(&bufmgr_list_mutex);
+	if (atomic_dec_and_test(&bufmgr_gem->refcount)) {
+		DRMLISTDEL(&bufmgr_gem->managers);
+		drm_intel_bufmgr_gem_destroy(bufmgr);
 	}
+
+	pthread_mutex_unlock(&bufmgr_list_mutex);
 }
 
 drm_public void *drm_intel_gem_bo_map__gtt(drm_intel_bo *bo)
@@ -3588,13 +3590,9 @@ drm_intel_bufmgr_gem_init(int fd, int batch_size)
 		bufmgr_gem->gen = 6;
 	else if (IS_GEN7(bufmgr_gem->pci_device))
 		bufmgr_gem->gen = 7;
-	else if (IS_GEN8(bufmgr_gem->pci_device))
+	else
+		/* Treat all further unmatched platforms the same as gen8 */
 		bufmgr_gem->gen = 8;
-	else if (!intel_get_genx(bufmgr_gem->pci_device, &bufmgr_gem->gen)) {
-		free(bufmgr_gem);
-		bufmgr_gem = NULL;
-		goto exit;
-	}
 
 	if (IS_GEN3(bufmgr_gem->pci_device) &&
 	    bufmgr_gem->gtt_size > 256*1024*1024) {

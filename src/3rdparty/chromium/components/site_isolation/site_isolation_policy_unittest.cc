@@ -75,6 +75,14 @@ class BaseSiteIsolationTest : public testing::Test {
     content::SetBrowserClientForTesting(original_client_);
   }
 
+  void SetUp() override {
+    SiteIsolationPolicy::SetDisallowMemoryThresholdCachingForTesting(true);
+  }
+
+  void TearDown() override {
+    SiteIsolationPolicy::SetDisallowMemoryThresholdCachingForTesting(false);
+  }
+
  protected:
   void SetEnableStrictSiteIsolation(bool enable) {
     browser_client_.strict_isolation_enabled_ = enable;
@@ -166,7 +174,7 @@ class WebTriggeredIsolatedOriginsPolicyTest : public SiteIsolationPolicyTest {
   void SetUp() override {
     // Set up the COOP isolation feature with persistence enabled and a maximum
     // of 3 stored sites.
-    base::test::ScopedFeatureList::FeatureAndParams coop_feature = {
+    base::test::FeatureRefAndParams coop_feature = {
         ::features::kSiteIsolationForCrossOriginOpenerPolicy,
         {{::features::kSiteIsolationForCrossOriginOpenerPolicyMaxSitesParam
               .name,
@@ -178,7 +186,7 @@ class WebTriggeredIsolatedOriginsPolicyTest : public SiteIsolationPolicyTest {
     // Some machines running this test may be below the default memory
     // threshold.  To ensure that COOP isolation is also enabled on those
     // machines, set a very low 128MB threshold.
-    base::test::ScopedFeatureList::FeatureAndParams memory_threshold_feature = {
+    base::test::FeatureRefAndParams memory_threshold_feature = {
         site_isolation::features::kSiteIsolationMemoryThresholds,
         {{site_isolation::features::
               kPartialSiteIsolationMemoryThresholdParamName,
@@ -524,6 +532,7 @@ class SitePerProcessMemoryThresholdBrowserTest
     // On Android official builds, we expect to isolate an additional set of
     // built-in origins.
     expected_embedder_origins_ = GetBrowserSpecificBuiltInIsolatedOrigins();
+    BaseSiteIsolationTest::SetUp();
   }
 
  protected:
@@ -727,11 +736,7 @@ class PasswordSiteIsolationFieldTrialTest : public BaseSiteIsolationTest {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableLowEndDeviceMode);
     EXPECT_EQ(512, base::SysInfo::AmountOfPhysicalMemoryMB());
-    SiteIsolationPolicy::SetDisallowMemoryThresholdCachingForTesting(true);
-  }
-
-  void TearDown() override {
-    SiteIsolationPolicy::SetDisallowMemoryThresholdCachingForTesting(false);
+    BaseSiteIsolationTest::SetUp();
   }
 
  protected:
@@ -944,11 +949,7 @@ class StrictOriginIsolationFieldTrialTest : public BaseSiteIsolationTest {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableLowEndDeviceMode);
     EXPECT_EQ(512, base::SysInfo::AmountOfPhysicalMemoryMB());
-    SiteIsolationPolicy::SetDisallowMemoryThresholdCachingForTesting(true);
-  }
-
-  void TearDown() override {
-    SiteIsolationPolicy::SetDisallowMemoryThresholdCachingForTesting(false);
+    BaseSiteIsolationTest::SetUp();
   }
 
  protected:
@@ -1074,6 +1075,7 @@ class BuiltInIsolatedOriginsTest : public SiteIsolationPolicyTest {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableLowEndDeviceMode);
     EXPECT_EQ(512, base::SysInfo::AmountOfPhysicalMemoryMB());
+    SiteIsolationPolicyTest::SetUp();
   }
 };
 

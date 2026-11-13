@@ -18,6 +18,7 @@
 #define INCLUDE_PERFETTO_TRACING_INTERNAL_SYSTEM_TRACING_BACKEND_H_
 
 #include "perfetto/base/export.h"
+#include "perfetto/tracing/default_socket.h"
 #include "perfetto/tracing/tracing_backend.h"
 
 namespace perfetto {
@@ -28,25 +29,39 @@ class TaskRunner;
 
 class Producer;
 
-// A built-in implementation of TracingBackend that connects to the system
-// tracing daemon (traced) via a UNIX socket using the perfetto built-in
-// proto-based IPC mechanism. Instantiated when the embedder calls
-// Tracing::Initialize(kSystemBackend). It allows to get app-traces fused
-// together with system traces, useful to correlate on the timeline system
-// events (e.g. scheduling slices from the kernel) with in-app events.
+// Built-in implementations of TracingProducerBackend and TracingConsumerBackend
+// that connect to the system tracing daemon (traced) via a UNIX socket using
+// the perfetto built-in proto-based IPC mechanism. Instantiated when the
+// embedder calls Tracing::Initialize(kSystemBackend). They allow to get
+// app-traces fused together with system traces, useful to correlate on the
+// timeline system events (e.g. scheduling slices from the kernel) with in-app
+// events.
 namespace internal {
-class PERFETTO_EXPORT_COMPONENT SystemTracingBackend : public TracingBackend {
- public:
-  static TracingBackend* GetInstance();
 
-  // TracingBackend implementation.
+// Producer backend
+class PERFETTO_EXPORT_COMPONENT SystemProducerTracingBackend
+    : public TracingProducerBackend {
+ public:
+  static TracingProducerBackend* GetInstance();
+
   std::unique_ptr<ProducerEndpoint> ConnectProducer(
       const ConnectProducerArgs&) override;
+
+ private:
+  SystemProducerTracingBackend();
+};
+
+// Consumer backend
+class PERFETTO_EXPORT_COMPONENT SystemConsumerTracingBackend
+    : public TracingConsumerBackend {
+ public:
+  static TracingConsumerBackend* GetInstance();
+
   std::unique_ptr<ConsumerEndpoint> ConnectConsumer(
       const ConnectConsumerArgs&) override;
 
  private:
-  SystemTracingBackend();
+  SystemConsumerTracingBackend();
 };
 
 }  // namespace internal

@@ -21,6 +21,7 @@
 #include "src/wasm/wasm-objects-inl.h"
 #include "src/wasm/wasm-objects.h"
 #include "src/wasm/wasm-result.h"
+#include "src/wasm/well-known-imports.h"
 
 namespace v8 {
 namespace internal {
@@ -35,13 +36,13 @@ constexpr uint8_t kTurboFanFunction = 4;
 // in Wasm, e.g. StreamProcessor and ZoneBuffer, with these.
 class Writer {
  public:
-  explicit Writer(base::Vector<byte> buffer)
+  explicit Writer(base::Vector<uint8_t> buffer)
       : start_(buffer.begin()), end_(buffer.end()), pos_(buffer.begin()) {}
 
   size_t bytes_written() const { return pos_ - start_; }
-  byte* current_location() const { return pos_; }
+  uint8_t* current_location() const { return pos_; }
   size_t current_size() const { return end_ - pos_; }
-  base::Vector<byte> current_buffer() const {
+  base::Vector<uint8_t> current_buffer() const {
     return {current_location(), current_size()};
   }
 
@@ -56,14 +57,17 @@ class Writer {
     }
   }
 
-  void WriteVector(const base::Vector<const byte> v) {
-    DCHECK_GE(current_size(), v.size());
-    if (v.size() > 0) {
-      memcpy(current_location(), v.begin(), v.size());
-      pos_ += v.size();
+  template <typename T>
+  void WriteVector(const base::Vector<T> v) {
+    base::Vector<const uint8_t> bytes = base::Vector<const uint8_t>::cast(v);
+    DCHECK_GE(current_size(), bytes.size());
+    if (!bytes.empty()) {
+      memcpy(current_location(), bytes.begin(), bytes.size());
+      pos_ += bytes.size();
     }
     if (v8_flags.trace_wasm_serialization) {
-      StdoutStream{} << "wrote vector of " << v.size() << " elements"
+      StdoutStream{} << "wrote vector of " << v.size()
+                     << " elements (total size " << bytes.size() << " bytes)"
                      << std::endl;
     }
   }
@@ -71,20 +75,20 @@ class Writer {
   void Skip(size_t size) { pos_ += size; }
 
  private:
-  byte* const start_;
-  byte* const end_;
-  byte* pos_;
+  uint8_t* const start_;
+  uint8_t* const end_;
+  uint8_t* pos_;
 };
 
 class Reader {
  public:
-  explicit Reader(base::Vector<const byte> buffer)
+  explicit Reader(base::Vector<const uint8_t> buffer)
       : start_(buffer.begin()), end_(buffer.end()), pos_(buffer.begin()) {}
 
   size_t bytes_read() const { return pos_ - start_; }
-  const byte* current_location() const { return pos_; }
+  const uint8_t* current_location() const { return pos_; }
   size_t current_size() const { return end_ - pos_; }
-  base::Vector<const byte> current_buffer() const {
+  base::Vector<const uint8_t> current_buffer() const {
     return {current_location(), current_size()};
   }
 
@@ -104,7 +108,7 @@ class Reader {
   template <typename T>
   base::Vector<const T> ReadVector(size_t size) {
     DCHECK_GE(current_size(), size);
-    base::Vector<const byte> bytes{pos_, size * sizeof(T)};
+    base::Vector<const uint8_t> bytes{pos_, size * sizeof(T)};
     pos_ += size * sizeof(T);
     if (v8_flags.trace_wasm_serialization) {
       StdoutStream{} << "read vector of " << size << " elements of size "
@@ -117,9 +121,9 @@ class Reader {
   void Skip(size_t size) { pos_ += size; }
 
  private:
-  const byte* const start_;
-  const byte* const end_;
-  const byte* pos_;
+  const uint8_t* const start_;
+  const uint8_t* const end_;
+  const uint8_t* pos_;
 };
 
 void WriteHeader(Writer* writer) {
@@ -135,7 +139,7 @@ void WriteHeader(Writer* writer) {
 // index). On Intel, that means accessing the raw displacement.
 // On ARM64, call sites are encoded as either a literal load or a direct branch.
 // Other platforms simply require accessing the target address.
-void SetWasmCalleeTag(RelocInfo* rinfo, uint32_t tag) {
+void SetWasmCalleeTag(WritableRelocInfo* rinfo, uint32_t tag) {
 #if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_IA32
   DCHECK(rinfo->HasTargetAddressAddress());
   DCHECK(!RelocInfo::IsCompressedEmbeddedObject(rinfo->rmode()));
@@ -147,7 +151,7 @@ void SetWasmCalleeTag(RelocInfo* rinfo, uint32_t tag) {
                         static_cast<Address>(tag));
   } else {
     DCHECK(instr->IsBranchAndLink() || instr->IsUnconditionalBranch());
-    instr->SetBranchImmTarget(
+    instr->SetBranchImmTarget<UncondBranchType>(
         reinterpret_cast<Instruction*>(rinfo->pc() + tag * kInstrSize));
   }
 #else
@@ -157,7 +161,7 @@ void SetWasmCalleeTag(RelocInfo* rinfo, uint32_t tag) {
   } else if (rinfo->rmode() == RelocInfo::WASM_STUB_CALL) {
     rinfo->set_wasm_stub_call_address(addr, SKIP_ICACHE_FLUSH);
   } else {
-    rinfo->set_target_address(addr, SKIP_WRITE_BARRIER, SKIP_ICACHE_FLUSH);
+    rinfo->set_target_address(addr, SKIP_ICACHE_FLUSH);
   }
 #endif
 }
@@ -187,7 +191,8 @@ uint32_t GetWasmCalleeTag(RelocInfo* rinfo) {
 #endif
 }
 
-constexpr size_t kHeaderSize = sizeof(size_t);  // total code size
+constexpr size_t kHeaderSize = sizeof(size_t) +  // total code size
+                               sizeof(bool);     // all functions validated
 
 constexpr size_t kCodeHeaderSize = sizeof(uint8_t) +  // code kind
                                    sizeof(int) +      // offset of constant pool
@@ -201,6 +206,7 @@ constexpr size_t kCodeHeaderSize = sizeof(uint8_t) +  // code kind
                                    sizeof(int) +  // code size
                                    sizeof(int) +  // reloc size
                                    sizeof(int) +  // source positions size
+                                   sizeof(int) +  // inlining positions size
                                    sizeof(int) +  // protected instructions size
                                    sizeof(WasmCode::Kind) +  // code kind
                                    sizeof(ExecutionTier);    // tier
@@ -276,7 +282,8 @@ static_assert(std::is_trivially_destructible<ExternalReferenceList>::value,
 
 class V8_EXPORT_PRIVATE NativeModuleSerializer {
  public:
-  NativeModuleSerializer(const NativeModule*, base::Vector<WasmCode* const>);
+  NativeModuleSerializer(const NativeModule*, base::Vector<WasmCode* const>,
+                         base::Vector<WellKnownImport const>);
   NativeModuleSerializer(const NativeModuleSerializer&) = delete;
   NativeModuleSerializer& operator=(const NativeModuleSerializer&) = delete;
 
@@ -287,17 +294,22 @@ class V8_EXPORT_PRIVATE NativeModuleSerializer {
   size_t MeasureCode(const WasmCode*) const;
   void WriteHeader(Writer*, size_t total_code_size);
   void WriteCode(const WasmCode*, Writer*);
+  void WriteTieringBudget(Writer* writer);
 
   const NativeModule* const native_module_;
   const base::Vector<WasmCode* const> code_table_;
+  const base::Vector<WellKnownImport const> import_statuses_;
   bool write_called_ = false;
   size_t total_written_code_ = 0;
   int num_turbofan_functions_ = 0;
 };
 
 NativeModuleSerializer::NativeModuleSerializer(
-    const NativeModule* module, base::Vector<WasmCode* const> code_table)
-    : native_module_(module), code_table_(code_table) {
+    const NativeModule* module, base::Vector<WasmCode* const> code_table,
+    base::Vector<WellKnownImport const> import_statuses)
+    : native_module_(module),
+      code_table_(code_table),
+      import_statuses_(import_statuses) {
   DCHECK_NOT_NULL(native_module_);
   // TODO(mtrofin): persist the export wrappers. Ideally, we'd only persist
   // the unique ones, i.e. the cache.
@@ -311,6 +323,7 @@ size_t NativeModuleSerializer::MeasureCode(const WasmCode* code) const {
   }
   return kCodeHeaderSize + code->instructions().size() +
          code->reloc_info().size() + code->source_positions().size() +
+         code->inlining_positions().size() +
          code->protected_instructions_data().size();
 }
 
@@ -319,6 +332,13 @@ size_t NativeModuleSerializer::Measure() const {
   for (WasmCode* code : code_table_) {
     size += MeasureCode(code);
   }
+  // Add the size of the well-known imports status.
+  size += import_statuses_.size() * sizeof(WellKnownImport);
+  // Add the size of the tiering budget.
+  size += native_module_->module()->num_declared_functions * sizeof(uint32_t);
+  // Add the size of the compile-time imports.
+  size += sizeof(typename CompileTimeImports::StorageType);
+
   return size;
 }
 
@@ -327,7 +347,24 @@ void NativeModuleSerializer::WriteHeader(Writer* writer,
   // TODO(eholk): We need to properly preserve the flag whether the trap
   // handler was used or not when serializing.
 
+  writer->Write(native_module_->compile_imports().ToIntegral());
   writer->Write(total_code_size);
+
+  // We do not ship lazy validation, so in most cases all functions will be
+  // validated. Thus only write out a single bit instead of serializing the
+  // information per function.
+  const bool fully_validated = !v8_flags.wasm_lazy_validation;
+  writer->Write(fully_validated);
+#ifdef DEBUG
+  if (fully_validated) {
+    const WasmModule* module = native_module_->module();
+    for (auto& function : module->declared_functions()) {
+      DCHECK(module->function_was_validated(function.func_index));
+    }
+  }
+#endif
+
+  writer->WriteVector(base::VectorOf(import_statuses_));
 }
 
 void NativeModuleSerializer::WriteCode(const WasmCode* code, Writer* writer) {
@@ -369,30 +406,33 @@ void NativeModuleSerializer::WriteCode(const WasmCode* code, Writer* writer) {
   writer->Write(code->instructions().length());
   writer->Write(code->reloc_info().length());
   writer->Write(code->source_positions().length());
+  writer->Write(code->inlining_positions().length());
   writer->Write(code->protected_instructions_data().length());
   writer->Write(code->kind());
   writer->Write(code->tier());
 
   // Get a pointer to the destination buffer, to hold relocated code.
-  byte* serialized_code_start = writer->current_buffer().begin();
-  byte* code_start = serialized_code_start;
+  uint8_t* serialized_code_start = writer->current_buffer().begin();
+  uint8_t* code_start = serialized_code_start;
   size_t code_size = code->instructions().size();
   writer->Skip(code_size);
-  // Write the reloc info, source positions, and protected code.
+  // Write the reloc info, source positions, inlining positions and protected
+  // code.
   writer->WriteVector(code->reloc_info());
   writer->WriteVector(code->source_positions());
+  writer->WriteVector(code->inlining_positions());
   writer->WriteVector(code->protected_instructions_data());
 #if V8_TARGET_ARCH_MIPS64 || V8_TARGET_ARCH_ARM || V8_TARGET_ARCH_PPC ||      \
     V8_TARGET_ARCH_PPC64 || V8_TARGET_ARCH_S390X || V8_TARGET_ARCH_RISCV32 || \
     V8_TARGET_ARCH_RISCV64
   // On platforms that don't support misaligned word stores, copy to an aligned
   // buffer if necessary so we can relocate the serialized code.
-  std::unique_ptr<byte[]> aligned_buffer;
+  std::unique_ptr<uint8_t[]> aligned_buffer;
   if (!IsAligned(reinterpret_cast<Address>(serialized_code_start),
                  kSystemPointerSize)) {
-    // 'byte' does not guarantee an alignment but seems to work well enough in
-    // practice.
-    aligned_buffer.reset(new byte[code_size]);
+    // 'uint8_t' does not guarantee an alignment but seems to work well enough
+    // in practice.
+    aligned_buffer.reset(new uint8_t[code_size]);
     code_start = aligned_buffer.get();
   }
 #endif
@@ -405,8 +445,13 @@ void NativeModuleSerializer::WriteCode(const WasmCode* code, Writer* writer) {
              RelocInfo::ModeMask(RelocInfo::INTERNAL_REFERENCE_ENCODED);
   RelocIterator orig_iter(code->instructions(), code->reloc_info(),
                           code->constant_pool(), mask);
-  for (RelocIterator iter(
-           {code_start, code->instructions().size()}, code->reloc_info(),
+  WritableJitAllocation jit_allocation =
+      WritableJitAllocation::ForNonExecutableMemory(
+          reinterpret_cast<Address>(code_start), code->instructions().size(),
+          ThreadIsolation::JitAllocationType::kWasmCode);
+  for (WritableRelocIterator iter(
+           jit_allocation, {code_start, code->instructions().size()},
+           code->reloc_info(),
            reinterpret_cast<Address>(code_start) + code->constant_pool_offset(),
            mask);
        !iter.done(); iter.next(), orig_iter.next()) {
@@ -420,8 +465,8 @@ void NativeModuleSerializer::WriteCode(const WasmCode* code, Writer* writer) {
       } break;
       case RelocInfo::WASM_STUB_CALL: {
         Address target = orig_iter.rinfo()->wasm_stub_call_address();
-        uint32_t tag = native_module_->GetRuntimeStubId(target);
-        DCHECK_GT(WasmCode::kRuntimeStubCount, tag);
+        uint32_t tag = static_cast<uint32_t>(
+            native_module_->GetBuiltinInJumptableSlot(target));
         SetWasmCalleeTag(iter.rinfo(), tag);
       } break;
       case RelocInfo::EXTERNAL_REFERENCE: {
@@ -448,6 +493,12 @@ void NativeModuleSerializer::WriteCode(const WasmCode* code, Writer* writer) {
   total_written_code_ += code_size;
 }
 
+void NativeModuleSerializer::WriteTieringBudget(Writer* writer) {
+  writer->WriteVector(
+      base::VectorOf(native_module_->tiering_budget_array(),
+                     native_module_->module()->num_declared_functions));
+}
+
 bool NativeModuleSerializer::Write(Writer* writer) {
   DCHECK(!write_called_);
   write_called_ = true;
@@ -470,22 +521,24 @@ bool NativeModuleSerializer::Write(Writer* writer) {
   // Make sure that the serialized total code size was correct.
   CHECK_EQ(total_written_code_, total_code_size);
 
+  WriteTieringBudget(writer);
   return true;
 }
 
 WasmSerializer::WasmSerializer(NativeModule* native_module)
-    : native_module_(native_module),
-      code_table_(native_module->SnapshotCodeTable()) {}
+    : native_module_(native_module) {
+  std::tie(code_table_, import_statuses_) = native_module->SnapshotCodeTable();
+}
 
 size_t WasmSerializer::GetSerializedNativeModuleSize() const {
-  NativeModuleSerializer serializer(native_module_,
-                                    base::VectorOf(code_table_));
+  NativeModuleSerializer serializer(native_module_, base::VectorOf(code_table_),
+                                    base::VectorOf(import_statuses_));
   return kHeaderSize + serializer.Measure();
 }
 
-bool WasmSerializer::SerializeNativeModule(base::Vector<byte> buffer) const {
-  NativeModuleSerializer serializer(native_module_,
-                                    base::VectorOf(code_table_));
+bool WasmSerializer::SerializeNativeModule(base::Vector<uint8_t> buffer) const {
+  NativeModuleSerializer serializer(native_module_, base::VectorOf(code_table_),
+                                    base::VectorOf(import_statuses_));
   size_t measured_size = kHeaderSize + serializer.Measure();
   if (buffer.size() < measured_size) return false;
 
@@ -498,7 +551,7 @@ bool WasmSerializer::SerializeNativeModule(base::Vector<byte> buffer) const {
 }
 
 struct DeserializationUnit {
-  base::Vector<const byte> src_code_buffer;
+  base::Vector<const uint8_t> src_code_buffer;
   std::unique_ptr<WasmCode> code;
   NativeModule::JumpTablesRef jump_tables;
 };
@@ -563,6 +616,7 @@ class V8_EXPORT_PRIVATE NativeModuleDeserializer {
 
   void ReadHeader(Reader* reader);
   DeserializationUnit ReadCode(int fn_index, Reader* reader);
+  void ReadTieringBudget(Reader* reader);
   void CopyAndRelocate(const DeserializationUnit& unit);
   void Publish(std::vector<DeserializationUnit> batch);
 
@@ -573,7 +627,9 @@ class V8_EXPORT_PRIVATE NativeModuleDeserializer {
 
   // Updated in {ReadCode}.
   size_t remaining_code_size_ = 0;
-  base::Vector<byte> current_code_space_;
+  bool all_functions_validated_ = false;
+  CompileTimeImports compile_imports_;
+  base::Vector<uint8_t> current_code_space_;
   NativeModule::JumpTablesRef current_jump_tables_;
   std::vector<int> lazy_functions_;
   std::vector<int> eager_functions_;
@@ -586,7 +642,6 @@ class DeserializeCodeTask : public JobTask {
       : deserializer_(deserializer), reloc_queue_(reloc_queue) {}
 
   void Run(JobDelegate* delegate) override {
-    CodeSpaceWriteScope code_space_write_scope(deserializer_->native_module_);
     bool finished = false;
     while (!finished) {
       // Repeatedly publish everything that was copied already.
@@ -598,7 +653,6 @@ class DeserializeCodeTask : public JobTask {
         deserializer_->CopyAndRelocate(unit);
       }
       publish_queue_.Add(std::move(batch));
-      ResetPKUPermissionsForThreadSpawning pku_reset_scope;
       delegate->NotifyConcurrencyIncrease();
     }
   }
@@ -652,8 +706,14 @@ bool NativeModuleDeserializer::Read(Reader* reader) {
 #endif
 
   ReadHeader(reader);
+  if (compile_imports_ != native_module_->compile_imports()) return false;
+
   uint32_t total_fns = native_module_->num_functions();
   uint32_t first_wasm_fn = native_module_->num_imported_functions();
+
+  if (all_functions_validated_) {
+    native_module_->module()->set_all_functions_validated();
+  }
 
   WasmCodeRefScope wasm_code_ref_scope;
 
@@ -673,7 +733,6 @@ bool NativeModuleDeserializer::Read(Reader* reader) {
 
   std::vector<DeserializationUnit> batch;
   size_t batch_size = 0;
-  CodeSpaceWriteScope code_space_write_scope(native_module_);
   for (uint32_t i = first_wasm_fn; i < total_fns; ++i) {
     DeserializationUnit unit = ReadCode(i, reader);
     if (!unit.code) continue;
@@ -683,7 +742,6 @@ bool NativeModuleDeserializer::Read(Reader* reader) {
       reloc_queue.Add(std::move(batch));
       DCHECK(batch.empty());
       batch_size = 0;
-      ResetPKUPermissionsForThreadSpawning pku_reset_scope;
       job_handle->NotifyConcurrencyIncrease();
     }
   }
@@ -695,18 +753,30 @@ bool NativeModuleDeserializer::Read(Reader* reader) {
 
   if (!batch.empty()) {
     reloc_queue.Add(std::move(batch));
-    ResetPKUPermissionsForThreadSpawning pku_reset_scope;
     job_handle->NotifyConcurrencyIncrease();
   }
 
   // Wait for all tasks to finish, while participating in their work.
   job_handle->Join();
 
+  ReadTieringBudget(reader);
   return reader->current_size() == 0;
 }
 
 void NativeModuleDeserializer::ReadHeader(Reader* reader) {
+  auto compile_imports = reader->Read<CompileTimeImports::StorageType>();
+  compile_imports_ = CompileTimeImports::FromIntegral(compile_imports);
+
   remaining_code_size_ = reader->Read<size_t>();
+  all_functions_validated_ = reader->Read<bool>();
+
+  uint32_t imported = native_module_->module()->num_imported_functions;
+  if (imported > 0) {
+    base::Vector<const WellKnownImport> well_known_imports =
+        reader->ReadVector<WellKnownImport>(imported);
+    native_module_->module()->type_feedback.well_known_imports.Initialize(
+        well_known_imports);
+  }
 }
 
 DeserializationUnit NativeModuleDeserializer::ReadCode(int fn_index,
@@ -732,6 +802,7 @@ DeserializationUnit NativeModuleDeserializer::ReadCode(int fn_index,
   int code_size = reader->Read<int>();
   int reloc_size = reader->Read<int>();
   int source_position_size = reader->Read<int>();
+  int inlining_position_size = reader->Read<int>();
   int protected_instructions_size = reader->Read<int>();
   WasmCode::Kind kind = reader->Read<WasmCode::Kind>();
   ExecutionTier tier = reader->Read<ExecutionTier>();
@@ -741,21 +812,22 @@ DeserializationUnit NativeModuleDeserializer::ReadCode(int fn_index,
   if (current_code_space_.size() < static_cast<size_t>(code_size)) {
     // Allocate the next code space. Don't allocate more than 90% of
     // {kMaxCodeSpaceSize}, to leave some space for jump tables.
-    constexpr size_t kMaxReservation =
-        RoundUp<kCodeAlignment>(WasmCodeAllocator::kMaxCodeSpaceSize * 9 / 10);
-    size_t code_space_size = std::min(kMaxReservation, remaining_code_size_);
+    size_t max_reservation = RoundUp<kCodeAlignment>(
+        v8_flags.wasm_max_code_space_size_mb * MB * 9 / 10);
+    size_t code_space_size = std::min(max_reservation, remaining_code_size_);
     std::tie(current_code_space_, current_jump_tables_) =
         native_module_->AllocateForDeserializedCode(code_space_size);
     DCHECK_EQ(current_code_space_.size(), code_space_size);
-    DCHECK(current_jump_tables_.is_valid());
+    CHECK(current_jump_tables_.is_valid());
   }
 
   DeserializationUnit unit;
-  unit.src_code_buffer = reader->ReadVector<byte>(code_size);
-  auto reloc_info = reader->ReadVector<byte>(reloc_size);
-  auto source_pos = reader->ReadVector<byte>(source_position_size);
+  unit.src_code_buffer = reader->ReadVector<uint8_t>(code_size);
+  auto reloc_info = reader->ReadVector<uint8_t>(reloc_size);
+  auto source_pos = reader->ReadVector<uint8_t>(source_position_size);
+  auto inlining_pos = reader->ReadVector<uint8_t>(inlining_position_size);
   auto protected_instructions =
-      reader->ReadVector<byte>(protected_instructions_size);
+      reader->ReadVector<uint8_t>(protected_instructions_size);
 
   base::Vector<uint8_t> instructions =
       current_code_space_.SubVector(0, code_size);
@@ -766,15 +838,21 @@ DeserializationUnit NativeModuleDeserializer::ReadCode(int fn_index,
       fn_index, instructions, stack_slot_count, ool_spill_count,
       tagged_parameter_slots, safepoint_table_offset, handler_table_offset,
       constant_pool_offset, code_comment_offset, unpadded_binary_size,
-      protected_instructions, reloc_info, source_pos, kind, tier);
+      protected_instructions, reloc_info, source_pos, inlining_pos,
+      kind, tier);
   unit.jump_tables = current_jump_tables_;
   return unit;
 }
 
 void NativeModuleDeserializer::CopyAndRelocate(
     const DeserializationUnit& unit) {
-  memcpy(unit.code->instructions().begin(), unit.src_code_buffer.begin(),
-         unit.src_code_buffer.size());
+  WritableJitAllocation jit_allocation = ThreadIsolation::RegisterJitAllocation(
+      reinterpret_cast<Address>(unit.code->instructions().begin()),
+      unit.code->instructions().size(),
+      ThreadIsolation::JitAllocationType::kWasmCode);
+
+  jit_allocation.CopyCode(0, unit.src_code_buffer.begin(),
+                          unit.src_code_buffer.size());
 
   // Relocate the code.
   int mask = RelocInfo::ModeMask(RelocInfo::WASM_CALL) |
@@ -782,8 +860,9 @@ void NativeModuleDeserializer::CopyAndRelocate(
              RelocInfo::ModeMask(RelocInfo::EXTERNAL_REFERENCE) |
              RelocInfo::ModeMask(RelocInfo::INTERNAL_REFERENCE) |
              RelocInfo::ModeMask(RelocInfo::INTERNAL_REFERENCE_ENCODED);
-  for (RelocIterator iter(unit.code->instructions(), unit.code->reloc_info(),
-                          unit.code->constant_pool(), mask);
+  for (WritableRelocIterator iter(jit_allocation, unit.code->instructions(),
+                                  unit.code->reloc_info(),
+                                  unit.code->constant_pool(), mask);
        !iter.done(); iter.next()) {
     RelocInfo::Mode mode = iter.rinfo()->rmode();
     switch (mode) {
@@ -796,9 +875,8 @@ void NativeModuleDeserializer::CopyAndRelocate(
       }
       case RelocInfo::WASM_STUB_CALL: {
         uint32_t tag = GetWasmCalleeTag(iter.rinfo());
-        DCHECK_LT(tag, WasmCode::kRuntimeStubCount);
-        Address target = native_module_->GetNearRuntimeStubEntry(
-            static_cast<WasmCode::RuntimeStubId>(tag), unit.jump_tables);
+        Address target = native_module_->GetJumpTableEntryForBuiltin(
+            static_cast<Builtin>(tag), unit.jump_tables);
         iter.rinfo()->set_wasm_stub_call_address(target, SKIP_ICACHE_FLUSH);
         break;
       }
@@ -826,6 +904,19 @@ void NativeModuleDeserializer::CopyAndRelocate(
                         unit.code->instructions().size());
 }
 
+void NativeModuleDeserializer::ReadTieringBudget(Reader* reader) {
+  size_t size_of_tiering_budget =
+      native_module_->module()->num_declared_functions * sizeof(uint32_t);
+  if (size_of_tiering_budget > reader->current_size()) {
+    return;
+  }
+  base::Vector<const uint8_t> serialized_budget =
+      reader->ReadVector<const uint8_t>(size_of_tiering_budget);
+
+  memcpy(native_module_->tiering_budget_array(), serialized_budget.begin(),
+         size_of_tiering_budget);
+}
+
 void NativeModuleDeserializer::Publish(std::vector<DeserializationUnit> batch) {
   DCHECK(!batch.empty());
   std::vector<std::unique_ptr<WasmCode>> codes;
@@ -840,9 +931,9 @@ void NativeModuleDeserializer::Publish(std::vector<DeserializationUnit> batch) {
   }
 }
 
-bool IsSupportedVersion(base::Vector<const byte> header) {
+bool IsSupportedVersion(base::Vector<const uint8_t> header) {
   if (header.size() < WasmSerializer::kHeaderSize) return false;
-  byte current_version[WasmSerializer::kHeaderSize];
+  uint8_t current_version[WasmSerializer::kHeaderSize];
   Writer writer({current_version, WasmSerializer::kHeaderSize});
   WriteHeader(&writer);
   return memcmp(header.begin(), current_version, WasmSerializer::kHeaderSize) ==
@@ -850,9 +941,9 @@ bool IsSupportedVersion(base::Vector<const byte> header) {
 }
 
 MaybeHandle<WasmModuleObject> DeserializeNativeModule(
-    Isolate* isolate, base::Vector<const byte> data,
-    base::Vector<const byte> wire_bytes_vec,
-    base::Vector<const char> source_url) {
+    Isolate* isolate, base::Vector<const uint8_t> data,
+    base::Vector<const uint8_t> wire_bytes_vec,
+    CompileTimeImports compile_imports, base::Vector<const char> source_url) {
   if (!IsWasmCodegenAllowed(isolate, isolate->native_context())) return {};
   if (!IsSupportedVersion(data)) return {};
 
@@ -861,30 +952,31 @@ MaybeHandle<WasmModuleObject> DeserializeNativeModule(
   auto owned_wire_bytes = base::OwnedVector<uint8_t>::Of(wire_bytes_vec);
 
   // TODO(titzer): module features should be part of the serialization format.
-  WasmEngine* wasm_engine = GetWasmEngine();
   WasmFeatures enabled_features = WasmFeatures::FromIsolate(isolate);
   ModuleResult decode_result = DecodeWasmModule(
-      enabled_features, owned_wire_bytes.start(), owned_wire_bytes.end(), false,
+      enabled_features, owned_wire_bytes.as_vector(), false,
       i::wasm::kWasmOrigin, isolate->counters(), isolate->metrics_recorder(),
       isolate->GetOrRegisterRecorderContextId(isolate->native_context()),
-      DecodingMethod::kDeserialize, wasm_engine->allocator());
+      DecodingMethod::kDeserialize);
   if (decode_result.failed()) return {};
   std::shared_ptr<WasmModule> module = std::move(decode_result).value();
   CHECK_NOT_NULL(module);
 
+  WasmEngine* wasm_engine = GetWasmEngine();
   auto shared_native_module = wasm_engine->MaybeGetNativeModule(
-      module->origin, owned_wire_bytes.as_vector(), isolate);
+      module->origin, owned_wire_bytes.as_vector(), compile_imports, isolate);
   if (shared_native_module == nullptr) {
     const bool dynamic_tiering = v8_flags.wasm_dynamic_tiering;
     const bool include_liftoff = !dynamic_tiering;
     size_t code_size_estimate =
         wasm::WasmCodeManager::EstimateNativeModuleCodeSize(
             module.get(), include_liftoff, DynamicTiering{dynamic_tiering});
-    shared_native_module = wasm_engine->NewNativeModule(
-        isolate, enabled_features, std::move(module), code_size_estimate);
+    shared_native_module =
+        wasm_engine->NewNativeModule(isolate, enabled_features, compile_imports,
+                                     std::move(module), code_size_estimate);
     // We have to assign a compilation ID here, as it is required for a
     // potential re-compilation, e.g. triggered by
-    // {TierDownAllModulesPerIsolate}. The value is -2 so that it is different
+    // {EnterDebuggingForIsolate}. The value is -2 so that it is different
     // than the compilation ID of actual compilations, and also different than
     // the sentinel value of the CompilationState.
     shared_native_module->compilation_state()->set_compilation_id(-2);
@@ -894,13 +986,13 @@ MaybeHandle<WasmModuleObject> DeserializeNativeModule(
     Reader reader(data + WasmSerializer::kHeaderSize);
     bool error = !deserializer.Read(&reader);
     if (error) {
-      wasm_engine->UpdateNativeModuleCache(error, &shared_native_module,
-                                           isolate);
+      wasm_engine->UpdateNativeModuleCache(
+          error, std::move(shared_native_module), isolate);
       return {};
     }
     shared_native_module->compilation_state()->InitializeAfterDeserialization(
         deserializer.lazy_functions(), deserializer.eager_functions());
-    wasm_engine->UpdateNativeModuleCache(error, &shared_native_module, isolate);
+    wasm_engine->UpdateNativeModuleCache(error, shared_native_module, isolate);
   }
 
   Handle<Script> script =

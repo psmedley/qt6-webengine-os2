@@ -16,19 +16,29 @@ namespace media {
 // For new values, please also add them to enums.xml.
 
 constexpr HRESULT kErrorInitializeMediaFoundation =
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA01);
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA01);  // 0x8004FA01
 constexpr HRESULT kErrorInitializeVideoWindowClass =
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA02);
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA02);  // 0x8004FA02
 constexpr HRESULT kErrorCdmProxyReceivedInInvalidState =
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA03);
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA03);  // 0x8004FA03
 constexpr HRESULT kErrorResolveCoreWinRTStringDelayload =
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA04);
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA04);  // 0x8004FA04
 constexpr HRESULT kErrorZeroProtectionSystemId =
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA05);
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA05);  // 0x8004FA05
 constexpr HRESULT kErrorLoadLibrary =
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA06);
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA06);  // 0x8004FA06
 constexpr HRESULT kErrorGetFunctionPointer =
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA07);
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA07);  // 0x8004FA07
+constexpr HRESULT kErrorInvalidCdmProxy =
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xFA08);  // 0x8004FA08
+
+// HRESULTs defined by Windows but are not exposed in public header files.
+
+// HRESULT 0x8004CD12 is DRM_E_TEE_INVALID_HWDRM_STATE, which can happen
+// during OS sleep/resume, or moving video to different graphics adapters.
+// When it happens, the HWDRM state is reset.
+constexpr HRESULT DRM_E_TEE_INVALID_HWDRM_STATE =
+    static_cast<HRESULT>(0x8004CD12);
 
 }  // namespace media
 

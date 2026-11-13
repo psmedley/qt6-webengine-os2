@@ -1,11 +1,22 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "core/fxge/dib/cfx_dibitmap.h"
 
+#include <stdint.h>
+
 #include "core/fxcrt/fx_coordinates.h"
+#include "core/fxge/dib/fx_dib.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/base/containers/span.h"
+
+namespace {
+
+using ::testing::ElementsAre;
+
+}  // namespace
 
 TEST(CFX_DIBitmap, Create) {
   auto pBitmap = pdfium::MakeRetain<CFX_DIBitmap>();
@@ -30,19 +41,19 @@ TEST(CFX_DIBitmap, CalculatePitchAndSizeGood) {
   EXPECT_EQ(100u, result.value().pitch);
   EXPECT_EQ(20000u, result.value().size);
 
-  // Simple case with provided pitch.
+  // Simple case with provided pitch matching width * bpp.
   result =
       CFX_DIBitmap::CalculatePitchAndSize(100, 200, FXDIB_Format::kArgb, 400);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(400u, result.value().pitch);
   EXPECT_EQ(80000u, result.value().size);
 
-  // Simple case with provided pitch, but pitch does not match width * bpp.
+  // Simple case with provided pitch, where pitch exceeds width * bpp.
   result =
-      CFX_DIBitmap::CalculatePitchAndSize(100, 200, FXDIB_Format::kArgb, 355);
+      CFX_DIBitmap::CalculatePitchAndSize(100, 200, FXDIB_Format::kArgb, 455);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(355u, result.value().pitch);
-  EXPECT_EQ(71000u, result.value().size);
+  EXPECT_EQ(455u, result.value().pitch);
+  EXPECT_EQ(91000u, result.value().size);
 }
 
 TEST(CFX_DIBitmap, CalculatePitchAndSizeBad) {
@@ -63,6 +74,10 @@ TEST(CFX_DIBitmap, CalculatePitchAndSizeBad) {
       CFX_DIBitmap::CalculatePitchAndSize(100, 200, FXDIB_Format::kInvalid, 0));
   EXPECT_FALSE(CFX_DIBitmap::CalculatePitchAndSize(
       100, 200, FXDIB_Format::kInvalid, 800));
+
+  // Width too wide for claimed pitch.
+  EXPECT_FALSE(
+      CFX_DIBitmap::CalculatePitchAndSize(101, 200, FXDIB_Format::kArgb, 400));
 
   // Overflow cases with calculated pitch.
   EXPECT_FALSE(CFX_DIBitmap::CalculatePitchAndSize(1073747000, 1,
@@ -101,3 +116,37 @@ TEST(CFX_DIBitmap, CalculatePitchAndSizeBoundary) {
   EXPECT_FALSE(CFX_DIBitmap::CalculatePitchAndSize(68174085, 63,
                                                    FXDIB_Format::k8bppRgb, 0));
 }
+
+#if defined(PDF_USE_SKIA)
+TEST(CFX_DIBitmap, UnPreMultiply_FromCleared) {
+  auto bitmap = pdfium::MakeRetain<CFX_DIBitmap>();
+  ASSERT_TRUE(bitmap->Create(1, 1, FXDIB_Format::kArgb));
+  FXARGB_SETDIB(bitmap->GetBuffer().data(), 0x7f'7f'7f'7f);
+
+  bitmap->UnPreMultiply();
+
+  EXPECT_THAT(bitmap->GetBuffer(), ElementsAre(0xff, 0xff, 0xff, 0x7f));
+}
+
+TEST(CFX_DIBitmap, UnPreMultiply_FromPreMultiplied) {
+  auto bitmap = pdfium::MakeRetain<CFX_DIBitmap>();
+  ASSERT_TRUE(bitmap->Create(1, 1, FXDIB_Format::kArgb));
+  bitmap->ForcePreMultiply();
+  FXARGB_SETDIB(bitmap->GetBuffer().data(), 0x7f'7f'7f'7f);
+
+  bitmap->UnPreMultiply();
+
+  EXPECT_THAT(bitmap->GetBuffer(), ElementsAre(0xff, 0xff, 0xff, 0x7f));
+}
+
+TEST(CFX_DIBitmap, UnPreMultiply_FromUnPreMultiplied) {
+  auto bitmap = pdfium::MakeRetain<CFX_DIBitmap>();
+  ASSERT_TRUE(bitmap->Create(1, 1, FXDIB_Format::kArgb));
+  bitmap->UnPreMultiply();
+  FXARGB_SETDIB(bitmap->GetBuffer().data(), 0x7f'ff'ff'ff);
+
+  bitmap->UnPreMultiply();
+
+  EXPECT_THAT(bitmap->GetBuffer(), ElementsAre(0xff, 0xff, 0xff, 0x7f));
+}
+#endif  // defined(PDF_USE_SKIA)

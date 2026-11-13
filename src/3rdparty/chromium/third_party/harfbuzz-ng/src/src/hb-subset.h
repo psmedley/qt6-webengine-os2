@@ -28,6 +28,7 @@
 #define HB_SUBSET_H
 
 #include "hb.h"
+#include "hb-ot.h"
 
 HB_BEGIN_DECLS
 
@@ -70,6 +71,11 @@ typedef struct hb_subset_plan_t hb_subset_plan_t;
  * in the final subset.
  * @HB_SUBSET_FLAGS_NO_PRUNE_UNICODE_RANGES: If set then the unicode ranges in
  * OS/2 will not be recalculated.
+ * @HB_SUBSET_FLAGS_NO_LAYOUT_CLOSURE: If set don't perform glyph closure on layout
+ * substitution rules (GSUB). Since: 7.2.0.
+ * @HB_SUBSET_FLAGS_IFTB_REQUIREMENTS: If set enforce requirements on the output subset
+ * to allow it to be used with incremental font transfer IFTB patches. Primarily,
+ * this forces all outline data to use long (32 bit) offsets. Since: EXPERIMENTAL
  *
  * List of boolean properties that can be configured on the subset input.
  *
@@ -86,6 +92,10 @@ typedef enum { /*< flags >*/
   HB_SUBSET_FLAGS_NOTDEF_OUTLINE =	     0x00000040u,
   HB_SUBSET_FLAGS_GLYPH_NAMES =		     0x00000080u,
   HB_SUBSET_FLAGS_NO_PRUNE_UNICODE_RANGES =  0x00000100u,
+  HB_SUBSET_FLAGS_NO_LAYOUT_CLOSURE =        0x00000200u,
+#ifdef HB_EXPERIMENTAL_API
+  HB_SUBSET_FLAGS_IFTB_REQUIREMENTS       =  0x00000400u,
+#endif
 } hb_subset_flags_t;
 
 /**
@@ -138,6 +148,9 @@ HB_EXTERN void *
 hb_subset_input_get_user_data (const hb_subset_input_t *input,
 			       hb_user_data_key_t      *key);
 
+HB_EXTERN void
+hb_subset_input_keep_everything (hb_subset_input_t *input);
+
 HB_EXTERN hb_set_t *
 hb_subset_input_unicode_set (hb_subset_input_t *input);
 
@@ -147,6 +160,9 @@ hb_subset_input_glyph_set (hb_subset_input_t *input);
 HB_EXTERN hb_set_t *
 hb_subset_input_set (hb_subset_input_t *input, hb_subset_sets_t set_type);
 
+HB_EXTERN hb_map_t*
+hb_subset_input_old_to_new_glyph_mapping (hb_subset_input_t *input);
+
 HB_EXTERN hb_subset_flags_t
 hb_subset_input_get_flags (hb_subset_input_t *input);
 
@@ -154,8 +170,6 @@ HB_EXTERN void
 hb_subset_input_set_flags (hb_subset_input_t *input,
 			   unsigned value);
 
-#ifdef HB_EXPERIMENTAL_API
-#ifndef HB_NO_VAR
 HB_EXTERN hb_bool_t
 hb_subset_input_pin_axis_to_default (hb_subset_input_t  *input,
 				     hb_face_t          *face,
@@ -166,8 +180,36 @@ hb_subset_input_pin_axis_location (hb_subset_input_t  *input,
 				   hb_face_t          *face,
 				   hb_tag_t            axis_tag,
 				   float               axis_value);
+
+#ifdef HB_EXPERIMENTAL_API
+HB_EXTERN hb_bool_t
+hb_subset_input_get_axis_range (hb_subset_input_t  *input,
+				hb_tag_t            axis_tag,
+				float              *axis_min_value,
+				float              *axis_max_value,
+				float              *axis_def_value);
+
+HB_EXTERN hb_bool_t
+hb_subset_input_set_axis_range (hb_subset_input_t  *input,
+				hb_face_t          *face,
+				hb_tag_t            axis_tag,
+				float               axis_min_value,
+				float               axis_max_value,
+				float               axis_def_value);
+
+HB_EXTERN hb_bool_t
+hb_subset_input_override_name_table (hb_subset_input_t  *input,
+				     hb_ot_name_id_t     name_id,
+				     unsigned            platform_id,
+				     unsigned            encoding_id,
+				     unsigned            language_id,
+				     const char         *name_str,
+				     int                 str_len);
+
 #endif
-#endif
+
+HB_EXTERN hb_face_t *
+hb_subset_preprocess (hb_face_t *source);
 
 HB_EXTERN hb_face_t *
 hb_subset_or_fail (hb_face_t *source, const hb_subset_input_t *input);
@@ -182,13 +224,13 @@ hb_subset_plan_create_or_fail (hb_face_t                 *face,
 HB_EXTERN void
 hb_subset_plan_destroy (hb_subset_plan_t *plan);
 
-HB_EXTERN const hb_map_t*
+HB_EXTERN hb_map_t *
 hb_subset_plan_old_to_new_glyph_mapping (const hb_subset_plan_t *plan);
 
-HB_EXTERN const hb_map_t*
+HB_EXTERN hb_map_t *
 hb_subset_plan_new_to_old_glyph_mapping (const hb_subset_plan_t *plan);
 
-HB_EXTERN const hb_map_t*
+HB_EXTERN hb_map_t *
 hb_subset_plan_unicode_to_old_glyph_mapping (const hb_subset_plan_t *plan);
 
 

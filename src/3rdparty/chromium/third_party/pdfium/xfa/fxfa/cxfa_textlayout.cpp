@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,8 +100,7 @@ void CXFA_TextLayout::Trace(cppgc::Visitor* visitor) const {
   visitor->Trace(m_pTextProvider);
   visitor->Trace(m_pTextDataNode);
   visitor->Trace(m_pTextParser);
-  if (m_pLoader)
-    m_pLoader->Trace(visitor);
+  visitor->Trace(m_pLoader);
 }
 
 void CXFA_TextLayout::Unload() {
@@ -183,8 +182,7 @@ void CXFA_TextLayout::InitBreak(float fLineWidth) {
       case XFA_AttributeValue::Radix:
         break;
       default:
-        NOTREACHED();
-        break;
+        NOTREACHED_NORETURN();
     }
     m_pBreak->SetAlignment(iAlign);
 
@@ -331,7 +329,8 @@ float CXFA_TextLayout::GetLayoutHeight() {
 
 float CXFA_TextLayout::StartLayout(float fWidth) {
   if (!m_pLoader)
-    m_pLoader = std::make_unique<LoaderContext>();
+    m_pLoader = cppgc::MakeGarbageCollected<LoaderContext>(
+        m_pDoc->GetHeap()->GetAllocationHandle());
 
   if (fWidth < 0 ||
       (m_pLoader->fWidth > -1 && fabs(fWidth - m_pLoader->fWidth) > 0)) {
@@ -525,7 +524,7 @@ bool CXFA_TextLayout::LayoutInternal(size_t szBlockIndex) {
       if (!pContainerNode)
         return true;
 
-      const CFX_XMLNode* pXMLNode = m_pLoader->pXMLNode.Get();
+      const CFX_XMLNode* pXMLNode = m_pLoader->pXMLNode;
       if (!pXMLNode)
         return true;
 
@@ -615,7 +614,7 @@ bool CXFA_TextLayout::DrawString(CFX_RenderDevice* pFxDevice,
     for (size_t i = 0; i < szBlockCount; ++i)
       LayoutInternal(i);
     m_pTabstopContext.reset();
-    m_pLoader.reset();
+    m_pLoader.Clear();
   }
 
   std::vector<TextCharPos> char_pos(1);
@@ -690,8 +689,8 @@ void CXFA_TextLayout::Loader(float textWidth,
     m_pTextParser->DoParse(pXMLContainer, m_pTextProvider);
 
   auto pRootStyle = m_pTextParser->CreateRootStyle(m_pTextProvider);
-  LoadRichText(pXMLContainer, textWidth, pLinePos, pRootStyle, bSavePieces,
-               nullptr, true, false, 0);
+  LoadRichText(pXMLContainer, textWidth, pLinePos, std::move(pRootStyle),
+               bSavePieces, nullptr, true, false, 0);
 }
 
 void CXFA_TextLayout::LoadText(CXFA_Node* pNode,
@@ -715,8 +714,7 @@ void CXFA_TextLayout::LoadText(CXFA_Node* pNode,
         break;
       }
       default:
-        NOTREACHED();
-        break;
+        NOTREACHED_NORETURN();
     }
   }
 
@@ -729,16 +727,15 @@ void CXFA_TextLayout::LoadText(CXFA_Node* pNode,
     EndBreak(CFGAS_Char::BreakType::kParagraph, pLinePos, bSavePieces);
 }
 
-bool CXFA_TextLayout::LoadRichText(
-    const CFX_XMLNode* pXMLNode,
-    float textWidth,
-    float* pLinePos,
-    const RetainPtr<CFX_CSSComputedStyle>& pParentStyle,
-    bool bSavePieces,
-    RetainPtr<CFGAS_LinkUserData> pLinkData,
-    bool bEndBreak,
-    bool bIsOl,
-    int32_t iLiCount) {
+bool CXFA_TextLayout::LoadRichText(const CFX_XMLNode* pXMLNode,
+                                   float textWidth,
+                                   float* pLinePos,
+                                   RetainPtr<CFX_CSSComputedStyle> pParentStyle,
+                                   bool bSavePieces,
+                                   RetainPtr<CFGAS_LinkUserData> pLinkData,
+                                   bool bEndBreak,
+                                   bool bIsOl,
+                                   int32_t iLiCount) {
   if (!pXMLNode)
     return false;
 
@@ -772,7 +769,7 @@ bool CXFA_TextLayout::LoadRichText(
         return true;
       }
 
-      pStyle = m_pTextParser->ComputeStyle(pXMLNode, pParentStyle.Get());
+      pStyle = m_pTextParser->ComputeStyle(pXMLNode, pParentStyle);
       InitBreak(bContentNode ? pParentStyle.Get() : pStyle.Get(), eDisplay,
                 textWidth, pXMLNode, pParentStyle.Get());
       if ((eDisplay == CFX_CSSDisplay::Block ||
@@ -1231,8 +1228,8 @@ void CXFA_TextLayout::RenderPath(CFX_RenderDevice* pDevice,
       return;
 
     bHasCount = false;
-    while (szPieceNext < pPieceLine->m_textPieces.size() - 1) {
-      szPieceNext++;
+    while (szPieceNext + 1 < pPieceLine->m_textPieces.size()) {
+      ++szPieceNext;
       if (pPieceLine->m_charCounts[szPieceNext] > 0) {
         bHasCount = true;
         break;

@@ -1,31 +1,75 @@
-// Copyright 2020 The Dawn Authors
+// Copyright 2020 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_WIRE_CHUNKEDCOMMANDSERIALIZER_H_
 #define SRC_DAWN_WIRE_CHUNKEDCOMMANDSERIALIZER_H_
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <utility>
 
 #include "dawn/common/Alloc.h"
 #include "dawn/common/Compiler.h"
+#include "dawn/common/Constants.h"
+#include "dawn/common/Math.h"
 #include "dawn/wire/Wire.h"
 #include "dawn/wire/WireCmd_autogen.h"
+#include "partition_alloc/pointers/raw_ptr.h"
 
 namespace dawn::wire {
+
+// Simple command extension struct used when a command needs to serialize additional information
+// that is not baked directly into the command already.
+struct CommandExtension {
+    size_t size;
+    std::function<void(char*)> serialize;
+};
+
+namespace detail {
+
+inline WireResult SerializeCommandExtension(SerializeBuffer* serializeBuffer) {
+    return WireResult::Success;
+}
+
+template <typename Extension, typename... Extensions>
+WireResult SerializeCommandExtension(SerializeBuffer* serializeBuffer,
+                                     Extension&& e,
+                                     Extensions&&... es) {
+    char* buffer;
+    WIRE_TRY(serializeBuffer->NextN(e.size, &buffer));
+    e.serialize(buffer);
+
+    WIRE_TRY(SerializeCommandExtension(serializeBuffer, std::forward<Extensions>(es)...));
+    return WireResult::Success;
+}
+
+}  // namespace detail
 
 class ChunkedCommandSerializer {
   public:
@@ -33,57 +77,51 @@ class ChunkedCommandSerializer {
 
     template <typename Cmd>
     void SerializeCommand(const Cmd& cmd) {
-        SerializeCommand(cmd, 0, [](SerializeBuffer*) { return WireResult::Success; });
+        SerializeCommandImpl(
+            cmd, [](const Cmd& cmd, size_t requiredSize, SerializeBuffer* serializeBuffer) {
+                return cmd.Serialize(requiredSize, serializeBuffer);
+            });
     }
 
-    template <typename Cmd, typename ExtraSizeSerializeFn>
-    void SerializeCommand(const Cmd& cmd,
-                          size_t extraSize,
-                          ExtraSizeSerializeFn&& SerializeExtraSize) {
+    template <typename Cmd, typename... Extensions>
+    void SerializeCommand(const Cmd& cmd, CommandExtension&& e, Extensions&&... es) {
         SerializeCommandImpl(
             cmd,
             [](const Cmd& cmd, size_t requiredSize, SerializeBuffer* serializeBuffer) {
                 return cmd.Serialize(requiredSize, serializeBuffer);
             },
-            extraSize, std::forward<ExtraSizeSerializeFn>(SerializeExtraSize));
+            std::forward<CommandExtension>(e), std::forward<Extensions>(es)...);
     }
 
-    template <typename Cmd>
-    void SerializeCommand(const Cmd& cmd, const ObjectIdProvider& objectIdProvider) {
-        SerializeCommand(cmd, objectIdProvider, 0,
-                         [](SerializeBuffer*) { return WireResult::Success; });
-    }
-
-    template <typename Cmd, typename ExtraSizeSerializeFn>
+    template <typename Cmd, typename... Extensions>
     void SerializeCommand(const Cmd& cmd,
                           const ObjectIdProvider& objectIdProvider,
-                          size_t extraSize,
-                          ExtraSizeSerializeFn&& SerializeExtraSize) {
+                          Extensions&&... extensions) {
         SerializeCommandImpl(
             cmd,
             [&objectIdProvider](const Cmd& cmd, size_t requiredSize,
                                 SerializeBuffer* serializeBuffer) {
                 return cmd.Serialize(requiredSize, serializeBuffer, objectIdProvider);
             },
-            extraSize, std::forward<ExtraSizeSerializeFn>(SerializeExtraSize));
+            std::forward<Extensions>(extensions)...);
     }
 
   private:
-    template <typename Cmd, typename SerializeCmdFn, typename ExtraSizeSerializeFn>
+    template <typename Cmd, typename SerializeCmdFn, typename... Extensions>
     void SerializeCommandImpl(const Cmd& cmd,
                               SerializeCmdFn&& SerializeCmd,
-                              size_t extraSize,
-                              ExtraSizeSerializeFn&& SerializeExtraSize) {
+                              Extensions&&... extensions) {
         size_t commandSize = cmd.GetRequiredSize();
-        size_t requiredSize = commandSize + extraSize;
+        size_t requiredSize = (Align(extensions.size, kWireBufferAlignment) + ... + commandSize);
 
         if (requiredSize <= mMaxAllocationSize) {
             char* allocatedBuffer = static_cast<char*>(mSerializer->GetCmdSpace(requiredSize));
             if (allocatedBuffer != nullptr) {
                 SerializeBuffer serializeBuffer(allocatedBuffer, requiredSize);
-                WireResult r1 = SerializeCmd(cmd, requiredSize, &serializeBuffer);
-                WireResult r2 = SerializeExtraSize(&serializeBuffer);
-                if (DAWN_UNLIKELY(r1 != WireResult::Success || r2 != WireResult::Success)) {
+                WireResult rCmd = SerializeCmd(cmd, requiredSize, &serializeBuffer);
+                WireResult rExts =
+                    detail::SerializeCommandExtension(&serializeBuffer, extensions...);
+                if (DAWN_UNLIKELY(rCmd != WireResult::Success || rExts != WireResult::Success)) {
                     mSerializer->OnSerializeError();
                 }
             }
@@ -95,9 +133,9 @@ class ChunkedCommandSerializer {
             return;
         }
         SerializeBuffer serializeBuffer(cmdSpace.get(), requiredSize);
-        WireResult r1 = SerializeCmd(cmd, requiredSize, &serializeBuffer);
-        WireResult r2 = SerializeExtraSize(&serializeBuffer);
-        if (DAWN_UNLIKELY(r1 != WireResult::Success || r2 != WireResult::Success)) {
+        WireResult rCmd = SerializeCmd(cmd, requiredSize, &serializeBuffer);
+        WireResult rExts = detail::SerializeCommandExtension(&serializeBuffer, extensions...);
+        if (DAWN_UNLIKELY(rCmd != WireResult::Success || rExts != WireResult::Success)) {
             mSerializer->OnSerializeError();
             return;
         }
@@ -106,7 +144,7 @@ class ChunkedCommandSerializer {
 
     void SerializeChunkedCommand(const char* allocatedBuffer, size_t remainingSize);
 
-    CommandSerializer* mSerializer;
+    raw_ptr<CommandSerializer> mSerializer;
     size_t mMaxAllocationSize;
 };
 

@@ -28,6 +28,7 @@
 import os
 import re
 
+from testrunner.build_config import INITIALIZATION_ERROR
 from testrunner.local.variants import ALL_VARIANTS
 from testrunner.local.utils import Freeze
 
@@ -63,10 +64,12 @@ for var in [
     "windows", "linux", "aix", "r1", "r2", "r3", "r5", "r6", "riscv32",
     "riscv64", "loong64"
 ]:
+  assert var not in VARIABLES
   VARIABLES[var] = var
 
 # Allow using variants as keywords.
 for var in ALL_VARIANTS:
+  assert var not in VARIABLES
   VARIABLES[var] = var
 
 class StatusFile(object):
@@ -160,7 +163,8 @@ def _EvalExpression(exp, variables):
     return eval(exp, variables)
   except NameError as e:
     identifier = re.match("name '(.*)' is not defined", str(e)).group(1)
-    assert identifier == "variant", "Unknown identifier: %s" % identifier
+    # If it's not a variant expression, it points to a missing build flag.
+    assert identifier == "variant", INITIALIZATION_ERROR % identifier
     return VARIANT_EXPRESSION
 
 
@@ -244,7 +248,16 @@ def ReadStatusFile(content, variables):
   prefix_rules = {variant: {} for variant in ALL_VARIANTS}
   prefix_rules[""] = {}
 
-  variables.update(VARIABLES)
+  # This method can be called with the same `variables` object multiple times.
+  # Ensure we only update `variables` (and check it for consistency) once.
+  if ALWAYS not in variables:
+    # Ensure we don't silently overwrite any build variables with our set of
+    # default keywords in VARIABLES.
+    for var in VARIABLES:
+      assert var not in variables, (
+          "build_config variable '%s' conflicts with VARIABLES" % var)
+    variables.update(VARIABLES)
+
   for conditional_section in ReadContent(content):
     assert type(conditional_section) == list
     assert len(conditional_section) == 2

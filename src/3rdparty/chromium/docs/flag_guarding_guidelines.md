@@ -1,7 +1,7 @@
 # Chromium Flag Guarding Guidelines
 
 This document describes using [`base::Feature`](/base/feature_list.h) flags which
-can be remotely via a server. This applies to both A/B experiments
+can be remotely set via a server. This applies to both A/B experiments
 ([internal link](http://go/finch101)) (disabled by default) and to kill switches
 ([internal link](http://go/finch-killswitch)) (enabled by default).
 
@@ -71,3 +71,6 @@ Non-Googler committers will need to work with owners of the code that work at
 Google to launch and monitor the experiment.
 * Otherwise it should be guarded minimally by an enabled-by-default
 base::Feature flag, which can be remotely disabled by a server configuration.
+    * For code in blink, this can be as simple as using a
+[Runtime Enabled Feature](/third_party/blink/renderer/platform/RuntimeEnabledFeatures.md),
+which has long been common-practice for new or changed APIs.

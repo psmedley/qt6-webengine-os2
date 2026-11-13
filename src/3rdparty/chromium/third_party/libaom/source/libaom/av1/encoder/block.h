@@ -42,6 +42,35 @@ extern "C" {
 
 /*! Maximum value taken by transform type probabilities */
 #define MAX_TX_TYPE_PROB 1024
+
+//! Compute color sensitivity index for given plane
+#define COLOR_SENS_IDX(plane) ((plane)-1)
+
+//! Enable timer statistics of mode search in non-rd
+#define COLLECT_NONRD_PICK_MODE_STAT 0
+
+/*!\cond */
+#if COLLECT_NONRD_PICK_MODE_STAT
+#include "aom_ports/aom_timer.h"
+
+typedef struct _mode_search_stat_nonrd {
+  int32_t num_blocks[BLOCK_SIZES];
+  int64_t total_block_times[BLOCK_SIZES];
+  int32_t num_searches[BLOCK_SIZES][MB_MODE_COUNT];
+  int32_t num_nonskipped_searches[BLOCK_SIZES][MB_MODE_COUNT];
+  int64_t search_times[BLOCK_SIZES][MB_MODE_COUNT];
+  int64_t nonskipped_search_times[BLOCK_SIZES][MB_MODE_COUNT];
+  int64_t ms_time[BLOCK_SIZES][MB_MODE_COUNT];
+  int64_t ifs_time[BLOCK_SIZES][MB_MODE_COUNT];
+  int64_t model_rd_time[BLOCK_SIZES][MB_MODE_COUNT];
+  int64_t txfm_time[BLOCK_SIZES][MB_MODE_COUNT];
+  struct aom_usec_timer timer1;
+  struct aom_usec_timer timer2;
+  struct aom_usec_timer bsize_timer;
+} mode_search_stat_nonrd;
+#endif  // COLLECT_NONRD_PICK_MODE_STAT
+/*!\endcond */
+
 /*! \brief Superblock level encoder info
  *
  * SuperblockEnc stores superblock level information used by the encoder for
@@ -326,7 +355,7 @@ typedef struct {
   //! The best color map found.
   uint8_t best_palette_color_map[MAX_PALETTE_SQUARE];
   //! A temporary buffer used for k-means clustering.
-  int kmeans_data_buf[2 * MAX_PALETTE_SQUARE];
+  int16_t kmeans_data_buf[2 * MAX_PALETTE_SQUARE];
 } PALETTE_BUFFER;
 
 /*! \brief Contains buffers used by av1_compound_type_rd()
@@ -943,6 +972,21 @@ typedef struct macroblock {
    */
   int delta_qindex;
 
+  /*! \brief Difference between frame-level qindex and qindex used to
+   * compute rdmult (lambda).
+   *
+   * rdmult_delta_qindex is assigned the same as delta_qindex before qp sweep.
+   * During qp sweep, delta_qindex is changed and used to calculate the actual
+   * quant params, while rdmult_delta_qindex remains the same, and is used to
+   * calculate the rdmult in "set_deltaq_rdmult".
+   */
+  int rdmult_delta_qindex;
+
+  /*! \brief Current qindex (before being adjusted by delta_q_res) used to
+   * derive rdmult_delta_qindex.
+   */
+  int rdmult_cur_qindex;
+
   /*! \brief Rate-distortion multiplier.
    *
    * The rd multiplier used to determine the rate-distortion trade-off. This is
@@ -1271,11 +1315,19 @@ typedef struct macroblock {
    * Used in REALTIME coding mode to enhance the visual quality at the boundary
    * of moving color objects.
    */
-  uint8_t color_sensitivity_sb[2];
+  uint8_t color_sensitivity_sb[MAX_MB_PLANE - 1];
   //! Color sensitivity flag for the superblock for golden reference.
-  uint8_t color_sensitivity_sb_g[2];
+  uint8_t color_sensitivity_sb_g[MAX_MB_PLANE - 1];
+  //! Color sensitivity flag for the superblock for altref reference.
+  uint8_t color_sensitivity_sb_alt[MAX_MB_PLANE - 1];
   //! Color sensitivity flag for the coding block.
-  uint8_t color_sensitivity[2];
+  uint8_t color_sensitivity[MAX_MB_PLANE - 1];
+  //! Coding block distortion value for uv/color, minimum over the inter modes.
+  int64_t min_dist_inter_uv;
+
+  //! The buffer used by search_tx_type() to swap dqcoeff in macroblockd_plane
+  // so we can keep dqcoeff of the best tx_type.
+  tran_low_t *dqcoeff_buf;
   /**@}*/
 
   /*****************************************************************************
@@ -1284,6 +1336,18 @@ typedef struct macroblock {
   /**@{*/
   //! Variance of the source frame.
   unsigned int source_variance;
+  //! Flag to indicate coding block is zero sad.
+  int block_is_zero_sad;
+  //! Flag to indicate superblock ME in variance partition is determined to be
+  // good/reliable, and so the superblock MV will be tested in the
+  // nonrd_pickmode. This is only used for LAST_FRAME.
+  int sb_me_partition;
+  //! Flag to indicate to test the superblock MV for the coding block in the
+  // nonrd_pickmode.
+  int sb_me_block;
+  //! Motion vector from superblock MV derived from int_pro_motion() in
+  // the variance_partitioning.
+  int_mv sb_me_mv;
   //! SSE of the current predictor.
   unsigned int pred_sse[REF_FRAMES];
   //! Prediction for ML based partition.
@@ -1311,6 +1375,32 @@ typedef struct macroblock {
   /*! \brief A hash to make sure av1_set_offsets is called */
   SetOffsetsLoc last_set_offsets_loc;
 #endif  // NDEBUG
+
+#if COLLECT_NONRD_PICK_MODE_STAT
+  mode_search_stat_nonrd ms_stat_nonrd;
+#endif  // COLLECT_NONRD_PICK_MODE_STAT
+
+  /*!\brief Number of pixels in current thread that choose palette mode in the
+   * fast encoding stage for screen content tool detemination.
+   */
+  int palette_pixels;
+
+  /*!\brief Pointer to the structure which stores the statistics used by
+   * sb-level multi-pass encoding.
+   */
+  struct SB_FIRST_PASS_STATS *sb_stats_cache;
+
+  /*!\brief Pointer to the structure which stores the statistics used by
+   * first-pass when superblock is searched twice consecutively.
+   */
+  struct SB_FIRST_PASS_STATS *sb_fp_stats;
+
+#if CONFIG_PARTITION_SEARCH_ORDER
+  /*!\brief Pointer to RD_STATS structure to be used in
+   * av1_rd_partition_search().
+   */
+  RD_STATS *rdcost;
+#endif  // CONFIG_PARTITION_SEARCH_ORDER
 } MACROBLOCK;
 #undef SINGLE_REF_MODES
 

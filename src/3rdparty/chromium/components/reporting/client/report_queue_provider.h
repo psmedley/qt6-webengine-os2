@@ -9,16 +9,18 @@
 #include <queue>
 #include <utility>
 
-#include "base/callback.h"
 #include "base/feature_list.h"
+#include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "components/reporting/client/report_queue.h"
 #include "components/reporting/client/report_queue_configuration.h"
 #include "components/reporting/proto/synced/record_constants.pb.h"
 #include "components/reporting/storage/storage_module_interface.h"
 #include "components/reporting/util/status.h"
+#include "components/reporting/util/status_macros.h"
 #include "components/reporting/util/statusor.h"
 
 namespace reporting {
@@ -41,10 +43,11 @@ BASE_DECLARE_FEATURE(kEncryptedReportingPipeline);
 // void SendMessage(google::protobuf::ImportantMessage important_message,
 //                  reporting::ReportQueue::EnqueueCallback done_cb) {
 //   // Create configuration.
-//   auto config_result = reporting::ReportQueueConfiguration::Create(...);
+//   StatusOr<reporting::ReportQueueConfiguration> config_result =
+//      reporting::ReportQueueConfiguration::Create({...}).Set...().Build();
 //   // Bail out if configuration failed to create.
-//   if (!config_result.ok()) {
-//     std::move(done_cb).Run(config_result.status());
+//   if (!config_result.has_value()) {
+//     std::move(done_cb).Run(config_result.error());
 //     return;
 //   }
 //   // Asynchronously create ReportingQueue.
@@ -58,24 +61,24 @@ BASE_DECLARE_FEATURE(kEncryptedReportingPipeline);
 //             reporting::ReportQueueProvider::CreateQueue(
 //                 std::move(config),
 //                 base::BindOnce(
-//                     [](base::StringPiece data,
+//                     [](std::string_view data,
 //                        reporting::ReportQueue::EnqueueCallback
 //                        done_cb, reporting::StatusOr<std::unique_ptr<
 //                            reporting::ReportQueue>>
 //                            report_queue_result) {
 //                       // Bail out if queue failed to create.
-//                       if (!report_queue_result.ok()) {
-//                         std::move(done_cb).Run(report_queue_result.status());
+//                       if (!report_queue_result.has_value()) {
+//                         std::move(done_cb).Run(report_queue_result.error());
 //                         return;
 //                       }
 //                       // Queue created successfully, enqueue the message.
-//                       report_queue_result.ValueOrDie()->Enqueue(
+//                       report_queue_result.value()->Enqueue(
 //                           important_message, std::move(done_cb));
 //                     },
 //                     important_message, std::move(done_cb)));
 //           },
 //           important_message, std::move(done_cb),
-//           std::move(config_result.ValueOrDie())))
+//           std::move(config_result.value())))
 // }
 class ReportQueueProvider {
  public:
@@ -102,7 +105,6 @@ class ReportQueueProvider {
   using ReportQueueConfiguredCallback = base::OnceCallback<void(
       StatusOr<std::unique_ptr<ReportQueueConfiguration>>)>;
 
-  explicit ReportQueueProvider(StorageModuleCreateCallback storage_create_cb);
   ReportQueueProvider(const ReportQueueProvider& other) = delete;
   ReportQueueProvider& operator=(const ReportQueueProvider& other) = delete;
   virtual ~ReportQueueProvider();
@@ -137,6 +139,10 @@ class ReportQueueProvider {
   // Storage module creator (can be substituted for testing purposes).
   StorageModuleCreateCallback storage_create_cb_;
 
+ protected:
+  ReportQueueProvider(StorageModuleCreateCallback storage_create_cb,
+                      scoped_refptr<base::SequencedTaskRunner> seq_task_runner);
+
  private:
   // Holds the creation request for a ReportQueue.
   class CreateReportQueueRequest;
@@ -150,7 +156,8 @@ class ReportQueueProvider {
   virtual void CreateNewQueue(std::unique_ptr<ReportQueueConfiguration> config,
                               CreateReportQueueCallback cb);
   virtual StatusOr<std::unique_ptr<ReportQueue, base::OnTaskRunnerDeleter>>
-  CreateNewSpeculativeQueue();
+  CreateNewSpeculativeQueue(
+      const ReportQueue::SpeculativeConfigSettings& config_settings);
 
   // Configures a given report queue config with appropriate DM tokens after its
   // retrieval so it can be used for downstream processing while building a

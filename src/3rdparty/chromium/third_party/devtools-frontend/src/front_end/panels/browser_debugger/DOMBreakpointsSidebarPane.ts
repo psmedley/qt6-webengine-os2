@@ -33,88 +33,89 @@ import * as i18n from '../../core/i18n/i18n.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 import * as Sources from '../sources/sources.js';
 
 import domBreakpointsSidebarPaneStyles from './domBreakpointsSidebarPane.css.js';
 
 const UIStrings = {
   /**
-  *@description Text to indicate there are no breakpoints
-  */
+   *@description Text to indicate there are no breakpoints
+   */
   noBreakpoints: 'No breakpoints',
   /**
-  *@description Accessibility label for the DOM breakpoints list in the Sources panel
-  */
+   *@description Accessibility label for the DOM breakpoints list in the Sources panel
+   */
   domBreakpointsList: 'DOM Breakpoints list',
   /**
-  *@description Text with two placeholders separated by a colon
-  *@example {Node removed} PH1
-  *@example {div#id1} PH2
-  */
+   *@description Text with two placeholders separated by a colon
+   *@example {Node removed} PH1
+   *@example {div#id1} PH2
+   */
   sS: '{PH1}: {PH2}',
   /**
-  *@description Text with three placeholders separated by a colon and a comma
-  *@example {Node removed} PH1
-  *@example {div#id1} PH2
-  *@example {checked} PH3
-  */
+   *@description Text with three placeholders separated by a colon and a comma
+   *@example {Node removed} PH1
+   *@example {div#id1} PH2
+   *@example {checked} PH3
+   */
   sSS: '{PH1}: {PH2}, {PH3}',
   /**
-  *@description Text exposed to screen readers on checked items.
-  */
+   *@description Text exposed to screen readers on checked items.
+   */
   checked: 'checked',
   /**
-  *@description Accessible text exposed to screen readers when the screen reader encounters an unchecked checkbox.
-  */
+   *@description Accessible text exposed to screen readers when the screen reader encounters an unchecked checkbox.
+   */
   unchecked: 'unchecked',
   /**
-  *@description Accessibility label for hit breakpoints in the Sources panel.
-  *@example {checked} PH1
-  */
+   *@description Accessibility label for hit breakpoints in the Sources panel.
+   *@example {checked} PH1
+   */
   sBreakpointHit: '{PH1} breakpoint hit',
   /**
-  *@description Screen reader description of a hit breakpoint in the Sources panel
-  */
+   *@description Screen reader description of a hit breakpoint in the Sources panel
+   */
   breakpointHit: 'breakpoint hit',
   /**
-  *@description A context menu item in the DOM Breakpoints sidebar that reveals the node on which the current breakpoint is set.
-  */
+   *@description A context menu item in the DOM Breakpoints sidebar that reveals the node on which the current breakpoint is set.
+   */
   revealDomNodeInElementsPanel: 'Reveal DOM node in Elements panel',
   /**
-  *@description Text to remove a breakpoint
-  */
+   *@description Text to remove a breakpoint
+   */
   removeBreakpoint: 'Remove breakpoint',
   /**
-  *@description A context menu item in the DOMBreakpoints Sidebar Pane of the JavaScript Debugging pane in the Sources panel or the DOM Breakpoints pane in the Elements panel
-  */
+   *@description A context menu item in the DOMBreakpoints Sidebar Pane of the JavaScript Debugging pane in the Sources panel or the DOM Breakpoints pane in the Elements panel
+   */
   removeAllDomBreakpoints: 'Remove all DOM breakpoints',
   /**
-  *@description Text in DOMBreakpoints Sidebar Pane of the JavaScript Debugging pane in the Sources panel or the DOM Breakpoints pane in the Elements panel
-  */
+   *@description Text in DOMBreakpoints Sidebar Pane of the JavaScript Debugging pane in the Sources panel or the DOM Breakpoints pane in the Elements panel
+   */
   subtreeModified: 'Subtree modified',
   /**
-  *@description Text in DOMBreakpoints Sidebar Pane of the JavaScript Debugging pane in the Sources panel or the DOM Breakpoints pane in the Elements panel
-  */
+   *@description Text in DOMBreakpoints Sidebar Pane of the JavaScript Debugging pane in the Sources panel or the DOM Breakpoints pane in the Elements panel
+   */
   attributeModified: 'Attribute modified',
   /**
-  *@description Text in DOMBreakpoints Sidebar Pane of the JavaScript Debugging pane in the Sources panel or the DOM Breakpoints pane in the Elements panel
-  */
+   *@description Text in DOMBreakpoints Sidebar Pane of the JavaScript Debugging pane in the Sources panel or the DOM Breakpoints pane in the Elements panel
+   */
   nodeRemoved: 'Node removed',
   /**
-  *@description Entry in context menu of the elements pane, allowing developers to select a DOM
-  * breakpoint for the element that they have right-clicked on. Short for the action 'set a
-  * breakpoint on this DOM Element'. A breakpoint pauses the website when the code reaches a
-  * specified line, or when a specific action happen (in this case, when the DOM Element is
-  * modified).
-  */
+   *@description Entry in context menu of the elements pane, allowing developers to select a DOM
+   * breakpoint for the element that they have right-clicked on. Short for the action 'set a
+   * breakpoint on this DOM Element'. A breakpoint pauses the website when the code reaches a
+   * specified line, or when a specific action happen (in this case, when the DOM Element is
+   * modified).
+   */
   breakOn: 'Break on',
   /**
-  *@description Screen reader description for removing a DOM breakpoint.
-  */
+   *@description Screen reader description for removing a DOM breakpoint.
+   */
   breakpointRemoved: 'Breakpoint removed',
   /**
-  *@description Screen reader description for setting a DOM breakpoint.
-  */
+   *@description Screen reader description for setting a DOM breakpoint.
+   */
   breakpointSet: 'Breakpoint set',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/browser_debugger/DOMBreakpointsSidebarPane.ts', UIStrings);
@@ -136,6 +137,7 @@ export class DOMBreakpointsSidebarPane extends UI.Widget.VBox implements
 
     this.elementToCheckboxes = new WeakMap();
 
+    this.contentElement.setAttribute('jslog', `${VisualLogging.pane().context('debugger-dom-breakpoints')}`);
     this.#emptyElement = this.contentElement.createChild('div', 'gray-info-message');
     this.#emptyElement.textContent = i18nString(UIStrings.noBreakpoints);
     this.#breakpoints = new UI.ListModel.ListModel();
@@ -143,7 +145,7 @@ export class DOMBreakpointsSidebarPane extends UI.Widget.VBox implements
     this.contentElement.appendChild(this.#list.element);
     this.#list.element.classList.add('breakpoint-list', 'hidden');
     UI.ARIAUtils.markAsList(this.#list.element);
-    UI.ARIAUtils.setAccessibleName(this.#list.element, i18nString(UIStrings.domBreakpointsList));
+    UI.ARIAUtils.setLabel(this.#list.element, i18nString(UIStrings.domBreakpointsList));
     this.#emptyElement.tabIndex = -1;
 
     SDK.TargetManager.TargetManager.instance().addModelListener(
@@ -178,6 +180,7 @@ export class DOMBreakpointsSidebarPane extends UI.Widget.VBox implements
   createElementForItem(item: SDK.DOMDebuggerModel.DOMBreakpoint): Element {
     const element = document.createElement('div');
     element.classList.add('breakpoint-entry');
+    element.setAttribute('jslog', `${VisualLogging.domBreakpoint().context(item.type)}`);
     element.addEventListener('contextmenu', this.contextMenu.bind(this, item), true);
     UI.ARIAUtils.markAsListitem(element);
     element.tabIndex = -1;
@@ -202,7 +205,8 @@ export class DOMBreakpointsSidebarPane extends UI.Widget.VBox implements
     const breakpointTypeLabel = BreakpointTypeLabels.get(item.type);
     description.textContent = breakpointTypeLabel ? breakpointTypeLabel() : null;
     const breakpointTypeText = breakpointTypeLabel ? breakpointTypeLabel() : '';
-    UI.ARIAUtils.setAccessibleName(checkboxElement, breakpointTypeText);
+    UI.ARIAUtils.setLabel(checkboxElement, breakpointTypeText);
+    checkboxElement.setAttribute('jslog', `${VisualLogging.toggle().track({click: true})}`);
     const checkedStateText = item.enabled ? i18nString(UIStrings.checked) : i18nString(UIStrings.unchecked);
     const linkifiedNode = document.createElement('monospace');
     linkifiedNode.style.display = 'block';
@@ -211,11 +215,11 @@ export class DOMBreakpointsSidebarPane extends UI.Widget.VBox implements
         .then(linkified => {
           linkifiedNode.appendChild(linkified);
           // Give the checkbox an aria-label as it is required for all form element
-          UI.ARIAUtils.setAccessibleName(
+          UI.ARIAUtils.setLabel(
               checkboxElement, i18nString(UIStrings.sS, {PH1: breakpointTypeText, PH2: linkified.deepTextContent()}));
           // The parent list element is the one that actually gets focused.
           // Assign it an aria-label with complete information for the screen reader to read out properly
-          UI.ARIAUtils.setAccessibleName(
+          UI.ARIAUtils.setLabel(
               element,
               i18nString(
                   UIStrings.sSS, {PH1: breakpointTypeText, PH2: linkified.deepTextContent(), PH3: checkedStateText}));
@@ -373,7 +377,7 @@ export class DOMBreakpointsSidebarPane extends UI.Widget.VBox implements
     }
     void UI.ViewManager.ViewManager.instance().showView('sources.domBreakpoints');
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.registerCSSFiles([domBreakpointsSidebarPaneStyles]);
   }
@@ -385,21 +389,8 @@ const BreakpointTypeLabels = new Map([
   [Protocol.DOMDebugger.DOMBreakpointType.NodeRemoved, i18nLazyString(UIStrings.nodeRemoved)],
 ]);
 
-let contextMenuProviderInstance: ContextMenuProvider;
-
-export class ContextMenuProvider implements UI.ContextMenu.Provider {
-  static instance(opts: {
-    forceNew: boolean|null,
-  } = {forceNew: null}): ContextMenuProvider {
-    const {forceNew} = opts;
-    if (!contextMenuProviderInstance || forceNew) {
-      contextMenuProviderInstance = new ContextMenuProvider();
-    }
-
-    return contextMenuProviderInstance;
-  }
-  appendApplicableItems(event: Event, contextMenu: UI.ContextMenu.ContextMenu, object: Object): void {
-    const node = object as SDK.DOMModel.DOMNode;
+export class ContextMenuProvider implements UI.ContextMenu.Provider<SDK.DOMModel.DOMNode> {
+  appendApplicableItems(event: Event, contextMenu: UI.ContextMenu.ContextMenu, node: SDK.DOMModel.DOMNode): void {
     if (node.pseudoType()) {
       return;
     }

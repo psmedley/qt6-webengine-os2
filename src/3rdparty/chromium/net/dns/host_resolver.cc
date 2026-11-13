@@ -4,13 +4,14 @@
 
 #include "net/dns/host_resolver.h"
 
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
 #include "base/check.h"
+#include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/ranges/algorithm.h"
@@ -31,7 +32,6 @@
 #include "net/dns/mapped_host_resolver.h"
 #include "net/dns/public/host_resolver_results.h"
 #include "net/dns/resolve_context.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
 #include "url/scheme_host_port.h"
 
@@ -75,18 +75,12 @@ class FailingRequestImpl : public HostResolver::ResolveHostRequest,
     return nullptr;
   }
 
-  const absl::optional<std::vector<std::string>>& GetTextResults()
-      const override {
-    static const base::NoDestructor<absl::optional<std::vector<std::string>>>
-        nullopt_result;
-    return *nullopt_result;
+  const std::vector<std::string>* GetTextResults() const override {
+    return nullptr;
   }
 
-  const absl::optional<std::vector<HostPortPair>>& GetHostnameResults()
-      const override {
-    static const base::NoDestructor<absl::optional<std::vector<HostPortPair>>>
-        nullopt_result;
-    return *nullopt_result;
+  const std::vector<HostPortPair>* GetHostnameResults() const override {
+    return nullptr;
   }
 
   const std::set<std::string>* GetDnsAliasResults() const override {
@@ -97,9 +91,9 @@ class FailingRequestImpl : public HostResolver::ResolveHostRequest,
     return ResolveErrorInfo(error_);
   }
 
-  const absl::optional<HostCache::EntryStaleness>& GetStaleInfo()
+  const std::optional<HostCache::EntryStaleness>& GetStaleInfo()
       const override {
-    static const absl::optional<HostCache::EntryStaleness> nullopt_result;
+    static const std::optional<HostCache::EntryStaleness> nullopt_result;
     return nullopt_result;
   }
 
@@ -316,8 +310,8 @@ HostCache* HostResolver::GetHostCache() {
   return nullptr;
 }
 
-base::Value HostResolver::GetDnsConfigAsValue() const {
-  return base::Value(base::Value::Type::DICTIONARY);
+base::Value::Dict HostResolver::GetDnsConfigAsValue() const {
+  return base::Value::Dict();
 }
 
 void HostResolver::SetRequestContext(URLRequestContext* request_context) {
@@ -368,7 +362,7 @@ std::unique_ptr<HostResolver> HostResolver::CreateResolver(
 // static
 std::unique_ptr<HostResolver> HostResolver::CreateStandaloneResolver(
     NetLog* net_log,
-    absl::optional<ManagerOptions> options,
+    std::optional<ManagerOptions> options,
     base::StringPiece host_mapping_rules,
     bool enable_caching) {
   std::unique_ptr<ContextHostResolver> resolver =
@@ -387,7 +381,7 @@ std::unique_ptr<HostResolver> HostResolver::CreateStandaloneResolver(
 std::unique_ptr<ContextHostResolver>
 HostResolver::CreateStandaloneContextResolver(
     NetLog* net_log,
-    absl::optional<ManagerOptions> options,
+    std::optional<ManagerOptions> options,
     bool enable_caching) {
   auto resolve_context = std::make_unique<ResolveContext>(
       nullptr /* url_request_context */, enable_caching);
@@ -404,7 +398,7 @@ std::unique_ptr<HostResolver>
 HostResolver::CreateStandaloneNetworkBoundResolver(
     NetLog* net_log,
     handles::NetworkHandle target_network,
-    absl::optional<ManagerOptions> options,
+    std::optional<ManagerOptions> options,
     base::StringPiece host_mapping_rules,
     bool enable_caching) {
 #if BUILDFLAG(IS_ANDROID)
@@ -503,19 +497,8 @@ int HostResolver::SquashErrorCode(int error) {
 }
 
 // static
-std::vector<HostResolverEndpointResult>
-HostResolver::AddressListToEndpointResults(const AddressList& address_list) {
-  HostResolverEndpointResult connection_endpoint;
-  connection_endpoint.ip_endpoints = address_list.endpoints();
-
-  std::vector<HostResolverEndpointResult> list;
-  list.push_back(std::move(connection_endpoint));
-  return list;
-}
-
-// static
 AddressList HostResolver::EndpointResultToAddressList(
-    const std::vector<HostResolverEndpointResult>& endpoints,
+    base::span<const HostResolverEndpointResult> endpoints,
     const std::set<std::string>& aliases) {
   AddressList list;
 
@@ -533,13 +516,45 @@ AddressList HostResolver::EndpointResultToAddressList(
 }
 
 // static
-std::vector<IPEndPoint> HostResolver::GetNonProtocolEndpoints(
-    const std::vector<HostResolverEndpointResult>& endpoints) {
-  auto non_protocol_endpoint =
-      base::ranges::find_if(endpoints, &EndpointResultIsNonProtocol);
-  if (non_protocol_endpoint == endpoints.end())
-    return std::vector<IPEndPoint>();
-  return non_protocol_endpoint->ip_endpoints;
+bool HostResolver::AllProtocolEndpointsHaveEch(
+    base::span<const HostResolverEndpointResult> endpoints) {
+  bool has_svcb = false;
+  for (const auto& endpoint : endpoints) {
+    if (!endpoint.metadata.supported_protocol_alpns.empty()) {
+      has_svcb = true;
+      if (endpoint.metadata.ech_config_list.empty()) {
+        return false;  // There is a non-ECH SVCB/HTTPS route.
+      }
+    }
+  }
+  // Either there were no SVCB/HTTPS records (should be SVCB-optional), or there
+  // were and all supported ECH (should be SVCB-reliant).
+  return has_svcb;
+}
+
+// static
+base::StringPiece HostResolver::GetHostname(
+    const absl::variant<url::SchemeHostPort, std::string>& host) {
+  if (absl::holds_alternative<url::SchemeHostPort>(host)) {
+    base::StringPiece hostname = absl::get<url::SchemeHostPort>(host).host();
+    if (hostname.size() >= 2 && hostname.front() == '[' &&
+        hostname.back() == ']') {
+      hostname = hostname.substr(1, hostname.size() - 2);
+    }
+    return hostname;
+  }
+
+  return absl::get<std::string>(host);
+}
+
+// static
+bool HostResolver::MayUseNAT64ForIPv4Literal(HostResolverFlags flags,
+                                             HostResolverSource source,
+                                             const IPAddress& ip_address) {
+  return !(flags & HOST_RESOLVER_DEFAULT_FAMILY_SET_DUE_TO_NO_IPV6) &&
+         ip_address.IsValid() && ip_address.IsIPv4() &&
+         base::FeatureList::IsEnabled(features::kUseNAT64ForIPv4Literal) &&
+         (source != HostResolverSource::LOCAL_ONLY);
 }
 
 HostResolver::HostResolver() = default;

@@ -1,5 +1,5 @@
-# Copyright (C) 2022 The Qt Company Ltd.
-# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (C) 2023 The Qt Company Ltd.
+# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 cmake_minimum_required(VERSION 3.16)
 project(quicknanobrowser LANGUAGES CXX)
@@ -18,6 +18,13 @@ qt_add_executable(quicknanobrowser
     main.cpp
     utils.h
 )
+
+if(WIN32)
+    set_property(
+        TARGET quicknanobrowser
+        APPEND PROPERTY
+            SOURCES quicknanobrowser.exe.manifest)
+endif()
 
 set_target_properties(quicknanobrowser PROPERTIES
     WIN32_EXECUTABLE TRUE
@@ -47,6 +54,7 @@ set(resources_resource_files
     "DownloadView.qml"
     "FindBar.qml"
     "FullScreenNotification.qml"
+    "WebAuthDialog.qml"
 )
 
 qt_add_resources(quicknanobrowser "resources"
@@ -85,8 +93,14 @@ if (APPLE)
 
     if (NOT CMAKE_GENERATOR STREQUAL "Xcode")
         # Need to sign application for location permissions to work
+        if(QT_FEATURE_debug_and_release)
+            set(exe_path "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/")
+        else()
+            unset(exe_path)
+        endif()
         add_custom_command(TARGET quicknanobrowser
-            POST_BUILD COMMAND codesign -s - quicknanobrowser.app)
+            POST_BUILD COMMAND codesign --force -s - ${exe_path}quicknanobrowser.app
+        )
     endif()
 endif()
 

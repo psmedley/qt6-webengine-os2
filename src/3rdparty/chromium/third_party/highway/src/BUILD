@@ -1,8 +1,15 @@
+load("@rules_license//rules:license.bzl", "license")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 
 load("@rules_cc//cc:defs.bzl", "cc_test")
 package(
+    default_applicable_licenses = ["//:license"],
     default_visibility = ["//visibility:public"],
+)
+
+license(
+    name = "license",
+    package_name = "highway",
 )
 
 licenses(["notice"])
@@ -161,6 +168,8 @@ cc_library(
         # These are textual because config macros influence them:
         "hwy/detect_targets.h",  # private
         "hwy/targets.h",
+        # This .cc file #includes itself through foreach_target.h
+        "hwy/per_target.cc",
         # End of list
         "hwy/highway.h",  # public
         "hwy/foreach_target.h",  # public
@@ -179,7 +188,10 @@ cc_library(
         "hwy/ops/x86_512-inl.h",
         # Select avoids recompiling native arch if only non-native changed
     ] + select({
-        ":compiler_emscripten": ["hwy/ops/wasm_128-inl.h"],
+        ":compiler_emscripten": [
+            "hwy/ops/wasm_128-inl.h",
+            "hwy/ops/wasm_256-inl.h",
+        ],
         "//conditions:default": [],
     }) + select({
         "@platforms//cpu:riscv64": ["hwy/ops/rvv-inl.h"],
@@ -195,6 +207,18 @@ cc_library(
         "hwy/contrib/algo/copy-inl.h",
         "hwy/contrib/algo/find-inl.h",
         "hwy/contrib/algo/transform-inl.h",
+    ],
+    deps = [
+        ":hwy",
+    ],
+)
+
+cc_library(
+    name = "bit_pack",
+    compatible_with = [],
+    copts = COPTS,
+    textual_hdrs = [
+        "hwy/contrib/bit_pack/bit_pack-inl.h",
     ],
     deps = [
         ":hwy",
@@ -292,8 +316,9 @@ cc_library(
     ],
 )
 
-cc_binary(
+cc_test(
     name = "list_targets",
+    size = "small",
     srcs = ["hwy/tests/list_targets.cc"],
     deps = [":hwy"],
 )
@@ -303,10 +328,12 @@ HWY_TESTS = [
     ("hwy/contrib/algo/", "copy_test"),
     ("hwy/contrib/algo/", "find_test"),
     ("hwy/contrib/algo/", "transform_test"),
+    ("hwy/contrib/bit_pack/", "bit_pack_test"),
     ("hwy/contrib/dot/", "dot_test"),
     ("hwy/contrib/image/", "image_test"),
     ("hwy/contrib/math/", "math_test"),
-    # contrib/sort has its own BUILD, we add it to GUITAR_TESTS.
+    # contrib/sort has its own BUILD, we also add sort_test to GUITAR_TESTS.
+    # To run bench_sort, specify --test=hwy/contrib/sort:bench_sort.
     ("hwy/examples/", "skeleton_test"),
     ("hwy/", "nanobenchmark_test"),
     ("hwy/", "aligned_allocator_test"),
@@ -322,6 +349,7 @@ HWY_TESTS = [
     ("hwy/tests/", "convert_test"),
     ("hwy/tests/", "crypto_test"),
     ("hwy/tests/", "demote_test"),
+    ("hwy/tests/", "expand_test"),
     ("hwy/tests/", "float_test"),
     ("hwy/tests/", "if_test"),
     ("hwy/tests/", "interleaved_test"),
@@ -349,6 +377,7 @@ HWY_TEST_COPTS = select({
 
 HWY_TEST_DEPS = [
     ":algo",
+    ":bit_pack",
     ":dot",
     ":hwy",
     ":hwy_test_util",

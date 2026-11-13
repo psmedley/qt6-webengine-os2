@@ -7,6 +7,7 @@
 #include <tuple>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/ranges/algorithm.h"
 #include "base/stl_util.h"
@@ -22,8 +23,6 @@
 using extensions::mojom::APIPermissionID;
 
 namespace extensions {
-
-namespace {
 
 // Copyable wrapper to make PermissionMessages comparable.
 class ComparablePermission {
@@ -41,11 +40,9 @@ class ComparablePermission {
   }
 
  private:
-  const PermissionMessage* msg_;
+  raw_ptr<const PermissionMessage> msg_;
 };
 using ComparablePermissions = std::vector<ComparablePermission>;
-
-}  // namespace
 
 typedef std::set<PermissionMessage> PermissionMsgSet;
 

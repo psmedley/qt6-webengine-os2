@@ -12,7 +12,7 @@
 #include <functional>
 #include <memory>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
@@ -108,7 +108,7 @@ class PlatformSensorReaderWinrtBase : public PlatformSensorReaderWinBase {
   // |lock_| because SetClient() and StartSensor() are called from the main
   // task runner rather than the thread where this object is created, and
   // StopSensor() may be called from the main task runner too.
-  raw_ptr<Client> client_ GUARDED_BY(lock_);
+  raw_ptr<Client, DanglingUntriaged> client_ GUARDED_BY(lock_);
 
   // Always report the first sample received after starting the sensor.
   bool has_received_first_sample_ = false;

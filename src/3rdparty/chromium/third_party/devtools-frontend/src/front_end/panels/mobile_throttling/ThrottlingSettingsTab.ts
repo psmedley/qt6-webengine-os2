@@ -4,98 +4,102 @@
 
 import * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import type * as SDK from '../../core/sdk/sdk.js';
+import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import throttlingSettingsTabStyles from './throttlingSettingsTab.css.js';
 
-import type * as SDK from '../../core/sdk/sdk.js';
-import * as UI from '../../ui/legacy/legacy.js';
-
 const UIStrings = {
   /**
-  *@description Text in Throttling Settings Tab of the Network panel
-  */
+   *@description Text in Throttling Settings Tab of the Network panel
+   */
   networkThrottlingProfiles: 'Network Throttling Profiles',
   /**
-  *@description Text of add conditions button in Throttling Settings Tab of the Network panel
-  */
+   *@description Text of add conditions button in Throttling Settings Tab of the Network panel
+   */
   addCustomProfile: 'Add custom profile...',
   /**
-  *@description A value in milliseconds
-  *@example {3} PH1
-  */
+   *@description A value in milliseconds
+   *@example {3} PH1
+   */
   dms: '{PH1} `ms`',
   /**
-  *@description Text in Throttling Settings Tab of the Network panel
-  */
+   *@description Text in Throttling Settings Tab of the Network panel
+   */
   profileName: 'Profile Name',
   /**
-  * @description Label for a textbox that sets the download speed in the Throttling Settings Tab.
-  * Noun, short for 'download speed'.
-  */
+   * @description Label for a textbox that sets the download speed in the Throttling Settings Tab.
+   * Noun, short for 'download speed'.
+   */
   download: 'Download',
   /**
-  * @description Label for a textbox that sets the upload speed in the Throttling Settings Tab.
-  * Noun, short for 'upload speed'.
-  */
+   * @description Label for a textbox that sets the upload speed in the Throttling Settings Tab.
+   * Noun, short for 'upload speed'.
+   */
   upload: 'Upload',
   /**
-  * @description Label for a textbox that sets the latency in the Throttling Settings Tab.
-  */
+   * @description Label for a textbox that sets the latency in the Throttling Settings Tab.
+   */
   latency: 'Latency',
   /**
-  *@description Text in Throttling Settings Tab of the Network panel
-  */
+   *@description Text in Throttling Settings Tab of the Network panel
+   */
   optional: 'optional',
   /**
-  *@description Error message for Profile Name input in Throtting pane of the Settings
-  *@example {49} PH1
-  */
+   *@description Error message for Profile Name input in Throtting pane of the Settings
+   *@example {49} PH1
+   */
   profileNameCharactersLengthMust: 'Profile Name characters length must be between 1 to {PH1} inclusive',
   /**
-  *@description Error message for Download and Upload inputs in Throttling pane of the Settings
-  *@example {Download} PH1
-  *@example {0} PH2
-  *@example {10000000} PH3
-  */
+   *@description Error message for Download and Upload inputs in Throttling pane of the Settings
+   *@example {Download} PH1
+   *@example {0} PH2
+   *@example {10000000} PH3
+   */
   sMustBeANumberBetweenSkbsToSkbs: '{PH1} must be a number between {PH2} `kbit/s` to {PH3} `kbit/s` inclusive',
   /**
-  *@description Error message for Latency input in Throttling pane of the Settings
-  *@example {0} PH1
-  *@example {1000000} PH2
-  */
+   *@description Error message for Latency input in Throttling pane of the Settings
+   *@example {0} PH1
+   *@example {1000000} PH2
+   */
   latencyMustBeAnIntegerBetweenSms: 'Latency must be an integer between {PH1} `ms` to {PH2} `ms` inclusive',
   /**
-  * @description Text in Throttling Settings Tab of the Network panel, indicating the download or
-  * upload speed that will be applied in kilobits per second.
-  * @example {25} PH1
-  */
+   * @description Text in Throttling Settings Tab of the Network panel, indicating the download or
+   * upload speed that will be applied in kilobits per second.
+   * @example {25} PH1
+   */
   dskbits: '{PH1} `kbit/s`',
   /**
-  * @description Text in Throttling Settings Tab of the Network panel, indicating the download or
-  * upload speed that will be applied in megabits per second.
-  * @example {25.4} PH1
-  */
+   * @description Text in Throttling Settings Tab of the Network panel, indicating the download or
+   * upload speed that will be applied in megabits per second.
+   * @example {25.4} PH1
+   */
   fsmbits: '{PH1} `Mbit/s`',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/mobile_throttling/ThrottlingSettingsTab.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
-
-let throttlingSettingsTabInstance: ThrottlingSettingsTab;
 
 export class ThrottlingSettingsTab extends UI.Widget.VBox implements
     UI.ListWidget.Delegate<SDK.NetworkManager.Conditions> {
   private readonly list: UI.ListWidget.ListWidget<SDK.NetworkManager.Conditions>;
   private readonly customSetting: Common.Settings.Setting<SDK.NetworkManager.Conditions[]>;
   private editor?: UI.ListWidget.Editor<SDK.NetworkManager.Conditions>;
+
   constructor() {
     super(true);
+
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('throttling-conditions')}`);
 
     const header = this.contentElement.createChild('div', 'header');
     header.textContent = i18nString(UIStrings.networkThrottlingProfiles);
     UI.ARIAUtils.markAsHeading(header, 1);
 
-    const addButton = UI.UIUtils.createTextButton(
-        i18nString(UIStrings.addCustomProfile), this.addButtonClicked.bind(this), 'add-conditions-button');
+    const addButton =
+        UI.UIUtils.createTextButton(i18nString(UIStrings.addCustomProfile), this.addButtonClicked.bind(this), {
+          className: 'add-conditions-button',
+          jslogContext: 'network.add-conditions',
+        });
     this.contentElement.appendChild(addButton);
 
     this.list = new UI.ListWidget.ListWidget(this);
@@ -109,16 +113,7 @@ export class ThrottlingSettingsTab extends UI.Widget.VBox implements
     this.setDefaultFocusedElement(addButton);
   }
 
-  static instance(opts = {forceNew: null}): ThrottlingSettingsTab {
-    const {forceNew} = opts;
-    if (!throttlingSettingsTabInstance || forceNew) {
-      throttlingSettingsTabInstance = new ThrottlingSettingsTab();
-    }
-
-    return throttlingSettingsTabInstance;
-  }
-
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.list.registerCSSFiles([throttlingSettingsTabStyles]);
     this.registerCSSFiles([throttlingSettingsTabStyles]);
@@ -230,14 +225,14 @@ export class ThrottlingSettingsTab extends UI.Widget.VBox implements
 
     const fields = content.createChild('div', 'conditions-edit-row');
     const nameInput = editor.createInput('title', 'text', '', titleValidator);
-    UI.ARIAUtils.setAccessibleName(nameInput, nameStr);
+    UI.ARIAUtils.setLabel(nameInput, nameStr);
     fields.createChild('div', 'conditions-list-text conditions-list-title').appendChild(nameInput);
     fields.createChild('div', 'conditions-list-separator conditions-list-separator-invisible');
 
     let cell = fields.createChild('div', 'conditions-list-text');
     const downloadInput = editor.createInput('download', 'text', i18n.i18n.lockedString('kbit/s'), throughputValidator);
     cell.appendChild(downloadInput);
-    UI.ARIAUtils.setAccessibleName(downloadInput, downloadStr);
+    UI.ARIAUtils.setLabel(downloadInput, downloadStr);
     const downloadOptional = cell.createChild('div', 'conditions-edit-optional');
     const optionalStr = i18nString(UIStrings.optional);
     downloadOptional.textContent = optionalStr;
@@ -246,7 +241,7 @@ export class ThrottlingSettingsTab extends UI.Widget.VBox implements
 
     cell = fields.createChild('div', 'conditions-list-text');
     const uploadInput = editor.createInput('upload', 'text', i18n.i18n.lockedString('kbit/s'), throughputValidator);
-    UI.ARIAUtils.setAccessibleName(uploadInput, uploadStr);
+    UI.ARIAUtils.setLabel(uploadInput, uploadStr);
     cell.appendChild(uploadInput);
     const uploadOptional = cell.createChild('div', 'conditions-edit-optional');
     uploadOptional.textContent = optionalStr;
@@ -255,7 +250,7 @@ export class ThrottlingSettingsTab extends UI.Widget.VBox implements
 
     cell = fields.createChild('div', 'conditions-list-text');
     const latencyInput = editor.createInput('latency', 'text', i18n.i18n.lockedString('ms'), latencyValidator);
-    UI.ARIAUtils.setAccessibleName(latencyInput, latencyStr);
+    UI.ARIAUtils.setLabel(latencyInput, latencyStr);
     cell.appendChild(latencyInput);
     const latencyOptional = cell.createChild('div', 'conditions-edit-optional');
     latencyOptional.textContent = optionalStr;

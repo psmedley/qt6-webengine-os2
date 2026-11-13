@@ -14,8 +14,8 @@
 #include "third_party/blink/renderer/modules/xr/xr_joint_pose.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace blink {
 
@@ -42,6 +42,9 @@ class XRTransientInputHitTestSource;
 class XRView;
 class XRViewerPose;
 
+template <typename IDLType>
+class FrozenArray;
+
 class XRFrame final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -54,12 +57,22 @@ class XRFrame final : public ScriptWrappable {
 
   explicit XRFrame(XRSession* session, bool is_animation_frame = false);
 
-  XRSession* session() const { return session_; }
+  XRSession* session() const { return session_.Get(); }
 
-  XRViewerPose* getViewerPose(XRReferenceSpace*, ExceptionState&);
-  XRPose* getPose(XRSpace*, XRSpace*, ExceptionState&);
+  // Returns basespace_from_viewer.
+  XRViewerPose* getViewerPose(XRReferenceSpace* basespace,
+                              ExceptionState& exception_state);
+
+  // Return an XRPose that has a transform of basespace_from_space, while
+  // accounting for the base pose matrix of this frame. If computing a transform
+  // isn't possible, return nullptr.
+  XRPose* getPose(XRSpace* space,
+                  XRSpace* basespace,
+                  ExceptionState& exception_state);
+
   XRAnchorSet* trackedAnchors() const;
-  XRLightEstimate* getLightEstimate(XRLightProbe*, ExceptionState&) const;
+  XRLightEstimate* getLightEstimate(XRLightProbe* light_probe,
+                                    ExceptionState& exception_state) const;
   XRCPUDepthInformation* getDepthInformation(
       XRView* view,
       ExceptionState& exception_state) const;
@@ -73,11 +86,11 @@ class XRFrame final : public ScriptWrappable {
 
   bool IsAnimationFrame() const { return is_animation_frame_; }
 
-  HeapVector<Member<XRHitTestResult>> getHitTestResults(
+  const FrozenArray<XRHitTestResult>& getHitTestResults(
       XRHitTestSource* hit_test_source,
       ExceptionState& exception_state);
 
-  HeapVector<Member<XRTransientInputHitTestResult>>
+  const FrozenArray<XRTransientInputHitTestResult>&
   getHitTestResultsForTransientInput(
       XRTransientInputHitTestSource* hit_test_source,
       ExceptionState& exception_state);
@@ -87,7 +100,7 @@ class XRFrame final : public ScriptWrappable {
                              XRSpace* space,
                              ExceptionState& exception_state);
 
-  HeapVector<Member<XRImageTrackingResult>> getImageTrackingResults(
+  const FrozenArray<XRImageTrackingResult>& getImageTrackingResults(
       ExceptionState&);
 
   XRJointPose* getJointPose(XRJointSpace* joint,
@@ -102,7 +115,7 @@ class XRFrame final : public ScriptWrappable {
                  ExceptionState& exception_state) const;
 
  private:
-  std::unique_ptr<TransformationMatrix> GetAdjustedPoseMatrix(XRSpace*) const;
+  std::unique_ptr<gfx::Transform> GetAdjustedPoseMatrix(XRSpace*) const;
   XRPose* GetTargetRayPose(XRInputSource*, XRSpace*) const;
   XRPose* GetGripPose(XRInputSource*, XRSpace*) const;
   // Helper that creates an anchor with the assumption that the conversion from
@@ -112,7 +125,7 @@ class XRFrame final : public ScriptWrappable {
   // already taken into account).
   ScriptPromise CreateAnchorFromNonStationarySpace(
       ScriptState* script_state,
-      const blink::TransformationMatrix& native_origin_from_anchor,
+      const gfx::Transform& native_origin_from_anchor,
       XRSpace* space,
       absl::optional<uint64_t> maybe_plane_id,
       ExceptionState& exception_state);

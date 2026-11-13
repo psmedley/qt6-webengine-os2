@@ -2,10 +2,12 @@
 #define QUICHE_HTTP2_ADAPTER_WINDOW_MANAGER_H_
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <functional>
 
 #include "quiche/common/platform/api/quiche_export.h"
+#include "quiche/common/quiche_callbacks.h"
 
 namespace http2 {
 namespace adapter {
@@ -16,15 +18,15 @@ class WindowManagerPeer;
 
 // This class keeps track of a HTTP/2 flow control window, notifying a listener
 // when a window update needs to be sent. This class is not thread-safe.
-class QUICHE_EXPORT_PRIVATE WindowManager {
+class QUICHE_EXPORT WindowManager {
  public:
   // A WindowUpdateListener is invoked when it is time to send a window update.
-  using WindowUpdateListener = std::function<void(int64_t)>;
+  using WindowUpdateListener = quiche::MultiUseCallback<void(int64_t)>;
 
   // Invoked to determine whether to call the listener based on the window
   // limit, window size, and delta that would be sent.
-  using ShouldWindowUpdateFn =
-      std::function<bool(int64_t limit, int64_t size, int64_t delta)>;
+  using ShouldWindowUpdateFn = bool (*)(int64_t limit, int64_t size,
+                                        int64_t delta);
 
   WindowManager(int64_t window_size_limit, WindowUpdateListener listener,
                 ShouldWindowUpdateFn should_window_update_fn = {},

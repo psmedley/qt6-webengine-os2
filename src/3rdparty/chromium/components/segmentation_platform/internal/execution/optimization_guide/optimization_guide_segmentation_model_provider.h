@@ -8,13 +8,11 @@
 #include <memory>
 #include <vector>
 
+#include "base/task/sequenced_task_runner.h"
 #include "components/optimization_guide/core/model_handler.h"
 #include "components/segmentation_platform/public/model_provider.h"
 #include "components/segmentation_platform/public/proto/segmentation_platform.pb.h"
 
-namespace optimization_guide {
-class OptimizationGuideSegmentationModelProvider;
-}  // namespace optimization_guide
 
 namespace segmentation_platform {
 
@@ -40,7 +38,7 @@ class OptimizationGuideSegmentationModelProvider : public ModelProvider {
   // ModelProvider impl:
   void InitAndFetchModel(
       const ModelUpdatedCallback& model_updated_callback) override;
-  void ExecuteModelWithInput(const std::vector<float>& inputs,
+  void ExecuteModelWithInput(const ModelProvider::Request& inputs,
                              ExecutionCallback callback) override;
   bool ModelAvailable() override;
 

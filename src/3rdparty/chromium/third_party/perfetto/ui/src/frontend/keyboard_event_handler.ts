@@ -16,14 +16,11 @@ import {Actions} from '../common/actions';
 import {Area} from '../common/state';
 
 import {Flow, globals} from './globals';
-import {toggleHelp} from './help_modal';
 import {
   focusHorizontalRange,
   verticalScrollToTrack,
 } from './scroll_helper';
-import {executeSearch} from './search_handler';
 
-const INSTANT_FOCUS_DURATION_S = 1 / 1e9;  // 1 ns.
 type Direction = 'Forward'|'Backward';
 
 // Handles all key events than are not handled by the
@@ -55,8 +52,8 @@ export function handleKey(e: KeyboardEvent, down: boolean): boolean {
     if (selection !== null && selection.kind === 'AREA') {
       const area = globals.state.areas[selection.areaId];
       const coversEntireTimeRange =
-          globals.state.traceTime.startSec === area.startSec &&
-          globals.state.traceTime.endSec === area.endSec;
+          globals.state.traceTime.start === area.start &&
+          globals.state.traceTime.end === area.end;
       if (!coversEntireTimeRange) {
         // If the current selection is an area which does not cover the entire
         // time range, preserve the list of selected tracks and expand the time
@@ -71,31 +68,19 @@ export function handleKey(e: KeyboardEvent, down: boolean): boolean {
       // If the current selection is not an area, select all.
       tracksToSelect = Object.keys(globals.state.tracks);
     }
+    const {start, end} = globals.state.traceTime;
     globals.dispatch(Actions.selectArea({
       area: {
-        startSec: globals.state.traceTime.startSec,
-        endSec: globals.state.traceTime.endSec,
+        start,
+        end,
         tracks: tracksToSelect,
       },
     }));
     e.preventDefault();
     return true;
   }
-  if (down && 'b' === key && ctrlOrMeta) {
-    globals.dispatch(Actions.toggleSidebar({}));
-    return true;
-  }
-  if (down && '?' === key && maybeShift) {
-    toggleHelp();
-    return true;
-  }
-  if (down && 'enter' === key && maybeShift) {
-    e.preventDefault();
-    executeSearch(e.shiftKey);
-    return true;
-  }
   if (down && 'escape' === key) {
-    globals.frontendLocalState.deselectArea();
+    globals.timeline.deselectArea();
     globals.makeSelection(Actions.deselect({}));
     globals.dispatch(Actions.removeNote({id: '0'}));
     return true;
@@ -187,12 +172,11 @@ function moveByFocusedFlow(direction: Direction): void {
   for (const flow of globals.connectedFlows) {
     if (flow.id === flowId) {
       const flowPoint = (direction === 'Backward' ? flow.begin : flow.end);
-      const uiTrackId =
-          globals.state.uiTrackIdByTraceTrackId[flowPoint.trackId];
-      if (uiTrackId) {
+      const trackKey = globals.state.trackKeyByTrackId[flowPoint.trackId];
+      if (trackKey) {
         globals.makeSelection(Actions.selectChromeSlice({
           id: flowPoint.sliceId,
-          trackId: uiTrackId,
+          trackKey,
           table: 'slice',
           scroll: true,
         }));
@@ -201,64 +185,14 @@ function moveByFocusedFlow(direction: Direction): void {
   }
 }
 
-function findTimeRangeOfSelection(): {startTs: number, endTs: number} {
-  const selection = globals.state.currentSelection;
-  let startTs = -1;
-  let endTs = -1;
-  if (selection === null) {
-    return {startTs, endTs};
-  } else if (selection.kind === 'SLICE' || selection.kind === 'CHROME_SLICE') {
-    const slice = globals.sliceDetails;
-    if (slice.ts && slice.dur !== undefined && slice.dur > 0) {
-      startTs = slice.ts + globals.state.traceTime.startSec;
-      endTs = startTs + slice.dur;
-    } else if (slice.ts) {
-      startTs = slice.ts + globals.state.traceTime.startSec;
-      // This will handle either:
-      // a)slice.dur === -1 -> unfinished slice
-      // b)slice.dur === 0  -> instant event
-      endTs = slice.dur === -1 ? globals.state.traceTime.endSec :
-                                 startTs + INSTANT_FOCUS_DURATION_S;
-    }
-  } else if (selection.kind === 'THREAD_STATE') {
-    const threadState = globals.threadStateDetails;
-    if (threadState.ts && threadState.dur) {
-      startTs = threadState.ts + globals.state.traceTime.startSec;
-      endTs = startTs + threadState.dur;
-    }
-  } else if (selection.kind === 'COUNTER') {
-    startTs = selection.leftTs;
-    endTs = selection.rightTs;
-  } else if (selection.kind === 'AREA') {
-    const selectedArea = globals.state.areas[selection.areaId];
-    if (selectedArea) {
-      startTs = selectedArea.startSec;
-      endTs = selectedArea.endSec;
-    }
-  } else if (selection.kind === 'NOTE') {
-    const selectedNote = globals.state.notes[selection.id];
-    // Notes can either be default or area notes. Area notes are handled
-    // above in the AREA case.
-    if (selectedNote && selectedNote.noteType === 'DEFAULT') {
-      startTs = selectedNote.timestamp;
-      endTs = selectedNote.timestamp + INSTANT_FOCUS_DURATION_S;
-    }
-  } else if (selection.kind === 'LOG') {
-    // TODO(hjd): Make focus selection work for logs.
-  }
-
-  return {startTs, endTs};
-}
-
-
 function lockSliceSpan(persistent = false) {
-  const range = findTimeRangeOfSelection();
-  if (range.startTs !== -1 && range.endTs !== -1 &&
+  const range = globals.findTimeRangeOfSelection();
+  if (range.start !== -1n && range.end !== -1n &&
       globals.state.currentSelection !== null) {
-    const tracks = globals.state.currentSelection.trackId ?
-        [globals.state.currentSelection.trackId] :
+    const tracks = globals.state.currentSelection.trackKey ?
+        [globals.state.currentSelection.trackKey] :
         [];
-    const area: Area = {startSec: range.startTs, endSec: range.endTs, tracks};
+    const area: Area = {start: range.start, end: range.end, tracks};
     globals.dispatch(Actions.markArea({area, persistent}));
   }
 }
@@ -267,12 +201,12 @@ export function findCurrentSelection() {
   const selection = globals.state.currentSelection;
   if (selection === null) return;
 
-  const range = findTimeRangeOfSelection();
-  if (range.startTs !== -1 && range.endTs !== -1) {
-    focusHorizontalRange(range.startTs, range.endTs);
+  const range = globals.findTimeRangeOfSelection();
+  if (range.start !== -1n && range.end !== -1n) {
+    focusHorizontalRange(range.start, range.end);
   }
 
-  if (selection.trackId) {
-    verticalScrollToTrack(selection.trackId, true);
+  if (selection.trackKey) {
+    verticalScrollToTrack(selection.trackKey, true);
   }
 }

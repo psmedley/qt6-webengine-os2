@@ -3,20 +3,18 @@
 // found in the LICENSE file.
 
 import * as Platform from '../../core/platform/platform.js';
-import * as Utils from './utils/utils.js';
 
 import {type Size} from './Geometry.js';
-import {Icon} from './Icon.js';
-import {deepElementFromEvent} from './UIUtils.js';
-
-import {Widget, type WidgetElement} from './Widget.js';
 import glassPaneStyles from './glassPane.css.legacy.js';
+import {deepElementFromEvent} from './UIUtils.js';
+import * as Utils from './utils/utils.js';
+import {Widget, type WidgetElement} from './Widget.js';
 
 export class GlassPane {
   private readonly widgetInternal: Widget;
   element: WidgetElement;
   contentElement: HTMLDivElement;
-  private readonly arrowElement: Icon;
+  private readonly arrowElement: HTMLSpanElement;
   private readonly onMouseDownBound: (event: Event) => void;
   private onClickOutsideCallback: ((arg0: Event) => void)|null;
   private maxSize: Size|null;
@@ -26,13 +24,15 @@ export class GlassPane {
   private anchorBehavior: AnchorBehavior;
   private sizeBehavior: SizeBehavior;
   private marginBehavior: MarginBehavior;
+  #ignoreLeftMargin: boolean = false;
 
   constructor() {
     this.widgetInternal = new Widget(true);
     this.widgetInternal.markAsRoot();
     this.element = this.widgetInternal.element;
     this.contentElement = this.widgetInternal.contentElement;
-    this.arrowElement = Icon.create('', 'arrow hidden');
+    this.arrowElement = document.createElement('span');
+    this.arrowElement.classList.add('arrow', 'hidden');
     if (this.element.shadowRoot) {
       this.element.shadowRoot.appendChild(this.arrowElement);
     }
@@ -112,6 +112,10 @@ export class GlassPane {
     this.arrowElement.classList.toggle('hidden', behavior !== MarginBehavior.Arrow);
   }
 
+  setIgnoreLeftMargin(ignore: boolean): void {
+    this.#ignoreLeftMargin = ignore;
+  }
+
   show(document: Document): void {
     if (this.isShowing()) {
       return;
@@ -119,6 +123,7 @@ export class GlassPane {
     // TODO(crbug.com/1006759): Extract the magic number
     // Deliberately starts with 3000 to hide other z-indexed elements below.
     this.element.style.zIndex = `${3000 + 1000 * _panes.size}`;
+    this.element.setAttribute('data-devtools-glass-pane', '');
     document.body.addEventListener('mousedown', this.onMouseDownBound, true);
     document.body.addEventListener('pointerdown', this.onMouseDownBound, true);
     this.widgetInternal.show(document.body);
@@ -216,7 +221,6 @@ export class GlassPane {
           } else {
             height = Math.min(height, spaceTop);
           }
-          this.arrowElement.setIconType('mediumicon-arrow-bottom');
           this.arrowElement.classList.add('arrow-bottom');
           arrowY = anchorBox.y - gutterSize;
         } else {
@@ -231,12 +235,16 @@ export class GlassPane {
           } else {
             height = Math.min(height, spaceBottom);
           }
-          this.arrowElement.setIconType('mediumicon-arrow-top');
           this.arrowElement.classList.add('arrow-top');
           arrowY = anchorBox.y + anchorBox.height + gutterSize;
         }
 
-        positionX = Math.max(gutterSize, Math.min(anchorBox.x, containerWidth - width - gutterSize));
+        const naturalPositionX = Math.min(anchorBox.x, containerWidth - width - gutterSize);
+        positionX = Math.max(gutterSize, naturalPositionX);
+        if (this.#ignoreLeftMargin && gutterSize > naturalPositionX) {
+          positionX = 0;
+        }
+
         if (!enoughHeight) {
           positionX = Math.min(positionX + arrowSize, containerWidth - width - gutterSize);
         } else if (showArrow && positionX - arrowSize >= gutterSize) {
@@ -273,7 +281,6 @@ export class GlassPane {
           } else {
             width = Math.min(width, spaceLeft);
           }
-          this.arrowElement.setIconType('mediumicon-arrow-right');
           this.arrowElement.classList.add('arrow-right');
           arrowX = anchorBox.x - gutterSize;
         } else {
@@ -288,7 +295,6 @@ export class GlassPane {
           } else {
             width = Math.min(width, spaceRight);
           }
-          this.arrowElement.setIconType('mediumicon-arrow-left');
           this.arrowElement.classList.add('arrow-left');
           arrowX = anchorBox.x + anchorBox.width + gutterSize;
         }

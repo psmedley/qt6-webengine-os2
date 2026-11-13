@@ -65,8 +65,6 @@ class VideoQualityTest : public test::CallTest,
   static std::vector<int> ParseCSV(const std::string& str);
 
  protected:
-  std::map<uint8_t, webrtc::MediaType> payload_type_map_;
-
   // No-op implementation to be able to instantiate this class from non-TEST_F
   // locations.
   void TestBody() override;
@@ -92,8 +90,8 @@ class VideoQualityTest : public test::CallTest,
   void DestroyThumbnailStreams();
   // Helper method for creating a real ADM (using hardware) for all platforms.
   rtc::scoped_refptr<AudioDeviceModule> CreateAudioDevice();
-  void InitializeAudioDevice(Call::Config* send_call_config,
-                             Call::Config* recv_call_config,
+  void InitializeAudioDevice(CallConfig* send_call_config,
+                             CallConfig* recv_call_config,
                              bool use_real_adm);
   void SetupAudio(Transport* transport);
 

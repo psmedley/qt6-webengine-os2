@@ -12,6 +12,9 @@
 #include <vector>
 
 #include "dawn/common/Compiler.h"
+#include "partition_alloc/pointers/raw_ptr.h"
+
+namespace dawn {
 
 // This allocator can be used with STL containers to provide a stack buffer
 // from which to allocate memory and overflows onto the heap. This stack buffer
@@ -111,7 +114,7 @@ class StackAllocator : public std::allocator<T> {
     }
 
   private:
-    Source* source_;
+    raw_ptr<Source> source_;
 };
 
 // A wrapper around STL containers that maintains a stack-sized buffer that the
@@ -234,5 +237,7 @@ class StackVector
     StackVector(StackVector&& rhs) = delete;
     StackVector& operator=(StackVector&& rhs) = delete;
 };
+
+}  // namespace dawn
 
 #endif  // SRC_DAWN_COMMON_STACKCONTAINER_H_

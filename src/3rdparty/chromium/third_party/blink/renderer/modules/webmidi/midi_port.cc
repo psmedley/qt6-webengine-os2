@@ -53,7 +53,8 @@ MIDIPort::MIDIPort(MIDIAccess* access,
                    MIDIPortType type,
                    const String& version,
                    PortState state)
-    : ExecutionContextLifecycleObserver(access->GetExecutionContext()),
+    : ActiveScriptWrappable<MIDIPort>({}),
+      ExecutionContextLifecycleObserver(access->GetExecutionContext()),
       id_(id),
       manufacturer_(manufacturer),
       name_(name),
@@ -178,7 +179,7 @@ void MIDIPort::ContextDestroyed() {
 
 void MIDIPort::Trace(Visitor* visitor) const {
   visitor->Trace(access_);
-  EventTargetWithInlineData::Trace(visitor);
+  EventTarget::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
@@ -224,9 +225,8 @@ void MIDIPort::CloseAsynchronously(ScriptPromiseResolver* resolver) {
 }
 
 ScriptPromise MIDIPort::Accept(ScriptState* script_state) {
-  return ScriptPromise::Cast(
-      script_state,
-      ToV8Traits<MIDIPort>::ToV8(script_state, this).ToLocalChecked());
+  return ScriptPromise::Cast(script_state,
+                             ToV8Traits<MIDIPort>::ToV8(script_state, this));
 }
 
 void MIDIPort::SetStates(PortState state, MIDIPortConnectionState connection) {

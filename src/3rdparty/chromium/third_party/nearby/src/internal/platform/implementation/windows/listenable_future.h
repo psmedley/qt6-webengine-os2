@@ -17,7 +17,6 @@
 
 #include "internal/platform/implementation/listenable_future.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
 
@@ -27,15 +26,15 @@ namespace windows {
 template <typename T>
 class ListenableFuture : public api::ListenableFuture<T> {
  public:
+  using FutureCallback = typename api::ListenableFuture<T>::FutureCallback;
   // TODO(b/184975123): replace with real implementation.
   ~ListenableFuture() override = default;
 
   // TODO(b/184975123): replace with real implementation.
-  void AddListener(Runnable runnable, api::Executor* executor) {}
+  void AddListener(FutureCallback callback, api::Executor* executor) {}
 };
 
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_IMPL_WINDOWS_LISTENABLE_FUTURE_H_

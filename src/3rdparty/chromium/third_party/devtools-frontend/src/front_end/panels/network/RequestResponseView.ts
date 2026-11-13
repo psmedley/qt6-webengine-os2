@@ -29,19 +29,22 @@
  */
 
 import * as Common from '../../core/common/common.js';
+import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
-import type * as SDK from '../../core/sdk/sdk.js';
+import * as SDK from '../../core/sdk/sdk.js';
+import * as TextUtils from '../../models/text_utils/text_utils.js';
 import * as SourceFrame from '../../ui/legacy/components/source_frame/source_frame.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 const UIStrings = {
   /**
-  *@description Text in Request Response View of the Network panel
-  */
+   *@description Text in Request Response View of the Network panel
+   */
   thisRequestHasNoResponseData: 'This request has no response data available.',
   /**
-  *@description Text in Request Preview View of the Network panel
-  */
+   *@description Text in Request Preview View of the Network panel
+   */
   failedToLoadResponseData: 'Failed to load response data',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/network/RequestResponseView.ts', UIStrings);
@@ -53,30 +56,9 @@ export class RequestResponseView extends UI.Widget.VBox {
   constructor(request: SDK.NetworkRequest.NetworkRequest) {
     super();
     this.element.classList.add('request-view');
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('response')}`);
     this.request = request;
     this.contentViewPromise = null;
-  }
-
-  private static hasTextContent(
-      request: SDK.NetworkRequest.NetworkRequest, contentData: SDK.NetworkRequest.ContentData): boolean {
-    const mimeType = request.mimeType || '';
-    let resourceType = Common.ResourceType.ResourceType.fromMimeType(mimeType);
-    if (resourceType === Common.ResourceType.resourceTypes.Other) {
-      resourceType = request.contentType();
-    }
-    if (resourceType === Common.ResourceType.resourceTypes.Image) {
-      return mimeType.startsWith('image/svg');
-    }
-    if (resourceType.isTextType()) {
-      return true;
-    }
-    if (contentData.error) {
-      return false;
-    }
-    if (resourceType === Common.ResourceType.resourceTypes.Other) {
-      return Boolean(contentData.content) && !contentData.encoded;
-    }
-    return false;
   }
 
   static async sourceViewForRequest(request: SDK.NetworkRequest.NetworkRequest): Promise<UI.Widget.Widget|null> {
@@ -86,18 +68,34 @@ export class RequestResponseView extends UI.Widget.VBox {
     }
 
     const contentData = await request.contentData();
-    if (!RequestResponseView.hasTextContent(request, contentData)) {
+    // Note: Even though WASM is binary data, the source view will disassemble it and show a text representation.
+    if (SDK.ContentData.ContentData.isError(contentData) ||
+        !(contentData.isTextContent || contentData.mimeType === 'application/wasm')) {
       requestToSourceView.delete(request);
       return null;
     }
 
-    const highlighterType = request.resourceType().canonicalMimeType() || request.mimeType;
-    sourceView = SourceFrame.ResourceSourceFrame.ResourceSourceFrame.createSearchableView(request, highlighterType);
+    let mimeType;
+    // If the main document is of type JSON (or any JSON subtype), do not use the more generic canonical MIME type,
+    // which would prevent the JSON from being pretty-printed. See https://crbug.com/406900
+    if (Common.ResourceType.ResourceType.simplifyContentType(request.mimeType) === 'application/json') {
+      mimeType = request.mimeType;
+    } else {
+      mimeType = request.resourceType().canonicalMimeType() || request.mimeType;
+    }
+
+    const isMinified =
+        contentData.mimeType === 'application/wasm' ? false : TextUtils.TextUtils.isMinified(contentData.text);
+    const mediaType = Common.ResourceType.ResourceType.mediaTypeForMetrics(
+        mimeType, request.resourceType().isFromSourceMap(), isMinified);
+
+    Host.userMetrics.networkPanelResponsePreviewOpened(mediaType);
+    sourceView = SourceFrame.ResourceSourceFrame.ResourceSourceFrame.createSearchableView(request, mimeType);
     requestToSourceView.set(request, sourceView);
     return sourceView;
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     void this.doShowPreview();
   }
 
@@ -116,26 +114,22 @@ export class RequestResponseView extends UI.Widget.VBox {
 
   async createPreview(): Promise<UI.Widget.Widget> {
     const contentData = await this.request.contentData();
-    const sourceView = await RequestResponseView.sourceViewForRequest(this.request);
-    if ((!contentData.content || !sourceView) && !contentData.error) {
-      return new UI.EmptyWidget.EmptyWidget(i18nString(UIStrings.thisRequestHasNoResponseData));
-    }
-    if (contentData.content && sourceView) {
-      return sourceView;
-    }
-    if (contentData.error) {
+    if (SDK.ContentData.ContentData.isError(contentData)) {
       return new UI.EmptyWidget.EmptyWidget(i18nString(UIStrings.failedToLoadResponseData) + ': ' + contentData.error);
     }
-    if (this.request.statusCode === 204) {
+
+    const sourceView = await RequestResponseView.sourceViewForRequest(this.request);
+    if (contentData.isEmpty || !sourceView || this.request.statusCode === 204) {
       return new UI.EmptyWidget.EmptyWidget(i18nString(UIStrings.thisRequestHasNoResponseData));
     }
-    return new UI.EmptyWidget.EmptyWidget(i18nString(UIStrings.failedToLoadResponseData));
+
+    return sourceView;
   }
 
-  async revealLine(line: number): Promise<void> {
+  async revealPosition(position: SourceFrame.SourceFrame.RevealPosition): Promise<void> {
     const view = await this.doShowPreview();
     if (view instanceof SourceFrame.ResourceSourceFrame.SearchableContainer) {
-      void view.revealPosition(line);
+      void view.revealPosition(position);
     }
   }
 }

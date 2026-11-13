@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/fxcrt/unowned_ptr.h"
+#include "core/fxcrt/unowned_ptr_exclusion.h"
 #include "fxjs/gc/heap.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "v8/include/cppgc/garbage-collected.h"
@@ -33,16 +34,16 @@ class CXFA_ViewLayoutProcessor
   struct BreakData {
     CPPGC_STACK_ALLOCATED();  // Raw/Unowned pointers allowed.
    public:
-    CXFA_Node* pLeader;
-    CXFA_Node* pTrailer;
+    UNOWNED_PTR_EXCLUSION CXFA_Node* pLeader;   // POD struct.
+    UNOWNED_PTR_EXCLUSION CXFA_Node* pTrailer;  // POD struct.
     bool bCreatePage;
   };
 
   struct OverflowData {
     CPPGC_STACK_ALLOCATED();  // Raw/Unowned pointers allowed.
    public:
-    CXFA_Node* pLeader;
-    CXFA_Node* pTrailer;
+    UNOWNED_PTR_EXCLUSION CXFA_Node* pLeader;   // POD struct.
+    UNOWNED_PTR_EXCLUSION CXFA_Node* pTrailer;  // POD struct.
   };
 
   CONSTRUCT_VIA_MAKE_GARBAGE_COLLECTED;
@@ -50,7 +51,7 @@ class CXFA_ViewLayoutProcessor
 
   void PreFinalize();
   void Trace(cppgc::Visitor* visitor) const;
-  cppgc::Heap* GetHeap() const { return m_pHeap.Get(); }
+  cppgc::Heap* GetHeap() const { return m_pHeap; }
 
   bool InitLayoutPage(CXFA_Node* pFormNode);
   bool PrepareFirstPage(CXFA_Node* pRootSubform);
@@ -64,7 +65,7 @@ class CXFA_ViewLayoutProcessor
   CXFA_ViewLayoutItem* GetPage(int32_t index) const;
   int32_t GetPageIndex(const CXFA_ViewLayoutItem* pPage) const;
   CXFA_ViewLayoutItem* GetRootLayoutItem() const {
-    return m_pPageSetRootLayoutItem.Get();
+    return m_pPageSetRootLayoutItem;
   }
   absl::optional<BreakData> ProcessBreakBefore(const CXFA_Node* pBreakNode);
   absl::optional<BreakData> ProcessBreakAfter(const CXFA_Node* pBreakNode);
@@ -193,7 +194,7 @@ class CXFA_ViewLayoutProcessor
   int32_t m_nCurPageCount = 0;
   XFA_AttributeValue m_ePageSetMode = XFA_AttributeValue::OrderedOccurrence;
   bool m_bCreateOverFlowPage = false;
-  std::map<CXFA_Node*, int32_t> m_pPageSetMap;
+  std::map<cppgc::Member<CXFA_Node>, int32_t> m_pPageSetMap;
   std::vector<cppgc::Member<CXFA_ViewLayoutItem>> m_PageArray;
 };
 

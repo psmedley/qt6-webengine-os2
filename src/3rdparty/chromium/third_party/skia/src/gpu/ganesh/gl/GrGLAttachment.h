@@ -61,14 +61,14 @@ private:
                            dimensions,
                            supportedUsages,
                            sampleCnt,
-                           GrMipmapped::kNo,
+                           skgpu::Mipmapped::kNo,
                            GrProtected::kNo,
                            label)
             , fFormat(format)
             , fRenderbufferID(renderbufferID) {
         SkASSERT(supportedUsages == UsageFlags::kStencilAttachment ||
                  supportedUsages == UsageFlags::kColorAttachment);
-        this->registerWithCache(SkBudgeted::kYes);
+        this->registerWithCache(skgpu::Budgeted::kYes);
     }
 
     void onSetLabel() override;

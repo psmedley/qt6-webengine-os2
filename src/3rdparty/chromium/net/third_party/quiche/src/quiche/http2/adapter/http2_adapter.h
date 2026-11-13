@@ -4,7 +4,6 @@
 #include <cstdint>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "quiche/http2/adapter/data_source.h"
 #include "quiche/http2/adapter/http2_protocol.h"
@@ -21,7 +20,7 @@ namespace adapter {
 // invokes corresponding callbacks on its passed-in Http2VisitorInterface.
 // Http2Adapter is a base class shared between client-side and server-side
 // implementations.
-class QUICHE_EXPORT_PRIVATE Http2Adapter {
+class QUICHE_EXPORT Http2Adapter {
  public:
   Http2Adapter(const Http2Adapter&) = delete;
   Http2Adapter& operator=(const Http2Adapter&) = delete;

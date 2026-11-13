@@ -2,23 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import './realbox_dropdown.js';
-import './realbox_icon.js';
+import 'chrome://resources/cr_components/omnibox/realbox_dropdown.js';
+import 'chrome://resources/cr_components/omnibox/realbox_icon.js';
 
+import type {AutocompleteMatch, AutocompleteResult, PageCallbackRouter, PageHandlerInterface} from 'chrome://resources/cr_components/omnibox/omnibox.mojom-webui.js';
+import {NavigationPredictor, SideType} from 'chrome://resources/cr_components/omnibox/omnibox.mojom-webui.js';
+import {RealboxBrowserProxy} from 'chrome://resources/cr_components/omnibox/realbox_browser_proxy.js';
+import type {RealboxDropdownElement} from 'chrome://resources/cr_components/omnibox/realbox_dropdown.js';
+import type {RealboxIconElement} from 'chrome://resources/cr_components/omnibox/realbox_icon.js';
 import {assert} from 'chrome://resources/js/assert.js';
+import {MetricsReporterImpl} from 'chrome://resources/js/metrics_reporter/metrics_reporter.js';
 import {hasKeyModifiers} from 'chrome://resources/js/util.js';
-import {Url} from 'chrome://resources/mojo/url/mojom/url.mojom-webui.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {loadTimeData} from '../i18n_setup.js';
-import {NavigationPredictor} from '../omnibox.mojom-webui.js';
-import {AutocompleteMatch, AutocompleteResult, PageCallbackRouter, PageHandlerInterface} from '../realbox.mojom-webui.js';
-import {decodeString16, mojoString16, mojoTimeDelta} from '../utils.js';
+import {decodeString16, mojoString16} from '../utils.js';
 
 import {getTemplate} from './realbox.html.js';
-import {RealboxBrowserProxy} from './realbox_browser_proxy.js';
-import {RealboxDropdownElement} from './realbox_dropdown.js';
-import {AutocompleteMatchWithImageData, RealboxIconElement} from './realbox_icon.js';
+
+// 900px ~= 561px (max value for --ntp-search-box-width) * 1.5 + some margin.
+const canShowSecondarySideMediaQueryList =
+    window.matchMedia('(min-width: 900px)');
 
 interface Input {
   text: string;
@@ -57,16 +61,47 @@ export class RealboxElement extends PolymerElement {
       // Public properties
       //========================================================================
 
-      /** Whether the theme is dark. */
-      isDark: {
+      /**
+       * Whether the secondary side can be shown based on the feature state and
+       * the width available to the dropdown.
+       */
+      canShowSecondarySide: {
+        type: Boolean,
+        value: () => canShowSecondarySideMediaQueryList.matches,
+        reflectToAttribute: true,
+      },
+
+      colorSourceIsBaseline: {
         type: Boolean,
         reflectToAttribute: true,
       },
 
-      /** Whether matches are currently visible. */
-      matchesAreVisible: {
+      /** Whether the cr-realbox-dropdown should be visible. */
+      dropdownIsVisible: {
         type: Boolean,
         value: false,
+        reflectToAttribute: true,
+      },
+
+      /**
+       * Whether the secondary side was at any point available to be shown.
+       */
+      hadSecondarySide: {
+        type: Boolean,
+        reflectToAttribute: true,
+      },
+
+      /*
+       * Whether the secondary side is currently available to be shown.
+       */
+      hasSecondarySide: {
+        type: Boolean,
+        reflectToAttribute: true,
+      },
+
+      /** Whether the theme is dark. */
+      isDark: {
+        type: Boolean,
         reflectToAttribute: true,
       },
 
@@ -84,18 +119,21 @@ export class RealboxElement extends PolymerElement {
         reflectToAttribute: true,
       },
 
+      realboxChromeRefreshTheming: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('realboxCr23Theming'),
+        reflectToAttribute: true,
+      },
+
+      realboxSteadyStateShadow: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('realboxCr23SteadyStateShadow'),
+        reflectToAttribute: true,
+      },
+
       //========================================================================
       // Private properties
       //========================================================================
-
-      /**
-       * The time of the first character insert operation that has not yet been
-       * painted in milliseconds. Used to measure the realbox responsiveness.
-       */
-      charTypedTime_: {
-        type: Number,
-        value: 0,
-      },
 
       /**
        * Whether user is deleting text in the input. Used to prevent the default
@@ -122,15 +160,6 @@ export class RealboxElement extends PolymerElement {
       lastInput_: {
         type: Object,
         value: {text: '', inline: ''},
-      },
-
-      /**
-       * The time at which the input was last focused in milliseconds. Passed to
-       * the browser when navigating to a match.
-       */
-      lastInputFocusTime_: {
-        type: Number,
-        value: null,
       },
 
       /** The last queried input text. */
@@ -175,7 +204,7 @@ export class RealboxElement extends PolymerElement {
 
       /**
        * Index of the currently selected match, if any.
-       * Do not modify this. Use <ntp-realbox-dropdown> API to change selection.
+       * Do not modify this. Use <cr-realbox-dropdown> API to change selection.
        */
       selectedMatchIndex_: {
         type: Number,
@@ -187,18 +216,35 @@ export class RealboxElement extends PolymerElement {
         type: String,
         computed: `computeInputAriaLive_(selectedMatch_)`,
       },
+
+      widthBehavior_: {
+        type: String,
+        value: loadTimeData.getString('realboxWidthBehavior'),
+        reflectToAttribute: true,
+      },
+
+      isTall_: {
+        type: Boolean,
+        value: loadTimeData.getBoolean('realboxIsTall'),
+        reflectToAttribute: true,
+      },
     };
   }
 
+  canShowSecondarySide: boolean;
+  colorSourceIsBaseline: boolean;
+  dropdownIsVisible: boolean;
+  hadSecondarySide: boolean;
+  hasSecondarySide: boolean;
   isDark: boolean;
-  matchesAreVisible: boolean;
   matchSearchbox: boolean;
   realboxLensSearchEnabled: boolean;
-  private charTypedTime_: number;
+  realboxChromeRefreshTheming: boolean;
+  realboxSteadyStateShadow: boolean;
+  private inputAriaLive_: string;
   private isDeletingInput_: boolean;
   private lastIgnoredEnterEvent_: KeyboardEvent|null;
   private lastInput_: Input;
-  private lastInputFocusTime_: number|null;
   private lastQueriedInput_: string|null;
   private pastedInInput_: boolean;
   private realboxIcon_: string;
@@ -206,12 +252,10 @@ export class RealboxElement extends PolymerElement {
   private result_: AutocompleteResult|null;
   private selectedMatch_: AutocompleteMatch|null;
   private selectedMatchIndex_: number;
-  private inputAriaLive_: string;
 
   private pageHandler_: PageHandlerInterface;
   private callbackRouter_: PageCallbackRouter;
   private autocompleteResultChangedListenerId_: number|null = null;
-  private autocompleteMatchImageAvailableListenerId_: number|null = null;
 
   constructor() {
     performance.mark('realbox-creation-start');
@@ -229,17 +273,17 @@ export class RealboxElement extends PolymerElement {
     this.autocompleteResultChangedListenerId_ =
         this.callbackRouter_.autocompleteResultChanged.addListener(
             this.onAutocompleteResultChanged_.bind(this));
-    this.autocompleteMatchImageAvailableListenerId_ =
-        this.callbackRouter_.autocompleteMatchImageAvailable.addListener(
-            this.onAutocompleteMatchImageAvailable_.bind(this));
+    canShowSecondarySideMediaQueryList.addEventListener(
+        'change', this.onCanShowSecondarySideChanged_.bind(this));
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
+    assert(this.autocompleteResultChangedListenerId_);
     this.callbackRouter_.removeListener(
-        assert(this.autocompleteResultChangedListenerId_!));
-    this.callbackRouter_.removeListener(
-        assert(this.autocompleteMatchImageAvailableListenerId_!));
+        this.autocompleteResultChangedListenerId_);
+    canShowSecondarySideMediaQueryList.removeEventListener(
+        'change', this.onCanShowSecondarySideChanged_.bind(this));
   }
 
   override ready() {
@@ -251,44 +295,27 @@ export class RealboxElement extends PolymerElement {
   // Callbacks
   //============================================================================
 
-  /**
-   * @param matchIndex match index
-   * @param url match imageUrl or destinationUrl.
-   * @param dataUrl match image or favicon content in in base64 encoded Data URL
-   *     format.
-   */
-  private onAutocompleteMatchImageAvailable_(
-      matchIndex: number, url: Url, dataUrl: string) {
-    if (!this.result_ || !this.result_.matches) {
-      return;
-    }
-
-    const match = this.result_.matches[matchIndex];
-    if (!match || this.selectedMatchIndex_ !== matchIndex) {
-      return;
-    }
-
-    // Set favicon content of the selected match, if applicable.
-    if (match.destinationUrl.url === url.url) {
-      (match as AutocompleteMatchWithImageData).faviconDataUrl = dataUrl;
-      this.notifyPath('selectedMatch_.faviconDataUrl');
-    }
-  }
-
   private onAutocompleteResultChanged_(result: AutocompleteResult) {
     if (this.lastQueriedInput_ === null ||
-        this.lastQueriedInput_.trimLeft() !== decodeString16(result.input)) {
+        this.lastQueriedInput_.trimStart() !== decodeString16(result.input)) {
       return;  // Stale result; ignore.
     }
 
     this.result_ = result;
-    const hasMatches = result && result.matches && result.matches.length > 0;
-    this.matchesAreVisible = hasMatches;
+    const hasMatches = result?.matches?.length > 0;
+    const hasPrimaryMatches = result?.matches?.some(match => {
+      const sideType =
+          result.suggestionGroupsMap[match.suggestionGroupId]?.sideType ||
+          SideType.kDefaultPrimary;
+      return sideType === SideType.kDefaultPrimary;
+    });
+    this.dropdownIsVisible = hasPrimaryMatches;
 
     this.$.input.focus();
 
     const firstMatch = hasMatches ? this.result_.matches[0] : null;
     if (firstMatch && firstMatch.allowedToBeDefaultMatch) {
+      // Select the default match and update the input.
       this.$.matches.selectFirst();
       this.updateInput_({
         text: this.lastQueriedInput_,
@@ -304,7 +331,7 @@ export class RealboxElement extends PolymerElement {
     } else if (
         hasMatches && this.selectedMatchIndex_ !== -1 &&
         this.selectedMatchIndex_ < this.result_.matches.length) {
-      // Restore the selection, if any.
+      // Restore the selection and update the input.
       this.$.matches.selectIndex(this.selectedMatchIndex_);
       this.updateInput_({
         text: decodeString16(this.selectedMatch_!.fillIntoEdit),
@@ -312,6 +339,7 @@ export class RealboxElement extends PolymerElement {
         moveCursorToEnd: true,
       });
     } else {
+      // Remove the selection and update the input.
       this.$.matches.unselect();
       this.updateInput_({
         inline: '',
@@ -322,6 +350,10 @@ export class RealboxElement extends PolymerElement {
   //============================================================================
   // Event handlers
   //============================================================================
+
+  private onCanShowSecondarySideChanged_(e: MediaQueryListEvent) {
+    this.canShowSecondarySide = e.matches;
+  }
 
   private onHeaderFocusin_() {
     // The header got focus. Unselect the selected match and clear the input.
@@ -350,7 +382,7 @@ export class RealboxElement extends PolymerElement {
   }
 
   private onInputFocus_() {
-    this.lastInputFocusTime_ = window.performance.now();
+    this.pageHandler_.onFocusChanged(true);
   }
 
   private onInputInput_(e: InputEvent) {
@@ -362,13 +394,19 @@ export class RealboxElement extends PolymerElement {
 
     this.updateInput_({text: inputValue, inline: ''});
 
-    const charTyped = !this.isDeletingInput_ && !!inputValue.trim();
-    // If a character has been typed, update |charTypedTime_|. Otherwise reset
-    // it. If |charTypedTime_| is not 0, there's a pending typed character for
+    // If a character has been typed, mark 'CharTyped'. Otherwise clear it. If
+    // 'CharTyped' mark already exists, there's a pending typed character for
     // which the results have not been painted yet. In that case, keep the
-    // earlier time.
-    this.charTypedTime_ =
-        charTyped ? this.charTypedTime_ || window.performance.now() : 0;
+    // earlier mark.
+    const charTyped = !this.isDeletingInput_ && !!inputValue.trim();
+    const metricsReporter = MetricsReporterImpl.getInstance();
+    if (charTyped) {
+      if (!metricsReporter.hasLocalMark('CharTyped')) {
+        metricsReporter.mark('CharTyped');
+      }
+    } else {
+      metricsReporter.clearMark('CharTyped');
+    }
 
     if (inputValue.trim()) {
       // TODO(crbug.com/1149769): Rather than disabling inline autocompletion
@@ -400,15 +438,20 @@ export class RealboxElement extends PolymerElement {
         inputValue === lastInputValue &&
         this.lastInput_.inline[0].toLocaleLowerCase() ===
             e.key.toLocaleLowerCase()) {
+      const text = this.lastInput_.text + e.key;
+      assert(text);
       this.updateInput_({
-        text: assert(this.lastInput_.text + e.key),
+        text: text,
         inline: this.lastInput_.inline.substr(1),
       });
 
-      // If |charTypedTime_| is not 0, there's a pending typed character for
-      // which the results have not been painted yet. In that case, keep the
-      // earlier time.
-      this.charTypedTime_ = this.charTypedTime_ || window.performance.now();
+      // If 'CharTyped' mark already exists, there's a pending typed character
+      // for which the results have not been painted yet. In that case, keep the
+      // earlier mark.
+      const metricsReporter = MetricsReporterImpl.getInstance();
+      if (!metricsReporter.hasLocalMark('CharTyped')) {
+        metricsReporter.mark('CharTyped');
+      }
 
       this.queryAutocomplete_(this.lastInput_.text);
       e.preventDefault();
@@ -422,7 +465,7 @@ export class RealboxElement extends PolymerElement {
 
     // Query for zero-prefix matches if user is tabbing into an empty input and
     // matches are not visible.
-    if (!this.$.input.value && !this.matchesAreVisible) {
+    if (!this.$.input.value && !this.dropdownIsVisible) {
       this.queryAutocomplete_('');
     }
   }
@@ -434,7 +477,7 @@ export class RealboxElement extends PolymerElement {
 
     // Query for zero-prefix matches when the main (generally left) mouse button
     // is pressed on an empty input and matches are not visible.
-    if (!this.$.input.value && !this.matchesAreVisible) {
+    if (!this.$.input.value && !this.dropdownIsVisible) {
       this.queryAutocomplete_('');
     }
   }
@@ -453,7 +496,7 @@ export class RealboxElement extends PolymerElement {
         this.updateInput_({text: '', inline: ''});
         this.clearAutocompleteMatches_();
       } else {
-        this.matchesAreVisible = false;
+        this.dropdownIsVisible = false;
 
         // Stop autocomplete but leave (potentially stale) results and continue
         // listening for key presses. These stale results should never be shown.
@@ -462,6 +505,7 @@ export class RealboxElement extends PolymerElement {
         // focusing and pressing 'Enter'.
         this.pageHandler_.stopAutocomplete(/*clearResult=*/ false);
       }
+      this.pageHandler_.onFocusChanged(false);
     }
   }
 
@@ -485,7 +529,7 @@ export class RealboxElement extends PolymerElement {
     }
 
     // ArrowUp/ArrowDown query autocomplete when matches are not visible.
-    if (!this.matchesAreVisible) {
+    if (!this.dropdownIsVisible) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         const inputValue = this.$.input.value;
         if (inputValue.trim() || !inputValue) {
@@ -504,7 +548,8 @@ export class RealboxElement extends PolymerElement {
     if (e.key === 'Delete') {
       if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
         if (this.selectedMatch_ && this.selectedMatch_.supportsDeletion) {
-          this.pageHandler_.deleteAutocompleteMatch(this.selectedMatchIndex_);
+          this.pageHandler_.deleteAutocompleteMatch(
+              this.selectedMatchIndex_, this.selectedMatch_.destinationUrl);
           e.preventDefault();
         }
       }
@@ -520,7 +565,7 @@ export class RealboxElement extends PolymerElement {
       const array: HTMLElement[] = [this.$.matches, this.$.input];
       if (array.includes(e.target as HTMLElement)) {
         if (this.lastQueriedInput_ !== null &&
-            this.lastQueriedInput_.trimLeft() ===
+            this.lastQueriedInput_.trimStart() ===
                 decodeString16(this.result_.input)) {
           if (this.selectedMatch_) {
             this.navigateToMatch_(this.selectedMatchIndex_, e);
@@ -553,11 +598,13 @@ export class RealboxElement extends PolymerElement {
     if (e.key === 'ArrowDown') {
       this.$.matches.selectNext();
       this.pageHandler_.onNavigationLikely(
-          this.selectedMatchIndex_, NavigationPredictor.kUpOrDownArrowButton);
+          this.selectedMatchIndex_, this.selectedMatch_!.destinationUrl,
+          NavigationPredictor.kUpOrDownArrowButton);
     } else if (e.key === 'ArrowUp') {
       this.$.matches.selectPrevious();
       this.pageHandler_.onNavigationLikely(
-          this.selectedMatchIndex_, NavigationPredictor.kUpOrDownArrowButton);
+          this.selectedMatchIndex_, this.selectedMatch_!.destinationUrl,
+          NavigationPredictor.kUpOrDownArrowButton);
     } else if (e.key === 'Escape' || e.key === 'PageUp') {
       this.$.matches.selectFirst();
     } else if (e.key === 'PageDown') {
@@ -577,18 +624,13 @@ export class RealboxElement extends PolymerElement {
         decodeString16(this.selectedMatch_!.inlineAutocompletion) :
         '';
     const newFillEnd = newFill.length - newInline.length;
+    const text = newFill.substr(0, newFillEnd);
+    assert(text);
     this.updateInput_({
-      text: assert(newFill.substr(0, newFillEnd)),
+      text: text,
       inline: newInline,
       moveCursorToEnd: newInline.length === 0,
     });
-  }
-
-  /**
-   * @param e Event containing index of the match that was clicked.
-   */
-  private onMatchClick_(e: CustomEvent<{index: number, event: MouseEvent}>) {
-    this.navigateToMatch_(e.detail.index, e.detail.event);
   }
 
   /**
@@ -606,30 +648,12 @@ export class RealboxElement extends PolymerElement {
     });
   }
 
-  /**
-   * @param e Event containing index of the match that was removed.
-   */
-  private onMatchRemove_(e: CustomEvent<number>) {
-    this.pageHandler_.deleteAutocompleteMatch(e.detail);
-  }
-
-  /**
-   * @param e Event containing the result repaint time.
-   */
-  private onResultRepaint_(e: CustomEvent<number>) {
-    if (this.charTypedTime_) {
-      this.pageHandler_.logCharTypedToRepaintLatency(
-          mojoTimeDelta(e.detail - this.charTypedTime_));
-      this.charTypedTime_ = 0;
-    }
-  }
-
   private onVoiceSearchClick_() {
     this.dispatchEvent(new Event('open-voice-search'));
   }
 
   private onLensSearchClick_() {
-    this.matchesAreVisible = false;
+    this.dropdownIsVisible = false;
     this.dispatchEvent(new Event('open-lens-search'));
   }
 
@@ -648,7 +672,7 @@ export class RealboxElement extends PolymerElement {
    * Clears the autocomplete result on the page and on the autocomplete backend.
    */
   private clearAutocompleteMatches_() {
-    this.matchesAreVisible = false;
+    this.dropdownIsVisible = false;
     this.result_ = null;
     this.$.matches.unselect();
     this.pageHandler_.stopAutocomplete(/*clearResult=*/ true);
@@ -659,12 +683,10 @@ export class RealboxElement extends PolymerElement {
 
   private navigateToMatch_(matchIndex: number, e: KeyboardEvent|MouseEvent) {
     assert(matchIndex >= 0);
-    const match = assert(this.result_!.matches[matchIndex]);
-    assert(this.lastInputFocusTime_);
-    const delta =
-        mojoTimeDelta(window.performance.now() - this.lastInputFocusTime_!);
+    const match = this.result_!.matches[matchIndex];
+    assert(match);
     this.pageHandler_.openAutocompleteMatch(
-        matchIndex, match.destinationUrl, this.matchesAreVisible, delta,
+        matchIndex, match.destinationUrl, this.dropdownIsVisible,
         (e as MouseEvent).button || 0, e.altKey, e.ctrlKey, e.metaKey,
         e.shiftKey);
     e.preventDefault();

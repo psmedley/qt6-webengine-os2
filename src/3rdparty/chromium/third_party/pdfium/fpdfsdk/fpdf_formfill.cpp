@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@
 #include "core/fpdfdoc/cpdf_formfield.h"
 #include "core/fpdfdoc/cpdf_interactiveform.h"
 #include "core/fxge/cfx_defaultrenderdevice.h"
+#include "core/fxge/dib/cfx_dibitmap.h"
 #include "fpdfsdk/cpdfsdk_annot.h"
 #include "fpdfsdk/cpdfsdk_formfillenvironment.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
@@ -31,7 +32,13 @@
 #ifdef PDF_ENABLE_XFA
 #include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
 #include "fpdfsdk/fpdfxfa/cpdfxfa_page.h"
+#endif  // PDF_ENABLE_XFA
 
+#if defined(PDF_USE_SKIA)
+class SkCanvas;
+#endif  // defined(PDF_USE_SKIA)
+
+#ifdef PDF_ENABLE_XFA
 static_assert(static_cast<int>(AlertButton::kDefault) ==
                   JSPLATFORM_ALERT_BUTTON_DEFAULT,
               "Default alert button types must match");
@@ -171,7 +178,7 @@ CPDFSDK_PageView* FormHandleToPageView(FPDF_FORMHANDLE hHandle,
 
 void FFLCommon(FPDF_FORMHANDLE hHandle,
                FPDF_BITMAP bitmap,
-               FPDF_RECORDER recorder,
+               FPDF_SKIA_CANVAS canvas,
                FPDF_PAGE fpdf_page,
                int start_x,
                int start_y,
@@ -193,9 +200,10 @@ void FFLCommon(FPDF_FORMHANDLE hHandle,
   CFX_Matrix matrix = pPage->GetDisplayMatrix(rect, rotate);
 
   auto pDevice = std::make_unique<CFX_DefaultRenderDevice>();
-#if defined(_SKIA_SUPPORT_)
-  if (CFX_DefaultRenderDevice::SkiaIsDefaultRenderer())
-    pDevice->AttachRecorder(static_cast<SkPictureRecorder*>(recorder));
+#if defined(PDF_USE_SKIA)
+  if (CFX_DefaultRenderDevice::UseSkiaRenderer() && canvas) {
+    pDevice->AttachCanvas(reinterpret_cast<SkCanvas*>(canvas));
+  }
 #endif
 
   RetainPtr<CFX_DIBitmap> holder(CFXDIBitmapFromFPDFBitmap(bitmap));
@@ -218,13 +226,6 @@ void FFLCommon(FPDF_FORMHANDLE hHandle,
     if (pPageView)
       pPageView->PageView_OnDraw(pDevice.get(), matrix, &options, rect);
   }
-
-#if defined(_SKIA_SUPPORT_PATHS_)
-  if (CFX_DefaultRenderDevice::SkiaPathsIsDefaultRenderer()) {
-    pDevice->Flush(true);
-    holder->UnPreMultiply();
-  }
-#endif
 }
 
 // Returns true if formfill version is correctly set. See |version| in
@@ -538,6 +539,17 @@ FORM_GetSelectedText(FPDF_FORMHANDLE hHandle,
                                              buffer, buflen);
 }
 
+FPDF_EXPORT void FPDF_CALLCONV
+FORM_ReplaceAndKeepSelection(FPDF_FORMHANDLE hHandle,
+                             FPDF_PAGE page,
+                             FPDF_WIDESTRING wsText) {
+  CPDFSDK_PageView* pPageView = FormHandleToPageView(hHandle, page);
+  if (!pPageView)
+    return;
+
+  pPageView->ReplaceAndKeepSelection(WideStringFromFPDFWideString(wsText));
+}
+
 FPDF_EXPORT void FPDF_CALLCONV FORM_ReplaceSelection(FPDF_FORMHANDLE hHandle,
                                                      FPDF_PAGE page,
                                                      FPDF_WIDESTRING wsText) {
@@ -677,17 +689,17 @@ FPDF_EXPORT void FPDF_CALLCONV FPDF_FFLDraw(FPDF_FORMHANDLE hHandle,
             rotate, flags);
 }
 
-#if defined(_SKIA_SUPPORT_)
-FPDF_EXPORT void FPDF_CALLCONV FPDF_FFLRecord(FPDF_FORMHANDLE hHandle,
-                                              FPDF_RECORDER recorder,
-                                              FPDF_PAGE page,
-                                              int start_x,
-                                              int start_y,
-                                              int size_x,
-                                              int size_y,
-                                              int rotate,
-                                              int flags) {
-  FFLCommon(hHandle, nullptr, recorder, page, start_x, start_y, size_x, size_y,
+#if defined(PDF_USE_SKIA)
+FPDF_EXPORT void FPDF_CALLCONV FPDF_FFLDrawSkia(FPDF_FORMHANDLE hHandle,
+                                                FPDF_SKIA_CANVAS canvas,
+                                                FPDF_PAGE page,
+                                                int start_x,
+                                                int start_y,
+                                                int size_x,
+                                                int size_y,
+                                                int rotate,
+                                                int flags) {
+  FFLCommon(hHandle, nullptr, canvas, page, start_x, start_y, size_x, size_y,
             rotate, flags);
 }
 #endif

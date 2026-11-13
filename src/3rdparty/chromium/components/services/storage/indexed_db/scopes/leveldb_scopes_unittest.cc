@@ -8,9 +8,9 @@
 #include <utility>
 
 #include "base/run_loop.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
-#include "base/threading/sequenced_task_runner_handle.h"
-#include "components/services/storage/indexed_db/locks/partitioned_lock_manager_impl.h"
+#include "components/services/storage/indexed_db/locks/partitioned_lock_manager.h"
 #include "components/services/storage/indexed_db/scopes/leveldb_scopes_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/src/include/leveldb/slice.h"
@@ -27,7 +27,7 @@ class LevelDBScopesStartupTest : public LevelDBScopesTestBase {
 TEST_F(LevelDBScopesStartupTest, CleanupOnRecovery) {
   const int64_t kScopeToCleanUp = 19;
   SetUpRealDatabase();
-  PartitionedLockManagerImpl lock_manager(3);
+  PartitionedLockManager lock_manager;
   WriteScopesMetadata(kScopeToCleanUp, true);
 
   leveldb::Status failure_callback = leveldb::Status::OK();
@@ -38,8 +38,7 @@ TEST_F(LevelDBScopesStartupTest, CleanupOnRecovery) {
 
   leveldb::Status s = scopes.Initialize();
   EXPECT_TRUE(s.ok());
-  scopes.StartRecoveryAndCleanupTasks(
-      LevelDBScopes::TaskRunnerMode::kNewCleanupAndRevertSequences);
+  scopes.StartRecoveryAndCleanupTasks();
 
   // Wait until cleanup task runs.
   base::RunLoop loop;
@@ -60,7 +59,7 @@ TEST_F(LevelDBScopesStartupTest, RevertWithLocksOnRecoveryWithNoCleanup) {
   const std::string kKeyWithinCleanupDeleteRange = "b2";
   const std::string kCleanupDeleteRangeEnd = "b3";
   SetUpRealDatabase();
-  PartitionedLockManagerImpl lock_manager(3);
+  PartitionedLockManager lock_manager;
 
   // Tests that the revert execution on startup is performed correctly. This
   // includes:
@@ -69,11 +68,9 @@ TEST_F(LevelDBScopesStartupTest, RevertWithLocksOnRecoveryWithNoCleanup) {
   //   execute the cleanup tasks.
 
   metadata_buffer_.mutable_locks()->Add();
-  metadata_buffer_.mutable_locks()->Mutable(0)->set_level(0);
-  metadata_buffer_.mutable_locks()->Mutable(0)->mutable_range()->set_begin(
+  metadata_buffer_.mutable_locks()->Mutable(0)->set_partition(0);
+  metadata_buffer_.mutable_locks()->Mutable(0)->mutable_key()->set_key(
       simple_lock_begin_);
-  metadata_buffer_.mutable_locks()->Mutable(0)->mutable_range()->set_end(
-      simple_lock_end_);
   WriteScopesMetadata(kScopeToResumeRevert, false);
 
   // Cleanup task that will be ignored.
@@ -107,8 +104,7 @@ TEST_F(LevelDBScopesStartupTest, RevertWithLocksOnRecoveryWithNoCleanup) {
       {CreateSimpleExclusiveLock()}, locks_receiver.AsWeakPtr(),
       base::BindLambdaForTesting([&]() { lock_grabbed = true; }));
 
-  scopes.StartRecoveryAndCleanupTasks(
-      LevelDBScopes::TaskRunnerMode::kNewCleanupAndRevertSequences);
+  scopes.StartRecoveryAndCleanupTasks();
 
   EXPECT_FALSE(lock_grabbed);
 
@@ -127,8 +123,8 @@ TEST_F(LevelDBScopesStartupTest, RevertWithLocksOnRecoveryWithNoCleanup) {
   // Ensure the cleanup task was posted & locks were released.
   {
     base::RunLoop loop;
-    base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                     loop.QuitClosure());
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, loop.QuitClosure());
     loop.Run();
   }
   EXPECT_TRUE(lock_grabbed);

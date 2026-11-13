@@ -1,10 +1,9 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cast/streaming/session_messenger.h"
 
-#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "cast/common/public/message_port.h"
 #include "cast/streaming/message_fields.h"
@@ -12,8 +11,7 @@
 #include "util/json/json_serialization.h"
 #include "util/osp_logging.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 namespace {
 
@@ -88,7 +86,7 @@ SenderSessionMessenger::SenderSessionMessenger(MessagePort* message_port,
                                                std::string source_id,
                                                std::string receiver_id,
                                                ErrorCallback cb,
-                                               TaskRunner* task_runner)
+                                               TaskRunner& task_runner)
     : SessionMessenger(message_port, std::move(source_id), std::move(cb)),
       task_runner_(task_runner),
       receiver_id_(std::move(receiver_id)) {}
@@ -142,7 +140,7 @@ Error SenderSessionMessenger::SendRequest(SenderMessage message,
   OSP_DCHECK(awaiting_replies_.find(message.sequence_number) ==
              awaiting_replies_.end());
   awaiting_replies_.emplace_back(message.sequence_number, std::move(cb));
-  task_runner_->PostTaskWithDelay(
+  task_runner_.PostTaskWithDelay(
       [self = weak_factory_.GetWeakPtr(), seq_num = message.sequence_number] {
         if (self) {
           ReplyIfTimedOut(seq_num, &self->awaiting_replies_);
@@ -187,22 +185,17 @@ void SenderSessionMessenger::OnMessage(const std::string& source_id,
     ReportError(receiver_message.error());
     OSP_DLOG_WARN << "Received an invalid receiver message: "
                   << receiver_message.error();
+    return;
   }
 
   if (receiver_message.value().type == ReceiverMessage::Type::kRpc) {
     if (rpc_callback_) {
       rpc_callback_(receiver_message.value());
     } else {
-      OSP_DLOG_INFO << "Received RTP message but no callback, dropping";
+      OSP_DLOG_INFO << "Received RPC message but no callback, dropping";
     }
   } else {
-    int sequence_number;
-    if (!json::TryParseInt(message_body.value()[kSequenceNumber],
-                           &sequence_number)) {
-      OSP_DLOG_WARN << "Received a message without a sequence number";
-      return;
-    }
-
+    const int sequence_number = receiver_message.value().sequence_number;
     auto it = awaiting_replies_.find(sequence_number);
     if (it == awaiting_replies_.end()) {
       OSP_DLOG_WARN << "Received a reply I wasn't waiting for: "
@@ -210,12 +203,9 @@ void SenderSessionMessenger::OnMessage(const std::string& source_id,
       return;
     }
 
-    it->second(std::move(receiver_message.value()));
-
-    // Calling the function callback may result in the checksum of the pointed
-    // to object to change, so calling erase() on the iterator after executing
-    // second() may result in a segfault.
-    awaiting_replies_.erase_key(sequence_number);
+    ReplyCallback callback = std::move(it->second);
+    awaiting_replies_.erase(it);
+    callback(std::move(receiver_message.value()));
   }
 }
 
@@ -296,9 +286,9 @@ void ReceiverSessionMessenger::OnMessage(const std::string& source_id,
   auto it = callbacks_.find(sender_message.value().type);
   if (it == callbacks_.end()) {
     OSP_DLOG_INFO << "Received message without a callback, dropping";
-  } else {
-    it->second(source_id, sender_message.value());
+    return;
   }
+  it->second(source_id, sender_message.value());
 }
 
 void ReceiverSessionMessenger::OnError(Error error) {
@@ -306,5 +296,4 @@ void ReceiverSessionMessenger::OnError(Error error) {
   ReportError(error);
 }
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

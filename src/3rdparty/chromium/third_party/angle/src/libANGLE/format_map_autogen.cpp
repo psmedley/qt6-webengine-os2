@@ -558,17 +558,7 @@ GLenum GetSizedFormatInternal(GLenum format, GLenum type)
             }
             break;
 
-        case GL_STENCIL:
-            switch (type)
-            {
-                case GL_UNSIGNED_BYTE:
-                    return GL_STENCIL_INDEX8;
-                default:
-                    break;
-            }
-            break;
-
-        case GL_STENCIL_INDEX_OES:
+        case GL_STENCIL_INDEX:
             switch (type)
             {
                 case GL_UNSIGNED_BYTE:
@@ -1282,6 +1272,7 @@ bool ValidES3FormatCombination(GLenum format, GLenum type, GLenum internalFormat
                         case GL_SRGB8:
                         case GL_RGB:
                         case GL_RGBX8_ANGLE:
+                        case GL_RGBX8_SRGB_ANGLEX:
                             return true;
                         default:
                             break;

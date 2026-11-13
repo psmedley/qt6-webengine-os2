@@ -18,34 +18,25 @@
         gap: 10px;
       }
       #toolbar {
-        background-color: var(--color-background);
+        background-color: var(--sys-color-cdt-base-container);
         display: flex;
         flex-direction: row;
         align-items: center;
-        border-bottom: 1px solid var(--color-details-hairline);
+        border-bottom: 1px solid var(--sys-color-divider);
         padding: 0px 5px;
         height: 29px;
       }
       #small-toolbar {
-        background-color: var(--color-background);
+        background-color: var(--sys-color-cdt-base-container);
         display: flex;
         flex-direction: row;
         align-items: center;
-        border-bottom: 1px solid var(--color-details-hairline);
+        border-bottom: 1px solid var(--sys-color-divider);
         padding: 0px 5px;
         height: 23px;
       }
-      #unified-toolbar {
-        background-color: var(--color-background);
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        border-bottom: 1px solid var(--color-details-hairline);
-        padding: 5px 6px;
-        height: 26px;
-      }
       .separator {
-        background-color: var(--color-details-hairline);
+        background-color: var(--sys-color-divider);
         width: 1px;
         height: 17px;
         margin: 0px 5px;
@@ -58,8 +49,6 @@
     <div id="toolbar">
     </div>
     <div id="small-toolbar">
-    </div>
-    <div id="unified-toolbar">
     </div>
     <form onsubmit="event.preventDefault(); alert('submitted');" id="form">
       <input name="field" placeholder="Enter smth" />

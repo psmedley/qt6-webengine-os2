@@ -63,8 +63,9 @@ BrowserMainRunnerImpl::BrowserMainRunnerImpl()
           std::make_unique<base::ThreadPoolInstance::ScopedExecutionFence>()) {}
 
 BrowserMainRunnerImpl::~BrowserMainRunnerImpl() {
-  if (initialization_started_ && !is_shutdown_)
+  if (initialization_started_ && !is_shutdown_) {
     Shutdown();
+  }
 }
 
 int BrowserMainRunnerImpl::Initialize(MainFunctionParams parameters) {
@@ -79,15 +80,15 @@ int BrowserMainRunnerImpl::Initialize(MainFunctionParams parameters) {
   if (!initialization_started_) {
     initialization_started_ = true;
 
-    const base::TimeTicks start_time_step1 = base::TimeTicks::Now();
-
     SkGraphics::Init();
 
-    if (parameters.command_line->HasSwitch(switches::kWaitForDebugger))
+    if (parameters.command_line->HasSwitch(switches::kWaitForDebugger)) {
       base::debug::WaitForDebugger(60, true);
+    }
 
-    if (parameters.command_line->HasSwitch(switches::kBrowserStartupDialog))
+    if (parameters.command_line->HasSwitch(switches::kBrowserStartupDialog)) {
       WaitForDebugger("Browser");
+    }
 
     notification_service_ = std::make_unique<NotificationServiceImpl>();
 
@@ -136,17 +137,12 @@ int BrowserMainRunnerImpl::Initialize(MainFunctionParams parameters) {
     // to browser_shutdown::Shutdown or BrowserProcess::EndSession.
 
     ui::InitializeInputMethod();
-    UMA_HISTOGRAM_TIMES("Startup.BrowserMainRunnerImplInitializeStep1Time",
-                        base::TimeTicks::Now() - start_time_step1);
   }
-  const base::TimeTicks start_time_step2 = base::TimeTicks::Now();
   main_loop_->CreateStartupTasks();
   int result_code = main_loop_->GetResultCode();
-  if (result_code > 0)
+  if (result_code > 0) {
     return result_code;
-
-  UMA_HISTOGRAM_TIMES("Startup.BrowserMainRunnerImplInitializeStep2Time",
-                      base::TimeTicks::Now() - start_time_step2);
+  }
 
   // Return -1 to indicate no early termination.
   return -1;
@@ -169,15 +165,6 @@ void BrowserMainRunnerImpl::Shutdown() {
   DCHECK(initialization_started_);
   DCHECK(!is_shutdown_);
 
-#ifdef LEAK_SANITIZER
-  // Invoke leak detection now, to avoid dealing with shutdown-only leaks.
-  // Normally this will have already happened in
-  // BroserProcessImpl::ReleaseModule(), so this call has no effect. This is
-  // only for processes which do not instantiate a BrowserProcess.
-  // If leaks are found, the process will exit here.
-  __lsan_do_leak_check();
-#endif
-
   main_loop_->PreShutdown();
 
   // Finalize the startup tracing session if it is still active.
@@ -193,13 +180,6 @@ void BrowserMainRunnerImpl::Shutdown() {
     ui::ShutdownInputMethod();
 #if BUILDFLAG(IS_WIN) && !defined(TOOLKIT_QT)
     ole_initializer_.reset(NULL);
-#endif
-#if BUILDFLAG(IS_ANDROID)
-    // Forcefully terminates the RunLoop inside MessagePumpForUI, ensuring
-    // proper shutdown for content_browsertests. Shutdown() is not used by
-    // the actual browser.
-    if (base::RunLoop::IsRunningOnCurrentThread())
-      base::RunLoop::QuitCurrentDeprecated();
 #endif
     main_loop_.reset(nullptr);
 

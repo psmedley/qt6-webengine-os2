@@ -1,12 +1,12 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef GL_SURFACE_EGL_QT_H_
 #define GL_SURFACE_EGL_QT_H_
 
 #include "gl_surface_qt.h"
 #include <EGL/egl.h>
-#include <EGL/eglext.h>
 
 namespace gl {
 
@@ -16,7 +16,7 @@ class GLSurfaceEGLQt: public GLSurfaceQt {
 public:
     explicit GLSurfaceEGLQt(gl::GLDisplayEGL *display, const gfx::Size& size);
 
-    static gl::GLDisplay *InitializeOneOff(uint64_t system_device_id);
+    static gl::GLDisplay *InitializeOneOff(gl::GpuPreference preference);
     static bool InitializeExtensionSettingsOneOff();
 
     bool Initialize(GLSurfaceFormat format) override;

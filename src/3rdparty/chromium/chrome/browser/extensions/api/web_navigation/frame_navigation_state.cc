@@ -33,14 +33,15 @@ bool FrameNavigationState::allow_extension_scheme_ = false;
 
 DOCUMENT_USER_DATA_KEY_IMPL(FrameNavigationState);
 
-FrameNavigationState::FrameNavigationState(content::RenderFrameHost* rfh)
-    : content::DocumentUserData<FrameNavigationState>(rfh) {}
+FrameNavigationState::FrameNavigationState(
+    content::RenderFrameHost* render_frame_host)
+    : content::DocumentUserData<FrameNavigationState>(render_frame_host) {}
 FrameNavigationState::~FrameNavigationState() = default;
 
 // static
 bool FrameNavigationState::IsValidUrl(const GURL& url) {
-  for (unsigned i = 0; i < std::size(kValidSchemes); ++i) {
-    if (url.scheme() == kValidSchemes[i])
+  for (const auto* valid_scheme : kValidSchemes) {
+    if (url.scheme() == valid_scheme)
       return true;
   }
   // Allow about:blank and about:srcdoc.

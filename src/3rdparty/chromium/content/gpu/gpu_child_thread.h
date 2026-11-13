@@ -11,10 +11,11 @@
 #include <queue>
 #include <vector>
 
-#include "base/callback.h"
 #include "base/command_line.h"
+#include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
@@ -73,6 +74,7 @@ class GpuChildThread : public ChildThreadImpl,
 
   // viz::VizMainImpl::Delegate:
   void OnInitializationFailed() override;
+  void OnGpuChannelManagerCreated(gpu::GpuChannelManager* manager) override;
   void OnGpuServiceConnection(viz::GpuServiceImpl* gpu_service) override;
   void PostCompositorThreadCreated(
       base::SingleThreadTaskRunner* task_runner) override;

@@ -9,7 +9,6 @@
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
-#include "third_party/blink/renderer/platform/weborigin/security_origin_hash.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
@@ -17,7 +16,7 @@
 namespace blink {
 
 WindowAgentFactory::WindowAgentFactory(
-    scheduler::WebAgentGroupScheduler& agent_group_scheduler)
+    AgentGroupScheduler& agent_group_scheduler)
     : agent_group_scheduler_(agent_group_scheduler) {}
 
 WindowAgent* WindowAgentFactory::GetAgentForOrigin(
@@ -32,9 +31,9 @@ WindowAgent* WindowAgentFactory::GetAgentForOrigin(
     DCHECK(!is_origin_agent_cluster);
     if (!universal_access_agent_) {
       universal_access_agent_ =
-          MakeGarbageCollected<WindowAgent>(agent_group_scheduler_);
+          MakeGarbageCollected<WindowAgent>(*agent_group_scheduler_);
     }
-    return universal_access_agent_;
+    return universal_access_agent_.Get();
   }
 
   // For `file:` scheme origins.
@@ -45,9 +44,9 @@ WindowAgent* WindowAgentFactory::GetAgentForOrigin(
     DCHECK(!is_origin_agent_cluster);
     if (!file_url_agent_) {
       file_url_agent_ =
-          MakeGarbageCollected<WindowAgent>(agent_group_scheduler_);
+          MakeGarbageCollected<WindowAgent>(*agent_group_scheduler_);
     }
-    return file_url_agent_;
+    return file_url_agent_.Get();
   }
 
   // For opaque origins.
@@ -55,9 +54,9 @@ WindowAgent* WindowAgentFactory::GetAgentForOrigin(
     auto inserted = opaque_origin_agents_.insert(origin, nullptr);
     if (inserted.is_new_entry) {
       inserted.stored_value->value =
-          MakeGarbageCollected<WindowAgent>(agent_group_scheduler_);
+          MakeGarbageCollected<WindowAgent>(*agent_group_scheduler_);
     }
-    return inserted.stored_value->value;
+    return inserted.stored_value->value.Get();
   }
 
   // For origin-keyed agent cluster origins.
@@ -67,10 +66,10 @@ WindowAgent* WindowAgentFactory::GetAgentForOrigin(
     auto inserted = origin_keyed_agent_cluster_agents_.insert(origin, nullptr);
     if (inserted.is_new_entry) {
       inserted.stored_value->value = MakeGarbageCollected<WindowAgent>(
-          agent_group_scheduler_, is_origin_agent_cluster,
+          *agent_group_scheduler_, is_origin_agent_cluster,
           origin_agent_cluster_left_as_default);
     }
-    return inserted.stored_value->value;
+    return inserted.stored_value->value.Get();
   }
 
   // For tuple origins.
@@ -92,10 +91,10 @@ WindowAgent* WindowAgentFactory::GetAgentForOrigin(
   auto inserted = tuple_origin_agents->insert(key, nullptr);
   if (inserted.is_new_entry) {
     inserted.stored_value->value = MakeGarbageCollected<WindowAgent>(
-        agent_group_scheduler_, is_origin_agent_cluster,
+        *agent_group_scheduler_, is_origin_agent_cluster,
         origin_agent_cluster_left_as_default);
   }
-  return inserted.stored_value->value;
+  return inserted.stored_value->value.Get();
 }
 
 void WindowAgentFactory::Trace(Visitor* visitor) const {
@@ -104,38 +103,7 @@ void WindowAgentFactory::Trace(Visitor* visitor) const {
   visitor->Trace(opaque_origin_agents_);
   visitor->Trace(origin_keyed_agent_cluster_agents_);
   visitor->Trace(tuple_origin_agents_);
-}
-
-// static
-unsigned WindowAgentFactory::SchemeAndRegistrableDomainHash::GetHash(
-    const SchemeAndRegistrableDomain& value) {
-  return WTF::HashInts(StringHash::GetHash(value.scheme),
-                       StringHash::GetHash(value.registrable_domain));
-}
-
-// static
-bool WindowAgentFactory::SchemeAndRegistrableDomainHash::Equal(
-    const SchemeAndRegistrableDomain& x,
-    const SchemeAndRegistrableDomain& y) {
-  return x.scheme == y.scheme && x.registrable_domain == y.registrable_domain;
-}
-
-// static
-bool WindowAgentFactory::SchemeAndRegistrableDomainTraits::IsEmptyValue(
-    const SchemeAndRegistrableDomain& value) {
-  return HashTraits<String>::IsEmptyValue(value.scheme);
-}
-
-// static
-bool WindowAgentFactory::SchemeAndRegistrableDomainTraits::IsDeletedValue(
-    const SchemeAndRegistrableDomain& value) {
-  return HashTraits<String>::IsDeletedValue(value.scheme);
-}
-
-// static
-void WindowAgentFactory::SchemeAndRegistrableDomainTraits::
-    ConstructDeletedValue(SchemeAndRegistrableDomain& slot, bool zero_value) {
-  HashTraits<String>::ConstructDeletedValue(slot.scheme, zero_value);
+  visitor->Trace(agent_group_scheduler_);
 }
 
 }  // namespace blink

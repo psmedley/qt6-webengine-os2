@@ -786,6 +786,29 @@ TEST_P(TlsServerHandshakerTest, ResumptionWithAsyncDecryptCallback) {
   EXPECT_TRUE(server_stream()->ResumptionAttempted());
 }
 
+TEST_P(TlsServerHandshakerTest, ResumptionWithPlaceholderTicket) {
+  // Do the first handshake
+  InitializeFakeClient();
+
+  ticket_crypter_->set_fail_encrypt(true);
+  CompleteCryptoHandshake();
+  ExpectHandshakeSuccessful();
+  EXPECT_FALSE(client_stream()->IsResumption());
+  EXPECT_FALSE(server_stream()->IsResumption());
+  EXPECT_FALSE(server_stream()->ResumptionAttempted());
+
+  // Now do another handshake. It should end up with a full handshake because
+  // the placeholder ticket is undecryptable.
+  InitializeServer();
+  InitializeFakeClient();
+  CompleteCryptoHandshake();
+  ExpectHandshakeSuccessful();
+  EXPECT_FALSE(client_stream()->IsResumption());
+  EXPECT_FALSE(server_stream()->IsResumption());
+  EXPECT_NE(server_stream()->ResumptionAttempted(),
+            GetParam().disable_resumption);
+}
+
 TEST_P(TlsServerHandshakerTest, AdvanceHandshakeDuringAsyncDecryptCallback) {
   if (GetParam().disable_resumption) {
     return;
@@ -945,6 +968,81 @@ TEST_P(TlsServerHandshakerTest, RequestClientCert) {
   EXPECT_TRUE(server_handshaker_->received_client_cert());
 }
 
+TEST_P(TlsServerHandshakerTest,
+       SetInvalidServerTransportParamsByDelayedSslConfig) {
+  ASSERT_TRUE(SetupClientCert());
+  InitializeFakeClient();
+
+  QuicDelayedSSLConfig delayed_ssl_config;
+  delayed_ssl_config.quic_transport_parameters = {1, 2, 3};
+  InitializeServerWithFakeProofSourceHandle();
+  server_handshaker_->SetupProofSourceHandle(
+      /*select_cert_action=*/FakeProofSourceHandle::Action::DELEGATE_ASYNC,
+      /*compute_signature_action=*/FakeProofSourceHandle::Action::DELEGATE_SYNC,
+      delayed_ssl_config);
+
+  AdvanceHandshakeWithFakeClient();
+  ASSERT_TRUE(
+      server_handshaker_->fake_proof_source_handle()->HasPendingOperation());
+  server_handshaker_->fake_proof_source_handle()->CompletePendingOperation();
+
+  CompleteCryptoHandshake();
+  ExpectHandshakeSuccessful();
+  EXPECT_FALSE(server_handshaker_->fake_proof_source_handle()
+                   ->all_compute_signature_args()
+                   .empty());
+}
+
+TEST_P(TlsServerHandshakerTest,
+       SetValidServerTransportParamsByDelayedSslConfig) {
+  ParsedQuicVersion version = GetParam().version;
+
+  TransportParameters server_params;
+  std::string error_details;
+  server_params.perspective = quic::Perspective::IS_SERVER;
+  server_params.legacy_version_information =
+      TransportParameters::LegacyVersionInformation();
+  server_params.legacy_version_information.value().supported_versions =
+      quic::CreateQuicVersionLabelVector(
+          quic::ParsedQuicVersionVector{version});
+  server_params.legacy_version_information.value().version =
+      quic::CreateQuicVersionLabel(version);
+  server_params.version_information = TransportParameters::VersionInformation();
+  server_params.version_information.value().chosen_version =
+      quic::CreateQuicVersionLabel(version);
+  server_params.version_information.value().other_versions =
+      quic::CreateQuicVersionLabelVector(
+          quic::ParsedQuicVersionVector{version});
+
+  ASSERT_TRUE(server_params.AreValid(&error_details)) << error_details;
+
+  std::vector<uint8_t> server_params_bytes;
+  ASSERT_TRUE(
+      SerializeTransportParameters(server_params, &server_params_bytes));
+
+  ASSERT_TRUE(SetupClientCert());
+  InitializeFakeClient();
+
+  QuicDelayedSSLConfig delayed_ssl_config;
+  delayed_ssl_config.quic_transport_parameters = server_params_bytes;
+  InitializeServerWithFakeProofSourceHandle();
+  server_handshaker_->SetupProofSourceHandle(
+      /*select_cert_action=*/FakeProofSourceHandle::Action::DELEGATE_ASYNC,
+      /*compute_signature_action=*/FakeProofSourceHandle::Action::DELEGATE_SYNC,
+      delayed_ssl_config);
+
+  AdvanceHandshakeWithFakeClient();
+  ASSERT_TRUE(
+      server_handshaker_->fake_proof_source_handle()->HasPendingOperation());
+  server_handshaker_->fake_proof_source_handle()->CompletePendingOperation();
+
+  CompleteCryptoHandshake();
+  ExpectHandshakeSuccessful();
+  EXPECT_FALSE(server_handshaker_->fake_proof_source_handle()
+                   ->all_compute_signature_args()
+                   .empty());
+}
+
 TEST_P(TlsServerHandshakerTest, RequestClientCertByDelayedSslConfig) {
   ASSERT_TRUE(SetupClientCert());
   InitializeFakeClient();
@@ -1064,6 +1162,66 @@ TEST_P(TlsServerHandshakerTest, CloseConnectionBeforeSelectCert) {
                   ->all_select_cert_args()
                   .empty());
 }
+
+#if BORINGSSL_API_VERSION >= 22
+TEST_P(TlsServerHandshakerTest, EnableKyber) {
+  server_crypto_config_->set_preferred_groups(
+      {SSL_GROUP_X25519_KYBER768_DRAFT00});
+  client_crypto_config_->set_preferred_groups(
+      {SSL_GROUP_X25519_KYBER768_DRAFT00, SSL_GROUP_X25519, SSL_GROUP_SECP256R1,
+       SSL_GROUP_SECP384R1});
+
+  InitializeServer();
+  InitializeFakeClient();
+  CompleteCryptoHandshake();
+  ExpectHandshakeSuccessful();
+  EXPECT_EQ(PROTOCOL_TLS1_3, server_stream()->handshake_protocol());
+  EXPECT_EQ(SSL_GROUP_X25519_KYBER768_DRAFT00,
+            SSL_get_group_id(server_stream()->GetSsl()));
+}
+#endif  // BORINGSSL_API_VERSION
+
+#if BORINGSSL_API_VERSION >= 27
+TEST_P(TlsServerHandshakerTest, AlpsUseNewCodepoint) {
+  const struct {
+    bool client_use_alps_new_codepoint;
+    bool server_allow_alps_new_codepoint;
+  } tests[] = {
+      // The intent of this test is to demonstrate different combinations of
+      // ALPS codepoint settings works well for both client and server.
+      {true, true},
+      {false, true},
+      {false, false},
+      {true, true},
+  };
+  for (size_t i = 0; i < arraysize(tests); i++) {
+    SCOPED_TRACE(absl::StrCat("Test #", i));
+    const auto& test = tests[i];
+    client_crypto_config_->set_alps_use_new_codepoint(
+        test.client_use_alps_new_codepoint);
+    absl::SetFlag(&FLAGS_gfe2_reloadable_flag_quic_gfe_allow_alps_new_codepoint,
+                  test.server_allow_alps_new_codepoint);
+
+    ASSERT_TRUE(SetupClientCert());
+    InitializeFakeClient();
+
+    InitializeServerWithFakeProofSourceHandle();
+    server_handshaker_->SetupProofSourceHandle(
+        /*select_cert_action=*/FakeProofSourceHandle::Action::DELEGATE_SYNC,
+        /*compute_signature_action=*/FakeProofSourceHandle::Action::
+            DELEGATE_SYNC);
+
+    // Start handshake.
+    AdvanceHandshakeWithFakeClient();
+    EXPECT_EQ(test.client_use_alps_new_codepoint,
+              server_handshaker_->UseAlpsNewCodepoint());
+
+    CompleteCryptoHandshake();
+    ExpectHandshakeSuccessful();
+    EXPECT_EQ(PROTOCOL_TLS1_3, server_stream()->handshake_protocol());
+  }
+}
+#endif  // BORINGSSL_API_VERSION
 
 }  // namespace
 }  // namespace test

@@ -24,7 +24,6 @@
 #include "internal/platform/bluetooth_classic.h"
 #include "internal/platform/count_down_latch.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -32,8 +31,9 @@ namespace connections {
 // per-Medium-specific operations needed to upgrade an EndpointChannel.
 class BluetoothBwuHandler : public BaseBwuHandler {
  public:
-  explicit BluetoothBwuHandler(Mediums& mediums,
-                               BwuNotifications notifications);
+  explicit BluetoothBwuHandler(
+      Mediums& mediums,
+      IncomingConnectionCallback incoming_connection_callback);
 
  private:
   class BluetoothIncomingSocket : public IncomingSocket {
@@ -77,6 +77,5 @@ class BluetoothBwuHandler : public BaseBwuHandler {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_BLUETOOTH_BWU_HANDLER_H_

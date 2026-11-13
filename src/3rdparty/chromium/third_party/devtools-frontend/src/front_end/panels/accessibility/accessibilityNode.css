@@ -49,10 +49,12 @@ span.ax-value-undefined {
   content: "";
   width: 14px;
   display: inline-block;
+  margin-bottom: -2px;
+  margin-right: 3px;
 }
 
 .tree-outline li.property {
-  color: var(--color-text-primary);
+  color: var(--sys-color-on-surface);
 }
 
 .tree-outline li.invalid {

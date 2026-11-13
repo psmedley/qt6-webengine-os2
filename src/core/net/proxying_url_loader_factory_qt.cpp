@@ -1,11 +1,12 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:critical reason:network-protocol
 
 #include "proxying_url_loader_factory_qt.h"
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
@@ -24,6 +25,7 @@
 #include "web_contents_adapter.h"
 #include "web_contents_adapter_client.h"
 #include "web_contents_view_qt.h"
+#include "net/resource_request_body_qt.h"
 
 // originally based on aw_proxying_url_loader_factory.cc:
 // Copyright 2018 The Chromium Authors. All rights reserved.
@@ -64,6 +66,7 @@ ASSERT_ENUMS_MATCH(QWebEngineUrlRequestInfo::ResourceTypeCspReport, blink::mojom
 ASSERT_ENUMS_MATCH(QWebEngineUrlRequestInfo::ResourceTypePluginResource, blink::mojom::ResourceType::kPluginResource)
 ASSERT_ENUMS_MATCH(QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadMainFrame, blink::mojom::ResourceType::kNavigationPreloadMainFrame)
 ASSERT_ENUMS_MATCH(QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadSubFrame, blink::mojom::ResourceType::kNavigationPreloadSubFrame)
+ASSERT_ENUMS_MATCH(QWebEngineUrlRequestInfo::ResourceTypeJson, blink::mojom::ResourceType::kJson)
 ASSERT_ENUMS_MATCH(QWebEngineUrlRequestInfo::ResourceTypeLast, blink::mojom::ResourceType::kMaxValue)
 
 extern WebContentsAdapterClient::NavigationType pageTransitionToNavigationType(ui::PageTransition transition);
@@ -163,6 +166,7 @@ private:
     // error didn't occur.
     int error_status_ = net::OK;
     network::ResourceRequest request_;
+    ResourceRequestBody request_body_;
     network::mojom::URLResponseHeadPtr current_response_;
 
     const net::MutableNetworkTrafficAnnotationTag traffic_annotation_;
@@ -196,6 +200,7 @@ InterceptedRequest::InterceptedRequest(ProfileAdapter *profile_adapter,
     , request_id_(request_id)
     , options_(options)
     , request_(request)
+    , request_body_(ResourceRequestBody(request_.request_body.get()))
     , traffic_annotation_(traffic_annotation)
     , proxied_loader_receiver_(this, std::move(loader_receiver))
     , target_client_(std::move(client))
@@ -260,18 +265,25 @@ void InterceptedRequest::Restart()
 {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
+    bool granted_special_access = false;
+    auto navigationType = toQt(pageTransitionToNavigationType(ui::PageTransition(request_.transition_type)));
+    switch (navigationType) {
+    case QWebEngineUrlRequestInfo::NavigationTypeLink:
+    case QWebEngineUrlRequestInfo::NavigationTypeTyped:
+        if (blink::mojom::ResourceType(request_.resource_type) == blink::mojom::ResourceType::kMainFrame && request_.has_user_gesture)
+            granted_special_access = true; // allow normal explicit navigation
+        break;
+    case QWebEngineUrlRequestInfo::NavigationTypeBackForward:
+    case QWebEngineUrlRequestInfo::NavigationTypeReload:
+        if (blink::mojom::ResourceType(request_.resource_type) == blink::mojom::ResourceType::kMainFrame)
+            granted_special_access = true;
+        break;
+    default:
+        break;
+    }
+
     // Check if non-local access is allowed
     if (!allow_remote_ && remote_access_) {
-        bool granted_special_access = false;
-        switch (ui::PageTransition(request_.transition_type)) {
-        case ui::PAGE_TRANSITION_LINK:
-        case ui::PAGE_TRANSITION_TYPED:
-            if (blink::mojom::ResourceType(request_.resource_type) == blink::mojom::ResourceType::kMainFrame && request_.has_user_gesture)
-                granted_special_access = true; // allow normal explicit navigation
-            break;
-        default:
-            break;
-        }
         if (!granted_special_access) {
             target_client_->OnComplete(network::URLLoaderCompletionStatus(net::ERR_NETWORK_ACCESS_DENIED));
             delete this;
@@ -281,7 +293,6 @@ void InterceptedRequest::Restart()
 
     // Check if local access is allowed
     if (!allow_local_ && local_access_) {
-        bool granted_special_access = false;
         // Check for specifically granted file access:
         if (auto *frame_tree = content::FrameTreeNode::GloballyFindByID(frame_tree_node_id_)) {
             const int renderer_id = frame_tree->current_frame_host()->GetProcess()->GetID();
@@ -308,7 +319,6 @@ void InterceptedRequest::Restart()
     }
 
     auto resourceType = toQt(blink::mojom::ResourceType(request_.resource_type));
-    auto navigationType = toQt(pageTransitionToNavigationType(ui::PageTransition(request_.transition_type)));
     const QUrl originalUrl = toQt(request_.url);
     const QUrl initiator = request_.request_initiator.has_value() ? toQt(request_.request_initiator->GetURL()) : QUrl();
 
@@ -327,7 +337,7 @@ void InterceptedRequest::Restart()
 
     auto info = new QWebEngineUrlRequestInfoPrivate(
             resourceType, navigationType, originalUrl, firstPartyUrl, initiator,
-            QByteArray::fromStdString(request_.method), headers);
+            QByteArray::fromStdString(request_.method), &request_body_, headers);
     Q_ASSERT(!request_info_);
     request_info_.reset(new QWebEngineUrlRequestInfo(info));
 
@@ -356,18 +366,18 @@ void InterceptedRequest::ContinueAfterIntercept()
         const auto scoped_request_info = std::move(request_info_);
         QWebEngineUrlRequestInfoPrivate &info = *scoped_request_info->d_ptr;
 
-        if (info.changed) {
-            if (info.shouldBlockRequest)
-                return SendErrorAndCompleteImmediately(net::ERR_BLOCKED_BY_CLIENT);
+        for (auto header = info.extraHeaders.constBegin(); header != info.extraHeaders.constEnd(); ++header) {
+            std::string h = header.key().toStdString();
+            if (base::EqualsCaseInsensitiveASCII(h, "referer"))
+                request_.referrer = GURL(header.value().toStdString());
+            else
+                request_.headers.SetHeader(h, header.value().toStdString());
+        }
 
-            for (auto header = info.extraHeaders.constBegin(); header != info.extraHeaders.constEnd(); ++header) {
-                std::string h = header.key().toStdString();
-                if (base::EqualsCaseInsensitiveASCII(h, "referer")) {
-                    request_.referrer = GURL(header.value().toStdString());
-                } else {
-                    request_.headers.SetHeader(h, header.value().toStdString());
-                }
-            }
+        if (info.changed) {
+            // Used the same error code as AwProxyingURLLoaderFactory's blocked request.
+            if (info.shouldBlockRequest)
+                return SendErrorAndCompleteImmediately(net::ERR_ACCESS_DENIED);
 
             if (info.shouldRedirectRequest) {
                 net::RedirectInfo::FirstPartyURLPolicy first_party_url_policy =

@@ -73,6 +73,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kIA32Float64ExtractHighWord32:
     case kIA32Float64InsertLowWord32:
     case kIA32Float64InsertHighWord32:
+    case kIA32Float64FromWord32Pair:
     case kIA32Float64LoadLowWord32:
     case kIA32Float64SilenceNaN:
     case kFloat32Add:
@@ -89,6 +90,8 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kFloat32Neg:
     case kIA32BitcastFI:
     case kIA32BitcastIF:
+    case kIA32Blendvpd:
+    case kIA32Blendvps:
     case kIA32Pblendvb:
     case kIA32Cvttps2dq:
     case kIA32Cvttpd2dq:
@@ -192,6 +195,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kIA32I32x4Abs:
     case kIA32I32x4BitMask:
     case kIA32I32x4DotI16x8S:
+    case kIA32I32x4DotI8x16I7x16AddS:
     case kIA32I32x4ExtMulLowI16x8S:
     case kIA32I32x4ExtMulHighI16x8S:
     case kIA32I32x4ExtMulLowI16x8U:

@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
-# Copyright 2017 The Dawn Authors
+# Copyright 2017 The Dawn & Tint Authors
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import json, os, sys
 from collections import namedtuple
@@ -50,7 +63,7 @@ class Name:
         return chunk[0].upper() + chunk[1:]
 
     def canonical_case(self):
-        return (' '.join(self.chunks)).lower()
+        return ' '.join(self.chunks)
 
     def concatcase(self):
         return ''.join(self.chunks)
@@ -104,17 +117,22 @@ class EnumType(Type):
         Type.__init__(self, name, json_data)
 
         self.values = []
+        self.hasUndefined = False
         self.contiguousFromZero = True
         lastValue = -1
         for m in self.json_data['values']:
             if not is_enabled(m):
                 continue
             value = m['value']
+            name = m['name']
+            if name == "undefined":
+                assert value == 0
+                self.hasUndefined = True
             if value != lastValue + 1:
                 self.contiguousFromZero = False
             lastValue = value
             self.values.append(
-                EnumValue(Name(m['name']), value, m.get('valid', True), m))
+                EnumValue(Name(name), value, m.get('valid', True), m))
 
         # Assert that all values are unique in enums
         all_values = set()
@@ -158,7 +176,7 @@ class TypedefType(Type):
 class NativeType(Type):
     def __init__(self, is_enabled, name, json_data):
         Type.__init__(self, name, json_data, native=True)
-        self.is_wire_transparent = True
+        self.is_wire_transparent = json_data.get('wire transparent', True)
 
 
 # Methods and structures are both "records", so record members correspond to
@@ -181,6 +199,7 @@ class RecordMember:
         self.optional = optional
         self.is_return_value = is_return_value
         self.handle_type = None
+        self.id_type = None
         self.default_value = default_value
         self.skip_serialize = skip_serialize
 
@@ -188,9 +207,26 @@ class RecordMember:
         assert self.type.dict_name == "ObjectHandle"
         self.handle_type = handle_type
 
+    def set_id_type(self, id_type):
+        assert self.type.dict_name == "ObjectId"
+        self.id_type = id_type
 
-Method = namedtuple('Method',
-                    ['name', 'return_type', 'arguments', 'json_data'])
+    @property
+    def requires_struct_defaulting(self):
+        if self.annotation != "value":
+            return False
+
+        if self.type.category == "structure":
+            return self.type.any_member_requires_struct_defaulting
+        elif self.type.category == "enum":
+            return (self.type.hasUndefined
+                    and self.default_value not in [None, "undefined"])
+        else:
+            return False
+
+
+Method = namedtuple(
+    'Method', ['name', 'return_type', 'arguments', 'autolock', 'json_data'])
 
 
 class ObjectType(Type):
@@ -242,12 +278,14 @@ class StructureType(Record, Type):
         if self.chained:
             assert self.chained == 'in' or self.chained == 'out'
             assert 'chain roots' in json_data
+            self.chain_roots = []
         if self.extensible:
             assert self.extensible == 'in' or self.extensible == 'out'
         # Chained structs inherit from wgpu::ChainedStruct, which has
         # nextInChain, so setting both extensible and chained would result in
         # two nextInChain members.
         assert not (self.extensible and self.chained)
+        self.extensions = []
 
     def update_metadata(self):
         Record.update_metadata(self)
@@ -268,6 +306,20 @@ class StructureType(Record, Type):
     def output(self):
         return self.chained == "out" or self.extensible == "out"
 
+    @property
+    def has_free_members_function(self):
+        if not self.output:
+            return False
+        for m in self.members:
+            if m.annotation != 'value':
+                return True
+        return False
+
+    @property
+    def any_member_requires_struct_defaulting(self):
+        return any(member.requires_struct_defaulting
+                   for member in self.members)
+
 
 class ConstantDefinition():
     def __init__(self, is_enabled, name, json_data):
@@ -278,11 +330,12 @@ class ConstantDefinition():
 
 
 class FunctionDeclaration():
-    def __init__(self, is_enabled, name, json_data):
+    def __init__(self, is_enabled, name, json_data, no_cpp=False):
         self.return_type = None
         self.arguments = []
         self.json_data = json_data
         self.name = Name(name)
+        self.no_cpp = no_cpp
 
 
 class Command(Record):
@@ -308,6 +361,9 @@ def linked_record_members(json_data, types):
         handle_type = m.get('handle_type')
         if handle_type:
             member.set_handle_type(types[handle_type])
+        id_type = m.get('id_type')
+        if id_type:
+            member.set_id_type(types[id_type])
         members.append(member)
         members_by_name[member.name.canonical_case()] = member
 
@@ -331,17 +387,34 @@ def linked_record_members(json_data, types):
     return members
 
 
+def mark_lengths_non_serializable_lpm(record_members):
+    # Remove member length values from command metadata,
+    # these are set to the length of the protobuf array.
+    for record_member in record_members:
+        lengths = set()
+        for member in record_member.members:
+            lengths.add(member.length)
+
+        for member in record_member.members:
+            if member in lengths:
+                member.skip_serialize = True
+
 ############################################################
 # PARSE
 ############################################################
 
 
 def link_object(obj, types):
+    # Disable method's autolock if obj's "no autolock" = True
+    obj_scoped_autolock_enabled = not obj.json_data.get('no autolock', False)
+
     def make_method(json_data):
         arguments = linked_record_members(json_data.get('args', []), types)
+        autolock_enabled = obj_scoped_autolock_enabled and not json_data.get(
+            'no autolock', False)
         return Method(Name(json_data['name']),
-                      types[json_data.get('returns',
-                                          'void')], arguments, json_data)
+                      types[json_data.get('returns', 'void')], arguments,
+                      autolock_enabled, json_data)
 
     obj.methods = [make_method(m) for m in obj.json_data.get('methods', [])]
     obj.methods.sort(key=lambda method: method.name.canonical_case())
@@ -349,6 +422,9 @@ def link_object(obj, types):
 
 def link_structure(struct, types):
     struct.members = linked_record_members(struct.json_data['members'], types)
+    for root in struct.json_data.get('chain roots', []):
+        struct.chain_roots.append(types[root])
+        types[root].extensions.append(struct)
     struct.chain_roots = [types[root] for root in struct.json_data.get('chain roots', [])]
     assert all((root.category == 'structure' for root in struct.chain_roots))
 
@@ -370,7 +446,6 @@ def link_function(function, types):
     function.return_type = types[function.json_data.get('returns', 'void')]
     function.arguments = linked_record_members(function.json_data['args'],
                                                types)
-
 
 # Sort structures so that if struct A has struct B as a member, then B is
 # listed before A.
@@ -450,6 +525,23 @@ def parse_json(json, enabled_tags, disabled_tags=None):
     for struct in by_category['structure']:
         link_structure(struct, types)
 
+        if struct.has_free_members_function:
+            name = struct.name.get() + " free members"
+            func_decl = FunctionDeclaration(
+                True,
+                name, {
+                    "returns":
+                    "void",
+                    "args": [{
+                        "name": "value",
+                        "type": struct.name.get(),
+                        "annotation": "value",
+                    }]
+                },
+                no_cpp=True)
+            types[name] = func_decl
+            by_category['function'].append(func_decl)
+
     for function_pointer in by_category['function pointer']:
         link_function_pointer(function_pointer, types)
 
@@ -516,7 +608,8 @@ def compute_wire_params(api_params, wire_json):
             is_void = method.return_type.name.canonical_case() == 'void'
             if not (is_object or is_void):
                 assert command_suffix in (
-                    wire_json['special items']['client_handwritten_commands'])
+                    wire_json['special items']['client_handwritten_commands']
+                ), command_suffix
                 continue
 
             if command_suffix in (
@@ -566,6 +659,104 @@ def compute_wire_params(api_params, wire_json):
 
     return wire_params
 
+############################################################
+# DAWN LPM FUZZ STUFF
+############################################################
+
+
+def compute_lpm_params(api_and_wire_params, lpm_json):
+    # Start with all commands in dawn.json and dawn_wire.json
+    lpm_params = api_and_wire_params.copy()
+
+    # Commands that are built through codegen
+    generated_commands = []
+
+    # All commands, including hand written commands that we can't generate
+    # through codegen
+    all_commands = []
+
+    # Remove blocklisted commands from protobuf generation params
+    blocklisted_cmds_proto = lpm_json.get('blocklisted_cmds')
+    custom_cmds_proto = lpm_json.get('custom_cmds')
+    for command in lpm_params['cmd_records']['command']:
+        blocklisted = command.name.get() in blocklisted_cmds_proto
+        custom = command.name.get() in custom_cmds_proto
+
+        if blocklisted:
+            continue
+
+        if not custom:
+            generated_commands.append(command)
+        all_commands.append(command)
+
+    # Set all fields that are marked as the "length" of another field to
+    # skip_serialize. The values passed by libprotobuf-mutator will cause
+    # an instant crash during serialization if these don't match the length
+    # of the data they are passing. These values aren't used in
+    # deserialization.
+    mark_lengths_non_serializable_lpm(
+        api_and_wire_params['cmd_records']['command'])
+    mark_lengths_non_serializable_lpm(
+        api_and_wire_params['by_category']['structure'])
+
+    lpm_params['cmd_records'] = {
+        'proto_generated_commands': generated_commands,
+        'proto_all_commands': all_commands,
+        'cpp_generated_commands': generated_commands,
+        'lpm_info': lpm_json.get("lpm_info")
+    }
+
+    return lpm_params
+
+
+def as_protobufTypeLPM(member):
+    assert 'type' in member.json_data
+
+    if member.type.name.native:
+        typ = member.json_data['type']
+        cpp_to_protobuf_type = {
+            "bool": "bool",
+            "float": "float",
+            "double": "double",
+            "int8_t": "int32",
+            "int16_t": "int32",
+            "int32_t": "int32",
+            "int64_t": "int64",
+            "uint8_t": "uint32",
+            "uint16_t": "uint32",
+            "uint32_t": "uint32",
+            "uint64_t": "uint64",
+            "size_t": "uint64",
+        }
+
+        assert typ in cpp_to_protobuf_type
+
+        return cpp_to_protobuf_type[typ]
+
+    return member.type.name.CamelCase()
+
+
+# Helper that generates names for protobuf grammars from contents
+# of dawn*.json like files. example: membera
+def as_protobufNameLPM(*names):
+    # `descriptor` is a reserved keyword in lib-protobuf-mutator
+    if (names[0].concatcase() == "descriptor"):
+        return "desc"
+    return as_varName(*names)
+
+
+# Helper to generate member accesses within C++ of protobuf objects
+# example: cmd.membera().memberb()
+def as_protobufMemberNameLPM(*names):
+    # `descriptor` is a reserved keyword in lib-protobuf-mutator
+    if (names[0].concatcase() == "descriptor"):
+        return "desc"
+    return ''.join([name.concatcase().lower() for name in names])
+
+
+def unreachable_code():
+    assert False
+
 
 #############################################################
 # Generator
@@ -578,14 +769,23 @@ def as_varName(*names):
 
 
 def as_cType(c_prefix, name):
-    if name.native:
+    # Special case for 'bool' because it has a typedef for compatibility.
+    if name.native and name.get() != 'bool':
         return name.concatcase()
     else:
         return c_prefix + name.CamelCase()
 
 
+def as_cReturnType(c_prefix, typ):
+    if typ.category != 'bitmask':
+        return as_cType(c_prefix, typ.name)
+    else:
+        return as_cType(c_prefix, typ.name) + 'Flags'
+
+
 def as_cppType(name):
-    if name.native:
+    # Special case for 'bool' because it has a typedef for compatibility.
+    if name.native and name.get() != 'bool':
         return name.concatcase()
     else:
         return name.CamelCase()
@@ -623,22 +823,23 @@ def convert_cType_to_cppType(typ, annotation, arg, indent=0):
                                                     annotation, arg)
 
 
-def decorate(name, typ, arg):
+def decorate(name, typ, arg, make_const=False):
+    maybe_const = ' const ' if make_const else ' '
     if arg.annotation == 'value':
-        return typ + ' ' + name
+        return typ + maybe_const + name
     elif arg.annotation == '*':
-        return typ + ' * ' + name
+        return typ + ' *' + maybe_const + name
     elif arg.annotation == 'const*':
-        return typ + ' const * ' + name
+        return typ + ' const *' + maybe_const + name
     elif arg.annotation == 'const*const*':
-        return 'const ' + typ + '* const * ' + name
+        return 'const ' + typ + '* const *' + maybe_const + name
     else:
         assert False
 
 
-def annotated(typ, arg):
+def annotated(typ, arg, make_const=False):
     name = as_varName(arg.name)
-    return decorate(name, typ, arg)
+    return decorate(name, typ, arg, make_const)
 
 
 def item_is_enabled(enabled_tags, json_data):
@@ -670,7 +871,7 @@ def as_MethodSuffix(type_name, method_name):
 def as_frontendType(metadata, typ):
     if typ.category == 'object':
         return typ.name.CamelCase() + 'Base*'
-    elif typ.category in ['bitmask', 'enum']:
+    elif typ.category in ['bitmask', 'enum'] or typ.name.get() == 'bool':
         return metadata.namespace + '::' + typ.name.CamelCase()
     elif typ.category == 'structure':
         return as_cppType(typ.name)
@@ -698,15 +899,9 @@ def as_formatType(typ):
 
 def c_methods(params, typ):
     return typ.methods + [
-        x for x in [
-            Method(Name('reference'), params['types']['void'], [],
-                   {'tags': ['dawn', 'emscripten']}),
-            Method(Name('release'), params['types']['void'], [],
-                   {'tags': ['dawn', 'emscripten']}),
-        ] if item_is_enabled(params['enabled_tags'], x.json_data)
-        and not item_is_disabled(params['disabled_tags'], x.json_data)
+        Method(Name('reference'), params['types']['void'], [], False, {}),
+        Method(Name('release'), params['types']['void'], [], False, {}),
     ]
-
 
 def get_c_methods_sorted_by_name(api_params):
     unsorted = [(as_MethodSuffix(typ.name, method.name), typ, method) \
@@ -752,15 +947,16 @@ def make_base_render_params(metadata):
     return {
             'Name': lambda name: Name(name),
             'as_annotated_cType': \
-                lambda arg: annotated(as_cTypeEnumSpecialCase(arg.type), arg),
+                lambda arg, make_const=False: annotated(as_cTypeEnumSpecialCase(arg.type), arg, make_const),
             'as_annotated_cppType': \
-                lambda arg: annotated(as_cppType(arg.type.name), arg),
+                lambda arg, make_const=False: annotated(as_cppType(arg.type.name), arg, make_const),
             'as_cEnum': as_cEnum,
             'as_cppEnum': as_cppEnum,
             'as_cMethod': as_cMethod,
             'as_MethodSuffix': as_MethodSuffix,
             'as_cProc': as_cProc,
             'as_cType': lambda name: as_cType(c_prefix, name),
+            'as_cReturnType': lambda typ: as_cReturnType(c_prefix, typ),
             'as_cppType': as_cppType,
             'as_jsEnumValue': as_jsEnumValue,
             'convert_cType_to_cppType': convert_cType_to_cppType,
@@ -777,7 +973,7 @@ class MultiGeneratorFromDawnJSON(Generator):
     def add_commandline_arguments(self, parser):
         allowed_targets = [
             'dawn_headers', 'cpp_headers', 'cpp', 'proc', 'mock_api', 'wire',
-            'native_utils'
+            'native_utils', 'dawn_lpmfuzz_cpp', 'dawn_lpmfuzz_proto'
         ]
 
         parser.add_argument('--dawn-json',
@@ -788,6 +984,10 @@ class MultiGeneratorFromDawnJSON(Generator):
                             default=None,
                             type=str,
                             help='The DAWN WIRE JSON definition to use.')
+        parser.add_argument("--lpm-json",
+                            default=None,
+                            type=str,
+                            help='The DAWN LPM FUZZER definitions to use.')
         parser.add_argument(
             '--targets',
             required=True,
@@ -795,6 +995,7 @@ class MultiGeneratorFromDawnJSON(Generator):
             help=
             'Comma-separated subset of targets to output. Available targets: '
             + ', '.join(allowed_targets))
+
     def get_file_renders(self, args):
         with open(args.dawn_json) as f:
             loaded_json = json.loads(f.read())
@@ -805,6 +1006,11 @@ class MultiGeneratorFromDawnJSON(Generator):
         if args.wire_json:
             with open(args.wire_json) as f:
                 wire_json = json.loads(f.read())
+
+        lpm_json = None
+        if args.lpm_json:
+            with open(args.lpm_json) as f:
+                lpm_json = json.loads(f.read())
 
         renders = []
 
@@ -832,6 +1038,11 @@ class MultiGeneratorFromDawnJSON(Generator):
             renders.append(
                 FileRender('api_cpp_print.h',
                            'include/dawn/' + api + '_cpp_print.h',
+                           [RENDER_PARAMS_BASE, params_dawn]))
+
+            renders.append(
+                FileRender('api_cpp_chained_struct.h',
+                           'include/webgpu/' + api + '_cpp_chained_struct.h',
                            [RENDER_PARAMS_BASE, params_dawn]))
 
         if 'proc' in targets:
@@ -863,24 +1074,37 @@ class MultiGeneratorFromDawnJSON(Generator):
                            [RENDER_PARAMS_BASE, params_upstream]))
 
         if 'emscripten_bits' in targets:
+            assert api == 'webgpu'
             params_emscripten = parse_json(loaded_json,
                                            enabled_tags=['emscripten'])
+            # system/include/webgpu
             renders.append(
-                FileRender('api.h', 'emscripten-bits/' + api + '.h',
+                FileRender('api.h',
+                           'emscripten-bits/system/include/webgpu/webgpu.h',
                            [RENDER_PARAMS_BASE, params_emscripten]))
             renders.append(
-                FileRender('api_cpp.h', 'emscripten-bits/' + api + '_cpp.h',
-                           [RENDER_PARAMS_BASE, params_emscripten]))
+                FileRender(
+                    'api_cpp.h',
+                    'emscripten-bits/system/include/webgpu/webgpu_cpp.h',
+                    [RENDER_PARAMS_BASE, params_emscripten]))
             renders.append(
-                FileRender('api_cpp.cpp', 'emscripten-bits/' + api + '_cpp.cpp',
+                FileRender(
+                    'api_cpp_chained_struct.h',
+                    'emscripten-bits/system/include/webgpu/webgpu_cpp_chained_struct.h',
+                    [RENDER_PARAMS_BASE, params_emscripten]))
+            # system/lib/webgpu
+            renders.append(
+                FileRender('api_cpp.cpp',
+                           'emscripten-bits/system/lib/webgpu/webgpu_cpp.cpp',
                            [RENDER_PARAMS_BASE, params_emscripten]))
+            # Snippets to paste into existing Emscripten files
             renders.append(
                 FileRender('api_struct_info.json',
-                           'emscripten-bits/' + api + '_struct_info.json',
+                           'emscripten-bits/webgpu_struct_info.json',
                            [RENDER_PARAMS_BASE, params_emscripten]))
             renders.append(
                 FileRender('library_api_enum_tables.js',
-                           'emscripten-bits/library_' + api + '_enum_tables.js',
+                           'emscripten-bits/library_webgpu_enum_tables.js',
                            [RENDER_PARAMS_BASE, params_emscripten]))
 
         if 'mock_api' in targets:
@@ -941,6 +1165,14 @@ class MultiGeneratorFromDawnJSON(Generator):
             renders.append(
                 FileRender('dawn/native/ChainUtils.cpp',
                            'src/' + native_dir + '/ChainUtils_autogen.cpp',
+                           frontend_params))
+            renders.append(
+                FileRender('dawn/native/Features.h',
+                           'src/' + native_dir + '/Features_autogen.h',
+                           frontend_params))
+            renders.append(
+                FileRender('dawn/native/Features.inl',
+                           'src/' + native_dir + '/Features_autogen.inl',
                            frontend_params))
             renders.append(
                 FileRender('dawn/native/api_absl_format.h',
@@ -1025,12 +1257,76 @@ class MultiGeneratorFromDawnJSON(Generator):
                     'src/dawn/wire/server/ServerPrototypes_autogen.inc',
                     wire_params))
 
+        if 'dawn_lpmfuzz_proto' in targets:
+            params_dawn_wire = parse_json(loaded_json,
+                                          enabled_tags=['dawn', 'deprecated'],
+                                          disabled_tags=['native'])
+            api_and_wire_params = compute_wire_params(params_dawn_wire,
+                                                      wire_json)
+
+            fuzzer_params = compute_lpm_params(api_and_wire_params, lpm_json)
+
+            lpm_params = [
+                RENDER_PARAMS_BASE, params_dawn_wire, {
+                    'as_protobufTypeLPM': as_protobufTypeLPM,
+                    'as_protobufNameLPM': as_protobufNameLPM,
+                    'unreachable': unreachable_code
+                }, api_and_wire_params, fuzzer_params
+            ]
+
+            renders.append(
+                FileRender('dawn/fuzzers/lpmfuzz/dawn_lpm.proto',
+                           'src/dawn/fuzzers/lpmfuzz/dawn_lpm_autogen.proto',
+                           lpm_params))
+
+            renders.append(
+                FileRender(
+                    'dawn/fuzzers/lpmfuzz/dawn_object_types_lpm.proto',
+                    'src/dawn/fuzzers/lpmfuzz/dawn_object_types_lpm_autogen.proto',
+                    lpm_params))
+
+        if 'dawn_lpmfuzz_cpp' in targets:
+            params_dawn_wire = parse_json(loaded_json,
+                                          enabled_tags=['dawn', 'deprecated'],
+                                          disabled_tags=['native'])
+            api_and_wire_params = compute_wire_params(params_dawn_wire,
+                                                      wire_json)
+
+            fuzzer_params = compute_lpm_params(api_and_wire_params, lpm_json)
+
+            lpm_params = [
+                RENDER_PARAMS_BASE, params_dawn_wire, {
+                    'as_protobufMemberName': as_protobufMemberNameLPM,
+                    'unreachable_code': unreachable_code
+                }, api_and_wire_params, fuzzer_params
+            ]
+
+            renders.append(
+                FileRender(
+                    'dawn/fuzzers/lpmfuzz/DawnLPMSerializer.cpp',
+                    'src/dawn/fuzzers/lpmfuzz/DawnLPMSerializer_autogen.cpp',
+                    lpm_params))
+
+            renders.append(
+                FileRender(
+                    'dawn/fuzzers/lpmfuzz/DawnLPMSerializer.h',
+                    'src/dawn/fuzzers/lpmfuzz/DawnLPMSerializer_autogen.h',
+                    lpm_params))
+
+            renders.append(
+                FileRender(
+                    'dawn/fuzzers/lpmfuzz/DawnLPMConstants.h',
+                    'src/dawn/fuzzers/lpmfuzz/DawnLPMConstants_autogen.h',
+                    lpm_params))
+
         return renders
 
     def get_dependencies(self, args):
         deps = [os.path.abspath(args.dawn_json)]
         if args.wire_json != None:
             deps += [os.path.abspath(args.wire_json)]
+        if args.lpm_json != None:
+            deps += [os.path.abspath(args.lpm_json)]
         return deps
 
 

@@ -8,10 +8,11 @@
 #ifndef SKSL_CONSTRUCTOR_STRUCT
 #define SKSL_CONSTRUCTOR_STRUCT
 
-#include "include/private/SkSLDefines.h"
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLDefines.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLConstructor.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 
 #include <memory>
 #include <utility>
@@ -26,10 +27,10 @@ class Type;
  */
 class ConstructorStruct final : public MultiArgumentConstructor {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kConstructorStruct;
+    inline static constexpr Kind kIRNodeKind = Kind::kConstructorStruct;
 
     ConstructorStruct(Position pos, const Type& type, ExpressionArray arguments)
-        : INHERITED(pos, kExpressionKind, &type, std::move(arguments)) {}
+        : INHERITED(pos, kIRNodeKind, &type, std::move(arguments)) {}
 
     // ConstructorStruct::Convert will typecheck and create struct-constructor expressions.
     // Reports errors via the ErrorReporter; returns null on error.

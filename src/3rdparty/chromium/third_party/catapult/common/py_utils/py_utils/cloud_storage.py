@@ -67,22 +67,24 @@ class CloudStorageError(Exception):
 
   @staticmethod
   def _GetConfigInstructions():
-    command = _GSUTIL_PATH
+    boto_command = ('export BOTO_CONFIG=$(gcloud info --format '
+                  '"value(config.paths.global_config_dir)")/legacy_credentials/'
+                  '$(gcloud config list --format="value(core.account)")/.boto')
+    retval = ('To configure your credentials, run \n%s\n'
+              'Next run "gcloud auth login" and follow its instructions.\n'
+              'To make this change persistent, add the export BOTO_CONFIG\n'
+              'command to your ~/.bashrc file.' % boto_command)
     if py_utils.IsRunningOnCrosDevice():
-      command = 'HOME=%s %s' % (_CROS_GSUTIL_HOME_WAR, _GSUTIL_PATH)
-    return ('To configure your credentials:\n'
-            '  1. Run "%s config" and follow its instructions.\n'
-            '  2. If you have a @google.com account, use that account.\n'
-            '  3. For the project-id, just enter 0.' % command)
+      retval += ('If running on Chrome OS, gcloud auth login may require\n'
+                 'setting the home directory to HOME=%s'
+                 % _CROS_GSUTIL_HOME_WAR)
+    return retval
 
-# TODO(https://crbug.com/1262295): Rename this after Python2 trybots retire.
-# pylint: disable=redefined-builtin
-class PermissionError(CloudStorageError):
+
+class CloudStoragePermissionError(CloudStorageError):
 
   def __init__(self):
-    # TODO(https://crbug.com/1262295): Change to super() after Python2 trybots retire.
-    # pylint: disable=super-with-arguments
-    super(PermissionError, self).__init__(
+    super().__init__(
         'Attempted to access a file from Cloud Storage but you don\'t '
         'have permission. ' + self._GetConfigInstructions())
 
@@ -90,9 +92,7 @@ class PermissionError(CloudStorageError):
 class CredentialsError(CloudStorageError):
 
   def __init__(self):
-    # TODO(https://crbug.com/1262295): Change to super() after Python2 trybots retire.
-    # pylint: disable=super-with-arguments
-    super(CredentialsError, self).__init__(
+    super().__init__(
         'Attempted to access a file from Cloud Storage but you have no '
         'configured credentials. ' + self._GetConfigInstructions())
 
@@ -172,7 +172,7 @@ def GetErrorObjectForCloudStorageStderr(stderr):
   if ('status=403' in stderr or 'status 403' in stderr or
       '403 Forbidden' in stderr or
       re.match('.*403.*does not have .* access to .*', stderr)):
-    return PermissionError()
+    return CloudStoragePermissionError()
   if (stderr.startswith('InvalidUriError') or 'No such object' in stderr or
       'No URLs matched' in stderr or 'One or more URLs matched no' in stderr):
     return NotFoundError(stderr)

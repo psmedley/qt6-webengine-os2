@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,8 +87,8 @@ TEST(CFX_XMLInstructionTest, ParseAndReSave) {
       "<?acrobat http://www.xfa.org/schema/xfa-template/3.3/ Display:1 ?>\n"
       "<node></node>";
 
-  auto in_stream = pdfium::MakeRetain<CFX_ReadOnlySpanStream>(
-      pdfium::as_bytes(pdfium::make_span(input)));
+  auto in_stream =
+      pdfium::MakeRetain<CFX_ReadOnlySpanStream>(pdfium::as_byte_span(input));
 
   CFX_XMLParser parser(in_stream);
   std::unique_ptr<CFX_XMLDocument> doc = parser.Parse();
@@ -120,8 +120,8 @@ TEST(CFX_XMLInstructionTest, ParseAndReSaveInnerInstruction) {
       "<?acrobat http://www.xfa.org/schema/xfa-template/3.3/ Display:1 ?>\n"
       "</node>";
 
-  auto in_stream = pdfium::MakeRetain<CFX_ReadOnlySpanStream>(
-      pdfium::as_bytes(pdfium::make_span(input)));
+  auto in_stream =
+      pdfium::MakeRetain<CFX_ReadOnlySpanStream>(pdfium::as_byte_span(input));
 
   CFX_XMLParser parser(in_stream);
   std::unique_ptr<CFX_XMLDocument> doc = parser.Parse();

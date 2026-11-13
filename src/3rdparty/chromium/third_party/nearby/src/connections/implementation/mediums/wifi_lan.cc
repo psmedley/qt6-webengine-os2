@@ -23,7 +23,6 @@
 #include "internal/platform/logging.h"
 #include "internal/platform/mutex_lock.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -162,7 +161,8 @@ bool WifiLan::StartDiscovery(const std::string& service_id,
   }
 
   std::string service_type = GenerateServiceType(service_id);
-  bool ret = medium_.StartDiscovery(service_id, service_type, callback);
+  bool ret =
+      medium_.StartDiscovery(service_id, service_type, std::move(callback));
   if (!ret) {
     NEARBY_LOGS(INFO) << "Failed to start discovery of WifiLan services.";
     return false;
@@ -264,7 +264,9 @@ bool WifiLan::StartAcceptingConnections(const std::string& service_id,
             server_socket.Close();
             break;
           }
-          callback.accepted_cb(service_id, std::move(client_socket));
+          if (callback) {
+            callback(service_id, std::move(client_socket));
+          }
         }
       });
 
@@ -426,4 +428,3 @@ int WifiLan::GeneratePort(const std::string& service_id,
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

@@ -10,14 +10,15 @@
 
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkSpan.h"
-#include "src/core/SkTInternalLList.h"
+#include "src/base/SkTInternalLList.h"
 
 class GrRenderTask;
 
 // Take a topologically-sorted DAG and cluster the tasks together while maintaining the
 // dependencies.
 //
-// If no clustering is possible, returns false.
+// If no clustering is possible the llist is populated with the nodes in the original order and
+// false is returned.
 // Otherwise, returns true and populates the provided llist as such:
 //   - Contains the same set of tasks as `input`.
 //   - Obeys the dependency rules in `input`.

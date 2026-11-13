@@ -11,8 +11,8 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/run_loop.h"
@@ -20,6 +20,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "components/content_settings/core/browser/content_settings_uma_util.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -35,6 +36,7 @@
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/permission_result.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -44,6 +46,8 @@
 #include "url/url_util.h"
 
 namespace permissions {
+
+using PermissionStatus = blink::mojom::PermissionStatus;
 
 const char* const kPermissionsKillSwitchFieldStudy =
     PermissionContextBase::kPermissionsKillSwitchFieldStudy;
@@ -89,24 +93,18 @@ class TestPermissionContext : public PermissionContextBase {
                                   content_settings_type());
   }
 
-  void RequestPermission(const PermissionRequestID& id,
-                         const GURL& requesting_frame,
-                         bool user_gesture,
+  void RequestPermission(PermissionRequestData request_data,
                          BrowserPermissionCallback callback) override {
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
-    PermissionContextBase::RequestPermission(
-        id, requesting_frame, true /* user_gesture */, std::move(callback));
+    PermissionContextBase::RequestPermission(std::move(request_data),
+                                             std::move(callback));
     run_loop.Run();
   }
 
-  void DecidePermission(const PermissionRequestID& id,
-                        const GURL& requesting_origin,
-                        const GURL& embedding_origin,
-                        bool user_gesture,
+  void DecidePermission(PermissionRequestData request_data,
                         BrowserPermissionCallback callback) override {
-    PermissionContextBase::DecidePermission(id, requesting_origin,
-                                            embedding_origin, user_gesture,
+    PermissionContextBase::DecidePermission(std::move(request_data),
                                             std::move(callback));
     if (respond_permission_) {
       std::move(respond_permission_).Run();
@@ -124,6 +122,8 @@ class TestPermissionContext : public PermissionContextBase {
     respond_permission_ = std::move(callback);
   }
 
+  void SetUsesAutomaticEmbargo(bool value) { uses_automatic_embargo_ = value; }
+
  protected:
   void UpdateTabContext(const PermissionRequestID& id,
                         const GURL& requesting_origin,
@@ -133,6 +133,8 @@ class TestPermissionContext : public PermissionContextBase {
 
   bool IsRestrictedToSecureOrigins() const override { return false; }
 
+  bool UsesAutomaticEmbargo() const override { return uses_automatic_embargo_; }
+
  private:
   std::vector<ContentSetting> decisions_;
   bool tab_context_updated_;
@@ -140,6 +142,7 @@ class TestPermissionContext : public PermissionContextBase {
   // Callback for responding to a permission once the request has been completed
   // (valid URL, kill switch disabled)
   base::OnceClosure respond_permission_;
+  bool uses_automatic_embargo_ = true;
 };
 
 class TestKillSwitchPermissionContext : public TestPermissionContext {
@@ -229,14 +232,14 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     base::HistogramTester histograms;
 
     const PermissionRequestID id(
-        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
         PermissionRequestID::RequestLocalId());
     permission_context.SetRespondPermissionCallback(base::BindOnce(
         &PermissionContextBaseTests::RespondToPermission,
         base::Unretained(this), &permission_context, id, url, decision));
     permission_context.RequestPermission(
-        id, url, true /* user_gesture */,
+        PermissionRequestData(&permission_context, id,
+                              /*user_gesture=*/true, url),
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
     ASSERT_EQ(1u, permission_context.decisions().size());
@@ -288,20 +291,20 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     if (action.has_value()) {
       auto entries = ukm_recorder.GetEntriesByName("Permission");
       EXPECT_EQ(1u, entries.size());
-      auto* entry = entries.front();
+      auto* entry = entries.front().get();
       ukm_recorder.ExpectEntrySourceHasUrl(entry, url);
 
-      size_t num_values = 0;
-
-      EXPECT_NE(ContentSettingTypeToHistogramValue(content_settings_type,
-                                                   &num_values),
+      EXPECT_NE(content_settings_uma_util::ContentSettingTypeToHistogramValue(
+                    content_settings_type),
                 -1);
 
       EXPECT_EQ(*ukm_recorder.GetEntryMetric(entry, "Source"),
                 static_cast<int64_t>(PermissionSourceUI::PROMPT));
-      EXPECT_EQ(*ukm_recorder.GetEntryMetric(entry, "PermissionType"),
-                static_cast<int64_t>(ContentSettingTypeToHistogramValue(
-                    content_settings_type, &num_values)));
+      EXPECT_EQ(
+          *ukm_recorder.GetEntryMetric(entry, "PermissionType"),
+          static_cast<int64_t>(
+              content_settings_uma_util::ContentSettingTypeToHistogramValue(
+                  content_settings_type)));
       EXPECT_EQ(*ukm_recorder.GetEntryMetric(entry, "Action"),
                 static_cast<int64_t>(action.value()));
 
@@ -329,8 +332,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
       TestPermissionContext permission_context(browser_context(),
                                                content_settings_type);
       const PermissionRequestID id(
-          web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-          web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+          web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
           PermissionRequestID::RequestLocalId());
 
       permission_context.SetRespondPermissionCallback(
@@ -339,7 +341,8 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                          CONTENT_SETTING_ASK));
 
       permission_context.RequestPermission(
-          id, url, true /* user_gesture */,
+          PermissionRequestData(&permission_context, id,
+                                /*user_gesture=*/true, url),
           base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                          base::Unretained(&permission_context)));
       histograms.ExpectTotalCount(
@@ -354,21 +357,22 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
       histograms.ExpectTotalCount("Permissions.AutoBlocker.EmbargoStatus",
                                   i + 1);
 
-      PermissionResult result = permission_context.GetPermissionStatus(
+      content::PermissionResult result = permission_context.GetPermissionStatus(
           nullptr /* render_frame_host */, url, url);
 
       histograms.ExpectUniqueSample(
           "Permissions.AutoBlocker.EmbargoPromptSuppression",
           static_cast<int>(PermissionEmbargoStatus::NOT_EMBARGOED), i + 1);
       if (i < 2) {
-        EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
-        EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
+        EXPECT_EQ(content::PermissionStatusSource::UNSPECIFIED, result.source);
+        EXPECT_EQ(PermissionStatus::ASK, result.status);
         histograms.ExpectUniqueSample(
             "Permissions.AutoBlocker.EmbargoStatus",
             static_cast<int>(PermissionEmbargoStatus::NOT_EMBARGOED), i + 1);
       } else {
-        EXPECT_EQ(PermissionStatusSource::MULTIPLE_DISMISSALS, result.source);
-        EXPECT_EQ(CONTENT_SETTING_BLOCK, result.content_setting);
+        EXPECT_EQ(content::PermissionStatusSource::MULTIPLE_DISMISSALS,
+                  result.source);
+        EXPECT_EQ(PermissionStatus::DENIED, result.status);
         histograms.ExpectBucketCount(
             "Permissions.AutoBlocker.EmbargoStatus",
             static_cast<int>(PermissionEmbargoStatus::REPEATED_DISMISSALS), 1);
@@ -382,8 +386,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     TestPermissionContext permission_context(browser_context(),
                                              content_settings_type);
     const PermissionRequestID id(
-        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
         PermissionRequestID::RequestLocalId());
 
     permission_context.SetRespondPermissionCallback(
@@ -392,14 +395,16 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                        CONTENT_SETTING_ASK));
 
     permission_context.RequestPermission(
-        id, url, true /* user_gesture */,
+        PermissionRequestData(&permission_context, id,
+                              /*user_gesture=*/true, url),
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
-    PermissionResult result = permission_context.GetPermissionStatus(
+    content::PermissionResult result = permission_context.GetPermissionStatus(
         nullptr /* render_frame_host */, url, url);
-    EXPECT_EQ(CONTENT_SETTING_BLOCK, result.content_setting);
-    EXPECT_EQ(PermissionStatusSource::MULTIPLE_DISMISSALS, result.source);
+    EXPECT_EQ(PermissionStatus::DENIED, result.status);
+    EXPECT_EQ(content::PermissionStatusSource::MULTIPLE_DISMISSALS,
+              result.source);
     histograms.ExpectBucketCount(
         "Permissions.AutoBlocker.EmbargoPromptSuppression",
         static_cast<int>(PermissionEmbargoStatus::REPEATED_DISMISSALS), 1);
@@ -422,8 +427,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
             browser_context(), ContentSettingsType::GEOLOCATION);
 
         const PermissionRequestID id(
-            web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-            web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+            web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
             PermissionRequestID::RequestLocalId(i + 1));
 
         permission_context.SetRespondPermissionCallback(
@@ -431,7 +435,8 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                            base::Unretained(this), &permission_context, id, url,
                            CONTENT_SETTING_ASK));
         permission_context.RequestPermission(
-            id, url, true /* user_gesture */,
+            PermissionRequestData(&permission_context, id,
+                                  /*user_gesture=*/true, url),
             base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                            base::Unretained(&permission_context)));
         histograms.ExpectTotalCount(
@@ -497,22 +502,22 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                                                ContentSettingsType::MIDI_SYSEX);
 
       const PermissionRequestID id(
-          web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-          web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+          web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
           PermissionRequestID::RequestLocalId(i + 1));
       permission_context.SetRespondPermissionCallback(
           base::BindOnce(&PermissionContextBaseTests::RespondToPermission,
                          base::Unretained(this), &permission_context, id, url,
                          CONTENT_SETTING_ASK));
       permission_context.RequestPermission(
-          id, url, true /* user_gesture */,
+          PermissionRequestData(&permission_context, id,
+                                /*user_gesture=*/true, url),
           base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                          base::Unretained(&permission_context)));
 
       EXPECT_EQ(1u, permission_context.decisions().size());
       ASSERT_EQ(CONTENT_SETTING_ASK, permission_context.decisions()[0]);
       EXPECT_TRUE(permission_context.tab_context_updated());
-      PermissionResult result = permission_context.GetPermissionStatus(
+      content::PermissionResult result = permission_context.GetPermissionStatus(
           nullptr /* render_frame_host */, url, url);
 
       histograms.ExpectTotalCount(
@@ -525,14 +530,15 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
       histograms.ExpectTotalCount("Permissions.AutoBlocker.EmbargoStatus",
                                   i + 1);
       if (i < 4) {
-        EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
-        EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
+        EXPECT_EQ(PermissionStatus::ASK, result.status);
+        EXPECT_EQ(content::PermissionStatusSource::UNSPECIFIED, result.source);
         histograms.ExpectUniqueSample(
             "Permissions.AutoBlocker.EmbargoStatus",
             static_cast<int>(PermissionEmbargoStatus::NOT_EMBARGOED), i + 1);
       } else {
-        EXPECT_EQ(CONTENT_SETTING_BLOCK, result.content_setting);
-        EXPECT_EQ(PermissionStatusSource::MULTIPLE_DISMISSALS, result.source);
+        EXPECT_EQ(PermissionStatus::DENIED, result.status);
+        EXPECT_EQ(content::PermissionStatusSource::MULTIPLE_DISMISSALS,
+                  result.source);
         histograms.ExpectBucketCount(
             "Permissions.AutoBlocker.EmbargoStatus",
             static_cast<int>(PermissionEmbargoStatus::REPEATED_DISMISSALS), 1);
@@ -542,10 +548,87 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     // Ensure that we finish in the block state.
     TestPermissionContext permission_context(browser_context(),
                                              ContentSettingsType::MIDI_SYSEX);
-    PermissionResult result = permission_context.GetPermissionStatus(
+    content::PermissionResult result = permission_context.GetPermissionStatus(
         nullptr /* render_frame_host */, url, url);
-    EXPECT_EQ(CONTENT_SETTING_BLOCK, result.content_setting);
-    EXPECT_EQ(PermissionStatusSource::MULTIPLE_DISMISSALS, result.source);
+    EXPECT_EQ(PermissionStatus::DENIED, result.status);
+    EXPECT_EQ(content::PermissionStatusSource::MULTIPLE_DISMISSALS,
+              result.source);
+  }
+
+  void TestVariationBlockOnSeveralDismissalsAutomaticEmbargoOff_TestContent() {
+    GURL url("https://www.google.com");
+    SetUpUrl(url);
+    base::HistogramTester histograms;
+
+    std::map<std::string, std::string> params;
+    params
+        [PermissionDecisionAutoBlocker::GetPromptDismissCountKeyForTesting()] =
+            "5";
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeatureWithParameters(
+        features::kBlockPromptsIfDismissedOften, params);
+
+    std::map<std::string, std::string> actual_params;
+    EXPECT_TRUE(base::GetFieldTrialParamsByFeature(
+        features::kBlockPromptsIfDismissedOften, &actual_params));
+    EXPECT_EQ(params, actual_params);
+
+    EXPECT_TRUE(base::GetFieldTrialParamsByFeature(
+        features::kBlockPromptsIfDismissedOften, &actual_params));
+    EXPECT_EQ(params, actual_params);
+
+    for (uint32_t i = 0; i < 5; ++i) {
+      TestPermissionContext permission_context(browser_context(),
+                                               ContentSettingsType::MIDI_SYSEX);
+      permission_context.SetUsesAutomaticEmbargo(false);
+
+      const PermissionRequestID id(
+          web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
+          PermissionRequestID::RequestLocalId(i + 1));
+      permission_context.SetRespondPermissionCallback(
+          base::BindOnce(&PermissionContextBaseTests::RespondToPermission,
+                         base::Unretained(this), &permission_context, id, url,
+                         CONTENT_SETTING_ASK));
+      permission_context.RequestPermission(
+          PermissionRequestData(&permission_context, id,
+                                /*user_gesture=*/true, url),
+          base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
+                         base::Unretained(&permission_context)));
+
+      EXPECT_EQ(1u, permission_context.decisions().size());
+      ASSERT_EQ(CONTENT_SETTING_ASK, permission_context.decisions()[0]);
+      EXPECT_TRUE(permission_context.tab_context_updated());
+      content::PermissionResult result = permission_context.GetPermissionStatus(
+          nullptr /* render_frame_host */, url, url);
+
+      histograms.ExpectTotalCount(
+          "Permissions.Prompt.Dismissed.PriorDismissCount2.MidiSysEx", i + 1);
+      histograms.ExpectBucketCount(
+          "Permissions.Prompt.Dismissed.PriorDismissCount2.MidiSysEx", 0,
+          i + 1);
+
+      histograms.ExpectUniqueSample(
+          "Permissions.AutoBlocker.EmbargoPromptSuppression",
+          static_cast<int>(PermissionEmbargoStatus::NOT_EMBARGOED), i + 1);
+      histograms.ExpectTotalCount("Permissions.AutoBlocker.EmbargoStatus",
+                                  i + 1);
+
+      EXPECT_EQ(PermissionStatus::ASK, result.status);
+      EXPECT_EQ(content::PermissionStatusSource::UNSPECIFIED, result.source);
+      histograms.ExpectUniqueSample(
+          "Permissions.AutoBlocker.EmbargoStatus",
+          static_cast<int>(PermissionEmbargoStatus::NOT_EMBARGOED), i + 1);
+    }
+
+    // Ensure that we DO NOT finish in the block state (unlike when automatic
+    // embargo is enabled).
+    TestPermissionContext permission_context(browser_context(),
+                                             ContentSettingsType::MIDI_SYSEX);
+    permission_context.SetUsesAutomaticEmbargo(false);
+    content::PermissionResult result = permission_context.GetPermissionStatus(
+        nullptr /* render_frame_host */, url, url);
+    EXPECT_EQ(PermissionStatus::ASK, result.status);
+    EXPECT_EQ(content::PermissionStatusSource::UNSPECIFIED, result.source);
   }
 
   void TestRequestPermissionInvalidUrl(
@@ -559,11 +642,11 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                          std::string());
 
     const PermissionRequestID id(
-        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
         PermissionRequestID::RequestLocalId());
     permission_context.RequestPermission(
-        id, url, true /* user_gesture */,
+        PermissionRequestData(&permission_context, id,
+                              /*user_gesture=*/true, url),
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -584,8 +667,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     SetUpUrl(url);
 
     const PermissionRequestID id(
-        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
         PermissionRequestID::RequestLocalId());
     permission_context.SetRespondPermissionCallback(
         base::BindOnce(&PermissionContextBaseTests::RespondToPermission,
@@ -593,7 +675,8 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
                        CONTENT_SETTING_ALLOW));
 
     permission_context.RequestPermission(
-        id, url, true /* user_gesture */,
+        PermissionRequestData(&permission_context, id,
+                              /*user_gesture=*/true, url),
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -667,17 +750,16 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     SetUpUrl(url);
 
     const PermissionRequestID id1(
-        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
         PermissionRequestID::RequestLocalId(1));
     const PermissionRequestID id2(
-        web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
-        web_contents()->GetPrimaryMainFrame()->GetRoutingID(),
+        web_contents()->GetPrimaryMainFrame()->GetGlobalId(),
         PermissionRequestID::RequestLocalId(2));
 
     // Request a permission without setting the callback to DecidePermission.
     permission_context.RequestPermission(
-        id1, url, true /* user_gesture */,
+        PermissionRequestData(&permission_context, id1,
+                              /*user_gesture=*/true, url),
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -688,7 +770,8 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
         &PermissionContextBaseTests::RespondToPermission,
         base::Unretained(this), &permission_context, id1, url, response));
     permission_context.RequestPermission(
-        id2, url, true /* user_gesture */,
+        PermissionRequestData(&permission_context, id2,
+                              /*user_gesture=*/true, url),
         base::BindOnce(&TestPermissionContext::TrackPermissionDecision,
                        base::Unretained(&permission_context)));
 
@@ -703,7 +786,7 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
   void TestVirtualURL(const GURL& loaded_url,
                       const GURL& virtual_url,
                       const ContentSetting want_response,
-                      const PermissionStatusSource& want_source) {
+                      const content::PermissionStatusSource& want_source) {
     TestPermissionContext permission_context(browser_context(),
                                              ContentSettingsType::GEOLOCATION);
 
@@ -711,9 +794,10 @@ class PermissionContextBaseTests : public content::RenderViewHostTestHarness {
     web_contents()->GetController().GetVisibleEntry()->SetVirtualURL(
         virtual_url);
 
-    PermissionResult result = permission_context.GetPermissionStatus(
+    content::PermissionResult result = permission_context.GetPermissionStatus(
         web_contents()->GetPrimaryMainFrame(), virtual_url, virtual_url);
-    EXPECT_EQ(result.content_setting, want_response);
+    EXPECT_EQ(result.status,
+              PermissionUtil::ContentSettingToPermissionStatus(want_response));
     EXPECT_EQ(result.source, want_source);
   }
 
@@ -773,6 +857,11 @@ TEST_F(PermissionContextBaseTests, TestDismissUntilBlocked) {
 // Test setting a custom number of dismissals before block via variations.
 TEST_F(PermissionContextBaseTests, TestDismissVariations) {
   TestVariationBlockOnSeveralDismissals_TestContent();
+}
+
+// Test that contexts that disable the automatic blocker are not blocker.
+TEST_F(PermissionContextBaseTests, TestDismissVariationsWithoutEmbargo) {
+  TestVariationBlockOnSeveralDismissalsAutomaticEmbargoOff_TestContent();
 }
 
 // Simulates non-valid requesting URL.
@@ -891,28 +980,25 @@ TEST_F(PermissionContextBaseTests, TestParallelRequestsDismissed) {
 TEST_F(PermissionContextBaseTests, TestVirtualURLDifferentOrigin) {
   TestVirtualURL(GURL("http://www.google.com"), GURL("http://foo.com"),
                  CONTENT_SETTING_BLOCK,
-                 PermissionStatusSource::VIRTUAL_URL_DIFFERENT_ORIGIN);
+                 content::PermissionStatusSource::VIRTUAL_URL_DIFFERENT_ORIGIN);
 }
 
 TEST_F(PermissionContextBaseTests, TestVirtualURLNotHTTP) {
   TestVirtualURL(GURL("chrome://foo"), GURL("chrome://newtab"),
-                 CONTENT_SETTING_ASK, PermissionStatusSource::UNSPECIFIED);
+                 CONTENT_SETTING_ASK,
+                 content::PermissionStatusSource::UNSPECIFIED);
 }
 
 TEST_F(PermissionContextBaseTests, TestVirtualURLSameOrigin) {
   TestVirtualURL(GURL("http://www.google.com"),
                  GURL("http://www.google.com/foo"), CONTENT_SETTING_ASK,
-                 PermissionStatusSource::UNSPECIFIED);
+                 content::PermissionStatusSource::UNSPECIFIED);
 }
 
 #if !BUILDFLAG(IS_ANDROID)
 TEST_F(PermissionContextBaseTests, ExpirationAllow) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures(
-      {features::kRecordPermissionExpirationTimestamps}, {});
-
   base::Time now = base::Time::Now();
-  TestAskAndDecide_TestContent(ContentSettingsType::NOTIFICATIONS,
+  TestAskAndDecide_TestContent(ContentSettingsType::GEOLOCATION,
                                CONTENT_SETTING_ALLOW);
 
   GURL primary_url("https://www.google.com");
@@ -920,19 +1006,15 @@ TEST_F(PermissionContextBaseTests, ExpirationAllow) {
   auto* hcsm = PermissionsClient::Get()->GetSettingsMap(browser_context());
   content_settings::SettingInfo info;
   hcsm->GetWebsiteSetting(primary_url, secondary_url,
-                          ContentSettingsType::NOTIFICATIONS, &info);
+                          ContentSettingsType::GEOLOCATION, &info);
 
   // The last_visited should lie between today and a week ago.
-  EXPECT_GE(info.metadata.last_visited, now - base::Days(7));
-  EXPECT_LE(info.metadata.last_visited, now);
+  EXPECT_GE(info.metadata.last_visited(), now - base::Days(7));
+  EXPECT_LE(info.metadata.last_visited(), now);
 }
 
 TEST_F(PermissionContextBaseTests, ExpirationBlock) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures(
-      {features::kRecordPermissionExpirationTimestamps}, {});
-
-  TestAskAndDecide_TestContent(ContentSettingsType::NOTIFICATIONS,
+  TestAskAndDecide_TestContent(ContentSettingsType::GEOLOCATION,
                                CONTENT_SETTING_BLOCK);
 
   GURL primary_url("https://www.google.com");
@@ -940,10 +1022,10 @@ TEST_F(PermissionContextBaseTests, ExpirationBlock) {
   auto* hcsm = PermissionsClient::Get()->GetSettingsMap(browser_context());
   content_settings::SettingInfo info;
   hcsm->GetWebsiteSetting(primary_url, secondary_url,
-                          ContentSettingsType::NOTIFICATIONS, &info);
+                          ContentSettingsType::GEOLOCATION, &info);
 
   // last_visited is not set for BLOCKed permissions.
-  EXPECT_EQ(base::Time(), info.metadata.last_visited);
+  EXPECT_EQ(base::Time(), info.metadata.last_visited());
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 

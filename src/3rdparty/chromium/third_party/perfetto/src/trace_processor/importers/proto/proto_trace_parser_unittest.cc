@@ -20,23 +20,23 @@
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/trace_processor/trace_blob.h"
-#include "src/trace_processor/importers/additional_modules.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/args_translation_table.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/flow_tracker.h"
+#include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
-#include "src/trace_processor/importers/default_modules.h"
 #include "src/trace_processor/importers/ftrace/sched_event_tracker.h"
-#include "src/trace_processor/importers/proto/metadata_tracker.h"
+#include "src/trace_processor/importers/proto/additional_modules.h"
+#include "src/trace_processor/importers/proto/default_modules.h"
 #include "src/trace_processor/importers/proto/proto_trace_parser.h"
 #include "src/trace_processor/importers/proto/stack_profile_tracker.h"
+#include "src/trace_processor/sorter/trace_sorter.h"
 #include "src/trace_processor/storage/metadata.h"
 #include "src/trace_processor/storage/trace_storage.h"
-#include "src/trace_processor/trace_sorter.h"
 #include "src/trace_processor/util/descriptors.h"
 #include "test/gtest_and_gmock.h"
 
@@ -60,6 +60,7 @@
 #include "protos/perfetto/trace/sys_stats/sys_stats.pbzero.h"
 #include "protos/perfetto/trace/trace.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
+#include "protos/perfetto/trace/trace_uuid.pbzero.h"
 #include "protos/perfetto/trace/track_event/chrome_thread_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/counter_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/debug_annotation.pbzero.h"
@@ -109,39 +110,42 @@ class MockSchedEventTracker : public SchedEventTracker {
   explicit MockSchedEventTracker(TraceProcessorContext* context)
       : SchedEventTracker(context) {}
 
-  MOCK_METHOD9(PushSchedSwitch,
-               void(uint32_t cpu,
-                    int64_t timestamp,
-                    uint32_t prev_pid,
-                    base::StringView prev_comm,
-                    int32_t prev_prio,
-                    int64_t prev_state,
-                    uint32_t next_pid,
-                    base::StringView next_comm,
-                    int32_t next_prio));
+  MOCK_METHOD(void,
+              PushSchedSwitch,
+              (uint32_t cpu,
+               int64_t timestamp,
+               uint32_t prev_pid,
+               base::StringView prev_comm,
+               int32_t prev_prio,
+               int64_t prev_state,
+               uint32_t next_pid,
+               base::StringView next_comm,
+               int32_t next_prio),
+              (override));
 };
 
 class MockEventTracker : public EventTracker {
  public:
   explicit MockEventTracker(TraceProcessorContext* context)
       : EventTracker(context) {}
-  virtual ~MockEventTracker() = default;
+  ~MockEventTracker() override = default;
 
-  MOCK_METHOD9(PushSchedSwitch,
-               void(uint32_t cpu,
-                    int64_t timestamp,
-                    uint32_t prev_pid,
-                    base::StringView prev_comm,
-                    int32_t prev_prio,
-                    int64_t prev_state,
-                    uint32_t next_pid,
-                    base::StringView next_comm,
-                    int32_t next_prio));
+  MOCK_METHOD(void,
+              PushSchedSwitch,
+              (uint32_t cpu,
+               int64_t timestamp,
+               uint32_t prev_pid,
+               base::StringView prev_comm,
+               int32_t prev_prio,
+               int64_t prev_state,
+               uint32_t next_pid,
+               base::StringView next_comm,
+               int32_t next_prio));
 
-  MOCK_METHOD3(PushCounter,
-               base::Optional<CounterId>(int64_t timestamp,
-                                         double value,
-                                         TrackId track_id));
+  MOCK_METHOD(std::optional<CounterId>,
+              PushCounter,
+              (int64_t timestamp, double value, TrackId track_id),
+              (override));
 };
 
 class MockProcessTracker : public ProcessTracker {
@@ -149,25 +153,36 @@ class MockProcessTracker : public ProcessTracker {
   explicit MockProcessTracker(TraceProcessorContext* context)
       : ProcessTracker(context) {}
 
-  MOCK_METHOD4(SetProcessMetadata,
-               UniquePid(uint32_t pid,
-                         base::Optional<uint32_t> ppid,
-                         base::StringView process_name,
-                         base::StringView cmdline));
+  MOCK_METHOD(UniquePid,
+              SetProcessMetadata,
+              (uint32_t pid,
+               std::optional<uint32_t> ppid,
+               base::StringView process_name,
+               base::StringView cmdline),
+              (override));
 
-  MOCK_METHOD3(UpdateThreadName,
-               UniqueTid(uint32_t tid,
-                         StringId thread_name_id,
-                         ThreadNamePriority priority));
-  MOCK_METHOD3(UpdateThreadNameByUtid,
-               void(UniqueTid utid,
-                    StringId thread_name_id,
-                    ThreadNamePriority priority));
-  MOCK_METHOD2(UpdateThread, UniqueTid(uint32_t tid, uint32_t tgid));
+  MOCK_METHOD(UniqueTid,
+              UpdateThreadName,
+              (uint32_t tid,
+               StringId thread_name_id,
+               ThreadNamePriority priority),
+              (override));
+  MOCK_METHOD(void,
+              UpdateThreadNameByUtid,
+              (UniqueTid utid,
+               StringId thread_name_id,
+               ThreadNamePriority priority),
+              (override));
+  MOCK_METHOD(UniqueTid,
+              UpdateThread,
+              (uint32_t tid, uint32_t tgid),
+              (override));
 
-  MOCK_METHOD1(GetOrCreateProcess, UniquePid(uint32_t pid));
-  MOCK_METHOD2(SetProcessNameIfUnset,
-               void(UniquePid upid, StringId process_name_id));
+  MOCK_METHOD(UniquePid, GetOrCreateProcess, (uint32_t pid), (override));
+  MOCK_METHOD(void,
+              SetProcessNameIfUnset,
+              (UniquePid upid, StringId process_name_id),
+              (override));
 };
 
 class MockBoundInserter : public ArgsTracker::BoundInserter {
@@ -177,12 +192,13 @@ class MockBoundInserter : public ArgsTracker::BoundInserter {
     ON_CALL(*this, AddArg(_, _, _, _)).WillByDefault(ReturnRef(*this));
   }
 
-  MOCK_METHOD4(
-      AddArg,
-      ArgsTracker::BoundInserter&(StringId flat_key,
-                                  StringId key,
-                                  Variadic v,
-                                  ArgsTracker::UpdatePolicy update_policy));
+  MOCK_METHOD(ArgsTracker::BoundInserter&,
+              AddArg,
+              (StringId flat_key,
+               StringId key,
+               Variadic v,
+               ArgsTracker::UpdatePolicy update_policy),
+              (override));
 
  private:
   ArgsTracker tracker_;
@@ -193,30 +209,38 @@ class MockSliceTracker : public SliceTracker {
   explicit MockSliceTracker(TraceProcessorContext* context)
       : SliceTracker(context) {}
 
-  MOCK_METHOD5(Begin,
-               base::Optional<SliceId>(int64_t timestamp,
-                                       TrackId track_id,
-                                       StringId cat,
-                                       StringId name,
-                                       SetArgsCallback args_callback));
-  MOCK_METHOD5(End,
-               base::Optional<SliceId>(int64_t timestamp,
-                                       TrackId track_id,
-                                       StringId cat,
-                                       StringId name,
-                                       SetArgsCallback args_callback));
-  MOCK_METHOD6(Scoped,
-               base::Optional<SliceId>(int64_t timestamp,
-                                       TrackId track_id,
-                                       StringId cat,
-                                       StringId name,
-                                       int64_t duration,
-                                       SetArgsCallback args_callback));
-  MOCK_METHOD4(StartSlice,
-               base::Optional<SliceId>(int64_t timestamp,
-                                       TrackId track_id,
-                                       SetArgsCallback args_callback,
-                                       std::function<SliceId()> inserter));
+  MOCK_METHOD(std::optional<SliceId>,
+              Begin,
+              (int64_t timestamp,
+               TrackId track_id,
+               StringId cat,
+               StringId name,
+               SetArgsCallback args_callback),
+              (override));
+  MOCK_METHOD(std::optional<SliceId>,
+              End,
+              (int64_t timestamp,
+               TrackId track_id,
+               StringId cat,
+               StringId name,
+               SetArgsCallback args_callback),
+              (override));
+  MOCK_METHOD(std::optional<SliceId>,
+              Scoped,
+              (int64_t timestamp,
+               TrackId track_id,
+               StringId cat,
+               StringId name,
+               int64_t duration,
+               SetArgsCallback args_callback),
+              (override));
+  MOCK_METHOD(std::optional<SliceId>,
+              StartSlice,
+              (int64_t timestamp,
+               TrackId track_id,
+               SetArgsCallback args_callback,
+               std::function<SliceId()> inserter),
+              (override));
 };
 
 class ProtoTraceParserTest : public ::testing::Test {
@@ -242,7 +266,7 @@ class ProtoTraceParserTest : public ::testing::Test {
     slice_ = new NiceMock<MockSliceTracker>(&context_);
     context_.slice_tracker.reset(slice_);
     context_.slice_translation_table.reset(new SliceTranslationTable(storage_));
-    clock_ = new ClockTracker(context_.storage.get());
+    clock_ = new ClockTracker(&context_);
     context_.clock_tracker.reset(clock_);
     context_.flow_tracker.reset(new FlowTracker(&context_));
     context_.sorter.reset(new TraceSorter(&context_, CreateParser(),
@@ -602,10 +626,14 @@ TEST_F(ProtoTraceParserTest, LoadCpuFreqKHz) {
   context_.sorter->ExtractEventsForced();
 
   EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
-  EXPECT_EQ(context_.storage->track_table().name().GetString(0),
-            "CPU 0 Freq in kHz");
-  EXPECT_EQ(context_.storage->track_table().name().GetString(1),
-            "CPU 1 Freq in kHz");
+  EXPECT_EQ(context_.storage->cpu_counter_track_table().row_count(), 2u);
+
+  auto row = context_.storage->cpu_counter_track_table().FindById(TrackId(0));
+  EXPECT_EQ(context_.storage->GetString(row->name()), "cpufreq");
+  EXPECT_EQ(row->cpu(), 0u);
+
+  row = context_.storage->cpu_counter_track_table().FindById(TrackId(1));
+  EXPECT_EQ(row->cpu(), 1u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadMemInfo) {
@@ -619,11 +647,11 @@ TEST_F(ProtoTraceParserTest, LoadMemInfo) {
   meminfo->set_value(value);
 
   EXPECT_CALL(*event_, PushCounter(static_cast<int64_t>(ts),
-                                   DoubleEq(value * 1024.0), TrackId{0u}));
+                                   DoubleEq(value * 1024.0), TrackId{1u}));
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(context_.storage->track_table().row_count(), 1u);
+  EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadVmStats) {
@@ -637,11 +665,11 @@ TEST_F(ProtoTraceParserTest, LoadVmStats) {
   meminfo->set_value(value);
 
   EXPECT_CALL(*event_, PushCounter(static_cast<int64_t>(ts), DoubleEq(value),
-                                   TrackId{0u}));
+                                   TrackId{1u}));
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(context_.storage->track_table().row_count(), 1u);
+  EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadProcessPacket) {
@@ -2867,6 +2895,38 @@ TEST_F(ProtoTraceParserTest, ConfigUuid) {
   auto* config = trace_->add_packet()->set_trace_config();
   config->set_trace_uuid_lsb(1);
   config->set_trace_uuid_msb(2);
+
+  ASSERT_TRUE(Tokenize().ok());
+  context_.sorter->ExtractEventsForced();
+
+  SqlValue value = context_.metadata_tracker->GetMetadata(metadata::trace_uuid);
+  EXPECT_STREQ(value.string_value, "00000000-0000-0002-0000-000000000001");
+  ASSERT_TRUE(context_.uuid_found_in_trace);
+}
+
+TEST_F(ProtoTraceParserTest, PacketUuid) {
+  auto* uuid = trace_->add_packet()->set_trace_uuid();
+  uuid->set_lsb(1);
+  uuid->set_msb(2);
+
+  ASSERT_TRUE(Tokenize().ok());
+  context_.sorter->ExtractEventsForced();
+
+  SqlValue value = context_.metadata_tracker->GetMetadata(metadata::trace_uuid);
+  EXPECT_STREQ(value.string_value, "00000000-0000-0002-0000-000000000001");
+  ASSERT_TRUE(context_.uuid_found_in_trace);
+}
+
+// If both the TraceConfig and TracePacket.trace_uuid are present, the latter
+// is considered the source of truth.
+TEST_F(ProtoTraceParserTest, PacketAndConfigUuid) {
+  auto* uuid = trace_->add_packet()->set_trace_uuid();
+  uuid->set_lsb(1);
+  uuid->set_msb(2);
+
+  auto* config = trace_->add_packet()->set_trace_config();
+  config->set_trace_uuid_lsb(42);
+  config->set_trace_uuid_msb(42);
 
   ASSERT_TRUE(Tokenize().ok());
   context_.sorter->ExtractEventsForced();

@@ -1,11 +1,9 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CAST_STANDALONE_RECEIVER_AVCODEC_GLUE_H_
 #define CAST_STANDALONE_RECEIVER_AVCODEC_GLUE_H_
-
-#include <memory>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -14,8 +12,10 @@ extern "C" {
 #include <libavutil/samplefmt.h>
 }
 
-namespace openscreen {
-namespace cast {
+#include <memory>
+#include <utility>
+
+namespace openscreen::cast {
 
 // Macro that, for an AVFoo, generates code for:
 //
@@ -50,7 +50,15 @@ DEFINE_AV_UNIQUE_PTR(AVFrame, av_frame_alloc, av_frame_free(&obj));
 
 #undef DEFINE_AV_UNIQUE_PTR
 
-}  // namespace cast
-}  // namespace openscreen
+// Macros to enable backwards compability codepaths for older versions of
+// ffmpeg, where newer versions have deprecated APIs.  Note that ffmpeg defines
+// its own FF_API* macros that are related to removing APIs (not deprecating
+// them).
+//
+// TODO(https://issuetracker.google.com/224642520): dedup with standalone
+// sender.
+#define _LIBAVUTIL_OLD_CHANNEL_LAYOUT (LIBAVUTIL_VERSION_MAJOR < 57)
+
+}  // namespace openscreen::cast
 
 #endif  // CAST_STANDALONE_RECEIVER_AVCODEC_GLUE_H_

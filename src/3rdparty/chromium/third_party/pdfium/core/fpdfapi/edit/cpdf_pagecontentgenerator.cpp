@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include <tuple>
 #include <utility>
 
+#include "constants/page_object.h"
 #include "core/fpdfapi/edit/cpdf_contentstream_write_utils.h"
 #include "core/fpdfapi/edit/cpdf_pagecontentmanager.h"
 #include "core/fpdfapi/edit/cpdf_stringarchivestream.h"
@@ -37,13 +38,18 @@
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
+#include "core/fpdfapi/parser/object_tree_traversal_util.h"
 #include "third_party/base/check.h"
 #include "third_party/base/containers/contains.h"
+#include "third_party/base/containers/span.h"
 #include "third_party/base/notreached.h"
 #include "third_party/base/numerics/safe_conversions.h"
-#include "third_party/base/span.h"
 
 namespace {
+
+// Key: The resource type.
+// Value: The resource names of a given type.
+using ResourcesMap = std::map<ByteString, std::set<ByteString>>;
 
 bool GetColor(const CPDF_Color* pColor, float* rgb) {
   int intRGB[3];
@@ -55,6 +61,67 @@ bool GetColor(const CPDF_Color* pColor, float* rgb) {
   rgb[1] = intRGB[1] / 255.0f;
   rgb[2] = intRGB[2] / 255.0f;
   return true;
+}
+
+void RecordPageObjectResourceUsage(const CPDF_PageObject* page_object,
+                                   ResourcesMap& seen_resources) {
+  const ByteString& resource_name = page_object->GetResourceName();
+  if (!resource_name.IsEmpty()) {
+    switch (page_object->GetType()) {
+      case CPDF_PageObject::Type::kText:
+        seen_resources["Font"].insert(resource_name);
+        break;
+      case CPDF_PageObject::Type::kImage:
+      case CPDF_PageObject::Type::kForm:
+        seen_resources["XObject"].insert(resource_name);
+        break;
+      case CPDF_PageObject::Type::kPath:
+        break;
+      case CPDF_PageObject::Type::kShading:
+        break;
+    }
+  }
+  for (const auto& name : page_object->GetGraphicsResourceNames()) {
+    CHECK(!name.IsEmpty());
+    seen_resources["ExtGState"].insert(name);
+  }
+}
+
+void RemoveUnusedResources(RetainPtr<CPDF_Dictionary> resources_dict,
+                           const ResourcesMap& resources_in_use) {
+  // TODO(thestig): Remove other unused resource types:
+  // - ColorSpace
+  // - Pattern
+  // - Shading
+  static constexpr const char* kResourceKeys[] = {"ExtGState", "Font",
+                                                  "XObject"};
+  for (const char* resource_key : kResourceKeys) {
+    RetainPtr<CPDF_Dictionary> resource_dict =
+        resources_dict->GetMutableDictFor(resource_key);
+    if (!resource_dict) {
+      continue;
+    }
+
+    std::vector<ByteString> keys;
+    {
+      CPDF_DictionaryLocker resource_dict_locker(resource_dict);
+      for (auto& it : resource_dict_locker) {
+        keys.push_back(it.first);
+      }
+    }
+
+    auto it = resources_in_use.find(resource_key);
+    const std::set<ByteString>* resource_in_use_of_current_type =
+        it != resources_in_use.end() ? &it->second : nullptr;
+    for (const ByteString& key : keys) {
+      if (resource_in_use_of_current_type &&
+          pdfium::Contains(*resource_in_use_of_current_type, key)) {
+        continue;
+      }
+
+      resource_dict->RemoveFor(key.AsStringView());
+    }
+  }
 }
 
 }  // namespace
@@ -72,14 +139,19 @@ CPDF_PageContentGenerator::~CPDF_PageContentGenerator() = default;
 
 void CPDF_PageContentGenerator::GenerateContent() {
   DCHECK(m_pObjHolder->IsPage());
-  UpdateContentStreams(GenerateModifiedStreams());
+  std::map<int32_t, fxcrt::ostringstream> new_stream_data =
+      GenerateModifiedStreams();
+  // If no streams were regenerated or removed, nothing to do here.
+  if (new_stream_data.empty()) {
+    return;
+  }
+
+  UpdateContentStreams(std::move(new_stream_data));
+  UpdateResourcesDict();
 }
 
 std::map<int32_t, fxcrt::ostringstream>
 CPDF_PageContentGenerator::GenerateModifiedStreams() {
-  // Make sure default graphics are created.
-  GetOrCreateDefaultGraphics();
-
   // Figure out which streams are dirty.
   std::set<int32_t> all_dirty_streams;
   for (auto& pPageObj : m_pageObjects) {
@@ -120,9 +192,9 @@ CPDF_PageContentGenerator::GenerateModifiedStreams() {
 
     fxcrt::ostringstream* buf = &it->second;
     empty_streams.erase(stream_index);
-    current_content_marks[stream_index] = ProcessContentMarks(
-        buf, pPageObj.Get(), current_content_marks[stream_index]);
-    ProcessPageObject(buf, pPageObj.Get());
+    current_content_marks[stream_index] =
+        ProcessContentMarks(buf, pPageObj, current_content_marks[stream_index]);
+    ProcessPageObject(buf, pPageObj);
   }
 
   // Finish dirty streams.
@@ -144,12 +216,12 @@ CPDF_PageContentGenerator::GenerateModifiedStreams() {
 
 void CPDF_PageContentGenerator::UpdateContentStreams(
     std::map<int32_t, fxcrt::ostringstream>&& new_stream_data) {
-  // If no streams were regenerated or removed, nothing to do here.
-  if (new_stream_data.empty())
-    return;
+  CHECK(!new_stream_data.empty());
 
-  CPDF_PageContentManager page_content_manager(m_pObjHolder.Get());
+  // Make sure default graphics are created.
+  m_DefaultGraphicsName = GetOrCreateDefaultGraphics();
 
+  CPDF_PageContentManager page_content_manager(m_pObjHolder, m_pDocument);
   for (auto& pair : new_stream_data) {
     int32_t stream_index = pair.first;
     fxcrt::ostringstream* buf = &pair.second;
@@ -161,18 +233,40 @@ void CPDF_PageContentGenerator::UpdateContentStreams(
       continue;
     }
 
-    CPDF_Stream* old_stream =
-        page_content_manager.GetStreamByIndex(stream_index);
-    DCHECK(old_stream);
+    page_content_manager.UpdateStream(stream_index, buf);
+  }
+}
 
-    // If buf is now empty, remove the stream instead of setting the data.
-    if (buf->tellp() <= 0)
-      page_content_manager.ScheduleRemoveStreamByIndex(stream_index);
-    else
-      old_stream->SetDataFromStringstreamAndRemoveFilter(buf);
+void CPDF_PageContentGenerator::UpdateResourcesDict() {
+  RetainPtr<CPDF_Dictionary> resources = m_pObjHolder->GetMutableResources();
+  if (!resources) {
+    return;
   }
 
-  page_content_manager.ExecuteScheduledRemovals();
+  const uint32_t resources_object_number = resources->GetObjNum();
+  if (resources_object_number) {
+    // If `resources` is not an inline object, then do not modify it directly if
+    // it has multiple references.
+    if (pdfium::Contains(GetObjectsWithMultipleReferences(m_pDocument),
+                         resources_object_number)) {
+      resources = pdfium::WrapRetain(resources->Clone()->AsMutableDictionary());
+      const uint32_t clone_object_number =
+          m_pDocument->AddIndirectObject(resources);
+      m_pObjHolder->SetResources(resources);
+      m_pObjHolder->GetMutableDict()->SetNewFor<CPDF_Reference>(
+          pdfium::page_object::kResources, m_pDocument, clone_object_number);
+    }
+  }
+
+  ResourcesMap seen_resources;
+  for (auto& page_object : m_pageObjects) {
+    RecordPageObjectResourceUsage(page_object, seen_resources);
+  }
+  if (!m_DefaultGraphicsName.IsEmpty()) {
+    seen_resources["ExtGState"].insert(m_DefaultGraphicsName);
+  }
+
+  RemoveUnusedResources(std::move(resources), seen_resources);
 }
 
 ByteString CPDF_PageContentGenerator::RealizeResource(
@@ -182,7 +276,7 @@ ByteString CPDF_PageContentGenerator::RealizeResource(
   if (!m_pObjHolder->GetResources()) {
     m_pObjHolder->SetResources(m_pDocument->NewIndirect<CPDF_Dictionary>());
     m_pObjHolder->GetMutableDict()->SetNewFor<CPDF_Reference>(
-        "Resources", m_pDocument.Get(),
+        pdfium::page_object::kResources, m_pDocument,
         m_pObjHolder->GetResources()->GetObjNum());
   }
 
@@ -197,7 +291,7 @@ ByteString CPDF_PageContentGenerator::RealizeResource(
 
     idnum++;
   }
-  pResList->SetNewFor<CPDF_Reference>(name, m_pDocument.Get(),
+  pResList->SetNewFor<CPDF_Reference>(name, m_pDocument,
                                       pResource->GetObjNum());
   return name;
 }
@@ -213,8 +307,8 @@ bool CPDF_PageContentGenerator::ProcessPageObjects(fxcrt::ostringstream* buf) {
       continue;
 
     bDirty = true;
-    content_marks = ProcessContentMarks(buf, pPageObj.Get(), content_marks);
-    ProcessPageObject(buf, pPageObj.Get());
+    content_marks = ProcessContentMarks(buf, pPageObj, content_marks);
+    ProcessPageObject(buf, pPageObj);
   }
   FinishMarks(buf, content_marks);
   return bDirty;
@@ -267,9 +361,8 @@ const CPDF_ContentMarks* CPDF_PageContentGenerator::ProcessContentMarks(
         *buf << "/" << item->GetPropertyName() << " ";
         break;
       }
-      default:
-        NOTREACHED();
-        break;
+      case CPDF_ContentMarkItem::kNone:
+        NOTREACHED_NORETURN();
     }
 
     // Write BDC (begin dictionary content) operator.
@@ -325,8 +418,10 @@ void CPDF_PageContentGenerator::ProcessImage(fxcrt::ostringstream* buf,
     pImage->ConvertStreamToIndirectObject();
 
   ByteString name = RealizeResource(pStream, "XObject");
+  pImageObj->SetResourceName(name);
+
   if (bWasInline) {
-    auto* pPageData = CPDF_DocPageData::FromDocument(m_pDocument.Get());
+    auto* pPageData = CPDF_DocPageData::FromDocument(m_pDocument);
     pImageObj->SetImage(pPageData->GetImage(pStream->GetObjNum()));
   }
 
@@ -344,10 +439,11 @@ void CPDF_PageContentGenerator::ProcessForm(fxcrt::ostringstream* buf,
   if (!pStream)
     return;
 
+  ByteString name = RealizeResource(pStream.Get(), "XObject");
+  pFormObj->SetResourceName(name);
+
   *buf << "q\n";
   WriteMatrix(*buf, pFormObj->form_matrix()) << " cm ";
-
-  ByteString name = RealizeResource(pStream.Get(), "XObject");
   *buf << "/" << PDF_NameEncode(name) << " Do Q\n";
 }
 
@@ -432,26 +528,38 @@ void CPDF_PageContentGenerator::ProcessGraphics(fxcrt::ostringstream* buf,
                                                 CPDF_PageObject* pPageObj) {
   *buf << "q ";
   float fillColor[3];
-  if (GetColor(pPageObj->m_ColorState.GetFillColor(), fillColor)) {
+  if (GetColor(pPageObj->color_state().GetFillColor(), fillColor)) {
     *buf << fillColor[0] << " " << fillColor[1] << " " << fillColor[2]
          << " rg ";
   }
   float strokeColor[3];
-  if (GetColor(pPageObj->m_ColorState.GetStrokeColor(), strokeColor)) {
+  if (GetColor(pPageObj->color_state().GetStrokeColor(), strokeColor)) {
     *buf << strokeColor[0] << " " << strokeColor[1] << " " << strokeColor[2]
          << " RG ";
   }
-  float lineWidth = pPageObj->m_GraphState.GetLineWidth();
+  float lineWidth = pPageObj->graph_state().GetLineWidth();
   if (lineWidth != 1.0f)
     WriteFloat(*buf, lineWidth) << " w ";
-  CFX_GraphStateData::LineCap lineCap = pPageObj->m_GraphState.GetLineCap();
+  CFX_GraphStateData::LineCap lineCap = pPageObj->graph_state().GetLineCap();
   if (lineCap != CFX_GraphStateData::LineCap::kButt)
     *buf << static_cast<int>(lineCap) << " J ";
-  CFX_GraphStateData::LineJoin lineJoin = pPageObj->m_GraphState.GetLineJoin();
+  CFX_GraphStateData::LineJoin lineJoin = pPageObj->graph_state().GetLineJoin();
   if (lineJoin != CFX_GraphStateData::LineJoin::kMiter)
     *buf << static_cast<int>(lineJoin) << " j ";
+  std::vector<float> dash_array = pPageObj->graph_state().GetLineDashArray();
+  if (dash_array.size()) {
+    *buf << "[";
+    for (size_t i = 0; i < dash_array.size(); ++i) {
+      if (i > 0) {
+        *buf << " ";
+      }
+      WriteFloat(*buf, dash_array[i]);
+    }
+    *buf << "] ";
+    WriteFloat(*buf, pPageObj->graph_state().GetLineDashPhase()) << " d ";
+  }
 
-  const CPDF_ClipPath& clip_path = pPageObj->m_ClipPath;
+  const CPDF_ClipPath& clip_path = pPageObj->clip_path();
   if (clip_path.HasRef()) {
     for (size_t i = 0; i < clip_path.GetPathCount(); ++i) {
       CPDF_Path path = clip_path.GetPath(i);
@@ -464,8 +572,7 @@ void CPDF_PageContentGenerator::ProcessGraphics(fxcrt::ostringstream* buf,
           *buf << " W* ";
           break;
         case CFX_FillRenderOptions::FillType::kNoFill:
-          NOTREACHED();
-          break;
+          NOTREACHED_NORETURN();
       }
 
       // Use a no-op path-painting operator to terminate the path without
@@ -475,9 +582,9 @@ void CPDF_PageContentGenerator::ProcessGraphics(fxcrt::ostringstream* buf,
   }
 
   GraphicsData graphD;
-  graphD.fillAlpha = pPageObj->m_GeneralState.GetFillAlpha();
-  graphD.strokeAlpha = pPageObj->m_GeneralState.GetStrokeAlpha();
-  graphD.blendType = pPageObj->m_GeneralState.GetBlendType();
+  graphD.fillAlpha = pPageObj->general_state().GetFillAlpha();
+  graphD.strokeAlpha = pPageObj->general_state().GetStrokeAlpha();
+  graphD.blendType = pPageObj->general_state().GetBlendType();
   if (graphD.fillAlpha == 1.0f && graphD.strokeAlpha == 1.0f &&
       graphD.blendType == BlendMode::kNormal) {
     return;
@@ -498,10 +605,11 @@ void CPDF_PageContentGenerator::ProcessGraphics(fxcrt::ostringstream* buf,
 
     if (graphD.blendType != BlendMode::kNormal) {
       gsDict->SetNewFor<CPDF_Name>("BM",
-                                   pPageObj->m_GeneralState.GetBlendMode());
+                                   pPageObj->general_state().GetBlendMode());
     }
-    CPDF_Object* pDict = m_pDocument->AddIndirectObject(gsDict);
-    name = RealizeResource(pDict, "ExtGState");
+    m_pDocument->AddIndirectObject(gsDict);
+    name = RealizeResource(std::move(gsDict), "ExtGState");
+    pPageObj->mutable_general_state().SetGraphicsResourceNames({name});
     m_pObjHolder->GraphicsMapInsert(graphD, name);
   }
   *buf << "/" << PDF_NameEncode(name) << " gs ";
@@ -512,8 +620,8 @@ void CPDF_PageContentGenerator::ProcessDefaultGraphics(
   *buf << "0 0 0 RG 0 0 0 rg 1 w "
        << static_cast<int>(CFX_GraphStateData::LineCap::kButt) << " J "
        << static_cast<int>(CFX_GraphStateData::LineJoin::kMiter) << " j\n";
-  ByteString name = GetOrCreateDefaultGraphics();
-  *buf << "/" << PDF_NameEncode(name) << " gs ";
+  m_DefaultGraphicsName = GetOrCreateDefaultGraphics();
+  *buf << "/" << PDF_NameEncode(m_DefaultGraphicsName) << " gs ";
 }
 
 ByteString CPDF_PageContentGenerator::GetOrCreateDefaultGraphics() const {
@@ -531,8 +639,8 @@ ByteString CPDF_PageContentGenerator::GetOrCreateDefaultGraphics() const {
   gsDict->SetNewFor<CPDF_Number>("ca", defaultGraphics.fillAlpha);
   gsDict->SetNewFor<CPDF_Number>("CA", defaultGraphics.strokeAlpha);
   gsDict->SetNewFor<CPDF_Name>("BM", "Normal");
-  CPDF_Object* pDict = m_pDocument->AddIndirectObject(gsDict);
-  ByteString name = RealizeResource(pDict, "ExtGState");
+  m_pDocument->AddIndirectObject(gsDict);
+  ByteString name = RealizeResource(std::move(gsDict), "ExtGState");
   m_pObjHolder->GraphicsMapInsert(defaultGraphics, name);
   return name;
 }
@@ -549,7 +657,7 @@ void CPDF_PageContentGenerator::ProcessText(fxcrt::ostringstream* buf,
   WriteMatrix(*buf, pTextObj->GetTextMatrix()) << " Tm ";
   RetainPtr<CPDF_Font> pFont(pTextObj->GetFont());
   if (!pFont)
-    pFont = CPDF_Font::GetStockFont(m_pDocument.Get(), "Helvetica");
+    pFont = CPDF_Font::GetStockFont(m_pDocument, "Helvetica");
 
   FontData data;
   const CPDF_FontEncoding* pEncoding = nullptr;
@@ -566,10 +674,10 @@ void CPDF_PageContentGenerator::ProcessText(fxcrt::ostringstream* buf,
   }
   data.baseFont = pFont->GetBaseFontName();
 
-  ByteString dictName;
+  ByteString dict_name;
   absl::optional<ByteString> maybe_name = m_pObjHolder->FontsMapSearch(data);
   if (maybe_name.has_value()) {
-    dictName = std::move(maybe_name.value());
+    dict_name = std::move(maybe_name.value());
   } else {
     RetainPtr<const CPDF_Object> pIndirectFont = pFont->GetFontDict();
     if (pIndirectFont->IsInline()) {
@@ -582,12 +690,15 @@ void CPDF_PageContentGenerator::ProcessText(fxcrt::ostringstream* buf,
         pFontDict->SetFor("Encoding",
                           pEncoding->Realize(m_pDocument->GetByteStringPool()));
       }
-      pIndirectFont = m_pDocument->AddIndirectObject(pFontDict);
+      m_pDocument->AddIndirectObject(pFontDict);
+      pIndirectFont = std::move(pFontDict);
     }
-    dictName = RealizeResource(pIndirectFont, "Font");
-    m_pObjHolder->FontsMapInsert(data, dictName);
+    dict_name = RealizeResource(std::move(pIndirectFont), "Font");
+    m_pObjHolder->FontsMapInsert(data, dict_name);
   }
-  *buf << "/" << PDF_NameEncode(dictName) << " ";
+  pTextObj->SetResourceName(dict_name);
+
+  *buf << "/" << PDF_NameEncode(dict_name) << " ";
   WriteFloat(*buf, pTextObj->GetFontSize()) << " Tf ";
   *buf << static_cast<int>(pTextObj->GetTextRenderMode()) << " Tr ";
   ByteString text;

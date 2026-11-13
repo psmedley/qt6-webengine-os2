@@ -36,49 +36,50 @@ import * as i18n from '../../../../core/i18n/i18n.js';
 import * as Platform from '../../../../core/platform/platform.js';
 import * as TextUtils from '../../../../models/text_utils/text_utils.js';
 import * as Workspace from '../../../../models/workspace/workspace.js';
+import * as VisualLogging from '../../../visual_logging/visual_logging.js';
 import * as UI from '../../legacy.js';
 
 import imageViewStyles from './imageView.css.legacy.js';
 
 const UIStrings = {
   /**
-  *@description Text in Image View of the Sources panel
-  */
+   *@description Text in Image View of the Sources panel
+   */
   image: 'Image',
   /**
-  *@description Text that appears when user drag and drop something (for example, a file) in Image View of the Sources panel
-  */
+   *@description Text that appears when user drag and drop something (for example, a file) in Image View of the Sources panel
+   */
   dropImageFileHere: 'Drop image file here',
   /**
-  *@description Text to indicate the source of an image
-  *@example {example.com} PH1
-  */
+   *@description Text to indicate the source of an image
+   *@example {example.com} PH1
+   */
   imageFromS: 'Image from {PH1}',
   /**
-  *@description Text in Image View of the Sources panel
-  *@example {2} PH1
-  *@example {2} PH2
-  */
+   *@description Text in Image View of the Sources panel
+   *@example {2} PH1
+   *@example {2} PH2
+   */
   dD: '{PH1} × {PH2}',
   /**
-  *@description A context menu item in the Image View of the Sources panel
-  */
+   *@description A context menu item in the Image View of the Sources panel
+   */
   copyImageUrl: 'Copy image URL',
   /**
-  *@description A context menu item in the Image View of the Sources panel
-  */
+   *@description A context menu item in the Image View of the Sources panel
+   */
   copyImageAsDataUri: 'Copy image as data URI',
   /**
-  *@description A context menu item in the Image View of the Sources panel
-  */
+   *@description A context menu item in the Image View of the Sources panel
+   */
   openImageInNewTab: 'Open image in new tab',
   /**
-  *@description A context menu item in the Image Preview
-  */
+   *@description A context menu item in the Image Preview
+   */
   saveImageAs: 'Save image as...',
   /**
-  *@description The default file name when downloading a file
-  */
+   *@description The default file name when downloading a file
+   */
   download: 'download',
 };
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/components/source_frame/ImageView.ts', UIStrings);
@@ -101,6 +102,7 @@ export class ImageView extends UI.View.SimpleView {
     this.registerRequiredCSS(imageViewStyles);
     this.element.tabIndex = -1;
     this.element.classList.add('image-view');
+    this.element.setAttribute('jslog', `${VisualLogging.pane().context('image-view')}`);
     this.url = contentProvider.contentURL();
     this.parsedURL = new Common.ParsedURL.ParsedURL(this.url);
     this.mimeType = mimeType;
@@ -124,7 +126,7 @@ export class ImageView extends UI.View.SimpleView {
     this.imagePreviewElement.addEventListener('contextmenu', this.contextMenu.bind(this), true);
   }
 
-  async toolbarItems(): Promise<UI.Toolbar.ToolbarItem[]> {
+  override async toolbarItems(): Promise<UI.Toolbar.ToolbarItem[]> {
     await this.updateContentIfNeeded();
     return [
       this.sizeLabel,
@@ -137,11 +139,11 @@ export class ImageView extends UI.View.SimpleView {
     ];
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     void this.updateContentIfNeeded();
   }
 
-  disposeView(): void {
+  override disposeView(): void {
     if (this.uiSourceCode) {
       this.uiSourceCode.removeEventListener(
           Workspace.UISourceCode.Events.WorkingCopyCommitted, this.workingCopyCommitted, this);
@@ -180,16 +182,22 @@ export class ImageView extends UI.View.SimpleView {
     const contextMenu = new UI.ContextMenu.ContextMenu(event);
     const parsedSrc = new Common.ParsedURL.ParsedURL(this.imagePreviewElement.src);
     if (!this.parsedURL.isDataURL()) {
-      contextMenu.clipboardSection().appendItem(i18nString(UIStrings.copyImageUrl), this.copyImageURL.bind(this));
+      contextMenu.clipboardSection().appendItem(i18nString(UIStrings.copyImageUrl), this.copyImageURL.bind(this), {
+        jslogContext: 'image-view.copy-image-url',
+      });
     }
     if (parsedSrc.isDataURL()) {
       contextMenu.clipboardSection().appendItem(
-          i18nString(UIStrings.copyImageAsDataUri), this.copyImageAsDataURL.bind(this));
+          i18nString(UIStrings.copyImageAsDataUri), this.copyImageAsDataURL.bind(this), {
+            jslogContext: 'image-view.copy-image-as-data-url',
+          });
     }
 
-    contextMenu.clipboardSection().appendItem(i18nString(UIStrings.openImageInNewTab), this.openInNewTab.bind(this));
-    contextMenu.clipboardSection().appendItem(i18nString(UIStrings.saveImageAs), async () => {
-      await this.saveImage();
+    contextMenu.clipboardSection().appendItem(i18nString(UIStrings.openImageInNewTab), this.openInNewTab.bind(this), {
+      jslogContext: 'image-view.open-in-new-tab',
+    });
+    contextMenu.clipboardSection().appendItem(i18nString(UIStrings.saveImageAs), this.saveImage.bind(this), {
+      jslogContext: 'image-view.save-image',
     });
 
     void contextMenu.show();

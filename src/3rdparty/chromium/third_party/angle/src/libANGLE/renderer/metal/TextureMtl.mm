@@ -15,7 +15,9 @@
 #include "common/debug.h"
 #include "common/mathutil.h"
 #include "image_util/imageformats.h"
+#include "image_util/loadimage.h"
 #include "libANGLE/Surface.h"
+#include "libANGLE/renderer/Format.h"
 #include "libANGLE/renderer/metal/BufferMtl.h"
 #include "libANGLE/renderer/metal/ContextMtl.h"
 #include "libANGLE/renderer/metal/DisplayMtl.h"
@@ -347,6 +349,26 @@ angle::Result CopyCompressedTextureContentsToStagingBuffer(ContextMtl *contextMt
     return angle::Result::Continue;
 }
 
+angle::Result SaturateDepth(ContextMtl *contextMtl,
+                            mtl::BufferRef srcBuffer,
+                            mtl::BufferRef dstBuffer,
+                            uint32_t srcBufferOffset,
+                            uint32_t srcPitch,
+                            MTLSize size)
+{
+    static_assert(gl::IMPLEMENTATION_MAX_2D_TEXTURE_SIZE <= UINT_MAX);
+    mtl::DepthSaturationParams params;
+    params.srcBuffer       = srcBuffer;
+    params.dstBuffer       = dstBuffer;
+    params.srcBufferOffset = srcBufferOffset;
+    params.dstWidth        = static_cast<uint32_t>(size.width);
+    params.dstHeight       = static_cast<uint32_t>(size.height);
+    params.srcPitch        = srcPitch;
+    ANGLE_TRY(contextMtl->getDisplay()->getUtils().saturateDepth(contextMtl, params));
+
+    return angle::Result::Continue;
+}
+
 angle::Result UploadDepthStencilTextureContentsWithStagingBuffer(
     ContextMtl *contextMtl,
     const angle::Format &textureAngleFormat,
@@ -364,8 +386,9 @@ angle::Result UploadDepthStencilTextureContentsWithStagingBuffer(
 
     ASSERT(!textureAngleFormat.depthBits || !textureAngleFormat.stencilBits);
 
-    // Compressed texture is not supporte atm
-    ASSERT(!textureAngleFormat.isBlock);
+    // Depth and stencil textures cannot be of 3D type;
+    // arrays and cube maps must be uploaded per-slice.
+    ASSERT(region.size.depth == 1);
 
     // Copy data to staging buffer
     size_t stagingBufferRowPitch;
@@ -375,6 +398,12 @@ angle::Result UploadDepthStencilTextureContentsWithStagingBuffer(
         contextMtl, textureAngleFormat, textureAngleFormat, textureAngleFormat.pixelWriteFunction,
         region.size, data, bytesPerRow, bytesPer2DImage, &stagingBufferRowPitch,
         &stagingBuffer2DImageSize, &stagingBuffer));
+
+    if (textureAngleFormat.id == angle::FormatID::D32_FLOAT)
+    {
+        ANGLE_TRY(SaturateDepth(contextMtl, stagingBuffer, stagingBuffer, 0,
+                                static_cast<uint32_t>(region.size.width), region.size));
+    }
 
     // Copy staging buffer to texture.
     mtl::BlitCommandEncoder *encoder = contextMtl->getBlitCommandEncoder();
@@ -402,6 +431,10 @@ angle::Result UploadPackedDepthStencilTextureContentsWithStagingBuffer(
     ASSERT(!texture->isCPUAccessible());
 
     ASSERT(textureAngleFormat.depthBits && textureAngleFormat.stencilBits);
+
+    // Depth and stencil textures cannot be of 3D type;
+    // arrays and cube maps must be uploaded per-slice.
+    ASSERT(region.size.depth == 1);
 
     // We have to split the depth & stencil data into 2 buffers.
     angle::FormatID stagingDepthBufferFormatId;
@@ -433,13 +466,13 @@ angle::Result UploadPackedDepthStencilTextureContentsWithStagingBuffer(
 
     size_t stagingDepthBufferRowPitch, stagingStencilBufferRowPitch;
     size_t stagingDepthBuffer2DImageSize, stagingStencilBuffer2DImageSize;
-    mtl::BufferRef stagingDepthbuffer, stagingStencilBuffer;
+    mtl::BufferRef stagingDepthBuffer, stagingStencilBuffer;
 
     // Copy depth data to staging depth buffer
     ANGLE_TRY(CopyDepthStencilTextureContentsToStagingBuffer(
         contextMtl, textureAngleFormat, angleStagingDepthFormat,
         stagingDepthBufferWriteFunctionOverride, region.size, data, bytesPerRow, bytesPer2DImage,
-        &stagingDepthBufferRowPitch, &stagingDepthBuffer2DImageSize, &stagingDepthbuffer));
+        &stagingDepthBufferRowPitch, &stagingDepthBuffer2DImageSize, &stagingDepthBuffer));
 
     // Copy stencil data to staging stencil buffer
     ANGLE_TRY(CopyDepthStencilTextureContentsToStagingBuffer(
@@ -447,9 +480,15 @@ angle::Result UploadPackedDepthStencilTextureContentsWithStagingBuffer(
         bytesPerRow, bytesPer2DImage, &stagingStencilBufferRowPitch,
         &stagingStencilBuffer2DImageSize, &stagingStencilBuffer));
 
+    if (angleStagingDepthFormat.id == angle::FormatID::D32_FLOAT)
+    {
+        ANGLE_TRY(SaturateDepth(contextMtl, stagingDepthBuffer, stagingDepthBuffer, 0,
+                                static_cast<uint32_t>(region.size.width), region.size));
+    }
+
     mtl::BlitCommandEncoder *encoder = contextMtl->getBlitCommandEncoder();
 
-    encoder->copyBufferToTexture(stagingDepthbuffer, 0, stagingDepthBufferRowPitch,
+    encoder->copyBufferToTexture(stagingDepthBuffer, 0, stagingDepthBufferRowPitch,
                                  stagingDepthBuffer2DImageSize, region.size, texture, slice,
                                  mipmapLevel, region.origin, MTLBlitOptionDepthFromDepthStencil);
     encoder->copyBufferToTexture(stagingStencilBuffer, 0, stagingStencilBufferRowPitch,
@@ -519,25 +558,31 @@ angle::Result UploadTextureContents(const gl::Context *context,
                                     const uint8_t *data,
                                     size_t bytesPerRow,
                                     size_t bytesPer2DImage,
+                                    bool avoidStagingBuffers,
                                     const mtl::TextureRef &texture)
 
 {
     ASSERT(texture && texture->valid());
-    ContextMtl *contextMtl = mtl::GetImpl(context);
-#if !TARGET_OS_SIMULATOR
-    const angle::FeaturesMtl &features = contextMtl->getDisplay()->getFeatures();
+    ContextMtl *contextMtl       = mtl::GetImpl(context);
+    const mtl::Format &mtlFormat = contextMtl->getPixelFormat(textureAngleFormat.id);
 
-    bool forceStagedUpload =
-        texture->hasIOSurface() && features.uploadDataToIosurfacesWithStagingBuffers.enabled;
-    if (texture->isCPUAccessible() && !forceStagedUpload)
+    bool preferGPUInitialization =
+        !avoidStagingBuffers &&
+        PreferStagedTextureUploads(context, texture, mtlFormat, mtl::StagingPurpose::Upload);
+    if (texture->isCPUAccessible() && !preferGPUInitialization)
     {
+        if (mtlFormat.isPVRTC())
+        {
+            // Replace Region Validation: rowBytes must be 0
+            bytesPerRow = 0;
+        }
+
         // If texture is CPU accessible, just call replaceRegion() directly.
         texture->replaceRegion(contextMtl, region, mipmapLevel, slice, data, bytesPerRow,
                                bytesPer2DImage);
 
         return angle::Result::Continue;
     }
-#endif
 
     // Texture is not CPU accessible or staging is forced due to a workaround
     if (!textureAngleFormat.depthBits && !textureAngleFormat.stencilBits)
@@ -572,12 +617,12 @@ GLenum OverrideSwizzleValue(const gl::Context *context,
                             const mtl::Format &format,
                             const gl::InternalFormat &glInternalFormat)
 {
-    if (format.actualAngleFormat().depthBits)
+    if (format.actualAngleFormat().hasDepthOrStencilBits())
     {
         ASSERT(!format.swizzled);
         if (context->getState().getClientMajorVersion() >= 3 && glInternalFormat.sized)
         {
-            // ES 3.0 spec: treat depth texture as red texture during sampling.
+            // ES 3.1 spec: treat depth and stencil textures as red textures during sampling.
             if (swizzle == GL_GREEN || swizzle == GL_BLUE)
             {
                 return GL_NONE;
@@ -646,6 +691,7 @@ void TextureMtl::releaseTexture(bool releaseImages, bool releaseTextureObjectsOn
     if (releaseImages)
     {
         mTexImageDefs.clear();
+        mShaderImageViews.clear();
     }
     else if (mNativeTexture)
     {
@@ -653,8 +699,8 @@ void TextureMtl::releaseTexture(bool releaseImages, bool releaseTextureObjectsOn
         retainImageDefinitions();
     }
 
-    mNativeTexture             = nullptr;
-    mNativeSwizzleSamplingView = nullptr;
+    mNativeTexture                    = nullptr;
+    mNativeSwizzleStencilSamplingView = nullptr;
 
     // Clear render target cache for each texture's image. We don't erase them because they
     // might still be referenced by a framebuffer.
@@ -711,35 +757,34 @@ angle::Result TextureMtl::createNativeTexture(const gl::Context *context,
     mCurrentBaseLevel = mState.getEffectiveBaseLevel();
     mCurrentMaxLevel  = mState.getEffectiveMaxLevel();
 
-    mSlices          = 1;
-    int numCubeFaces = 1;
+    mSlices              = 1;
+    int numCubeFaces     = 1;
+    bool allowFormatView = mFormat.hasDepthAndStencilBits() ||
+                           needsFormatViewForPixelLocalStorage(
+                               contextMtl->getDisplay()->getNativePixelLocalStorageOptions());
     switch (type)
     {
         case gl::TextureType::_2D:
             ANGLE_TRY(mtl::Texture::Make2DTexture(
                 contextMtl, mFormat, size.width, size.height, mips,
-                /** renderTargetOnly */ false,
-                /** allowFormatView */ mFormat.hasDepthAndStencilBits(), &mNativeTexture));
+                /** renderTargetOnly */ false, allowFormatView, &mNativeTexture));
             break;
         case gl::TextureType::CubeMap:
             mSlices = numCubeFaces = 6;
-            ANGLE_TRY(mtl::Texture::MakeCubeTexture(
-                contextMtl, mFormat, size.width, mips,
-                /** renderTargetOnly */ false,
-                /** allowFormatView */ mFormat.hasDepthAndStencilBits(), &mNativeTexture));
+            ANGLE_TRY(mtl::Texture::MakeCubeTexture(contextMtl, mFormat, size.width, mips,
+                                                    /** renderTargetOnly */ false, allowFormatView,
+                                                    &mNativeTexture));
             break;
         case gl::TextureType::_3D:
             ANGLE_TRY(mtl::Texture::Make3DTexture(
                 contextMtl, mFormat, size.width, size.height, size.depth, mips,
-                /** renderTargetOnly */ false,
-                /** allowFormatView */ mFormat.hasDepthAndStencilBits(), &mNativeTexture));
+                /** renderTargetOnly */ false, allowFormatView, &mNativeTexture));
             break;
         case gl::TextureType::_2DArray:
             mSlices = size.depth;
             ANGLE_TRY(mtl::Texture::Make2DArrayTexture(
                 contextMtl, mFormat, size.width, size.height, mips, mSlices,
-                /** renderTargetOnly */ false,
-                /** allowFormatView */ mFormat.hasDepthAndStencilBits(), &mNativeTexture));
+                /** renderTargetOnly */ false, allowFormatView, &mNativeTexture));
             break;
         default:
             UNREACHABLE();
@@ -761,6 +806,7 @@ angle::Result TextureMtl::createNativeTexture(const gl::Context *context,
             // format.
             gl::Extents actualMipSize = mNativeTexture->size(actualMip);
             if (imageToTransfer && imageToTransfer->sizeAt0() == actualMipSize &&
+                imageToTransfer->arrayLength() == mNativeTexture->arrayLength() &&
                 imageToTransfer->pixelFormat() == mNativeTexture->pixelFormat())
             {
                 if (!encoder)
@@ -807,7 +853,12 @@ angle::Result TextureMtl::ensureSamplerStateCreated(const gl::Context *context)
 
         samplerDesc.maxAnisotropy = 1;
     }
-    if (mState.getType() == gl::TextureType::Rectangle)
+
+    // OpenGL ES 3.x: The rules for texel selection are modified
+    // for cube maps so that texture wrap modes are ignored.
+    if ((mState.getType() == gl::TextureType::CubeMap ||
+         mState.getType() == gl::TextureType::CubeMapArray) &&
+        context->getState().getClientMajorVersion() >= 3)
     {
         samplerDesc.rAddressMode = MTLSamplerAddressModeClampToEdge;
         samplerDesc.sAddressMode = MTLSamplerAddressModeClampToEdge;
@@ -1366,7 +1417,7 @@ angle::Result TextureMtl::generateMipmapCPU(const gl::Context *context)
             // Upload to texture
             ANGLE_TRY(UploadTextureContents(
                 context, angleFormat, MTLRegionMake3D(0, 0, 0, dstWidth, dstHeight, dstDepth), mip,
-                slice, dstLevelData.get(), dstRowPitch, dstDepthPitch, mNativeTexture));
+                slice, dstLevelData.get(), dstRowPitch, dstDepthPitch, false, mNativeTexture));
 
             prevLevelWidth      = dstWidth;
             prevLevelHeight     = dstHeight;
@@ -1379,6 +1430,28 @@ angle::Result TextureMtl::generateMipmapCPU(const gl::Context *context)
     }  // For layers
 
     return angle::Result::Continue;
+}
+
+bool TextureMtl::needsFormatViewForPixelLocalStorage(
+    const ShPixelLocalStorageOptions &plsOptions) const
+{
+    // On iOS devices with GPU family 5 and later, Metal doesn't apply lossless compression to
+    // the texture if we set MTLTextureUsagePixelFormatView. This shouldn't be a problem though
+    // because iOS devices implement pixel local storage with framebuffer fetch instead of shader
+    // images.
+    if (plsOptions.type == ShPixelLocalStorageType::ImageLoadStore)
+    {
+        switch (mFormat.metalFormat)
+        {
+            case MTLPixelFormatRGBA8Unorm:
+            case MTLPixelFormatRGBA8Uint:
+            case MTLPixelFormatRGBA8Sint:
+                return !plsOptions.supportsNativeRGBA8ImageFormats;
+            default:
+                break;
+        }
+    }
+    return false;
 }
 
 angle::Result TextureMtl::setBaseLevel(const gl::Context *context, GLuint baseLevel)
@@ -1463,9 +1536,10 @@ angle::Result TextureMtl::syncState(const gl::Context *context,
             case gl::Texture::DIRTY_BIT_SWIZZLE_GREEN:
             case gl::Texture::DIRTY_BIT_SWIZZLE_BLUE:
             case gl::Texture::DIRTY_BIT_SWIZZLE_ALPHA:
+            case gl::Texture::DIRTY_BIT_DEPTH_STENCIL_TEXTURE_MODE:
             {
-                // Recreate swizzle view.
-                mNativeSwizzleSamplingView = nullptr;
+                // Recreate swizzle/stencil view.
+                mNativeSwizzleStencilSamplingView = nullptr;
             }
             break;
             default:
@@ -1492,14 +1566,21 @@ angle::Result TextureMtl::bindToShader(const gl::Context *context,
     float maxLodClamp;
     id<MTLSamplerState> samplerState;
 
-    if (!mNativeSwizzleSamplingView)
+    if (!mNativeSwizzleStencilSamplingView)
     {
 #if ANGLE_MTL_SWIZZLE_AVAILABLE
-        ContextMtl *contextMtl = mtl::GetImpl(context);
+        ContextMtl *contextMtl             = mtl::GetImpl(context);
+        const angle::FeaturesMtl &features = contextMtl->getDisplay()->getFeatures();
 
-        if ((mState.getSwizzleState().swizzleRequired() || mFormat.actualAngleFormat().depthBits ||
-             mFormat.swizzled) &&
-            contextMtl->getDisplay()->getFeatures().hasTextureSwizzle.enabled)
+        // Sampling from unused channels of depth and stencil textures is undefined in Metal.
+        // ANGLE relies on swizzled views to enforce values required by OpenGL ES specs. Some
+        // drivers fail to sample from a swizzled view of a stencil texture so skip this step.
+        const bool skipStencilSwizzle = mFormat.actualFormatId == angle::FormatID::S8_UINT &&
+                                        features.avoidStencilTextureSwizzle.enabled;
+        if (!skipStencilSwizzle &&
+            (mState.getSwizzleState().swizzleRequired() ||
+             mFormat.actualAngleFormat().hasDepthOrStencilBits() || mFormat.swizzled) &&
+            features.hasTextureSwizzle.enabled)
         {
             const gl::InternalFormat &glInternalFormat = *mState.getBaseLevelDesc().format.info;
 
@@ -1513,12 +1594,28 @@ angle::Result TextureMtl::bindToShader(const gl::Context *context,
                 mtl::GetTextureSwizzle(OverrideSwizzleValue(
                     context, mState.getSwizzleState().swizzleAlpha, mFormat, glInternalFormat)));
 
-            mNativeSwizzleSamplingView = mNativeTexture->createSwizzleView(swizzle);
+            MTLPixelFormat format = mNativeTexture->pixelFormat();
+            if (mState.isStencilMode())
+            {
+                if (format == MTLPixelFormatDepth32Float_Stencil8)
+                {
+                    format = MTLPixelFormatX32_Stencil8;
+                }
+#    if TARGET_OS_OSX || TARGET_OS_MACCATALYST
+                else if (format == MTLPixelFormatDepth24Unorm_Stencil8)
+                {
+                    format = MTLPixelFormatX24_Stencil8;
+                }
+#    endif
+            }
+
+            mNativeSwizzleStencilSamplingView = mNativeTexture->createSwizzleView(format, swizzle);
         }
         else
 #endif  // ANGLE_MTL_SWIZZLE_AVAILABLE
         {
-            mNativeSwizzleSamplingView = mNativeTexture;
+            mNativeSwizzleStencilSamplingView =
+                mState.isStencilMode() ? mNativeTexture->getStencilView() : mNativeTexture;
         }
     }
 
@@ -1538,10 +1635,46 @@ angle::Result TextureMtl::bindToShader(const gl::Context *context,
 
     minLodClamp = std::max(minLodClamp, 0.f);
 
-    cmdEncoder->setTexture(shaderType, mNativeSwizzleSamplingView, textureSlotIndex);
+    cmdEncoder->setTexture(shaderType, mNativeSwizzleStencilSamplingView, textureSlotIndex);
     cmdEncoder->setSamplerState(shaderType, samplerState, minLodClamp, maxLodClamp,
                                 samplerSlotIndex);
 
+    return angle::Result::Continue;
+}
+
+angle::Result TextureMtl::bindToShaderImage(const gl::Context *context,
+                                            mtl::RenderCommandEncoder *cmdEncoder,
+                                            gl::ShaderType shaderType,
+                                            int textureSlotIndex,
+                                            int level,
+                                            int layer,
+                                            GLenum format)
+{
+    ASSERT(mNativeTexture);
+    ASSERT(0 <= level && static_cast<uint32_t>(level) < mNativeTexture->mipmapLevels());
+
+    if (layer != 0)
+    {
+        UNIMPLEMENTED();
+        return angle::Result::Stop;
+    }
+
+    ContextMtl *contextMtl        = mtl::GetImpl(context);
+    angle::FormatID angleFormatId = angle::Format::InternalFormatToID(format);
+    mtl::Format imageAccessFormat = contextMtl->getPixelFormat(angleFormatId);
+    gl::TexLevelArray<mtl::TextureRef> &levelsForFormat =
+        mShaderImageViews[imageAccessFormat.metalFormat];
+    GLuint imageMipLevel =
+        mtl::GetGLMipLevel(mtl::kZeroNativeMipLevel + level, mState.getEffectiveBaseLevel());
+    mtl::TextureRef &textureRef = levelsForFormat[imageMipLevel];
+
+    if (textureRef == nullptr)
+    {
+        textureRef = mNativeTexture->createShaderImageView(mtl::kZeroNativeMipLevel + level, layer,
+                                                           imageAccessFormat.metalFormat);
+    }
+
+    cmdEncoder->setRWTexture(shaderType, textureRef, textureSlotIndex);
     return angle::Result::Continue;
 }
 
@@ -1587,7 +1720,10 @@ angle::Result TextureMtl::redefineImage(const gl::Context *context,
     }
     else
     {
-        imageDef.formatID = mtlFormat.intendedFormatId;
+        imageDef.formatID    = mtlFormat.intendedFormatId;
+        bool allowFormatView = mFormat.hasDepthAndStencilBits() ||
+                               needsFormatViewForPixelLocalStorage(
+                                   contextMtl->getDisplay()->getNativePixelLocalStorageOptions());
         // Create image to hold texture's data at this level & slice:
         switch (index.getType())
         {
@@ -1595,28 +1731,25 @@ angle::Result TextureMtl::redefineImage(const gl::Context *context,
             case gl::TextureType::CubeMap:
                 ANGLE_TRY(mtl::Texture::Make2DTexture(
                     contextMtl, mtlFormat, size.width, size.height, 1,
-                    /** renderTargetOnly */ false,
-                    /** allowFormatView */ mFormat.hasDepthAndStencilBits(), &imageDef.image));
+                    /** renderTargetOnly */ false, allowFormatView, &imageDef.image));
                 break;
             case gl::TextureType::_3D:
                 ANGLE_TRY(mtl::Texture::Make3DTexture(
                     contextMtl, mtlFormat, size.width, size.height, size.depth, 1,
-                    /** renderTargetOnly */ false,
-                    /** allowFormatView */ mFormat.hasDepthAndStencilBits(), &imageDef.image));
+                    /** renderTargetOnly */ false, allowFormatView, &imageDef.image));
                 break;
             case gl::TextureType::_2DArray:
                 ANGLE_TRY(mtl::Texture::Make2DArrayTexture(
                     contextMtl, mtlFormat, size.width, size.height, 1, size.depth,
-                    /** renderTargetOnly */ false,
-                    /** allowFormatView */ mFormat.hasDepthAndStencilBits(), &imageDef.image));
+                    /** renderTargetOnly */ false, allowFormatView, &imageDef.image));
                 break;
             default:
                 UNREACHABLE();
         }
-    }
 
-    // Make sure emulated channels are properly initialized
-    ANGLE_TRY(checkForEmulatedChannels(context, mtlFormat, imageDef.image));
+        // Make sure emulated channels are properly initialized in this newly allocated texture.
+        ANGLE_TRY(checkForEmulatedChannels(context, mtlFormat, imageDef.image));
+    }
 
     // Tell context to rebind textures
     contextMtl->invalidateCurrentTextures();
@@ -1714,18 +1847,6 @@ angle::Result TextureMtl::setSubImageImpl(const gl::Context *context,
                         formatInfo.computeSkipBytes(type, sourceRowPitch, sourceDepthPitch, unpack,
                                                     index.usesTex3D(), &sourceSkipBytes));
 
-    // Check if partial image update is supported for this format
-    if (!formatInfo.supportSubImage())
-    {
-        // area must be the whole mip level
-        sourceRowPitch   = 0;
-        gl::Extents size = image->sizeAt0();
-        if (area.x != 0 || area.y != 0 || area.width != size.width || area.height != size.height)
-        {
-            ANGLE_MTL_CHECK(contextMtl, false, GL_INVALID_OPERATION);
-        }
-    }
-
     // Get corresponding source data's ANGLE format
     angle::FormatID srcAngleFormatId;
     if (formatInfo.sizedInternalFormat == GL_DEPTH_COMPONENT24)
@@ -1817,19 +1938,77 @@ angle::Result TextureMtl::setPerSliceSubImage(const gl::Context *context,
         {
             // NOTE(hqle): packed depth & stencil texture cannot copy from buffer directly, needs
             // to split its depth & stencil data and copy separately.
-            const uint8_t *clientData = unpackBufferMtl->getClientShadowCopyData(contextMtl);
+            const uint8_t *clientData = unpackBufferMtl->getBufferDataReadOnly(contextMtl);
             clientData += offset;
             ANGLE_TRY(UploadTextureContents(context, mFormat.actualAngleFormat(), mtlArea,
                                             mtl::kZeroNativeMipLevel, slice, clientData,
-                                            pixelsRowPitch, pixelsDepthPitch, image));
+                                            pixelsRowPitch, pixelsDepthPitch, false, image));
         }
         else
         {
+            mtl::BufferRef sourceBuffer = unpackBufferMtl->getCurrentBuffer();
+            // PVRTC1 blocks are stored in a reflected Morton order
+            // and need to be linearized for buffer uploads in Metal.
+            // This step is skipped for textures that have only one block.
+            if (mFormat.isPVRTC() && mtlArea.size.height > 4)
+            {
+                // PVRTC1 inherent requirement.
+                ASSERT(gl::isPow2(mtlArea.size.width) && gl::isPow2(mtlArea.size.height));
+                // Metal-specific limitation enforced by ANGLE validation.
+                ASSERT(mtlArea.size.width == mtlArea.size.height);
+                static_assert(gl::IMPLEMENTATION_MAX_2D_TEXTURE_SIZE <= 262144,
+                              "The current kernel can handle up to 65536 blocks per dimension.");
+
+                // Current command buffer implementation does not support 64-bit offsets.
+                ANGLE_MTL_CHECK(contextMtl, offset <= std::numeric_limits<uint32_t>::max(),
+                                GL_INVALID_OPERATION);
+
+                mtl::BufferRef stagingBuffer;
+                ANGLE_TRY(
+                    mtl::Buffer::MakeBuffer(contextMtl, pixelsDepthPitch, nullptr, &stagingBuffer));
+
+                mtl::BlockLinearizationParams params;
+                params.srcBuffer       = sourceBuffer;
+                params.dstBuffer       = stagingBuffer;
+                params.srcBufferOffset = static_cast<uint32_t>(offset);
+                params.blocksWide =
+                    static_cast<GLuint>(mtlArea.size.width) / internalFormat.compressedBlockWidth;
+                params.blocksHigh =
+                    static_cast<GLuint>(mtlArea.size.height) / internalFormat.compressedBlockHeight;
+
+                // PVRTC1 textures always have at least 2 blocks in each dimension.
+                // Enforce correct block layout for 8x8 textures that use 8x4 blocks.
+                params.blocksWide = std::max(params.blocksWide, 2u);
+
+                ANGLE_TRY(contextMtl->getDisplay()->getUtils().linearizeBlocks(contextMtl, params));
+
+                sourceBuffer = stagingBuffer;
+                offset       = 0;
+            }
+            else if (pixelsAngleFormat.id == angle::FormatID::D32_FLOAT)
+            {
+                // Current command buffer implementation does not support 64-bit offsets.
+                ANGLE_MTL_CHECK(contextMtl, offset <= std::numeric_limits<uint32_t>::max(),
+                                GL_INVALID_OPERATION);
+
+                mtl::BufferRef stagingBuffer;
+                ANGLE_TRY(
+                    mtl::Buffer::MakeBuffer(contextMtl, pixelsDepthPitch, nullptr, &stagingBuffer));
+
+                ASSERT(pixelsAngleFormat.pixelBytes == 4 && offset % 4 == 0);
+                ANGLE_TRY(SaturateDepth(contextMtl, sourceBuffer, stagingBuffer,
+                                        static_cast<uint32_t>(offset),
+                                        static_cast<uint32_t>(pixelsRowPitch) / 4, mtlArea.size));
+
+                sourceBuffer = stagingBuffer;
+                offset       = 0;
+            }
+
             // Use blit encoder to copy
             mtl::BlitCommandEncoder *blitEncoder = contextMtl->getBlitCommandEncoder();
             blitEncoder->copyBufferToTexture(
-                unpackBufferMtl->getCurrentBuffer(), offset, pixelsRowPitch, pixelsDepthPitch,
-                mtlArea.size, image, slice, mtl::kZeroNativeMipLevel, mtlArea.origin,
+                sourceBuffer, offset, pixelsRowPitch, pixelsDepthPitch, mtlArea.size, image, slice,
+                mtl::kZeroNativeMipLevel, mtlArea.origin,
                 mFormat.isPVRTC() ? mtl::kBlitOptionRowLinearPVRTC : MTLBlitOptionNone);
         }
     }
@@ -1837,7 +2016,7 @@ angle::Result TextureMtl::setPerSliceSubImage(const gl::Context *context,
     {
         ANGLE_TRY(UploadTextureContents(context, mFormat.actualAngleFormat(), mtlArea,
                                         mtl::kZeroNativeMipLevel, slice, pixels, pixelsRowPitch,
-                                        pixelsDepthPitch, image));
+                                        pixelsDepthPitch, false, image));
     }
     return angle::Result::Continue;
 }
@@ -1871,7 +2050,7 @@ angle::Result TextureMtl::convertAndSetPerSliceSubImage(const gl::Context *conte
             mFormat.intendedAngleFormat().isBlock)
         {
             // Unsupported format, use CPU path.
-            const uint8_t *clientData = unpackBufferMtl->getClientShadowCopyData(contextMtl);
+            const uint8_t *clientData = unpackBufferMtl->getBufferDataReadOnly(contextMtl);
             clientData += offset;
             ANGLE_TRY(convertAndSetPerSliceSubImage(context, slice, mtlArea, internalFormat, type,
                                                     pixelsAngleFormat, pixelsRowPitch,
@@ -1910,6 +2089,10 @@ angle::Result TextureMtl::convertAndSetPerSliceSubImage(const gl::Context *conte
         const angle::Format &dstFormat         = angle::Format::Get(mFormat.actualFormatId);
         const size_t dstRowPitch               = dstFormat.pixelBytes * mtlArea.size.width;
 
+        // It is very important to avoid allocating a new buffer for each row during these
+        // uploads.
+        const bool kAvoidStagingBuffers = true;
+
         // Check if original image data is compressed:
         if (mFormat.intendedAngleFormat().isBlock)
         {
@@ -1924,15 +2107,15 @@ angle::Result TextureMtl::convertAndSetPerSliceSubImage(const gl::Context *conte
                                      decompressBuf.resize(dstDepthPitch * mtlArea.size.depth));
 
                 // Decompress
-                loadFunctionInfo.loadFunction(mtlArea.size.width, mtlArea.size.height,
-                                              mtlArea.size.depth, pixels, pixelsRowPitch,
-                                              pixelsDepthPitch, decompressBuf.data(), dstRowPitch,
-                                              dstDepthPitch);
+                loadFunctionInfo.loadFunction(contextMtl->getImageLoadContext(), mtlArea.size.width,
+                                              mtlArea.size.height, mtlArea.size.depth, pixels,
+                                              pixelsRowPitch, pixelsDepthPitch,
+                                              decompressBuf.data(), dstRowPitch, dstDepthPitch);
 
                 // Upload to texture
                 ANGLE_TRY(UploadTextureContents(
                     context, dstFormat, mtlArea, mtl::kZeroNativeMipLevel, slice,
-                    decompressBuf.data(), dstRowPitch, dstDepthPitch, image));
+                    decompressBuf.data(), dstRowPitch, dstDepthPitch, kAvoidStagingBuffers, image));
             }
             else
             {
@@ -1940,9 +2123,9 @@ angle::Result TextureMtl::convertAndSetPerSliceSubImage(const gl::Context *conte
                 ASSERT(mtlArea.size.width == static_cast<unsigned int>(image->sizeAt0().width));
                 ASSERT(mtlArea.size.height == static_cast<unsigned int>(image->sizeAt0().height));
                 const size_t dstDepthPitch = dstRowPitch * mtlArea.size.height;
-                ANGLE_TRY(UploadTextureContents(context, dstFormat, mtlArea,
-                                                mtl::kZeroNativeMipLevel, slice, pixels,
-                                                dstRowPitch, dstDepthPitch, image));
+                ANGLE_TRY(UploadTextureContents(
+                    context, dstFormat, mtlArea, mtl::kZeroNativeMipLevel, slice, pixels,
+                    dstRowPitch, dstDepthPitch, kAvoidStagingBuffers, image));
             }
         }  // if (mFormat.intendedAngleFormat().isBlock)
         else
@@ -1965,7 +2148,8 @@ angle::Result TextureMtl::convertAndSetPerSliceSubImage(const gl::Context *conte
                     // Convert pixels
                     if (loadFunctionInfo.loadFunction)
                     {
-                        loadFunctionInfo.loadFunction(mtlRow.size.width, 1, 1, psrc, pixelsRowPitch,
+                        loadFunctionInfo.loadFunction(contextMtl->getImageLoadContext(),
+                                                      mtlRow.size.width, 1, 1, psrc, pixelsRowPitch,
                                                       0, conversionRow.data(), dstRowPitch, 0);
                     }
                     else if (mFormat.hasDepthOrStencilBits())
@@ -1985,9 +2169,9 @@ angle::Result TextureMtl::convertAndSetPerSliceSubImage(const gl::Context *conte
                     }
 
                     // Upload to texture
-                    ANGLE_TRY(UploadTextureContents(context, dstFormat, mtlRow,
-                                                    mtl::kZeroNativeMipLevel, slice,
-                                                    conversionRow.data(), dstRowPitch, 0, image));
+                    ANGLE_TRY(UploadTextureContents(
+                        context, dstFormat, mtlRow, mtl::kZeroNativeMipLevel, slice,
+                        conversionRow.data(), dstRowPitch, 0, kAvoidStagingBuffers, image));
                 }
             }
         }  // if (mFormat.intendedAngleFormat().isBlock)
@@ -2195,6 +2379,10 @@ angle::Result TextureMtl::copySubImageCPU(const gl::Context *context,
             UNREACHABLE();
     }
 
+    // It is very important to avoid allocating a new buffer for each row during these
+    // uploads.
+    const bool kAvoidStagingBuffers = true;
+
     // Copy row by row:
     for (int r = 0; r < clippedSourceArea.height; ++r)
     {
@@ -2210,7 +2398,8 @@ angle::Result TextureMtl::copySubImageCPU(const gl::Context *context,
 
         // Upload to texture
         ANGLE_TRY(UploadTextureContents(context, dstFormat, mtlDstRowArea, mtl::kZeroNativeMipLevel,
-                                        dstSlice, conversionRow.data(), dstRowPitch, 0, image));
+                                        dstSlice, conversionRow.data(), dstRowPitch, 0,
+                                        kAvoidStagingBuffers, image));
     }
 
     return angle::Result::Continue;
@@ -2300,6 +2489,7 @@ angle::Result TextureMtl::copySubTextureWithDraw(const gl::Context *context,
     blitParams.unpackFlipY            = unpackFlipY;
     blitParams.unpackPremultiplyAlpha = unpackPremultiplyAlpha;
     blitParams.unpackUnmultiplyAlpha  = unpackUnmultiplyAlpha;
+    blitParams.transformLinearToSrgb  = sourceAngleFormat.isSRGB;
 
     return displayMtl->getUtils().copyTextureWithDraw(context, cmdEncoder, sourceAngleFormat,
                                                       mFormat.actualAngleFormat(), blitParams);
@@ -2350,7 +2540,7 @@ angle::Result TextureMtl::copySubTextureCPU(const gl::Context *context,
 
     // Upload to texture
     ANGLE_TRY(UploadTextureContents(context, dstAngleFormat, mtlDstArea, mtl::kZeroNativeMipLevel,
-                                    0, conversionDst.data(), convRowPitch, 0, image));
+                                    0, conversionDst.data(), convRowPitch, 0, false, image));
 
     return angle::Result::Continue;
 }

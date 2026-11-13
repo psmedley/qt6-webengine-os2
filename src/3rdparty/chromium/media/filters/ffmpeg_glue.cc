@@ -6,8 +6,12 @@
 
 #include "base/check_op.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/no_destructor.h"
 #include "base/notreached.h"
+#include "base/strings/string_util.h"
+#include "base/types/cxx23_to_underlying.h"
 #include "media/base/container_names.h"
+#include "media/base/media_switches.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 
 namespace media {
@@ -59,9 +63,30 @@ static int64_t AVIOSeekOperation(void* opaque, int64_t offset, int whence) {
 
 static void LogContainer(bool is_local_file,
                          container_names::MediaContainerName container) {
-  base::UmaHistogramSparse("Media.DetectedContainer", container);
-  if (is_local_file)
-    base::UmaHistogramSparse("Media.DetectedContainer.Local", container);
+  base::UmaHistogramSparse("Media.DetectedContainer",
+                           base::to_underlying(container));
+  if (is_local_file) {
+    base::UmaHistogramSparse("Media.DetectedContainer.Local",
+                             base::to_underlying(container));
+  }
+}
+
+static const char* GetAllowedDemuxers() {
+  static const base::NoDestructor<std::string> kAllowedDemuxers([]() {
+    // This should match the configured lists in //third_party/ffmpeg.
+    std::vector<std::string> allowed_demuxers = {"ogg",  "matroska", "wav",
+                                                 "flac", "mp3",      "mov"};
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+    allowed_demuxers.push_back("aac");
+#if BUILDFLAG(IS_CHROMEOS)
+    if (base::FeatureList::IsEnabled(kCrOSLegacyMediaFormats)) {
+      allowed_demuxers.push_back("avi");
+    }
+#endif
+#endif
+    return base::JoinString(allowed_demuxers, ",");
+  }());
+  return kAllowedDemuxers->c_str();
 }
 
 FFmpegGlue::FFmpegGlue(FFmpegURLProtocol* protocol) {
@@ -93,6 +118,10 @@ FFmpegGlue::FFmpegGlue(FFmpegURLProtocol* protocol) {
   format_context_->error_recognition |= AV_EF_EXPLODE;
 
   format_context_->pb = avio_context_.get();
+
+  // Note: FFmpeg will try to free these strings, so we must duplicate them.
+  format_context_->codec_whitelist = av_strdup(GetAllowedAudioDecoders());
+  format_context_->format_whitelist = av_strdup(GetAllowedDemuxers());
 }
 
 bool FFmpegGlue::OpenContext(bool is_local_file) {
@@ -126,7 +155,7 @@ bool FFmpegGlue::OpenContext(bool is_local_file) {
     LogContainer(is_local_file, container_);
 
     detected_hls_ =
-        container_ == container_names::MediaContainerName::CONTAINER_HLS;
+        container_ == container_names::MediaContainerName::kContainerHLS;
     return false;
   } else if (ret < 0) {
     return false;
@@ -134,27 +163,53 @@ bool FFmpegGlue::OpenContext(bool is_local_file) {
 
   // Rely on ffmpeg's parsing if we're able to succesfully open the file.
   if (strcmp(format_context_->iformat->name, "mov,mp4,m4a,3gp,3g2,mj2") == 0)
-    container_ = container_names::CONTAINER_MOV;
+    container_ = container_names::MediaContainerName::kContainerMOV;
   else if (strcmp(format_context_->iformat->name, "flac") == 0)
-    container_ = container_names::CONTAINER_FLAC;
+    container_ = container_names::MediaContainerName::kContainerFLAC;
   else if (strcmp(format_context_->iformat->name, "matroska,webm") == 0)
-    container_ = container_names::CONTAINER_WEBM;
+    container_ = container_names::MediaContainerName::kContainerWEBM;
   else if (strcmp(format_context_->iformat->name, "ogg") == 0)
-    container_ = container_names::CONTAINER_OGG;
+    container_ = container_names::MediaContainerName::kContainerOgg;
   else if (strcmp(format_context_->iformat->name, "wav") == 0)
-    container_ = container_names::CONTAINER_WAV;
+    container_ = container_names::MediaContainerName::kContainerWAV;
   else if (strcmp(format_context_->iformat->name, "aac") == 0)
-    container_ = container_names::CONTAINER_AAC;
+    container_ = container_names::MediaContainerName::kContainerAAC;
   else if (strcmp(format_context_->iformat->name, "mp3") == 0)
-    container_ = container_names::CONTAINER_MP3;
+    container_ = container_names::MediaContainerName::kContainerMP3;
   else if (strcmp(format_context_->iformat->name, "amr") == 0)
-    container_ = container_names::CONTAINER_AMR;
+    container_ = container_names::MediaContainerName::kContainerAMR;
   else if (strcmp(format_context_->iformat->name, "avi") == 0)
-    container_ = container_names::CONTAINER_AVI;
+    container_ = container_names::MediaContainerName::kContainerAVI;
 
-  DCHECK_NE(container_, container_names::CONTAINER_UNKNOWN);
+  // For a successfully opened file, we will get a container we've compiled in.
+  CHECK_NE(container_, container_names::MediaContainerName::kContainerUnknown);
   LogContainer(is_local_file, container_);
 
+#if BUILDFLAG(IS_QTWEBENGINE) && BUILDFLAG(USE_SYSTEM_FFMPEG)
+  // 'avformat_find_stream_info' is not aware of the whitelisted codecs.
+  // However it respects the codecs set in the format_context.
+  // Try to force the correct codecs here at context creation.
+  // https://ffmpeg.org/doxygen/7.0/structAVFormatContext.html#a52f39351b15890ef57cc6ff0ec9ab42d
+  // https://ffmpeg.org/doxygen/7.0/structAVFormatContext.html#ae5e087f4623b907517c0f7dd8327387d
+
+  for (int i = 0; i < format_context_->nb_streams; i++) {
+    AVCodecParameters *params = format_context_->streams[i]->codecpar;
+    if (!params)
+      continue;
+    const AVCodec* audio_codec =
+        FindDecoder(params->codec_id, GetAllowedAudioDecoders());
+    if (audio_codec) {
+      if (format_context_->audio_codec &&
+          format_context_->audio_codec != audio_codec) {
+        LOG(INFO) << "Conflicting codecs " << format_context_->audio_codec->name
+                  << ", " << audio_codec->name;
+        format_context_->audio_codec = nullptr;
+        break;
+      }
+      format_context_->audio_codec = audio_codec;
+    }
+  }
+#endif
   return true;
 }
 

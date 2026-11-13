@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as Host from '../../../../core/host/host.js';
 import * as ComponentHelpers from '../../../components/helpers/helpers.js';
 import * as LitHtml from '../../../lit-html/lit-html.js';
-import cssLengthStyles from './cssLength.css.js';
+import * as VisualLogging from '../../../visual_logging/visual_logging.js';
 
-import {LengthUnit, LENGTH_UNITS, parseText, type Length} from './CSSLengthUtils.js';
+import cssLengthStyles from './cssLength.css.js';
+import {type Length, LENGTH_UNITS, LengthUnit, parseText} from './CSSLengthUtils.js';
 import {ValueChangedEvent} from './InlineEditorUtils.js';
 
-const {render, html} = LitHtml;
+const {render, html, Directives: {classMap}} = LitHtml;
 
 export class DraggingFinishedEvent extends Event {
   static readonly eventName = 'draggingfinished';
@@ -20,6 +22,7 @@ export class DraggingFinishedEvent extends Event {
 
 export interface CSSLengthData {
   lengthText: string;
+  overloaded: boolean;
 }
 
 const DefaultLength = {
@@ -33,6 +36,7 @@ export class CSSLength extends HTMLElement {
   private readonly shadow = this.attachShadow({mode: 'open'});
   private readonly onDraggingValue = this.dragValue.bind(this);
   private length: Length = DefaultLength;
+  private overloaded: boolean = false;
   private isEditingSlot = false;
   private isDraggingValue = false;
   private currentMouseClientX = 0;
@@ -44,6 +48,7 @@ export class CSSLength extends HTMLElement {
       return;
     }
     this.length = parsedResult;
+    this.overloaded = data.overloaded;
     this.render();
   }
 
@@ -116,13 +121,20 @@ export class CSSLength extends HTMLElement {
   private onUnitMouseup(event: MouseEvent): void {
     event.preventDefault();
     event.stopPropagation();
+
+    Host.userMetrics.swatchActivated(Host.UserMetrics.SwatchType.Length);
   }
 
   private render(): void {
+    const classes = {
+      'css-length': true,
+      'overloaded': this.overloaded,
+    };
+
     // Disabled until https://crbug.com/1079231 is fixed.
     // clang-format off
     render(html`
-      <div class="css-length">
+      <div class=${classMap(classes)}>
         ${this.renderContent()}
       </div>
     `, this.shadow, {
@@ -146,9 +158,13 @@ export class CSSLength extends HTMLElement {
         <span class="value"
           @mousedown=${this.onValueMousedown}
           @mouseup=${this.onValueMouseup}
-        >${this.length.value}</span><span class="unit">${this.length.unit}</span><div class="unit-dropdown">
+        >${this.length.value}</span><span class="unit">${this.length.unit}</span>
+        <div class="unit-dropdown">
           <span class="icon"></span>
-          <select @mouseup=${this.onUnitMouseup} @change=${this.onUnitChange}>
+          <select
+            jslog=${VisualLogging.dropDown().track({change: true}).context('unit')}
+            @mouseup=${this.onUnitMouseup}
+            @change=${this.onUnitChange}>
             ${options}
           </select>
         </div>

@@ -31,7 +31,7 @@ using ServerConfigID = std::string;
 // "QNZR", "B2HI", "H2PR", "FIFO", "LIFO", "RRWS", "QNSP", "B2CL", "CHSP",
 // "BPTE", "ACKD", "AKD2", "AKD4", "MAD1", "MAD4", "MAD5", "ACD0", "ACKQ",
 // "TLPR", "CCS\0", "PDP4", "NCHP", "NBPE", "2RTO", "3RTO", "4RTO", "6RTO",
-// "PDP1", "PDP2", "PDP3", "PDP5"
+// "PDP1", "PDP2", "PDP3", "PDP5", "QLVE", "RVCM"
 
 // clang-format off
 const QuicTag kCHLO = TAG('C', 'H', 'L', 'O');   // Client hello
@@ -107,8 +107,7 @@ const QuicTag kBBRA = TAG('B', 'B', 'R', 'A');   // Starts a new ack aggregation
 const QuicTag kBBRB = TAG('B', 'B', 'R', 'B');   // Use send rate in BBR's
                                                  // MaxAckHeightTracker
 const QuicTag kBBRS = TAG('B', 'B', 'R', 'S');   // DEPRECATED
-const QuicTag kBBQ1 = TAG('B', 'B', 'Q', '1');   // BBR with lower 2.77 STARTUP
-                                                 // pacing and CWND gain.
+const QuicTag kBBQ1 = TAG('B', 'B', 'Q', '1');   // DEPRECATED
 const QuicTag kBBQ2 = TAG('B', 'B', 'Q', '2');   // BBRv2 with 2.885 STARTUP and
                                                  // DRAIN CWND gain.
 const QuicTag kBBQ3 = TAG('B', 'B', 'Q', '3');   // BBR with ack aggregation
@@ -126,6 +125,10 @@ const QuicTag kBBQ9 = TAG('B', 'B', 'Q', '9');   // Reduce bw_lo by
                                                  // bw_lo * bytes_lost/cwnd
 const QuicTag kBBQ0 = TAG('B', 'B', 'Q', '0');   // Increase bytes_acked in
                                                  // PROBE_UP when app limited.
+const QuicTag kBBPD = TAG('B', 'B', 'P', 'D');   // Use 0.91 PROBE_DOWN gain.
+const QuicTag kBBHI = TAG('B', 'B', 'H', 'I');   // Increase inflight_hi in
+                                                 // PROBE_UP if ever inflight_hi
+                                                 // limited in round
 const QuicTag kRENO = TAG('R', 'E', 'N', 'O');   // Reno Congestion Control
 const QuicTag kTPCC = TAG('P', 'C', 'C', '\0');  // Performance-Oriented
                                                  // Congestion Control
@@ -160,9 +163,7 @@ const QuicTag kBSAO = TAG('B', 'S', 'A', 'O');   // Avoid Overestimation in
                                                  // aggregation
 const QuicTag kB2DL = TAG('B', '2', 'D', 'L');   // Increase inflight_hi based
                                                  // on delievered, not inflight.
-const QuicTag kB201 = TAG('B', '2', '0', '1');   // In PROBE_UP, check if cwnd
-                                                 // limited before aggregation
-                                                 // epoch, instead of ack event.
+const QuicTag kB201 = TAG('B', '2', '0', '1');   // DEPRECATED
 const QuicTag kB202 = TAG('B', '2', '0', '2');   // Do not exit PROBE_UP if
                                                  // inflight dips below 1.25*BW.
 const QuicTag kB203 = TAG('B', '2', '0', '3');   // Ignore inflight_hi until
@@ -174,6 +175,12 @@ const QuicTag kB205 = TAG('B', '2', '0', '5');   // Add extra acked to CWND in
 const QuicTag kB206 = TAG('B', '2', '0', '6');   // Exit STARTUP after 2 losses.
 const QuicTag kB207 = TAG('B', '2', '0', '7');   // Exit STARTUP on persistent
                                                  // queue
+const QuicTag kBB2U = TAG('B', 'B', '2', 'U');   // Exit PROBE_UP on
+                                                 // min_bytes_in_flight for two
+                                                 // rounds in a row.
+const QuicTag kBB2S = TAG('B', 'B', '2', 'S');   // Exit STARTUP on
+                                                 // min_bytes_in_flight for two
+                                                 // rounds in a row.
 const QuicTag kNTLP = TAG('N', 'T', 'L', 'P');   // No tail loss probe
 const QuicTag k1TLP = TAG('1', 'T', 'L', 'P');   // 1 tail loss probe
 const QuicTag k1RTO = TAG('1', 'R', 'T', 'O');   // Send 1 packet upon RTO
@@ -272,10 +279,11 @@ const QuicTag kAPTO = TAG('A', 'P', 'T', 'O');   // Use 1.5 * initial RTT before
 
 const QuicTag kELDT = TAG('E', 'L', 'D', 'T');   // Enable Loss Detection Tuning
 
-// TODO(haoyuewang) Remove RVCM option once
-// --quic_remove_connection_migration_connection_option_v2 is deprecated.
-const QuicTag kRVCM = TAG('R', 'V', 'C', 'M');   // Validate the new address
-                                                 // upon client address change.
+const QuicTag kSPAD = TAG('S', 'P', 'A', 'D');   // Use server preferred address
+const QuicTag kSPA2 = TAG('S', 'P', 'A', '2');   // Start validating server
+                                                 // preferred address once it is
+                                                 // received. Send all coalesced
+                                                 // packets to both addresses.
 
 // Optional support of truncated Connection IDs.  If sent by a peer, the value
 // is the minimum number of bytes allowed for the connection ID sent to the
@@ -291,8 +299,9 @@ const QuicTag kNCMR = TAG('N', 'C', 'M', 'R');   // Do not attempt connection
 // Allows disabling defer_send_in_response_to_packets in QuicConnection.
 const QuicTag kDFER = TAG('D', 'F', 'E', 'R');   // Do not defer sending.
 
-// Disable Pacing offload option.
-const QuicTag kNPCO = TAG('N', 'P', 'C', 'O');    // No pacing offload.
+// Pacing options.
+const QuicTag kNPCO = TAG('N', 'P', 'C', 'O');  // No pacing offload.
+const QuicTag kRNIB = TAG('R', 'N', 'I', 'B');  // Remove non-initial burst.
 
 // Enable bandwidth resumption experiment.
 const QuicTag kBWRE = TAG('B', 'W', 'R', 'E');  // Bandwidth resumption.
@@ -395,8 +404,6 @@ const QuicTag kCFCW = TAG('C', 'F', 'C', 'W');   // Initial session/connection
                                                  // flow control receive window.
 const QuicTag kUAID = TAG('U', 'A', 'I', 'D');   // Client's User Agent ID.
 const QuicTag kXLCT = TAG('X', 'L', 'C', 'T');   // Expected leaf certificate.
-const QuicTag kQLVE = TAG('Q', 'L', 'V', 'E');   // Legacy Version
-                                                 // Encapsulation.
 
 const QuicTag kQNZ2 = TAG('Q', 'N', 'Z', '2');   // Turn off QUIC crypto 0-RTT.
 
@@ -425,6 +432,8 @@ const QuicTag kINVC = TAG('I', 'N', 'V', 'C');   // Send connection close for
                                                  // INVALID_VERSION
 
 const QuicTag kMPQC = TAG('M', 'P', 'Q', 'C');   // Multi-port QUIC connection
+const QuicTag kMPQM = TAG('M', 'P', 'Q', 'M');   // Enable multi-port QUIC
+                                                 // migration
 
 // Client Hints triggers.
 const QuicTag kGWCH = TAG('G', 'W', 'C', 'H');
@@ -454,6 +463,23 @@ const QuicTag kPAD  = TAG('P', 'A', 'D', '\0');  // Padding
 
 // Stats collection tags
 const QuicTag kEPID = TAG('E', 'P', 'I', 'D');  // Endpoint identifier.
+
+const QuicTag kMCS1 = TAG('M', 'C', 'S', '1');
+const QuicTag kMCS2 = TAG('M', 'C', 'S', '2');
+const QuicTag kMCS3 = TAG('M', 'C', 'S', '3');
+const QuicTag kMCS4 = TAG('M', 'C', 'S', '4');
+const QuicTag kMCS5 = TAG('M', 'C', 'S', '5');
+
+// Per-loop stream limit experiments
+const QuicTag kSLP1 = TAG('S', 'L', 'P', '1');  // 1 new request per event loop
+const QuicTag kSLP2 = TAG('S', 'L', 'P', '2');  // 2 new requests per event loop
+const QuicTag kSLPF = TAG('S', 'L', 'P', 'F');  // number of new requests per
+                                                // event loop according to
+                                                // internal flag.
+
+constexpr QuicTag kBSUS = TAG('B', 'S', 'U', 'S');  // Blocks server connection
+                                                    // until the SETTINGS frame
+                                                    // is received.
 
 // clang-format on
 

@@ -3,7 +3,6 @@
 
 cmake_minimum_required(VERSION 3.19)
 find_package(Ninja 1.7.2 REQUIRED)
-find_package(Nodejs 12 REQUIRED)
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
     create_pkg_config_host_wrapper(${CMAKE_CURRENT_BINARY_DIR})
@@ -22,7 +21,7 @@ qt_internal_add_module(Pdf
         qpdfdocumentrenderoptions.h
         qpdffile.cpp qpdffile_p.h
         qpdflink.cpp qpdflink.h qpdflink_p.h
-        qpdflinkmodel.cpp qpdflinkmodel_p.h qpdflinkmodel_p_p.h
+        qpdflinkmodel.cpp qpdflinkmodel.h qpdflinkmodel_p.h
         qpdfpagenavigator.cpp qpdfpagenavigator.h
         qpdfpagerenderer.cpp qpdfpagerenderer.h
         qpdfsearchmodel.cpp qpdfsearchmodel.h qpdfsearchmodel_p.h
@@ -32,13 +31,13 @@ qt_internal_add_module(Pdf
         ../3rdparty/chromium
     DEFINES
         QT_BUILD_PDF_LIB
-        NOMINMAX
     LIBRARIES
         Qt::CorePrivate
         Qt::Network
     PUBLIC_LIBRARIES
         Qt::Core
         Qt::Gui
+    SBOM_INCOMPLETE_3RD_PARTY_DEPENDENCIES
 )
 
 add_subdirectory(plugins/imageformats/pdf)
@@ -64,13 +63,13 @@ add_code_attributions_target(
     BUILDDIR ${buildDir}/${config}/${arch}
 )
 add_dependencies(generate_pdf_attributions run_pdf_GnDone)
-add_dependencies(docs generate_pdf_attributions)
+add_dependencies(prepare_docs_Pdf generate_pdf_attributions)
 
 ##
 #   TOOLCHAIN SETUP
 ##
 
-if(LINUX)
+if(LINUX OR MINGW OR ANDROID)
     setup_toolchains()
 endif()
 
@@ -120,20 +119,35 @@ foreach(arch ${archs})
           qt_libjpeg_config="${buildDir}/${config}/${arch}:qt_libjpeg_config"
           qt_harfbuzz_config="${buildDir}/${config}/${arch}:qt_harfbuzz_config"
           qt_freetype_config="${buildDir}/${config}/${arch}:qt_freetype_config"
+          enable_swiftshader=false
+          enable_swiftshader_vulkan=false
+          angle_enable_swiftshader=false
+          dawn_use_swiftshader=false
+          use_cups=false
+          use_dawn=false
+          build_dawn_tests=false
           enable_ipc_fuzzer=false
           enable_remoting=false
           enable_resource_allowlist_generation=false
+          enable_vr=false
           enable_web_speech=false
           chrome_pgo_phase=0
           strip_absolute_paths_from_debug_symbols=false
+          use_perfetto_client_library=false
+          v8_enable_webassembly=false
         )
 
         if(LINUX OR ANDROID)
             list(APPEND gnArgArg
+                enable_vr=false
                 is_cfi=false
                 ozone_auto_platforms=false
-                use_gnome_keyring=false
-                enable_vr=false
+                enable_arcore=false
+                use_ml_inliner=false
+                use_gio=false
+                use_glib=false
+                use_nss_certs=false
+                use_xkbcommon=false
             )
             extend_gn_list(gnArgArg
                 ARGS use_system_icu
@@ -148,12 +162,13 @@ foreach(arch ${archs})
             list(APPEND gnArgArg angle_enable_vulkan=false)
         endif()
         if(IOS)
+            list(APPEND gnArgArg enable_base_tracing=false)
             extend_gn_list(gnArgArg
                 ARGS enable_ios_bitcode
                 CONDITION QT_FEATURE_pdf_bitcode
             )
         endif()
-        if(WIN32)
+        if(WIN32 OR ANDROID)
           list(APPEND gnArgArg
               ninja_use_custom_environment_files=false
               safe_browsing_mode=0
@@ -201,6 +216,10 @@ foreach(arch ${archs})
             CONDITION QT_FEATURE_webengine_qt_libpng
         )
         extend_gn_list(gnArgArg
+            ARGS pdfium_use_system_libtiff
+            CONDITION QT_FEATURE_webengine_system_libtiff
+        )
+        extend_gn_list(gnArgArg
             ARGS use_qt_libjpeg
             CONDITION QT_FEATURE_webengine_qt_libjpeg
         )
@@ -234,6 +253,14 @@ endforeach()
 get_architectures(archs)
 list(GET archs 0 arch)
 target_include_directories(Pdf PRIVATE ${buildDir}/$<CONFIG>/${arch}/gen)
-add_gn_build_aritfacts_to_target(Pdf QtPdf pdf ${buildDir} TRUE)
+add_gn_build_artifacts_to_target(
+    CMAKE_TARGET Pdf
+    NINJA_TARGET QtPdf
+    MODULE pdf
+    DEPENDS Pdf_sync_headers
+    BUILDDIR ${buildDir}
+    COMPLETE_STATIC TRUE
+    NINJA_STAMP QtPdf.stamp
+)
 add_dependencies(Pdf run_pdf_NinjaDone)
 

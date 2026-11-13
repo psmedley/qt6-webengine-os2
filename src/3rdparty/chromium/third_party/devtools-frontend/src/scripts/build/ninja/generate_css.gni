@@ -6,6 +6,11 @@ import("//build/timestamp.gni")
 import("./node.gni")
 import("./vars.gni")
 
+declare_args() {
+  # Whether to enable CSS hot reloading with `watch` script or not.
+  devtools_css_hot_reload_enabled = false
+}
+
 template("generate_css") {
   node_action(target_name) {
     forward_variables_from(invoker, [ "sources" ])
@@ -16,7 +21,7 @@ template("generate_css") {
     _dest = rebase_path(target_gen_dir, root_build_dir)
 
     inputs +=
-        [ devtools_location_prepend + "node_modules/clean-css/package.json" ]
+        [ devtools_location_prepend + "node_modules/cssnano/package.json" ]
 
     args = [
       build_timestamp,
@@ -26,6 +31,7 @@ template("generate_css") {
       _src,
       _dest,
       string_join(",", sources),
+      "$devtools_css_hot_reload_enabled",
     ]
 
     outputs = []

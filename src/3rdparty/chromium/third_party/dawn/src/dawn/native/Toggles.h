@@ -1,36 +1,51 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_TOGGLES_H_
 #define SRC_DAWN_NATIVE_TOGGLES_H_
 
 #include <bitset>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "dawn/common/BitSetIterator.h"
 #include "dawn/native/DawnNative.h"
 
 namespace dawn::native {
 
-struct DawnTogglesDeviceDescriptor;
+struct DawnTogglesDescriptor;
 
 enum class Toggle {
     EmulateStoreAndMSAAResolve,
     NonzeroClearResourcesOnCreationForTesting,
     AlwaysResolveIntoZeroLevelAndLayer,
     LazyClearResourceOnFirstUse,
+    DisableLazyClearForMappedAtCreationBuffer,
     TurnOffVsync,
     UseTemporaryBufferInCompressedTextureToTextureCopy,
     UseD3D12ResourceHeapTier2,
@@ -45,23 +60,20 @@ enum class Toggle {
     DisableBaseVertex,
     DisableBaseInstance,
     DisableIndexedDrawBuffers,
-    DisableSnormRead,
     DisableDepthRead,
     DisableStencilRead,
     DisableDepthStencilRead,
-    DisableBGRARead,
     DisableSampleVariables,
     UseD3D12SmallShaderVisibleHeapForTesting,
     UseDXC,
     DisableRobustness,
     MetalEnableVertexPulling,
-    DisallowUnsafeAPIs,
+    AllowUnsafeAPIs,
     FlushBeforeClientWaitSync,
     UseTempBufferInSmallFormatTextureToTextureCopyFromGreaterToLessMipLevel,
     EmitHLSLDebugSymbols,
     DisallowSpirv,
     DumpShaders,
-    ForceWGSLStep,
     DisableWorkgroupInit,
     DisableSymbolRenaming,
     UseUserDefinedLabelsInBackend,
@@ -69,18 +81,57 @@ enum class Toggle {
     FxcOptimizations,
     RecordDetailedTimingInTraceEvents,
     DisableTimestampQueryConversion,
+    TimestampQuantization,
+    ClearBufferBeforeResolveQueries,
     VulkanUseZeroInitializeWorkgroupMemoryExtension,
     D3D12SplitBufferTextureCopyForRowsPerImagePaddings,
     MetalRenderR8RG8UnormSmallMipToTempTexture,
-    EnableBlobCache,
+    DisableBlobCache,
     D3D12ForceClearCopyableDepthStencilTextureOnCreation,
     D3D12DontSetClearValueOnDepthTextureCreation,
     D3D12AlwaysUseTypelessFormatsForCastableTexture,
-    D3D12AllocateExtraMemoryFor2DArrayTexture,
+    D3D12AllocateExtraMemoryFor2DArrayColorTexture,
     D3D12UseTempBufferInDepthStencilTextureAndBufferCopyWithNonZeroBufferOffset,
+    D3D12UseTempBufferInTextureToTextureCopyBetweenDifferentDimensions,
     ApplyClearBigIntegerColorValueWithDraw,
-    MetalUseDummyBlitEncoderForWriteTimestamp,
-    VulkanSplitCommandBufferOnDepthStencilComputeSampleAfterRenderPass,
+    MetalUseMockBlitEncoderForWriteTimestamp,
+    VulkanSplitCommandBufferOnComputePassAfterRenderPass,
+    DisableSubAllocationFor2DTextureWithCopyDstOrRenderAttachment,
+    MetalUseCombinedDepthStencilFormatForStencil8,
+    MetalUseBothDepthAndStencilAttachmentsForCombinedDepthStencilFormats,
+    MetalKeepMultisubresourceDepthStencilTexturesInitialized,
+    MetalFillEmptyOcclusionQueriesWithZero,
+    UseBlitForBufferToDepthTextureCopy,
+    UseBlitForBufferToStencilTextureCopy,
+    UseBlitForDepthTextureToTextureCopyToNonzeroSubresource,
+    UseBlitForDepth16UnormTextureToBufferCopy,
+    UseBlitForDepth32FloatTextureToBufferCopy,
+    UseBlitForStencilTextureToBufferCopy,
+    UseBlitForSnormTextureToBufferCopy,
+    UseBlitForBGRA8UnormTextureToBufferCopy,
+    UseBlitForRGB9E5UfloatTextureCopy,
+    D3D12ReplaceAddWithMinusWhenDstFactorIsZeroAndSrcFactorIsDstAlpha,
+    D3D12PolyfillReflectVec2F32,
+    VulkanClearGen12TextureWithCCSAmbiguateOnCreation,
+    D3D12UseRootSignatureVersion1_1,
+    VulkanUseImageRobustAccess2,
+    VulkanUseBufferRobustAccess2,
+    D3D12Use64KBAlignedMSAATexture,
+    ResolveMultipleAttachmentInSeparatePasses,
+    D3D12CreateNotZeroedHeap,
+    D3D12DontUseNotZeroedHeapFlagOnTexturesAsCommitedResources,
+    UseTintIR,
+    D3DDisableIEEEStrictness,
+    PolyFillPacked4x8DotProduct,
+    D3D12PolyFillPackUnpack4x8,
+    ExposeWGSLTestingFeatures,
+    ExposeWGSLExperimentalFeatures,
+    DisablePolyfillsOnIntegerDivisonAndModulo,
+
+    // Unresolved issues.
+    NoWorkaroundSampleMaskBecomesZeroForAllButLastColorTarget,
+    NoWorkaroundIndirectBaseVertexNotApplied,
+    NoWorkaroundDstAlphaAsSrcBlendFactorForBothColorAndAlphaDoesNotWork,
 
     EnumCount,
     InvalidEnum = EnumCount,
@@ -89,32 +140,70 @@ enum class Toggle {
 // A wrapper of the bitset to store if a toggle is present or not. This wrapper provides the
 // convenience to convert the enums of enum class Toggle to the indices of a bitset.
 struct TogglesSet {
-    std::bitset<static_cast<size_t>(Toggle::EnumCount)> toggleBitset;
+    std::bitset<static_cast<size_t>(Toggle::EnumCount)> bitset;
+    using Iterator = BitSetIterator<static_cast<size_t>(Toggle::EnumCount), uint32_t>;
 
     void Set(Toggle toggle, bool enabled);
     bool Has(Toggle toggle) const;
-    std::vector<const char*> GetContainedToggleNames() const;
+    size_t Count() const;
+    Iterator Iterate() const;
 };
 
-// TripleStateTogglesSet track each toggle with three posible states, i.e. "Not provided" (default),
-// "Provided as enabled", and "Provided as disabled". This struct can be used to record the
-// user-provided toggles, where some toggles are explicitly enabled or disabled while the other
-// toggles are left as default.
-struct TripleStateTogglesSet {
-    TogglesSet togglesIsProvided;
-    TogglesSet providedTogglesEnabled;
+namespace stream {
+class Sink;
+}
 
-    static TripleStateTogglesSet CreateFromTogglesDeviceDescriptor(
-        const DawnTogglesDeviceDescriptor* togglesDesc);
-    // Provide a single toggle with given state.
-    void Set(Toggle toggle, bool enabled);
-    bool IsProvided(Toggle toggle) const;
-    // Return true if the toggle is provided in enable list, and false otherwise.
+// TogglesState hold the actual state of toggles for instances, adapters and devices. Each toggle
+// is in of one of these states:
+//    - set
+//    - defaulted to enable
+//    - disabled
+//    - force set to enabled
+//    - force set to disabled
+//    - unset without default (and thus implicitly disabled).
+class TogglesState {
+  public:
+    // Create an empty toggles state of given stage
+    explicit TogglesState(ToggleStage stage);
+
+    // Create a TogglesState from a DawnTogglesDescriptor, only considering toggles of
+    // required toggle stage.
+    static TogglesState CreateFromTogglesDescriptor(const DawnTogglesDescriptor* togglesDesc,
+                                                    ToggleStage requiredStage);
+
+    // Inherit from a given toggles state of earlier stage, only inherit the forced and the
+    // unrequired toggles to allow overriding. Return *this to allow method chaining manner.
+    TogglesState& InheritFrom(const TogglesState& inheritedToggles);
+
+    // Set a toggle of the same stage of toggles state stage if and only if it is not already set.
+    void Default(Toggle toggle, bool enabled);
+    // Force set a toggle of same stage of toggles state stage. A force-set toggle will get
+    // inherited to all later stage as forced.
+    void ForceSet(Toggle toggle, bool enabled);
+
+    // Set a toggle of any stage for testing propose. Return *this to allow method chaining
+    // manner.
+    TogglesState& SetForTesting(Toggle toggle, bool enabled, bool forced);
+
+    // Return whether the toggle is set or not. Force-set is always treated as set.
+    bool IsSet(Toggle toggle) const;
+    // Return true if and only if the toggle is set to true.
     bool IsEnabled(Toggle toggle) const;
-    // Return true if the toggle is provided in disable list, and false otherwise.
-    bool IsDisabled(Toggle toggle) const;
+    ToggleStage GetStage() const;
     std::vector<const char*> GetEnabledToggleNames() const;
     std::vector<const char*> GetDisabledToggleNames() const;
+
+    // Friend definition of StreamIn which can be found by ADL to override stream::StreamIn<T>. This
+    // allows writing TogglesState to stream for cache key.
+    friend void StreamIn(stream::Sink* sink, const TogglesState& togglesState);
+
+  private:
+    // Indicating which stage of toggles state is this object holding for, instance, adapter, or
+    // device.
+    const ToggleStage mStage;
+    TogglesSet mTogglesSet;
+    TogglesSet mEnabledToggles;
+    TogglesSet mForcedToggles;
 };
 
 const char* ToggleEnumToName(Toggle toggle);
@@ -124,16 +213,22 @@ class TogglesInfo {
     TogglesInfo();
     ~TogglesInfo();
 
+    // Retrieves all fo the ToggleInfo information
+    static std::vector<const ToggleInfo*> AllToggleInfos();
+
     // Used to query the details of a toggle. Return nullptr if toggleName is not a valid name
     // of a toggle supported in Dawn.
     const ToggleInfo* GetToggleInfo(const char* toggleName);
+    // Used to query the details of a toggle enum. The enum value must not be Toggle::InvalidEnum,
+    // as Toggle::InvalidEnum doesn't has corresponding ToggleInfo.
+    static const ToggleInfo* GetToggleInfo(Toggle toggle);
     Toggle ToggleNameToEnum(const char* toggleName);
 
   private:
     void EnsureToggleNameToEnumMapInitialized();
 
     bool mToggleNameToEnumMapInitialized = false;
-    std::unordered_map<std::string, Toggle> mToggleNameToEnumMap;
+    absl::flat_hash_map<std::string, Toggle> mToggleNameToEnumMap;
 };
 
 }  // namespace dawn::native

@@ -7,7 +7,7 @@
 #include <memory>
 #include <vector>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/strings/string_util.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
@@ -96,6 +96,7 @@ void TrustTokenKeyCommitmentController::StartRequest(
 }
 
 void TrustTokenKeyCommitmentController::HandleRedirect(
+    const GURL& url_before_redirect,
     const net::RedirectInfo& redirect_info,
     const network::mojom::URLResponseHead& response_head,
     std::vector<std::string>* to_be_removed_headers) {
@@ -108,7 +109,7 @@ void TrustTokenKeyCommitmentController::HandleRedirect(
   // delay before the client deletes this object.
   url_loader_.reset();
   std::move(completion_callback_)
-      .Run({Status::Value::kGotRedirected}, /*result=*/nullptr);
+      .Run({.value = Status::Value::kGotRedirected}, /*result=*/nullptr);
 
   // |this| may be deleted here.
 }
@@ -130,12 +131,12 @@ void TrustTokenKeyCommitmentController::HandleResponseBody(
 
   if (!result) {
     std::move(completion_callback_)
-        .Run({Status::Value::kCouldntParse}, /*result=*/nullptr);
+        .Run({.value = Status::Value::kCouldntParse}, /*result=*/nullptr);
     return;
   }
 
   std::move(completion_callback_)
-      .Run({Status::Value::kOk}, std::move(result));
+      .Run({.value = Status::Value::kOk}, std::move(result));
 
   // |this| may be deleted here.
 }

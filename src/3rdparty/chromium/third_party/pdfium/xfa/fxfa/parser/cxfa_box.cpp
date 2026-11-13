@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -207,7 +207,7 @@ void CXFA_Box::Draw(CFGAS_GEGraphics* pGS,
   } else if (type == XFA_Element::Rectangle || type == XFA_Element::Border) {
     ToRectangle(this)->Draw(strokes, pGS, rtWidget, matrix);
   } else {
-    NOTREACHED();
+    NOTREACHED_NORETURN();
   }
 }
 
@@ -237,7 +237,7 @@ void CXFA_Box::DrawFill(const std::vector<CXFA_Stroke*>& strokes,
   } else if (type == XFA_Element::Rectangle || type == XFA_Element::Border) {
     ToRectangle(this)->GetFillPath(strokes, rtWidget, &fillPath);
   } else {
-    NOTREACHED();
+    NOTREACHED_NORETURN();
   }
   fillPath.Close();
   fill->Draw(pGS, fillPath, rtWidget, matrix);

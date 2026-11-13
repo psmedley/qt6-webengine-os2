@@ -4,6 +4,7 @@
 import glob
 import os
 import re
+import string
 import subprocess
 import sys
 import version_resolver as resolver
@@ -18,15 +19,14 @@ def subprocessCheckOutput(args):
     print(args)
     return subprocess.check_output(args).decode()
 
-class DEPSParser:
+# Special string formatter that support flat key names with '.' in them
+class DepsFormatter(string.Formatter):
+    def get_field(self, field_name, args, kwargs):
+        return (self.get_value(field_name, args, kwargs), field_name)
+
+class SubmoduleDEPSParser(resolver.DEPSParser):
     def __init__(self):
-        self.global_scope = {
-          'Var': lambda var_name: '{%s}' % var_name,
-          'Str': str,
-          'deps_os': {},
-        }
-        self.local_scope = {}
-        self.topmost_supermodule_path_prefix = ''
+        super().__init__()
 
     def get_vars(self):
         """Returns a dictionary of effective variable values
@@ -37,10 +37,7 @@ class DEPSParser:
         #result.update(self.custom_vars or {})
         return result
 
-    def get_recursedeps(self):
-        return self.local_scope["recursedeps"]
-
-    def createSubmodulesFromScope(self, scope, os):
+    def createSubmodulesFromScope(self, scope, os, module_whitelist = []):
         submodules = []
         for dep in scope:
             url = ''
@@ -49,24 +46,18 @@ class DEPSParser:
             elif (type(scope[dep]) == dict and 'url' in scope[dep]):
                 url = scope[dep]['url']
 
-                if ('condition' in scope[dep]) and (not 'checkout_linux' in scope[dep]['condition']):
-                    url = ''
-
+                if ('condition' in scope[dep]) and \
+                (not 'checkout_linux' in scope[dep]['condition']) and \
+                (not dep in module_whitelist):
+                    continue
             if url:
-                url = url.format(**self.get_vars())
+                url = DepsFormatter().vformat(url, [], self.get_vars())
                 repo_rev = url.split('@')
                 repo = repo_rev[0]
                 rev = repo_rev[1]
-                subdir = dep
-                if subdir.startswith('src/'):
-                    subdir = subdir[4:]
-                # Don't skip submodules that have a supermodule path prefix set (at the moment these
-                # are 2nd level deep submodules).
-                elif not self.topmost_supermodule_path_prefix:
-                    # Ignore the information about chromium itself since we get that from git,
-                    # also ignore anything outside src/ (e.g. depot_tools)
+                subdir = self.subdir(dep)
+                if subdir is None:
                     continue
-
                 submodule = Submodule(subdir, repo, sp=self.topmost_supermodule_path_prefix)
                 submodule.os = os
 
@@ -83,11 +74,11 @@ class DEPSParser:
                 submodules.append(submodule)
         return submodules
 
-    def parse(self, deps_content):
+    def parse(self, deps_content, module_whitelist = []):
         exec(deps_content, self.global_scope, self.local_scope)
 
         submodules = []
-        submodules.extend(self.createSubmodulesFromScope(self.local_scope['deps'], 'all'))
+        submodules.extend(self.createSubmodulesFromScope(self.local_scope['deps'], 'all', module_whitelist))
         if 'deps_os' in self.local_scope:
             for os_dep in self.local_scope['deps_os']:
                 submodules.extend(self.createSubmodulesFromScope(self.local_scope['deps_os'][os_dep], os_dep))
@@ -294,7 +285,7 @@ class Submodule:
     def readSubmodules(self, use_deps=False):
         submodules = []
         if use_deps:
-            submodules = resolver.readSubmodules()
+            submodules = resolver.read(SubmoduleDEPSParser)
             print('DEPS file provides the following submodules:')
             for submodule in submodules:
                 print('{:<80}'.format(submodule.pathRelativeToTopMostSupermodule()) + '{:<120}'.format(submodule.url) + submodule.ref)

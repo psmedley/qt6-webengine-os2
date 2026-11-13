@@ -17,8 +17,8 @@
 
 #include <guiddef.h>
 
-#include <functional>
 #include <future>  //  NOLINT
+#include <list>
 #include <memory>
 #include <string>
 #include <utility>
@@ -29,10 +29,8 @@
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/windows/ble.h"
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
-#include "internal/platform/implementation/windows/mediums_api.h"
 #include "winrt/Windows.Devices.Bluetooth.Advertisement.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
 
@@ -79,6 +77,11 @@ class BleMedium : public api::BleMedium {
                                           CancellationFlag* cancellation_flag);
 
  private:
+  void PublisherHandler(
+      ::winrt::Windows::Devices::Bluetooth::Advertisement::
+          BluetoothLEAdvertisementPublisher publisher,
+      ::winrt::Windows::Devices::Bluetooth::Advertisement::
+          BluetoothLEAdvertisementPublisherStatusChangedEventArgs args);
   void AdvertisementReceivedHandler(
       ::winrt::Windows::Devices::Bluetooth::Advertisement::
           BluetoothLEAdvertisementWatcher watcher,
@@ -100,21 +103,27 @@ class BleMedium : public api::BleMedium {
   absl::flat_hash_map<std::string, std::unique_ptr<BlePeripheral>>
       peripheral_map_ ABSL_GUARDED_BY(peripheral_map_mutex_);
 
-  // Uses Mediums API for advertising
-  std::unique_ptr<api::MediumsManager> mediums_manager_ = nullptr;
+  // The platform implementation will reference lost peripheral in another
+  // thread after report loss, so we still need to keep the peripheral to
+  // avoid potential memory issues.
+  std::list<std::unique_ptr<BlePeripheral>> lost_peripherals_
+      ABSL_GUARDED_BY(peripheral_map_mutex_);
 
   // WinRT objects
   ::winrt::Windows::Devices::Bluetooth::Advertisement::
+      BluetoothLEAdvertisementPublisher publisher_ = nullptr;
+  ::winrt::Windows::Devices::Bluetooth::Advertisement::
       BluetoothLEAdvertisementWatcher watcher_ = nullptr;
 
+  bool is_publisher_started_ = false;
   bool is_watcher_started_ = false;
 
+  ::winrt::event_token publisher_token_;
   ::winrt::event_token watcher_token_;
   ::winrt::event_token advertisement_received_token_;
 };
 
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location
 
 #endif  // THIRD_PARTY_NEARBY_INTERNAL_PLATFORM_IMPLEMENTATION_WINDOWS_BLE_MEDIUM_H_

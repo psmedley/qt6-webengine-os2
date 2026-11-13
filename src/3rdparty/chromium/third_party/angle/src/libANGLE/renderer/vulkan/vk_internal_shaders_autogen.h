@@ -19,6 +19,17 @@ namespace vk
 {
 namespace InternalShader
 {
+namespace Blit3DSrc_frag
+{
+enum Blit
+{
+    kBlitFloat = 0x00000000,
+    kBlitInt   = 0x00000001,
+    kBlitUint  = 0x00000002,
+};
+constexpr size_t kArrayLen = 0x00000003;
+}  // namespace Blit3DSrc_frag
+
 namespace BlitResolve_frag
 {
 enum flags
@@ -90,6 +101,20 @@ enum Conversion
 constexpr size_t kArrayLen = 0x00000008;
 }  // namespace ConvertVertex_comp
 
+namespace CopyImageToBuffer_comp
+{
+enum SrcFormat
+{
+    kSrcIsFloat = 0x00000000,
+};
+enum SrcType
+{
+    kSrcIs2D = 0x00000000,
+    kSrcIs3D = 0x00000001,
+};
+constexpr size_t kArrayLen = 0x00000002;
+}  // namespace CopyImageToBuffer_comp
+
 namespace EtcToBc_comp
 {
 enum OutputFormat
@@ -156,25 +181,26 @@ constexpr size_t kArrayLen = 0x00000030;
 
 namespace ImageCopy_frag
 {
+enum SrcType
+{
+    kSrcIs2D      = 0x00000000,
+    kSrcIs2DArray = 0x00000001,
+    kSrcIs3D      = 0x00000002,
+    kSrcIsYUV     = 0x00000003,
+};
 enum DestFormat
 {
     kDestIsFloat = 0x00000000,
-    kDestIsSint  = 0x00000001,
-    kDestIsUint  = 0x00000002,
+    kDestIsSint  = 0x00000004,
+    kDestIsUint  = 0x00000008,
 };
 enum SrcFormat
 {
     kSrcIsFloat = 0x00000000,
-    kSrcIsSint  = 0x00000004,
-    kSrcIsUint  = 0x00000008,
+    kSrcIsSint  = 0x00000010,
+    kSrcIsUint  = 0x00000020,
 };
-enum SrcType
-{
-    kSrcIs2D      = 0x00000000,
-    kSrcIs2DArray = 0x00000010,
-    kSrcIs3D      = 0x00000020,
-};
-constexpr size_t kArrayLen = 0x0000002B;
+constexpr size_t kArrayLen = 0x0000002C;
 }  // namespace ImageCopy_frag
 
 namespace OverlayDraw_frag
@@ -197,76 +223,81 @@ class ShaderLibrary final : angle::NonCopyable
 
     void destroy(VkDevice device);
 
+    angle::Result getBlit3DSrc_frag(Context *context,
+                                    uint32_t shaderFlags,
+                                    RefCounted<ShaderModule> **shaderOut);
     angle::Result getBlitResolve_frag(Context *context,
                                       uint32_t shaderFlags,
-                                      RefCounted<ShaderAndSerial> **shaderOut);
+                                      RefCounted<ShaderModule> **shaderOut);
     angle::Result getBlitResolveStencilNoExport_comp(Context *context,
                                                      uint32_t shaderFlags,
-                                                     RefCounted<ShaderAndSerial> **shaderOut);
+                                                     RefCounted<ShaderModule> **shaderOut);
     angle::Result getConvertIndex_comp(Context *context,
                                        uint32_t shaderFlags,
-                                       RefCounted<ShaderAndSerial> **shaderOut);
+                                       RefCounted<ShaderModule> **shaderOut);
     angle::Result getConvertIndexIndirectLineLoop_comp(Context *context,
                                                        uint32_t shaderFlags,
-                                                       RefCounted<ShaderAndSerial> **shaderOut);
+                                                       RefCounted<ShaderModule> **shaderOut);
     angle::Result getConvertIndirectLineLoop_comp(Context *context,
                                                   uint32_t shaderFlags,
-                                                  RefCounted<ShaderAndSerial> **shaderOut);
+                                                  RefCounted<ShaderModule> **shaderOut);
     angle::Result getConvertVertex_comp(Context *context,
                                         uint32_t shaderFlags,
-                                        RefCounted<ShaderAndSerial> **shaderOut);
+                                        RefCounted<ShaderModule> **shaderOut);
+    angle::Result getCopyImageToBuffer_comp(Context *context,
+                                            uint32_t shaderFlags,
+                                            RefCounted<ShaderModule> **shaderOut);
     angle::Result getEtcToBc_comp(Context *context,
                                   uint32_t shaderFlags,
-                                  RefCounted<ShaderAndSerial> **shaderOut);
+                                  RefCounted<ShaderModule> **shaderOut);
     angle::Result getExportStencil_frag(Context *context,
                                         uint32_t shaderFlags,
-                                        RefCounted<ShaderAndSerial> **shaderOut);
+                                        RefCounted<ShaderModule> **shaderOut);
     angle::Result getFullScreenTri_vert(Context *context,
                                         uint32_t shaderFlags,
-                                        RefCounted<ShaderAndSerial> **shaderOut);
+                                        RefCounted<ShaderModule> **shaderOut);
     angle::Result getGenerateMipmap_comp(Context *context,
                                          uint32_t shaderFlags,
-                                         RefCounted<ShaderAndSerial> **shaderOut);
+                                         RefCounted<ShaderModule> **shaderOut);
     angle::Result getImageClear_frag(Context *context,
                                      uint32_t shaderFlags,
-                                     RefCounted<ShaderAndSerial> **shaderOut);
+                                     RefCounted<ShaderModule> **shaderOut);
     angle::Result getImageCopy_frag(Context *context,
                                     uint32_t shaderFlags,
-                                    RefCounted<ShaderAndSerial> **shaderOut);
+                                    RefCounted<ShaderModule> **shaderOut);
     angle::Result getOverlayDraw_frag(Context *context,
                                       uint32_t shaderFlags,
-                                      RefCounted<ShaderAndSerial> **shaderOut);
+                                      RefCounted<ShaderModule> **shaderOut);
     angle::Result getOverlayDraw_vert(Context *context,
                                       uint32_t shaderFlags,
-                                      RefCounted<ShaderAndSerial> **shaderOut);
+                                      RefCounted<ShaderModule> **shaderOut);
 
   private:
-    RefCounted<ShaderAndSerial>
-        mBlitResolve_frag_shaders[InternalShader::BlitResolve_frag::kArrayLen];
-    RefCounted<ShaderAndSerial> mBlitResolveStencilNoExport_comp_shaders
+    RefCounted<ShaderModule> mBlit3DSrc_frag_shaders[InternalShader::Blit3DSrc_frag::kArrayLen];
+    RefCounted<ShaderModule> mBlitResolve_frag_shaders[InternalShader::BlitResolve_frag::kArrayLen];
+    RefCounted<ShaderModule> mBlitResolveStencilNoExport_comp_shaders
         [InternalShader::BlitResolveStencilNoExport_comp::kArrayLen];
-    RefCounted<ShaderAndSerial>
+    RefCounted<ShaderModule>
         mConvertIndex_comp_shaders[InternalShader::ConvertIndex_comp::kArrayLen];
-    RefCounted<ShaderAndSerial> mConvertIndexIndirectLineLoop_comp_shaders
+    RefCounted<ShaderModule> mConvertIndexIndirectLineLoop_comp_shaders
         [InternalShader::ConvertIndexIndirectLineLoop_comp::kArrayLen];
-    RefCounted<ShaderAndSerial> mConvertIndirectLineLoop_comp_shaders
+    RefCounted<ShaderModule> mConvertIndirectLineLoop_comp_shaders
         [InternalShader::ConvertIndirectLineLoop_comp::kArrayLen];
-    RefCounted<ShaderAndSerial>
+    RefCounted<ShaderModule>
         mConvertVertex_comp_shaders[InternalShader::ConvertVertex_comp::kArrayLen];
-    RefCounted<ShaderAndSerial> mEtcToBc_comp_shaders[InternalShader::EtcToBc_comp::kArrayLen];
-    RefCounted<ShaderAndSerial>
+    RefCounted<ShaderModule>
+        mCopyImageToBuffer_comp_shaders[InternalShader::CopyImageToBuffer_comp::kArrayLen];
+    RefCounted<ShaderModule> mEtcToBc_comp_shaders[InternalShader::EtcToBc_comp::kArrayLen];
+    RefCounted<ShaderModule>
         mExportStencil_frag_shaders[InternalShader::ExportStencil_frag::kArrayLen];
-    RefCounted<ShaderAndSerial>
+    RefCounted<ShaderModule>
         mFullScreenTri_vert_shaders[InternalShader::FullScreenTri_vert::kArrayLen];
-    RefCounted<ShaderAndSerial>
+    RefCounted<ShaderModule>
         mGenerateMipmap_comp_shaders[InternalShader::GenerateMipmap_comp::kArrayLen];
-    RefCounted<ShaderAndSerial>
-        mImageClear_frag_shaders[InternalShader::ImageClear_frag::kArrayLen];
-    RefCounted<ShaderAndSerial> mImageCopy_frag_shaders[InternalShader::ImageCopy_frag::kArrayLen];
-    RefCounted<ShaderAndSerial>
-        mOverlayDraw_frag_shaders[InternalShader::OverlayDraw_frag::kArrayLen];
-    RefCounted<ShaderAndSerial>
-        mOverlayDraw_vert_shaders[InternalShader::OverlayDraw_vert::kArrayLen];
+    RefCounted<ShaderModule> mImageClear_frag_shaders[InternalShader::ImageClear_frag::kArrayLen];
+    RefCounted<ShaderModule> mImageCopy_frag_shaders[InternalShader::ImageCopy_frag::kArrayLen];
+    RefCounted<ShaderModule> mOverlayDraw_frag_shaders[InternalShader::OverlayDraw_frag::kArrayLen];
+    RefCounted<ShaderModule> mOverlayDraw_vert_shaders[InternalShader::OverlayDraw_vert::kArrayLen];
 };
 }  // namespace vk
 }  // namespace rx

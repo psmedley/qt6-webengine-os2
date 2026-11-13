@@ -23,14 +23,13 @@
 #include "internal/platform/implementation/windows/mutex.h"
 #include "internal/platform/mutex.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
 
 class ConditionVariable : public api::ConditionVariable {
  public:
   explicit ConditionVariable(api::Mutex* mutex)
-      : mutex_(&(static_cast<windows::Mutex*>(mutex))->mutex_) {}
+      : mutex_(&(static_cast<windows::Mutex*>(mutex))->GetMutex()) {}
   ~ConditionVariable() override = default;
 
   Exception Wait() override {
@@ -51,5 +50,5 @@ class ConditionVariable : public api::ConditionVariable {
 };
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location
+
 #endif  // PLATFORM_IMPL_WINDOWS_CONDITION_VARIABLE_H_

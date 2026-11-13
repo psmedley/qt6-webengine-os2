@@ -43,9 +43,19 @@ g.test('size')
     );
   });
 
+g.test('limit')
+  .desc('Test buffer size is validated against maxBufferSize.')
+  .params(u => u.beginSubcases().combine('sizeAddition', [-1, 0, +1]))
+  .fn(t => {
+    const { sizeAddition } = t.params;
+    const size = t.makeLimitVariant('maxBufferSize', { mult: 1, add: sizeAddition });
+    const isValid = size <= t.device.limits.maxBufferSize;
+    const usage = BufferUsage.COPY_SRC;
+    t.expectGPUError('validation', () => t.device.createBuffer({ size, usage }), !isValid);
+  });
+
 const kInvalidUsage = 0x8000;
 assert((kInvalidUsage & kAllBufferUsageBits) === 0);
-
 g.test('usage')
   .desc('Test combinations of zero to two usage flags are validated to be valid.')
   .params(u =>

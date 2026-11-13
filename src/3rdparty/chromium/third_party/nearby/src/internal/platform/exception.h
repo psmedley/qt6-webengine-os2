@@ -19,7 +19,6 @@
 
 #include "absl/meta/type_traits.h"
 
-namespace location {
 namespace nearby {
 
 struct Exception {
@@ -35,6 +34,7 @@ struct Exception {
                              // illegal chars
   };
   bool Ok() const { return value == kSuccess; }
+  explicit operator bool() const { return Ok(); }
   bool Raised() const { return !Ok(); }
   bool Raised(Value val) const { return value == val; }
   Value value{kFailed};
@@ -108,7 +108,35 @@ class ExceptionOr {
   Exception exception_{Exception::kFailed};
 };
 
+template <>
+class ExceptionOr<bool> {
+ public:
+  explicit ExceptionOr() = default;
+  explicit ExceptionOr(bool result)
+      : exception_{result ? Exception::kSuccess : Exception::kFailed} {}
+  explicit ExceptionOr(Exception::Value exception) : exception_{exception} {}
+  explicit ExceptionOr(Exception exception) : exception_{exception} {}
+
+  bool ok() const { return exception_.Ok(); }
+  explicit operator bool() const { return ok(); }
+  bool result() const { return ok(); }
+  Exception::Value exception() const { return exception_.value; }
+  bool GetResult() const { return ok(); }
+  Exception GetException() const { return exception_; }
+
+ private:
+  Exception exception_{Exception::kFailed};
+};
+
+template <typename T>
+constexpr inline bool operator==(const ExceptionOr<T>& a,
+                                 const ExceptionOr<T>& b) {
+  if (a.ok() && b.ok()) {
+    return a.result() == b.result();
+  }
+  return a.exception() == b.exception();
+}
+
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_BASE_EXCEPTION_H_

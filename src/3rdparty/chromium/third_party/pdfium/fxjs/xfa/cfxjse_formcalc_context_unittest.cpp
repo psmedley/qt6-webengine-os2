@@ -1,4 +1,4 @@
-// Copyright 2022 PDFium Authors. All rights reserved.
+// Copyright 2022 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,4 +71,73 @@ TEST(FormCalcContextTest, GenerateSomExpression) {
   result = CFXJSE_FormCalcContext::GenerateSomExpression(
       "mars", 3, -2147483648, /*bIsStar=*/false);
   EXPECT_EQ(result, "mars[0]");
+}
+
+TEST(FormCalcContextTest, IsIsoDateFormat) {
+  int32_t year = 0;
+  int32_t month = 0;
+  int32_t day = 0;
+
+  EXPECT_FALSE(
+      CFXJSE_FormCalcContext::IsIsoDateFormat("", &year, &month, &day));
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoDateFormat("2023-06-24", &year,
+                                                      &month, &day));
+  EXPECT_EQ(2023, year);
+  EXPECT_EQ(6, month);
+  EXPECT_EQ(24, day);
+}
+
+TEST(FormCalcContextTest, IsIsoTimeFormat) {
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat(""));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat(":"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("::"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat(":::"));
+
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("2"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("2:"));
+
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:3"));
+
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20304"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:4"));
+
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("2030405"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:40:5"));
+
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20"));
+
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("2030"));
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30"));
+
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203040"));
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:40"));
+
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203040.001"));
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:40.001"));
+
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203040z"));
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:40z"));
+
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203040+07:30"));
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:40+07:30"));
+
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203040-07:30"));
+  EXPECT_TRUE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:40-07:30"));
+
+  // Range errors.
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("243040-07:30"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("24:30:40-07:30"));
+
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("206040-07:30"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:60:40-07:30"));
+
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203061-07:30"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:61-07:30"));
+
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203040-24:30"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:40-24:30"));
+
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("203040-07:60"));
+  EXPECT_FALSE(CFXJSE_FormCalcContext::IsIsoTimeFormat("20:30:40-07:60"));
 }

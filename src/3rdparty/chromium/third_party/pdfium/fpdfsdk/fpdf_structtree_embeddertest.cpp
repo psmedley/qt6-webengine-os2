@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -389,6 +389,53 @@ TEST_F(FPDFStructTreeEmbedderTest, GetMarkedContentIdAtIndex) {
   UnloadPage(page);
 }
 
+TEST_F(FPDFStructTreeEmbedderTest, GetChildMarkedContentID) {
+  ASSERT_TRUE(OpenDocument("tagged_mcr_multipage.pdf"));
+
+  // Using the loop to make difference clear
+  for (int page_i : {0, 1}) {
+    FPDF_PAGE page = LoadPage(page_i);
+    ASSERT_TRUE(page);
+    ScopedFPDFStructTree struct_tree(FPDF_StructTree_GetForPage(page));
+    ASSERT_TRUE(struct_tree);
+    ASSERT_EQ(1, FPDF_StructTree_CountChildren(struct_tree.get()));
+
+    FPDF_STRUCTELEMENT struct_doc =
+        FPDF_StructTree_GetChildAtIndex(struct_tree.get(), 0);
+    ASSERT_TRUE(struct_doc);
+    EXPECT_EQ(-1, FPDF_StructElement_GetMarkedContentID(struct_doc));
+
+    ASSERT_EQ(2, FPDF_StructElement_CountChildren(struct_doc));
+    FPDF_STRUCTELEMENT child1 =
+        FPDF_StructElement_GetChildAtIndex(struct_doc, 0);
+    EXPECT_FALSE(child1);
+    FPDF_STRUCTELEMENT child2 =
+        FPDF_StructElement_GetChildAtIndex(struct_doc, 1);
+    EXPECT_FALSE(child2);
+
+    EXPECT_EQ(2, FPDF_StructElement_GetMarkedContentIdCount(struct_doc));
+
+    // Both MCID are returned as if part of this page, while they are not.
+    // So `FPDF_StructElement_GetMarkedContentIdAtIndex(...)` does not work
+    // for StructElement spanning multiple pages.
+    EXPECT_EQ(0, FPDF_StructElement_GetMarkedContentIdAtIndex(struct_doc, 0));
+    EXPECT_EQ(0, FPDF_StructElement_GetMarkedContentIdAtIndex(struct_doc, 1));
+
+    // One MCR is pointing to page 1, another to page2, so those are different
+    // for different pages.
+    EXPECT_EQ(page_i == 0 ? 0 : -1,
+              FPDF_StructElement_GetChildMarkedContentID(struct_doc, 0));
+    EXPECT_EQ(page_i == 1 ? 0 : -1,
+              FPDF_StructElement_GetChildMarkedContentID(struct_doc, 1));
+    // Invalid index
+    EXPECT_EQ(-1, FPDF_StructElement_GetChildMarkedContentID(struct_doc, -1));
+    EXPECT_EQ(-1, FPDF_StructElement_GetChildMarkedContentID(struct_doc, 2));
+    // Invalid element
+    EXPECT_EQ(-1, FPDF_StructElement_GetChildMarkedContentID(nullptr, 0));
+    UnloadPage(page);
+  }
+}
+
 TEST_F(FPDFStructTreeEmbedderTest, GetType) {
   ASSERT_TRUE(OpenDocument("tagged_alt_text.pdf"));
   FPDF_PAGE page = LoadPage(0);
@@ -595,6 +642,11 @@ TEST_F(FPDFStructTreeEmbedderTest, GetAttributes) {
       ASSERT_EQ(2, FPDF_StructElement_Attr_GetCount(attr));
       ASSERT_FALSE(
           FPDF_StructElement_Attr_GetName(attr, 1, nullptr, 0U, nullptr));
+      unsigned long buffer_len_needed = ULONG_MAX;
+      // Pass buffer = nullptr to obtain the size of the buffer needed,
+      ASSERT_TRUE(FPDF_StructElement_Attr_GetName(attr, 1, nullptr, 0,
+                                                  &buffer_len_needed));
+      EXPECT_EQ(2U, buffer_len_needed);
       char buffer[8] = {};
       unsigned long out_len = ULONG_MAX;
       // Deliberately pass in a small buffer size to make sure `buffer` remains
@@ -643,11 +695,12 @@ TEST_F(FPDFStructTreeEmbedderTest, GetAttributes) {
       FPDF_STRUCTELEMENT td = FPDF_StructElement_GetChildAtIndex(tr, 1);
       ASSERT_TRUE(td);
       {
+        // Test counting and obtaining attributes via reference
         ASSERT_EQ(1, FPDF_StructElement_GetAttributeCount(td));
         FPDF_STRUCTELEMENT_ATTR attr =
             FPDF_StructElement_GetAttributeAtIndex(td, 0);
         ASSERT_TRUE(attr);
-        ASSERT_EQ(3, FPDF_StructElement_Attr_GetCount(attr));
+        ASSERT_EQ(4, FPDF_StructElement_Attr_GetCount(attr));
         // Test string and blob type
         {
           char buffer[16] = {};
@@ -690,6 +743,23 @@ TEST_F(FPDFStructTreeEmbedderTest, GetAttributes) {
           ASSERT_TRUE(
               FPDF_StructElement_Attr_GetBooleanValue(attr, buffer, &val));
           EXPECT_TRUE(val);
+        }
+
+        // Test reference to number
+        {
+          char buffer[16] = {};
+          unsigned long out_len = ULONG_MAX;
+          ASSERT_TRUE(FPDF_StructElement_Attr_GetName(
+              attr, 3, buffer, sizeof(buffer), &out_len));
+          EXPECT_EQ(8U, out_len);
+          EXPECT_STREQ("RowSpan", buffer);
+
+          EXPECT_EQ(FPDF_OBJECT_REFERENCE,
+                    FPDF_StructElement_Attr_GetType(attr, buffer));
+          float val;
+          ASSERT_TRUE(
+              FPDF_StructElement_Attr_GetNumberValue(attr, buffer, &val));
+          EXPECT_FLOAT_EQ(3, val);
         }
       }
     }
@@ -827,6 +897,21 @@ TEST_F(FPDFStructTreeEmbedderTest, Bug1296920) {
     ASSERT_EQ(1, FPDF_StructTree_CountChildren(struct_tree.get()));
 
     // Destroying this tree should not crash.
+  }
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFStructTreeEmbedderTest, Bug1443100) {
+  ASSERT_TRUE(OpenDocument("tagged_table_bad_parent.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  {
+    // Calling these APIs should not trigger a dangling pointer.
+    ScopedFPDFStructTree struct_tree(FPDF_StructTree_GetForPage(page));
+    ASSERT_TRUE(struct_tree);
+    ASSERT_EQ(1, FPDF_StructTree_CountChildren(struct_tree.get()));
   }
 
   UnloadPage(page);

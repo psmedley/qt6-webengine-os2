@@ -101,7 +101,7 @@ void MediaControlTimelineElement::UpdateAria() {
 void MediaControlTimelineElement::SetPosition(double current_time,
                                               bool suppress_aria) {
   if (is_live_ && !live_anchor_time_ && current_time != 0) {
-    live_anchor_time_.emplace();
+    live_anchor_time_ = LiveAnchorTime{};
     live_anchor_time_->clock_time_ = base::TimeTicks::Now();
     live_anchor_time_->media_time_ = MediaElement().currentTime();
   }
@@ -262,8 +262,7 @@ void MediaControlTimelineElement::RenderBarSegments() {
                GetFloatingPointAttribute(html_names::kMinAttr);
   }
 
-  if (std::isnan(duration) || std::isinf(duration) || !duration ||
-      std::isnan(current_time)) {
+  if (!std::isfinite(duration) || !duration || std::isnan(current_time)) {
     SetBeforeSegmentPosition(MediaControlSliderElement::Position(0, 0));
     SetAfterSegmentPosition(MediaControlSliderElement::Position(0, 0));
     return;

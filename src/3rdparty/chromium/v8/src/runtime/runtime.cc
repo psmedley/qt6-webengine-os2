@@ -186,6 +186,7 @@ bool Runtime::MayAllocate(FunctionId id) {
   switch (id) {
     case Runtime::kCompleteInobjectSlackTracking:
     case Runtime::kCompleteInobjectSlackTrackingForMap:
+    case Runtime::kGlobalPrint:
       return false;
     default:
       return true;
@@ -206,12 +207,18 @@ bool Runtime::IsAllowListedForFuzzing(FunctionId id) {
     case Runtime::kGetUndetectable:
     case Runtime::kNeverOptimizeFunction:
     case Runtime::kOptimizeFunctionOnNextCall:
+    case Runtime::kOptimizeMaglevOnNextCall:
     case Runtime::kOptimizeOsr:
     case Runtime::kPrepareFunctionForOptimization:
     case Runtime::kPretenureAllocationSite:
     case Runtime::kSetAllocationTimeout:
+    case Runtime::kSetForceSlowPath:
     case Runtime::kSimulateNewspaceFull:
     case Runtime::kWaitForBackgroundOptimization:
+    case Runtime::kSetBatterySaverMode:
+    case Runtime::kNotifyIsolateForeground:
+    case Runtime::kNotifyIsolateBackground:
+    case Runtime::kIsEfficiencyModeEnabled:
       return true;
     // Runtime functions only permitted for non-differential fuzzers.
     // This list may contain functions performing extra checks or returning
@@ -223,9 +230,14 @@ bool Runtime::IsAllowListedForFuzzing(FunctionId id) {
     case Runtime::kVerifyType:
       return !v8_flags.allow_natives_for_differential_fuzzing &&
              !v8_flags.concurrent_recompilation;
+    case Runtime::kLeakHole:
+      return v8_flags.hole_fuzzing;
     case Runtime::kBaselineOsr:
     case Runtime::kCompileBaseline:
-      return ENABLE_SPARKPLUG;
+#ifdef V8_ENABLE_SPARKPLUG
+      return true;
+#endif
+      // Fallthrough.
     default:
       return false;
   }

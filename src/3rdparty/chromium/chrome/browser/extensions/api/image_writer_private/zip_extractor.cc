@@ -4,10 +4,11 @@
 
 #include "chrome/browser/extensions/api/image_writer_private/zip_extractor.h"
 
+#include <algorithm>
 #include <memory>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/extensions/api/image_writer_private/error_constants.h"

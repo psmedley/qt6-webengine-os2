@@ -8,10 +8,11 @@
 #ifndef SKSL_CONSTRUCTOR_ARRAY
 #define SKSL_CONSTRUCTOR_ARRAY
 
-#include "include/private/SkSLDefines.h"
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLDefines.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLConstructor.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 
 #include <memory>
 #include <utility>
@@ -26,10 +27,10 @@ class Type;
  */
 class ConstructorArray final : public MultiArgumentConstructor {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kConstructorArray;
+    inline static constexpr Kind kIRNodeKind = Kind::kConstructorArray;
 
     ConstructorArray(Position pos, const Type& type, ExpressionArray arguments)
-        : INHERITED(pos, kExpressionKind, &type, std::move(arguments)) {}
+        : INHERITED(pos, kIRNodeKind, &type, std::move(arguments)) {}
 
     // ConstructorArray::Convert will typecheck and create array-constructor expressions.
     // Reports errors via the ErrorReporter; returns null on error.

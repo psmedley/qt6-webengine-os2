@@ -8,19 +8,17 @@
 #include <stddef.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/storage/setting_sync_data.h"
-#include "components/sync/model/sync_change.h"
 #include "components/sync/model/syncable_service.h"
 #include "components/value_store/value_store.h"
 #include "extensions/browser/api/storage/settings_observer.h"
 
 namespace syncer {
-class SyncError;
 class ModelError;
 }  // namespace syncer
 
@@ -67,9 +65,9 @@ class SyncableSettingsStorage : public value_store::ValueStore {
   // already active.
   // |sync_state| is the current state of the extension settings in sync.
   // |sync_processor| is used to write out any changes.
-  // Returns any error when trying to sync, or absl::nullopt on success.
-  absl::optional<syncer::ModelError> StartSyncing(
-      std::unique_ptr<base::DictionaryValue> sync_state,
+  // Returns any error when trying to sync, or std::nullopt on success.
+  std::optional<syncer::ModelError> StartSyncing(
+      base::Value::Dict sync_state,
       std::unique_ptr<SettingsSyncProcessor> sync_processor);
 
   // Stops syncing this storage area. May be called at any time (idempotent).
@@ -77,8 +75,8 @@ class SyncableSettingsStorage : public value_store::ValueStore {
 
   // Pushes a list of sync changes into this storage area. May be called at any
   // time, changes will be ignored if sync isn't active.
-  // Returns any error when trying to sync, or absl::nullopt on success.
-  absl::optional<syncer::ModelError> ProcessSyncChanges(
+  // Returns any error when trying to sync, or std::nullopt on success.
+  std::optional<syncer::ModelError> ProcessSyncChanges(
       std::unique_ptr<SettingSyncDataList> sync_changes);
 
  private:
@@ -92,27 +90,30 @@ class SyncableSettingsStorage : public value_store::ValueStore {
 
   // Sends all local settings to sync. This assumes that there are no settings
   // in sync yet.
-  // Returns any error when trying to sync, or absl::nullopt on success.
-  absl::optional<syncer::ModelError> SendLocalSettingsToSync(
+  // Returns any error when trying to sync, or std::nullopt on success.
+  std::optional<syncer::ModelError> SendLocalSettingsToSync(
       base::Value::Dict local_state);
 
   // Overwrites local state with sync state.
-  // Returns any error when trying to sync, or absl::nullopt on success.
-  absl::optional<syncer::ModelError> OverwriteLocalSettingsWithSync(
-      std::unique_ptr<base::DictionaryValue> sync_state,
+  // Returns any error when trying to sync, or std::nullopt on success.
+  std::optional<syncer::ModelError> OverwriteLocalSettingsWithSync(
+      base::Value::Dict sync_state,
       base::Value::Dict local_state);
 
   // Called when an Add/Update/Remove comes from sync.
-  syncer::SyncError OnSyncAdd(const std::string& key,
-                              std::unique_ptr<base::Value> new_value,
-                              value_store::ValueStoreChangeList* changes);
-  syncer::SyncError OnSyncUpdate(const std::string& key,
-                                 std::unique_ptr<base::Value> old_value,
-                                 std::unique_ptr<base::Value> new_value,
-                                 value_store::ValueStoreChangeList* changes);
-  syncer::SyncError OnSyncDelete(const std::string& key,
-                                 std::unique_ptr<base::Value> old_value,
-                                 value_store::ValueStoreChangeList* changes);
+  std::optional<syncer::ModelError> OnSyncAdd(
+      const std::string& key,
+      base::Value new_value,
+      value_store::ValueStoreChangeList* changes);
+  std::optional<syncer::ModelError> OnSyncUpdate(
+      const std::string& key,
+      base::Value old_value,
+      base::Value new_value,
+      value_store::ValueStoreChangeList* changes);
+  std::optional<syncer::ModelError> OnSyncDelete(
+      const std::string& key,
+      base::Value old_value,
+      value_store::ValueStoreChangeList* changes);
 
   // Observer to settings changes.
   SequenceBoundSettingsChangedCallback observer_;

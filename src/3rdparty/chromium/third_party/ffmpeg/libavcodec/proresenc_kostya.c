@@ -585,7 +585,7 @@ static int encode_slice(AVCodecContext *avctx, const AVFrame *pic,
     if (ctx->pictures_per_frame == 1)
         line_add = 0;
     else
-        line_add = ctx->cur_picture_idx ^ !pic->top_field_first;
+        line_add = ctx->cur_picture_idx ^ !(pic->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST);
 
     if (ctx->force_quant) {
         qmat = ctx->quants[0];
@@ -838,7 +838,7 @@ static int find_slice_quant(AVCodecContext *avctx,
     if (ctx->pictures_per_frame == 1)
         line_add = 0;
     else
-        line_add = ctx->cur_picture_idx ^ !ctx->pic->top_field_first;
+        line_add = ctx->cur_picture_idx ^ !(ctx->pic->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST);
     mbs = x + mbs_per_slice;
 
     for (i = 0; i < ctx->num_planes; i++) {
@@ -1045,7 +1045,7 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 
     frame_flags = ctx->chroma_factor << 6;
     if (avctx->flags & AV_CODEC_FLAG_INTERLACED_DCT)
-        frame_flags |= pic->top_field_first ? 0x04 : 0x08;
+        frame_flags |= (pic->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) ? 0x04 : 0x08;
     bytestream_put_byte  (&buf, frame_flags);
 
     bytestream_put_byte  (&buf, 0);             // reserved
@@ -1355,6 +1355,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
     }
 
     avctx->codec_tag   = ctx->profile_info->tag;
+    avctx->profile = ctx->profile;
 
     av_log(avctx, AV_LOG_DEBUG,
            "profile %d, %d slices, interlacing: %s, %d bits per MB\n",
@@ -1428,7 +1429,8 @@ const FFCodec ff_prores_ks_encoder = {
     .init           = encode_init,
     .close          = encode_close,
     FF_CODEC_ENCODE_CB(encode_frame),
-    .p.capabilities = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
+    .p.capabilities = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .p.pix_fmts     = (const enum AVPixelFormat[]) {
                           AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
                           AV_PIX_FMT_YUVA444P10, AV_PIX_FMT_NONE

@@ -14,13 +14,10 @@
 
 import {Message, Method, rpc, RPCImplCallback} from 'protobufjs';
 
+import {isString} from '../base/object_utils';
 import {base64Encode} from '../base/string_utils';
 import {Actions} from '../common/actions';
 import {TRACE_SUFFIX} from '../common/constants';
-import {
-  ConsumerPort,
-  TraceConfig,
-} from '../common/protos';
 import {genTraceConfig} from '../common/recordingV2/recording_config_utils';
 import {TargetInfo} from '../common/recordingV2/recording_interfaces_v2';
 import {
@@ -29,7 +26,12 @@ import {
   isChromeTarget,
   RecordingTarget,
 } from '../common/state';
+import {globals} from '../frontend/globals';
 import {publishBufferUsage, publishTrackData} from '../frontend/publish';
+import {
+  ConsumerPort,
+  TraceConfig,
+} from '../protos';
 
 import {AdbOverWebUsb} from './adb';
 import {AdbConsumerPort} from './adb_shell_controller';
@@ -45,7 +47,6 @@ import {
   isReadBuffersResponse,
 } from './consumer_port_types';
 import {Controller} from './controller';
-import {App, globals} from './globals';
 import {RecordConfig} from './record_config_types';
 import {Consumer, RpcConsumerPort} from './record_controller_interfaces';
 
@@ -128,7 +129,8 @@ export function toPbtxt(configBuffer: Uint8Array): string {
     return value.startsWith('MEMINFO_') || value.startsWith('VMSTAT_') ||
         value.startsWith('STAT_') || value.startsWith('LID_') ||
         value.startsWith('BATTERY_COUNTER_') || value === 'DISCARD' ||
-        value === 'RING_BUFFER';
+        value === 'RING_BUFFER' || value === 'BACKGROUND' ||
+        value === 'USER_INITIATED' || value.startsWith('PERF_CLOCK_');
   }
   // Since javascript doesn't have 64 bit numbers when converting protos to
   // json the proto library encodes them as strings. This is lossy since
@@ -139,9 +141,11 @@ export function toPbtxt(configBuffer: Uint8Array): string {
   function is64BitNumber(key: string): boolean {
     return [
       'maxFileSizeBytes',
+      'pid',
       'samplingIntervalBytes',
       'shmemSizeBytes',
-      'pid',
+      'timestampUnitMultiplier',
+      'frequency',
     ].includes(key);
   }
   function* message(msg: {}, indent: number): IterableIterator<string> {
@@ -150,7 +154,7 @@ export function toPbtxt(configBuffer: Uint8Array): string {
       const isNested = typeof value === 'object' && !isRepeated;
       for (const entry of (isRepeated ? value as Array<{}> : [value])) {
         yield ' '.repeat(indent) + `${snakeCase(key)}${isNested ? '' : ':'} `;
-        if (typeof entry === 'string') {
+        if (isString(entry)) {
           if (isEnum(entry) || is64BitNumber(key)) {
             yield entry;
           } else {
@@ -176,7 +180,6 @@ export function toPbtxt(configBuffer: Uint8Array): string {
 }
 
 export class RecordController extends Controller<'main'> implements Consumer {
-  private app: App;
   private config: RecordConfig|null = null;
   private readonly extensionPort: MessagePort;
   private recordingInProgress = false;
@@ -193,9 +196,8 @@ export class RecordController extends Controller<'main'> implements Consumer {
   // char, it is the 'targetOS'
   private controllerPromises = new Map<string, Promise<RpcConsumerPort>>();
 
-  constructor(args: {app: App, extensionPort: MessagePort}) {
+  constructor(args: {extensionPort: MessagePort}) {
     super('main');
-    this.app = args.app;
     this.consumerPort = ConsumerPort.create(this.rpcImpl.bind(this));
     this.extensionPort = args.extensionPort;
   }
@@ -203,21 +205,21 @@ export class RecordController extends Controller<'main'> implements Consumer {
   run() {
     // TODO(eseckler): Use ConsumerPort's QueryServiceState instead
     // of posting a custom extension message to retrieve the category list.
-    if (this.app.state.fetchChromeCategories && !this.fetchedCategories) {
+    if (globals.state.fetchChromeCategories && !this.fetchedCategories) {
       this.fetchedCategories = true;
-      if (this.app.state.extensionInstalled) {
+      if (globals.state.extensionInstalled) {
         this.extensionPort.postMessage({method: 'GetCategories'});
       }
       globals.dispatch(Actions.setFetchChromeCategories({fetch: false}));
     }
-    if (this.app.state.recordConfig === this.config &&
-        this.app.state.recordingInProgress === this.recordingInProgress) {
+    if (globals.state.recordConfig === this.config &&
+        globals.state.recordingInProgress === this.recordingInProgress) {
       return;
     }
-    this.config = this.app.state.recordConfig;
+    this.config = globals.state.recordConfig;
 
     const configProto =
-        genConfigProto(this.config, this.app.state.recordingTarget);
+        genConfigProto(this.config, globals.state.recordingTarget);
     const configProtoText = toPbtxt(configProto);
     const configProtoBase64 = base64Encode(configProto);
     const commandline = `
@@ -227,7 +229,7 @@ export class RecordController extends Controller<'main'> implements Consumer {
       adb pull /data/misc/perfetto-traces/trace /tmp/trace
     `;
     const traceConfig =
-        convertToRecordingV2Input(this.config, this.app.state.recordingTarget);
+        convertToRecordingV2Input(this.config, globals.state.recordingTarget);
     // TODO(hjd): This should not be TrackData after we unify the stores.
     publishTrackData({
       id: 'config',
@@ -241,8 +243,8 @@ export class RecordController extends Controller<'main'> implements Consumer {
 
     // If the recordingInProgress boolean state is different, it means that we
     // have to start or stop recording a trace.
-    if (this.app.state.recordingInProgress === this.recordingInProgress) return;
-    this.recordingInProgress = this.app.state.recordingInProgress;
+    if (globals.state.recordingInProgress === this.recordingInProgress) return;
+    this.recordingInProgress = globals.state.recordingInProgress;
 
     if (this.recordingInProgress) {
       this.startRecordTrace(traceConfig);
@@ -391,7 +393,9 @@ export class RecordController extends Controller<'main'> implements Consumer {
             throw Error(`No device connected`);
           }
 
+          /* eslint-disable @typescript-eslint/strict-boolean-expressions */
           if (!controller) throw Error(`Unknown target: ${target}`);
+          /* eslint-enable */
           resolve(controller);
         });
 
@@ -415,8 +419,8 @@ export class RecordController extends Controller<'main'> implements Consumer {
       method: RPCImplMethod, requestData: Uint8Array,
       _callback: RPCImplCallback) {
     try {
-      const state = this.app.state;
-      // TODO(hjd): This is a bit weird. We implicity send each RPC message to
+      const state = globals.state;
+      // TODO(hjd): This is a bit weird. We implicitly send each RPC message to
       // whichever target is currently selected (creating that target if needed)
       // it would be nicer if the setup/teardown was more explicit.
       const target = await this.getTargetController(state.recordingTarget);

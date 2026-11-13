@@ -1,9 +1,10 @@
 #!/usr/bin/python3 -i
 #
-# Copyright (c) 2015-2022 The Khronos Group Inc.
-# Copyright (c) 2015-2022 Valve Corporation
-# Copyright (c) 2015-2022 LunarG, Inc.
-# Copyright (c) 2015-2022 Google Inc.
+# Copyright (c) 2015-2023 The Khronos Group Inc.
+# Copyright (c) 2015-2023 Valve Corporation
+# Copyright (c) 2015-2023 LunarG, Inc.
+# Copyright (c) 2015-2023 Google Inc.
+# Copyright (c) 2023-2023 RasterGrid Kft.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,401 +29,6 @@ import os,re,sys
 from generator import *
 from common_codegen import *
 
-
-# Mock header code
-HEADER_C_CODE = '''
-using mutex_t = std::mutex;
-using lock_guard_t = std::lock_guard<mutex_t>;
-using unique_lock_t = std::unique_lock<mutex_t>;
-
-static mutex_t global_lock;
-static uint64_t global_unique_handle = 1;
-static const uint32_t SUPPORTED_LOADER_ICD_INTERFACE_VERSION = 5;
-static uint32_t loader_interface_version = 0;
-static bool negotiate_loader_icd_interface_called = false;
-static void* CreateDispObjHandle() {
-    auto handle = new VK_LOADER_DATA;
-    set_loader_magic_value(handle);
-    return handle;
-}
-static void DestroyDispObjHandle(void* handle) {
-    delete reinterpret_cast<VK_LOADER_DATA*>(handle);
-}
-'''
-
-# Manual code at the top of the cpp source file
-SOURCE_CPP_PREFIX = '''
-using std::unordered_map;
-
-static constexpr uint32_t icd_physical_device_count = 1;
-static constexpr uint32_t kSupportedVulkanAPIVersion = VK_API_VERSION_1_1;
-static unordered_map<VkInstance, std::array<VkPhysicalDevice, icd_physical_device_count>> physical_device_map;
-
-// Map device memory handle to any mapped allocations that we'll need to free on unmap
-static unordered_map<VkDeviceMemory, std::vector<void*>> mapped_memory_map;
-
-// Map device memory allocation handle to the size
-static unordered_map<VkDeviceMemory, VkDeviceSize> allocated_memory_size_map;
-
-static unordered_map<VkDevice, unordered_map<uint32_t, unordered_map<uint32_t, VkQueue>>> queue_map;
-static unordered_map<VkDevice, unordered_map<VkBuffer, VkBufferCreateInfo>> buffer_map;
-static unordered_map<VkDevice, unordered_map<VkImage, VkDeviceSize>> image_memory_size_map;
-static unordered_map<VkCommandPool, std::vector<VkCommandBuffer>> command_pool_buffer_map;
-
-static constexpr uint32_t icd_swapchain_image_count = 1;
-static unordered_map<VkSwapchainKHR, VkImage[icd_swapchain_image_count]> swapchain_image_map;
-
-// TODO: Would like to codegen this but limits aren't in XML
-static VkPhysicalDeviceLimits SetLimits(VkPhysicalDeviceLimits *limits) {
-    limits->maxImageDimension1D = 4096;
-    limits->maxImageDimension2D = 4096;
-    limits->maxImageDimension3D = 256;
-    limits->maxImageDimensionCube = 4096;
-    limits->maxImageArrayLayers = 256;
-    limits->maxTexelBufferElements = 65536;
-    limits->maxUniformBufferRange = 16384;
-    limits->maxStorageBufferRange = 134217728;
-    limits->maxPushConstantsSize = 128;
-    limits->maxMemoryAllocationCount = 4096;
-    limits->maxSamplerAllocationCount = 4000;
-    limits->bufferImageGranularity = 1;
-    limits->sparseAddressSpaceSize = 2147483648;
-    limits->maxBoundDescriptorSets = 4;
-    limits->maxPerStageDescriptorSamplers = 16;
-    limits->maxPerStageDescriptorUniformBuffers = 12;
-    limits->maxPerStageDescriptorStorageBuffers = 4;
-    limits->maxPerStageDescriptorSampledImages = 16;
-    limits->maxPerStageDescriptorStorageImages = 4;
-    limits->maxPerStageDescriptorInputAttachments = 4;
-    limits->maxPerStageResources = 128;
-    limits->maxDescriptorSetSamplers = 96;
-    limits->maxDescriptorSetUniformBuffers = 72;
-    limits->maxDescriptorSetUniformBuffersDynamic = 8;
-    limits->maxDescriptorSetStorageBuffers = 24;
-    limits->maxDescriptorSetStorageBuffersDynamic = 4;
-    limits->maxDescriptorSetSampledImages = 96;
-    limits->maxDescriptorSetStorageImages = 24;
-    limits->maxDescriptorSetInputAttachments = 4;
-    limits->maxVertexInputAttributes = 16;
-    limits->maxVertexInputBindings = 16;
-    limits->maxVertexInputAttributeOffset = 2047;
-    limits->maxVertexInputBindingStride = 2048;
-    limits->maxVertexOutputComponents = 64;
-    limits->maxTessellationGenerationLevel = 64;
-    limits->maxTessellationPatchSize = 32;
-    limits->maxTessellationControlPerVertexInputComponents = 64;
-    limits->maxTessellationControlPerVertexOutputComponents = 64;
-    limits->maxTessellationControlPerPatchOutputComponents = 120;
-    limits->maxTessellationControlTotalOutputComponents = 2048;
-    limits->maxTessellationEvaluationInputComponents = 64;
-    limits->maxTessellationEvaluationOutputComponents = 64;
-    limits->maxGeometryShaderInvocations = 32;
-    limits->maxGeometryInputComponents = 64;
-    limits->maxGeometryOutputComponents = 64;
-    limits->maxGeometryOutputVertices = 256;
-    limits->maxGeometryTotalOutputComponents = 1024;
-    limits->maxFragmentInputComponents = 64;
-    limits->maxFragmentOutputAttachments = 4;
-    limits->maxFragmentDualSrcAttachments = 1;
-    limits->maxFragmentCombinedOutputResources = 4;
-    limits->maxComputeSharedMemorySize = 16384;
-    limits->maxComputeWorkGroupCount[0] = 65535;
-    limits->maxComputeWorkGroupCount[1] = 65535;
-    limits->maxComputeWorkGroupCount[2] = 65535;
-    limits->maxComputeWorkGroupInvocations = 128;
-    limits->maxComputeWorkGroupSize[0] = 128;
-    limits->maxComputeWorkGroupSize[1] = 128;
-    limits->maxComputeWorkGroupSize[2] = 64;
-    limits->subPixelPrecisionBits = 4;
-    limits->subTexelPrecisionBits = 4;
-    limits->mipmapPrecisionBits = 4;
-    limits->maxDrawIndexedIndexValue = UINT32_MAX;
-    limits->maxDrawIndirectCount = UINT16_MAX;
-    limits->maxSamplerLodBias = 2.0f;
-    limits->maxSamplerAnisotropy = 16;
-    limits->maxViewports = 16;
-    limits->maxViewportDimensions[0] = 4096;
-    limits->maxViewportDimensions[1] = 4096;
-    limits->viewportBoundsRange[0] = -8192;
-    limits->viewportBoundsRange[1] = 8191;
-    limits->viewportSubPixelBits = 0;
-    limits->minMemoryMapAlignment = 64;
-    limits->minTexelBufferOffsetAlignment = 16;
-    limits->minUniformBufferOffsetAlignment = 16;
-    limits->minStorageBufferOffsetAlignment = 16;
-    limits->minTexelOffset = -8;
-    limits->maxTexelOffset = 7;
-    limits->minTexelGatherOffset = -8;
-    limits->maxTexelGatherOffset = 7;
-    limits->minInterpolationOffset = 0.0f;
-    limits->maxInterpolationOffset = 0.5f;
-    limits->subPixelInterpolationOffsetBits = 4;
-    limits->maxFramebufferWidth = 4096;
-    limits->maxFramebufferHeight = 4096;
-    limits->maxFramebufferLayers = 256;
-    limits->framebufferColorSampleCounts = 0x7F;
-    limits->framebufferDepthSampleCounts = 0x7F;
-    limits->framebufferStencilSampleCounts = 0x7F;
-    limits->framebufferNoAttachmentsSampleCounts = 0x7F;
-    limits->maxColorAttachments = 4;
-    limits->sampledImageColorSampleCounts = 0x7F;
-    limits->sampledImageIntegerSampleCounts = 0x7F;
-    limits->sampledImageDepthSampleCounts = 0x7F;
-    limits->sampledImageStencilSampleCounts = 0x7F;
-    limits->storageImageSampleCounts = 0x7F;
-    limits->maxSampleMaskWords = 1;
-    limits->timestampComputeAndGraphics = VK_TRUE;
-    limits->timestampPeriod = 1;
-    limits->maxClipDistances = 8;
-    limits->maxCullDistances = 8;
-    limits->maxCombinedClipAndCullDistances = 8;
-    limits->discreteQueuePriorities = 2;
-    limits->pointSizeRange[0] = 1.0f;
-    limits->pointSizeRange[1] = 64.0f;
-    limits->lineWidthRange[0] = 1.0f;
-    limits->lineWidthRange[1] = 8.0f;
-    limits->pointSizeGranularity = 1.0f;
-    limits->lineWidthGranularity = 1.0f;
-    limits->strictLines = VK_TRUE;
-    limits->standardSampleLocations = VK_TRUE;
-    limits->optimalBufferCopyOffsetAlignment = 1;
-    limits->optimalBufferCopyRowPitchAlignment = 1;
-    limits->nonCoherentAtomSize = 256;
-
-    return *limits;
-}
-
-void SetBoolArrayTrue(VkBool32* bool_array, uint32_t num_bools)
-{
-    for (uint32_t i = 0; i < num_bools; ++i) {
-        bool_array[i] = VK_TRUE;
-    }
-}
-'''
-
-# Manual code at the end of the cpp source file
-SOURCE_CPP_POSTFIX = '''
-
-static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetPhysicalDeviceProcAddr(VkInstance instance, const char *funcName) {
-    // TODO: This function should only care about physical device functions and return nullptr for other functions
-    const auto &item = name_to_funcptr_map.find(funcName);
-    if (item != name_to_funcptr_map.end()) {
-        return reinterpret_cast<PFN_vkVoidFunction>(item->second);
-    }
-    // Mock should intercept all functions so if we get here just return null
-    return nullptr;
-}
-
-} // namespace vkmock
-
-#if defined(__GNUC__) && __GNUC__ >= 4
-#define EXPORT __attribute__((visibility("default")))
-#elif defined(__SUNPRO_C) && (__SUNPRO_C >= 0x590)
-#define EXPORT __attribute__((visibility("default")))
-#else
-#define EXPORT
-#endif
-
-extern "C" {
-
-EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance, const char* pName) {
-    if (!vkmock::negotiate_loader_icd_interface_called) {
-        vkmock::loader_interface_version = 1;
-    }
-    return vkmock::GetInstanceProcAddr(instance, pName);
-}
-
-EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetPhysicalDeviceProcAddr(VkInstance instance, const char* pName) {
-    return vkmock::GetPhysicalDeviceProcAddr(instance, pName);
-}
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t* pSupportedVersion) {
-    vkmock::negotiate_loader_icd_interface_called = true;
-    vkmock::loader_interface_version = *pSupportedVersion;
-    if (*pSupportedVersion > vkmock::SUPPORTED_LOADER_ICD_INTERFACE_VERSION) {
-        *pSupportedVersion = vkmock::SUPPORTED_LOADER_ICD_INTERFACE_VERSION;
-    }
-    return VK_SUCCESS;
-}
-
-
-EXPORT VKAPI_ATTR void VKAPI_CALL vkDestroySurfaceKHR(
-    VkInstance                                  instance,
-    VkSurfaceKHR                                surface,
-    const VkAllocationCallbacks*                pAllocator)
-{
-    vkmock::DestroySurfaceKHR(instance, surface, pAllocator);
-}
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
-    VkPhysicalDevice                            physicalDevice,
-    uint32_t                                    queueFamilyIndex,
-    VkSurfaceKHR                                surface,
-    VkBool32*                                   pSupported)
-{
-    return vkmock::GetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIndex, surface, pSupported);
-}
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-    VkPhysicalDevice                            physicalDevice,
-    VkSurfaceKHR                                surface,
-    VkSurfaceCapabilitiesKHR*                   pSurfaceCapabilities)
-{
-    return vkmock::GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, pSurfaceCapabilities);
-}
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
-    VkPhysicalDevice                            physicalDevice,
-    VkSurfaceKHR                                surface,
-    uint32_t*                                   pSurfaceFormatCount,
-    VkSurfaceFormatKHR*                         pSurfaceFormats)
-{
-    return vkmock::GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, pSurfaceFormatCount, pSurfaceFormats);
-}
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
-    VkPhysicalDevice                            physicalDevice,
-    VkSurfaceKHR                                surface,
-    uint32_t*                                   pPresentModeCount,
-    VkPresentModeKHR*                           pPresentModes)
-{
-    return vkmock::GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, pPresentModes);
-}
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateDisplayPlaneSurfaceKHR(
-    VkInstance                                  instance,
-    const VkDisplaySurfaceCreateInfoKHR*        pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateDisplayPlaneSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
-}
-
-#ifdef VK_USE_PLATFORM_XLIB_KHR
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateXlibSurfaceKHR(
-    VkInstance                                  instance,
-    const VkXlibSurfaceCreateInfoKHR*           pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateXlibSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
-}
-#endif /* VK_USE_PLATFORM_XLIB_KHR */
-
-#ifdef VK_USE_PLATFORM_XCB_KHR
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateXcbSurfaceKHR(
-    VkInstance                                  instance,
-    const VkXcbSurfaceCreateInfoKHR*            pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateXcbSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
-}
-#endif /* VK_USE_PLATFORM_XCB_KHR */
-
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateWaylandSurfaceKHR(
-    VkInstance                                  instance,
-    const VkWaylandSurfaceCreateInfoKHR*        pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateWaylandSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
-}
-#endif /* VK_USE_PLATFORM_WAYLAND_KHR */
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateAndroidSurfaceKHR(
-    VkInstance                                  instance,
-    const VkAndroidSurfaceCreateInfoKHR*        pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateAndroidSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
-}
-#endif /* VK_USE_PLATFORM_ANDROID_KHR */
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateWin32SurfaceKHR(
-    VkInstance                                  instance,
-    const VkWin32SurfaceCreateInfoKHR*          pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateWin32SurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
-}
-#endif /* VK_USE_PLATFORM_WIN32_KHR */
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkGetDeviceGroupSurfacePresentModesKHR(
-    VkDevice                                    device,
-    VkSurfaceKHR                                surface,
-    VkDeviceGroupPresentModeFlagsKHR*           pModes)
-{
-    return vkmock::GetDeviceGroupSurfacePresentModesKHR(device, surface, pModes);
-}
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDevicePresentRectanglesKHR(
-    VkPhysicalDevice                            physicalDevice,
-    VkSurfaceKHR                                surface,
-    uint32_t*                                   pRectCount,
-    VkRect2D*                                   pRects)
-{
-    return vkmock::GetPhysicalDevicePresentRectanglesKHR(physicalDevice, surface, pRectCount, pRects);
-}
-
-#ifdef VK_USE_PLATFORM_VI_NN
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateViSurfaceNN(
-    VkInstance                                  instance,
-    const VkViSurfaceCreateInfoNN*              pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateViSurfaceNN(instance, pCreateInfo, pAllocator, pSurface);
-}
-#endif /* VK_USE_PLATFORM_VI_NN */
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2EXT(
-    VkPhysicalDevice                            physicalDevice,
-    VkSurfaceKHR                                surface,
-    VkSurfaceCapabilities2EXT*                  pSurfaceCapabilities)
-{
-    return vkmock::GetPhysicalDeviceSurfaceCapabilities2EXT(physicalDevice, surface, pSurfaceCapabilities);
-}
-
-#ifdef VK_USE_PLATFORM_IOS_MVK
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateIOSSurfaceMVK(
-    VkInstance                                  instance,
-    const VkIOSSurfaceCreateInfoMVK*            pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateIOSSurfaceMVK(instance, pCreateInfo, pAllocator, pSurface);
-}
-#endif /* VK_USE_PLATFORM_IOS_MVK */
-
-#ifdef VK_USE_PLATFORM_MACOS_MVK
-
-EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateMacOSSurfaceMVK(
-    VkInstance                                  instance,
-    const VkMacOSSurfaceCreateInfoMVK*          pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkSurfaceKHR*                               pSurface)
-{
-    return vkmock::CreateMacOSSurfaceMVK(instance, pCreateInfo, pAllocator, pSurface);
-}
-#endif /* VK_USE_PLATFORM_MACOS_MVK */
-
-} // end extern "C"
-
-'''
-
 CUSTOM_C_INTERCEPTS = {
 'vkCreateInstance': '''
     // TODO: If loader ver <=4 ICD must fail with VK_ERROR_INCOMPATIBLE_DRIVER for all vkCreateInstance calls with
@@ -439,8 +45,10 @@ CUSTOM_C_INTERCEPTS = {
 ''',
 'vkDestroyInstance': '''
     if (instance) {
-        for (const auto physical_device : physical_device_map.at(instance))
+        for (const auto physical_device : physical_device_map.at(instance)) {
+            display_map.erase(physical_device);
             DestroyDispObjHandle((void*)physical_device);
+        }
         physical_device_map.erase(instance);
         DestroyDispObjHandle((void*)instance);
     }
@@ -471,6 +79,12 @@ CUSTOM_C_INTERCEPTS = {
         DestroyDispObjHandle((void*) pCommandBuffers[i]);
     }
 ''',
+'vkCreateCommandPool': '''
+    unique_lock_t lock(global_lock);
+    *pCommandPool = (VkCommandPool)global_unique_handle++;
+    command_pool_map[device].insert(*pCommandPool);
+    return VK_SUCCESS;
+''',
 'vkDestroyCommandPool': '''
     // destroy command buffers for this pool
     unique_lock_t lock(global_lock);
@@ -481,6 +95,7 @@ CUSTOM_C_INTERCEPTS = {
         }
         command_pool_buffer_map.erase(it);
     }
+    command_pool_map[device].erase(commandPool);
 ''',
 'vkEnumeratePhysicalDevices': '''
     VkResult result_code = VK_SUCCESS;
@@ -509,6 +124,14 @@ CUSTOM_C_INTERCEPTS = {
         }
     }
 
+    for (auto& cp : command_pool_map[device]) {
+        for (auto& cb : command_pool_buffer_map[cp]) {
+            DestroyDispObjHandle((void*) cb);
+        }
+        command_pool_buffer_map.erase(cp);
+    }
+    command_pool_map[device].clear();
+
     queue_map.erase(device);
     buffer_map.erase(device);
     image_memory_size_map.erase(device);
@@ -535,7 +158,7 @@ CUSTOM_C_INTERCEPTS = {
     return VK_SUCCESS;
 ''',
 'vkEnumerateInstanceVersion': '''
-    *pApiVersion = kSupportedVulkanAPIVersion;
+    *pApiVersion = VK_HEADER_VERSION_COMPLETE;
     return VK_SUCCESS;
 ''',
 'vkEnumerateDeviceLayerProperties': '''
@@ -679,6 +302,18 @@ CUSTOM_C_INTERCEPTS = {
 ''',
 'vkGetPhysicalDeviceSurfaceCapabilities2KHR': '''
     GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, pSurfaceInfo->surface, &pSurfaceCapabilities->surfaceCapabilities);
+
+    auto *present_mode_compatibility = lvl_find_mod_in_chain<VkSurfacePresentModeCompatibilityEXT>(pSurfaceCapabilities->pNext);
+    if (present_mode_compatibility) {
+        if (!present_mode_compatibility->pPresentModes) {
+            present_mode_compatibility->presentModeCount = 3;
+        } else {
+            // arbitrary
+            present_mode_compatibility->pPresentModes[0] = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            present_mode_compatibility->pPresentModes[1] = VK_PRESENT_MODE_FIFO_KHR;
+            present_mode_compatibility->pPresentModes[2] = VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR;
+        }
+    }
     return VK_SUCCESS;
 ''',
 'vkGetInstanceProcAddr': '''
@@ -696,13 +331,27 @@ CUSTOM_C_INTERCEPTS = {
     return GetInstanceProcAddr(nullptr, pName);
 ''',
 'vkGetPhysicalDeviceMemoryProperties': '''
-    pMemoryProperties->memoryTypeCount = 2;
+    pMemoryProperties->memoryTypeCount = 6;
+    // Host visible Coherent
     pMemoryProperties->memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     pMemoryProperties->memoryTypes[0].heapIndex = 0;
-    pMemoryProperties->memoryTypes[1].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    pMemoryProperties->memoryTypes[1].heapIndex = 1;
+    // Host visible Cached
+    pMemoryProperties->memoryTypes[1].propertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    pMemoryProperties->memoryTypes[1].heapIndex = 0;
+    // Device local and Host visible
+    pMemoryProperties->memoryTypes[2].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    pMemoryProperties->memoryTypes[2].heapIndex = 1;
+    // Device local lazily
+    pMemoryProperties->memoryTypes[3].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+    pMemoryProperties->memoryTypes[3].heapIndex = 1;
+    // Device local protected
+    pMemoryProperties->memoryTypes[4].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_PROTECTED_BIT;
+    pMemoryProperties->memoryTypes[4].heapIndex = 1;
+    // Device local only
+    pMemoryProperties->memoryTypes[5].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    pMemoryProperties->memoryTypes[5].heapIndex = 1;
     pMemoryProperties->memoryHeapCount = 2;
-    pMemoryProperties->memoryHeaps[0].flags = 0;
+    pMemoryProperties->memoryHeaps[0].flags = VK_MEMORY_HEAP_MULTI_INSTANCE_BIT;
     pMemoryProperties->memoryHeaps[0].size = 8000000000;
     pMemoryProperties->memoryHeaps[1].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
     pMemoryProperties->memoryHeaps[1].size = 8000000000;
@@ -711,22 +360,66 @@ CUSTOM_C_INTERCEPTS = {
     GetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);
 ''',
 'vkGetPhysicalDeviceQueueFamilyProperties': '''
-    if (!pQueueFamilyProperties) {
-        *pQueueFamilyPropertyCount = 1;
-    } else {
-        if (*pQueueFamilyPropertyCount) {
-            pQueueFamilyProperties[0].queueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT;
-            pQueueFamilyProperties[0].queueCount = 1;
-            pQueueFamilyProperties[0].timestampValidBits = 0;
-            pQueueFamilyProperties[0].minImageTransferGranularity = {1,1,1};
+    if (pQueueFamilyProperties) {
+        std::vector<VkQueueFamilyProperties2KHR> props2(*pQueueFamilyPropertyCount, {
+            VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2_KHR});
+        GetPhysicalDeviceQueueFamilyProperties2KHR(physicalDevice, pQueueFamilyPropertyCount, props2.data());
+        for (uint32_t i = 0; i < *pQueueFamilyPropertyCount; ++i) {
+            pQueueFamilyProperties[i] = props2[i].queueFamilyProperties;
         }
+    } else {
+        GetPhysicalDeviceQueueFamilyProperties2KHR(physicalDevice, pQueueFamilyPropertyCount, nullptr);
     }
 ''',
 'vkGetPhysicalDeviceQueueFamilyProperties2KHR': '''
-    if (pQueueFamilyPropertyCount && pQueueFamilyProperties) {
-        GetPhysicalDeviceQueueFamilyProperties(physicalDevice, pQueueFamilyPropertyCount, &pQueueFamilyProperties->queueFamilyProperties);
+    if (pQueueFamilyProperties) {
+        if (*pQueueFamilyPropertyCount >= 1) {
+            auto props = &pQueueFamilyProperties[0].queueFamilyProperties;
+            props->queueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT
+                                | VK_QUEUE_SPARSE_BINDING_BIT | VK_QUEUE_PROTECTED_BIT;
+            props->queueCount = 1;
+            props->timestampValidBits = 16;
+            props->minImageTransferGranularity = {1,1,1};
+        }
+        if (*pQueueFamilyPropertyCount >= 2) {
+            auto props = &pQueueFamilyProperties[1].queueFamilyProperties;
+            props->queueFlags = VK_QUEUE_TRANSFER_BIT | VK_QUEUE_PROTECTED_BIT | VK_QUEUE_VIDEO_DECODE_BIT_KHR;
+            props->queueCount = 1;
+            props->timestampValidBits = 16;
+            props->minImageTransferGranularity = {1,1,1};
+
+            auto status_query_props = lvl_find_mod_in_chain<VkQueueFamilyQueryResultStatusPropertiesKHR>(pQueueFamilyProperties[1].pNext);
+            if (status_query_props) {
+                status_query_props->queryResultStatusSupport = VK_TRUE;
+            }
+            auto video_props = lvl_find_mod_in_chain<VkQueueFamilyVideoPropertiesKHR>(pQueueFamilyProperties[1].pNext);
+            if (video_props) {
+                video_props->videoCodecOperations = VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR
+                                                  | VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR;
+            }
+        }
+        if (*pQueueFamilyPropertyCount >= 3) {
+            auto props = &pQueueFamilyProperties[2].queueFamilyProperties;
+            props->queueFlags = VK_QUEUE_TRANSFER_BIT | VK_QUEUE_PROTECTED_BIT | VK_QUEUE_VIDEO_ENCODE_BIT_KHR;
+            props->queueCount = 1;
+            props->timestampValidBits = 16;
+            props->minImageTransferGranularity = {1,1,1};
+
+            auto status_query_props = lvl_find_mod_in_chain<VkQueueFamilyQueryResultStatusPropertiesKHR>(pQueueFamilyProperties[2].pNext);
+            if (status_query_props) {
+                status_query_props->queryResultStatusSupport = VK_TRUE;
+            }
+            auto video_props = lvl_find_mod_in_chain<VkQueueFamilyVideoPropertiesKHR>(pQueueFamilyProperties[2].pNext);
+            if (video_props) {
+                video_props->videoCodecOperations = VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR
+                                                  | VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR;
+            }
+        }
+        if (*pQueueFamilyPropertyCount > 3) {
+            *pQueueFamilyPropertyCount = 3;
+        }
     } else {
-        GetPhysicalDeviceQueueFamilyProperties(physicalDevice, pQueueFamilyPropertyCount, nullptr);
+        *pQueueFamilyPropertyCount = 3;
     }
 ''',
 'vkGetPhysicalDeviceFeatures': '''
@@ -738,6 +431,26 @@ CUSTOM_C_INTERCEPTS = {
     GetPhysicalDeviceFeatures(physicalDevice, &pFeatures->features);
     uint32_t num_bools = 0; // Count number of VkBool32s in extension structs
     VkBool32* feat_bools = nullptr;
+    auto vk_1_1_features = lvl_find_mod_in_chain<VkPhysicalDeviceVulkan11Features>(pFeatures->pNext);
+    if (vk_1_1_features) {
+        vk_1_1_features->protectedMemory = VK_TRUE;
+    }
+    auto vk_1_3_features = lvl_find_mod_in_chain<VkPhysicalDeviceVulkan13Features>(pFeatures->pNext);
+    if (vk_1_3_features) {
+        vk_1_3_features->synchronization2 = VK_TRUE;
+    }
+    auto prot_features = lvl_find_mod_in_chain<VkPhysicalDeviceProtectedMemoryFeatures>(pFeatures->pNext);
+    if (prot_features) {
+        prot_features->protectedMemory = VK_TRUE;
+    }
+    auto sync2_features = lvl_find_mod_in_chain<VkPhysicalDeviceSynchronization2FeaturesKHR>(pFeatures->pNext);
+    if (sync2_features) {
+        sync2_features->synchronization2 = VK_TRUE;
+    }
+    auto video_maintenance1_features = lvl_find_mod_in_chain<VkPhysicalDeviceVideoMaintenance1FeaturesKHR>(pFeatures->pNext);
+    if (video_maintenance1_features) {
+        video_maintenance1_features->videoMaintenance1 = VK_TRUE;
+    }
     const auto *desc_idx_features = lvl_find_in_chain<VkPhysicalDeviceDescriptorIndexingFeaturesEXT>(pFeatures->pNext);
     if (desc_idx_features) {
         const auto bool_size = sizeof(VkPhysicalDeviceDescriptorIndexingFeaturesEXT) - offsetof(VkPhysicalDeviceDescriptorIndexingFeaturesEXT, shaderInputAttachmentArrayDynamicIndexing);
@@ -751,6 +464,11 @@ CUSTOM_C_INTERCEPTS = {
         num_bools = bool_size/sizeof(VkBool32);
         feat_bools = (VkBool32*)&blendop_features->advancedBlendCoherentOperations;
         SetBoolArrayTrue(feat_bools, num_bools);
+    }
+    const auto *host_image_copy_features = lvl_find_in_chain<VkPhysicalDeviceHostImageCopyFeaturesEXT>(pFeatures->pNext);
+    if (host_image_copy_features) {
+       feat_bools = (VkBool32*)&host_image_copy_features->hostImageCopy;
+       SetBoolArrayTrue(feat_bools, 1);
     }
 ''',
 'vkGetPhysicalDeviceFormatProperties': '''
@@ -770,6 +488,14 @@ CUSTOM_C_INTERCEPTS = {
                 // Don't set color bits for DS formats
                 *pFormatProperties = { 0x00FFFE7F, 0x00FFFE7F, 0x00FFFE7F };
                 break;
+            case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
+            case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM:
+            case VK_FORMAT_G8_B8R8_2PLANE_422_UNORM:
+            case VK_FORMAT_B10X6G10X6R10X6G10X6_422_UNORM_4PACK16:
+            case VK_FORMAT_G8_B8R8_2PLANE_444_UNORM:
+                // Set decode/encode bits for these formats
+                *pFormatProperties = { 0x1EFFFDFF, 0x1EFFFDFF, 0x00FFFDFF };
+                break;
             default:
                 break;
         }
@@ -782,6 +508,7 @@ CUSTOM_C_INTERCEPTS = {
         props_3->linearTilingFeatures = pFormatProperties->formatProperties.linearTilingFeatures;
         props_3->optimalTilingFeatures = pFormatProperties->formatProperties.optimalTilingFeatures;
         props_3->bufferFeatures = pFormatProperties->formatProperties.bufferFeatures;
+        props_3->optimalTilingFeatures |= VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT;
     }
 ''',
 'vkGetPhysicalDeviceImageFormatProperties': '''
@@ -801,12 +528,53 @@ CUSTOM_C_INTERCEPTS = {
     return VK_SUCCESS;
 ''',
 'vkGetPhysicalDeviceImageFormatProperties2KHR': '''
+    auto *external_image_prop = lvl_find_mod_in_chain<VkExternalImageFormatProperties>(pImageFormatProperties->pNext);
+    auto *external_image_format = lvl_find_in_chain<VkPhysicalDeviceExternalImageFormatInfo>(pImageFormatInfo->pNext);
+    if (external_image_prop && external_image_format && external_image_format->handleType == VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID) {
+        external_image_prop->externalMemoryProperties.externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT;
+        external_image_prop->externalMemoryProperties.compatibleHandleTypes = external_image_format->handleType;
+        external_image_prop->externalMemoryProperties.compatibleHandleTypes = external_image_format->handleType;
+    }
+
     GetPhysicalDeviceImageFormatProperties(physicalDevice, pImageFormatInfo->format, pImageFormatInfo->type, pImageFormatInfo->tiling, pImageFormatInfo->usage, pImageFormatInfo->flags, &pImageFormatProperties->imageFormatProperties);
     return VK_SUCCESS;
 ''',
+'vkGetPhysicalDeviceSparseImageFormatProperties': '''
+    if (!pProperties) {
+        *pPropertyCount = 1;
+    } else {
+        // arbitrary
+        pProperties->imageGranularity = {4, 4, 4};
+        pProperties->flags = VK_SPARSE_IMAGE_FORMAT_SINGLE_MIPTAIL_BIT;
+        switch (format) {
+            case VK_FORMAT_D16_UNORM:
+            case VK_FORMAT_D32_SFLOAT:
+                pProperties->aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                break;
+            case VK_FORMAT_S8_UINT:
+                pProperties->aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+                break;
+            case VK_FORMAT_X8_D24_UNORM_PACK32:
+            case VK_FORMAT_D16_UNORM_S8_UINT:
+            case VK_FORMAT_D24_UNORM_S8_UINT:
+            case VK_FORMAT_D32_SFLOAT_S8_UINT:
+                pProperties->aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+                break;
+            default:
+                pProperties->aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                break;
+        }
+    }
+''',
+'vkGetPhysicalDeviceSparseImageFormatProperties2KHR': '''
+    if (pPropertyCount && pProperties) {
+        GetPhysicalDeviceSparseImageFormatProperties(physicalDevice, pFormatInfo->format, pFormatInfo->type, pFormatInfo->samples, pFormatInfo->usage, pFormatInfo->tiling, pPropertyCount, &pProperties->properties);
+    } else {
+        GetPhysicalDeviceSparseImageFormatProperties(physicalDevice, pFormatInfo->format, pFormatInfo->type, pFormatInfo->samples, pFormatInfo->usage, pFormatInfo->tiling, pPropertyCount, nullptr);
+    }
+''',
 'vkGetPhysicalDeviceProperties': '''
-    // TODO: Just hard-coding some values for now
-    pProperties->apiVersion = kSupportedVulkanAPIVersion;
+    pProperties->apiVersion = VK_HEADER_VERSION_COMPLETE;
     pProperties->driverVersion = 1;
     pProperties->vendorID = 0xba5eba11;
     pProperties->deviceID = 0xf005ba11;
@@ -818,55 +586,131 @@ CUSTOM_C_INTERCEPTS = {
     pProperties->sparseProperties = { VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE };
 ''',
 'vkGetPhysicalDeviceProperties2KHR': '''
+    // The only value that need to be set are those the Profile layer can't set
+    // see https://github.com/KhronosGroup/Vulkan-Profiles/issues/352
+    // All values set are arbitrary
     GetPhysicalDeviceProperties(physicalDevice, &pProperties->properties);
-    const auto *desc_idx_props = lvl_find_in_chain<VkPhysicalDeviceDescriptorIndexingPropertiesEXT>(pProperties->pNext);
-    if (desc_idx_props) {
-        VkPhysicalDeviceDescriptorIndexingPropertiesEXT* write_props = (VkPhysicalDeviceDescriptorIndexingPropertiesEXT*)desc_idx_props;
-        write_props->maxUpdateAfterBindDescriptorsInAllPools = 500000;
-        write_props->shaderUniformBufferArrayNonUniformIndexingNative = false;
-        write_props->shaderSampledImageArrayNonUniformIndexingNative = false;
-        write_props->shaderStorageBufferArrayNonUniformIndexingNative = false;
-        write_props->shaderStorageImageArrayNonUniformIndexingNative = false;
-        write_props->shaderInputAttachmentArrayNonUniformIndexingNative = false;
-        write_props->robustBufferAccessUpdateAfterBind = true;
-        write_props->quadDivergentImplicitLod = true;
-        write_props->maxPerStageDescriptorUpdateAfterBindSamplers = 500000;
-        write_props->maxPerStageDescriptorUpdateAfterBindUniformBuffers = 500000;
-        write_props->maxPerStageDescriptorUpdateAfterBindStorageBuffers = 500000;
-        write_props->maxPerStageDescriptorUpdateAfterBindSampledImages = 500000;
-        write_props->maxPerStageDescriptorUpdateAfterBindStorageImages = 500000;
-        write_props->maxPerStageDescriptorUpdateAfterBindInputAttachments = 500000;
-        write_props->maxPerStageUpdateAfterBindResources = 500000;
-        write_props->maxDescriptorSetUpdateAfterBindSamplers = 500000;
-        write_props->maxDescriptorSetUpdateAfterBindUniformBuffers = 96;
-        write_props->maxDescriptorSetUpdateAfterBindUniformBuffersDynamic = 8;
-        write_props->maxDescriptorSetUpdateAfterBindStorageBuffers = 500000;
-        write_props->maxDescriptorSetUpdateAfterBindStorageBuffersDynamic = 4;
-        write_props->maxDescriptorSetUpdateAfterBindSampledImages = 500000;
-        write_props->maxDescriptorSetUpdateAfterBindStorageImages = 500000;
-        write_props->maxDescriptorSetUpdateAfterBindInputAttachments = 500000;
+
+    auto *props_11 = lvl_find_mod_in_chain<VkPhysicalDeviceVulkan11Properties>(pProperties->pNext);
+    if (props_11) {
+        props_11->protectedNoFault = VK_FALSE;
     }
 
-    const auto *push_descriptor_props = lvl_find_in_chain<VkPhysicalDevicePushDescriptorPropertiesKHR>(pProperties->pNext);
-    if (push_descriptor_props) {
-        VkPhysicalDevicePushDescriptorPropertiesKHR* write_props = (VkPhysicalDevicePushDescriptorPropertiesKHR*)push_descriptor_props;
-        write_props->maxPushDescriptors = 256;
+    auto *props_12 = lvl_find_mod_in_chain<VkPhysicalDeviceVulkan12Properties>(pProperties->pNext);
+    if (props_12) {
+        props_12->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
+        props_12->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
     }
 
-    const auto *depth_stencil_resolve_props = lvl_find_in_chain<VkPhysicalDeviceDepthStencilResolvePropertiesKHR>(pProperties->pNext);
-    if (depth_stencil_resolve_props) {
-        VkPhysicalDeviceDepthStencilResolvePropertiesKHR* write_props = (VkPhysicalDeviceDepthStencilResolvePropertiesKHR*)depth_stencil_resolve_props;
-        write_props->supportedDepthResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT_KHR;
-        write_props->supportedStencilResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT_KHR;
+    auto *props_13 = lvl_find_mod_in_chain<VkPhysicalDeviceVulkan13Properties>(pProperties->pNext);
+    if (props_13) {
+        props_13->storageTexelBufferOffsetSingleTexelAlignment = VK_TRUE;
+        props_13->uniformTexelBufferOffsetSingleTexelAlignment = VK_TRUE;
+        props_13->storageTexelBufferOffsetAlignmentBytes = 16;
+        props_13->uniformTexelBufferOffsetAlignmentBytes = 16;
     }
 
-    const auto *fragment_density_map2_props = lvl_find_in_chain<VkPhysicalDeviceFragmentDensityMap2PropertiesEXT>(pProperties->pNext);
+    auto *protected_memory_props = lvl_find_mod_in_chain<VkPhysicalDeviceProtectedMemoryProperties>(pProperties->pNext);
+    if (protected_memory_props) {
+        protected_memory_props->protectedNoFault = VK_FALSE;
+    }
+
+    auto *float_controls_props = lvl_find_mod_in_chain<VkPhysicalDeviceFloatControlsProperties>(pProperties->pNext);
+    if (float_controls_props) {
+        float_controls_props->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
+        float_controls_props->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
+    }
+
+    auto *conservative_raster_props = lvl_find_mod_in_chain<VkPhysicalDeviceConservativeRasterizationPropertiesEXT>(pProperties->pNext);
+    if (conservative_raster_props) {
+        conservative_raster_props->primitiveOverestimationSize = 0.00195313f;
+        conservative_raster_props->conservativePointAndLineRasterization = VK_TRUE;
+        conservative_raster_props->degenerateTrianglesRasterized = VK_TRUE;
+        conservative_raster_props->degenerateLinesRasterized = VK_TRUE;
+    }
+
+    auto *rt_pipeline_props = lvl_find_mod_in_chain<VkPhysicalDeviceRayTracingPipelinePropertiesKHR>(pProperties->pNext);
+    if (rt_pipeline_props) {
+        rt_pipeline_props->shaderGroupHandleSize = 32;
+        rt_pipeline_props->shaderGroupBaseAlignment = 64;
+        rt_pipeline_props->shaderGroupHandleCaptureReplaySize = 32;
+    }
+
+    auto *rt_pipeline_nv_props = lvl_find_mod_in_chain<VkPhysicalDeviceRayTracingPropertiesNV>(pProperties->pNext);
+    if (rt_pipeline_nv_props) {
+        rt_pipeline_nv_props->shaderGroupHandleSize = 32;
+        rt_pipeline_nv_props->shaderGroupBaseAlignment = 64;
+    }
+
+    auto *texel_buffer_props = lvl_find_mod_in_chain<VkPhysicalDeviceTexelBufferAlignmentProperties>(pProperties->pNext);
+    if (texel_buffer_props) {
+        texel_buffer_props->storageTexelBufferOffsetSingleTexelAlignment = VK_TRUE;
+        texel_buffer_props->uniformTexelBufferOffsetSingleTexelAlignment = VK_TRUE;
+        texel_buffer_props->storageTexelBufferOffsetAlignmentBytes = 16;
+        texel_buffer_props->uniformTexelBufferOffsetAlignmentBytes = 16;
+    }
+
+    auto *descriptor_buffer_props = lvl_find_mod_in_chain<VkPhysicalDeviceDescriptorBufferPropertiesEXT>(pProperties->pNext);
+    if (descriptor_buffer_props) {
+        descriptor_buffer_props->combinedImageSamplerDescriptorSingleArray = VK_TRUE;
+        descriptor_buffer_props->bufferlessPushDescriptors = VK_TRUE;
+        descriptor_buffer_props->allowSamplerImageViewPostSubmitCreation = VK_TRUE;
+        descriptor_buffer_props->descriptorBufferOffsetAlignment = 4;
+    }
+
+    auto *mesh_shader_props = lvl_find_mod_in_chain<VkPhysicalDeviceMeshShaderPropertiesEXT>(pProperties->pNext);
+    if (mesh_shader_props) {
+        mesh_shader_props->meshOutputPerVertexGranularity = 32;
+        mesh_shader_props->meshOutputPerPrimitiveGranularity = 32;
+        mesh_shader_props->prefersLocalInvocationVertexOutput = VK_TRUE;
+        mesh_shader_props->prefersLocalInvocationPrimitiveOutput = VK_TRUE;
+        mesh_shader_props->prefersCompactVertexOutput = VK_TRUE;
+        mesh_shader_props->prefersCompactPrimitiveOutput = VK_TRUE;
+    }
+
+    auto *fragment_density_map2_props = lvl_find_mod_in_chain<VkPhysicalDeviceFragmentDensityMap2PropertiesEXT>(pProperties->pNext);
     if (fragment_density_map2_props) {
-        VkPhysicalDeviceFragmentDensityMap2PropertiesEXT* write_props = (VkPhysicalDeviceFragmentDensityMap2PropertiesEXT*)fragment_density_map2_props;
-        write_props->subsampledLoads = VK_FALSE;
-        write_props->subsampledCoarseReconstructionEarlyAccess = VK_FALSE;
-        write_props->maxSubsampledArrayLayers = 2;
-        write_props->maxDescriptorSetSubsampledSamplers = 1;
+        fragment_density_map2_props->subsampledLoads = VK_FALSE;
+        fragment_density_map2_props->subsampledCoarseReconstructionEarlyAccess = VK_FALSE;
+        fragment_density_map2_props->maxSubsampledArrayLayers = 2;
+        fragment_density_map2_props->maxDescriptorSetSubsampledSamplers = 1;
+    }
+
+    const uint32_t num_copy_layouts = 5;
+    const VkImageLayout HostCopyLayouts[]{
+       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+       VK_IMAGE_LAYOUT_GENERAL,
+       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+       VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL,
+       VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+    };
+
+    auto *host_image_copy_props = lvl_find_mod_in_chain<VkPhysicalDeviceHostImageCopyPropertiesEXT>(pProperties->pNext);
+    if (host_image_copy_props){
+        if (host_image_copy_props->pCopyDstLayouts == nullptr) host_image_copy_props->copyDstLayoutCount = num_copy_layouts;
+        else {
+            uint32_t num_layouts = (std::min)(host_image_copy_props->copyDstLayoutCount, num_copy_layouts);
+            for (uint32_t i = 0; i < num_layouts; i++) {
+                host_image_copy_props->pCopyDstLayouts[i] = HostCopyLayouts[i];
+            }
+        }
+        if (host_image_copy_props->pCopySrcLayouts == nullptr) host_image_copy_props->copySrcLayoutCount = num_copy_layouts;
+        else {
+            uint32_t num_layouts = (std::min)(host_image_copy_props->copySrcLayoutCount, num_copy_layouts);
+             for (uint32_t i = 0; i < num_layouts; i++) {
+                host_image_copy_props->pCopySrcLayouts[i] = HostCopyLayouts[i];
+            }
+        }
+    }
+
+    auto *driver_properties = lvl_find_mod_in_chain<VkPhysicalDeviceDriverProperties>(pProperties->pNext);
+    if (driver_properties) {
+        std::strncpy(driver_properties->driverName, "Vulkan Mock Device", VK_MAX_DRIVER_NAME_SIZE);
+#if defined(GIT_BRANCH_NAME) && defined(GIT_TAG_INFO)
+        std::strncpy(driver_properties->driverInfo, "Branch: " GIT_BRANCH_NAME " Tag Info: " GIT_TAG_INFO, VK_MAX_DRIVER_INFO_SIZE);
+#else
+        std::strncpy(driver_properties->driverInfo, "Branch: --unknown-- Tag Info: --unknown--", VK_MAX_DRIVER_INFO_SIZE);
+#endif
     }
 ''',
 'vkGetPhysicalDeviceExternalSemaphoreProperties':'''
@@ -888,10 +732,24 @@ CUSTOM_C_INTERCEPTS = {
     GetPhysicalDeviceExternalFenceProperties(physicalDevice, pExternalFenceInfo, pExternalFenceProperties);
 ''',
 'vkGetPhysicalDeviceExternalBufferProperties':'''
-    // Hard-code support for all handle types and features
-    pExternalBufferProperties->externalMemoryProperties.externalMemoryFeatures = 0x7;
-    pExternalBufferProperties->externalMemoryProperties.exportFromImportedHandleTypes = 0x1FF;
-    pExternalBufferProperties->externalMemoryProperties.compatibleHandleTypes = 0x1FF;
+    constexpr VkExternalMemoryHandleTypeFlags supported_flags = 0x1FF;
+    if (pExternalBufferInfo->handleType & VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID) {
+        // Can't have dedicated memory with AHB
+        pExternalBufferProperties->externalMemoryProperties.externalMemoryFeatures = VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT;
+        pExternalBufferProperties->externalMemoryProperties.exportFromImportedHandleTypes = pExternalBufferInfo->handleType;
+        pExternalBufferProperties->externalMemoryProperties.compatibleHandleTypes = pExternalBufferInfo->handleType;
+    } else if (pExternalBufferInfo->handleType & supported_flags) {
+        pExternalBufferProperties->externalMemoryProperties.externalMemoryFeatures = 0x7;
+        pExternalBufferProperties->externalMemoryProperties.exportFromImportedHandleTypes = supported_flags;
+        pExternalBufferProperties->externalMemoryProperties.compatibleHandleTypes = supported_flags;
+    } else {
+        pExternalBufferProperties->externalMemoryProperties.externalMemoryFeatures = 0;
+        pExternalBufferProperties->externalMemoryProperties.exportFromImportedHandleTypes = 0;
+        // According to spec, handle type is always compatible with itself. Even if export/import
+        // not supported, it's important to properly implement self-compatibility property since
+        // application's control flow can rely on this.
+        pExternalBufferProperties->externalMemoryProperties.compatibleHandleTypes = pExternalBufferInfo->handleType;
+    }
 ''',
 'vkGetPhysicalDeviceExternalBufferPropertiesKHR':'''
     GetPhysicalDeviceExternalBufferProperties(physicalDevice, pExternalBufferInfo, pExternalBufferProperties);
@@ -902,6 +760,7 @@ CUSTOM_C_INTERCEPTS = {
     pMemoryRequirements->alignment = 1;
     pMemoryRequirements->memoryTypeBits = 0xFFFF;
     // Return a better size based on the buffer size from the create info.
+    unique_lock_t lock(global_lock);
     auto d_iter = buffer_map.find(device);
     if (d_iter != buffer_map.end()) {
         auto iter = d_iter->second.find(buffer);
@@ -913,10 +772,22 @@ CUSTOM_C_INTERCEPTS = {
 'vkGetBufferMemoryRequirements2KHR': '''
     GetBufferMemoryRequirements(device, pInfo->buffer, &pMemoryRequirements->memoryRequirements);
 ''',
+'vkGetDeviceBufferMemoryRequirements': '''
+    // TODO: Just hard-coding reqs for now
+    pMemoryRequirements->memoryRequirements.alignment = 1;
+    pMemoryRequirements->memoryRequirements.memoryTypeBits = 0xFFFF;
+
+    // Return a size based on the buffer size from the create info.
+    pMemoryRequirements->memoryRequirements.size = ((pInfo->pCreateInfo->size + 4095) / 4096) * 4096;
+''',
+'vkGetDeviceBufferMemoryRequirementsKHR': '''
+    GetDeviceBufferMemoryRequirements(device, pInfo, pMemoryRequirements);
+''',
 'vkGetImageMemoryRequirements': '''
     pMemoryRequirements->size = 0;
     pMemoryRequirements->alignment = 1;
 
+    unique_lock_t lock(global_lock);
     auto d_iter = image_memory_size_map.find(device);
     if(d_iter != image_memory_size_map.end()){
         auto iter = d_iter->second.find(image);
@@ -929,6 +800,15 @@ CUSTOM_C_INTERCEPTS = {
 ''',
 'vkGetImageMemoryRequirements2KHR': '''
     GetImageMemoryRequirements(device, pInfo->image, &pMemoryRequirements->memoryRequirements);
+''',
+'vkGetDeviceImageMemoryRequirements': '''
+    pMemoryRequirements->memoryRequirements.size = GetImageSizeFromCreateInfo(pInfo->pCreateInfo);
+    pMemoryRequirements->memoryRequirements.alignment = 1;
+    // Here we hard-code that the memory type at index 3 doesn't support this image.
+    pMemoryRequirements->memoryRequirements.memoryTypeBits = 0xFFFF & ~(0x1 << 3);
+''',
+'vkGetDeviceImageMemoryRequirementsKHR': '''
+    GetDeviceImageMemoryRequirements(device, pInfo, pMemoryRequirements);
 ''',
 'vkMapMemory': '''
     unique_lock_t lock(global_lock);
@@ -943,12 +823,19 @@ CUSTOM_C_INTERCEPTS = {
     *ppData = map_addr;
     return VK_SUCCESS;
 ''',
+'vkMapMemory2KHR': '''
+    return MapMemory(device, pMemoryMapInfo->memory, pMemoryMapInfo->offset, pMemoryMapInfo->size, pMemoryMapInfo->flags, ppData);
+''',
 'vkUnmapMemory': '''
     unique_lock_t lock(global_lock);
     for (auto map_addr : mapped_memory_map[memory]) {
         free(map_addr);
     }
     mapped_memory_map.erase(memory);
+''',
+'vkUnmapMemory2KHR': '''
+    UnmapMemory(device, pMemoryUnmapInfo->memory);
+    return VK_SUCCESS;
 ''',
 'vkGetImageSubresourceLayout': '''
     // Need safe values. Callers are computing memory offsets from pLayout, with no return code to flag failure.
@@ -991,7 +878,16 @@ CUSTOM_C_INTERCEPTS = {
 'vkCreateBuffer': '''
     unique_lock_t lock(global_lock);
     *pBuffer = (VkBuffer)global_unique_handle++;
-    buffer_map[device][*pBuffer] = *pCreateInfo;
+     buffer_map[device][*pBuffer] = {
+         pCreateInfo->size,
+         current_available_address
+     };
+     current_available_address += pCreateInfo->size;
+     // Always align to next 64-bit pointer
+     const uint64_t alignment = current_available_address % 64;
+     if (alignment != 0) {
+         current_available_address += (64 - alignment);
+     }
     return VK_SUCCESS;
 ''',
 'vkDestroyBuffer': '''
@@ -1001,43 +897,719 @@ CUSTOM_C_INTERCEPTS = {
 'vkCreateImage': '''
     unique_lock_t lock(global_lock);
     *pImage = (VkImage)global_unique_handle++;
-    // TODO: A pixel size is 32 bytes. This accounts for the largest possible pixel size of any format. It could be changed to more accurate size if need be.
-    image_memory_size_map[device][*pImage] = pCreateInfo->extent.width * pCreateInfo->extent.height * pCreateInfo->extent.depth *
-                                             32 * pCreateInfo->arrayLayers * (pCreateInfo->mipLevels > 1 ? 2 : 1);
-    // plane count
-    switch (pCreateInfo->format) {
-        case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM:
-        case VK_FORMAT_G8_B8_R8_3PLANE_422_UNORM:
-        case VK_FORMAT_G8_B8_R8_3PLANE_444_UNORM:
-        case VK_FORMAT_G10X6_B10X6_R10X6_3PLANE_420_UNORM_3PACK16:
-        case VK_FORMAT_G10X6_B10X6_R10X6_3PLANE_422_UNORM_3PACK16:
-        case VK_FORMAT_G10X6_B10X6_R10X6_3PLANE_444_UNORM_3PACK16:
-        case VK_FORMAT_G12X4_B12X4_R12X4_3PLANE_420_UNORM_3PACK16:
-        case VK_FORMAT_G12X4_B12X4_R12X4_3PLANE_422_UNORM_3PACK16:
-        case VK_FORMAT_G12X4_B12X4_R12X4_3PLANE_444_UNORM_3PACK16:
-        case VK_FORMAT_G16_B16_R16_3PLANE_420_UNORM:
-        case VK_FORMAT_G16_B16_R16_3PLANE_422_UNORM:
-        case VK_FORMAT_G16_B16_R16_3PLANE_444_UNORM:
-            image_memory_size_map[device][*pImage] *= 3;
-            break;
-        case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
-        case VK_FORMAT_G8_B8R8_2PLANE_422_UNORM:
-        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16:
-        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16:
-        case VK_FORMAT_G12X4_B12X4R12X4_2PLANE_420_UNORM_3PACK16:
-        case VK_FORMAT_G12X4_B12X4R12X4_2PLANE_422_UNORM_3PACK16:
-        case VK_FORMAT_G16_B16R16_2PLANE_420_UNORM:
-        case VK_FORMAT_G16_B16R16_2PLANE_422_UNORM:
-            image_memory_size_map[device][*pImage] *= 2;
-            break;
-        default:
-            break;
-    }
+    image_memory_size_map[device][*pImage] = GetImageSizeFromCreateInfo(pCreateInfo);
     return VK_SUCCESS;
 ''',
 'vkDestroyImage': '''
     unique_lock_t lock(global_lock);
     image_memory_size_map[device].erase(image);
+''',
+'vkEnumeratePhysicalDeviceGroupsKHR': '''
+    if (!pPhysicalDeviceGroupProperties) {
+        *pPhysicalDeviceGroupCount = 1;
+    } else {
+        // arbitrary
+        pPhysicalDeviceGroupProperties->physicalDeviceCount = 1;
+        pPhysicalDeviceGroupProperties->physicalDevices[0] = physical_device_map.at(instance)[0];
+        pPhysicalDeviceGroupProperties->subsetAllocation = VK_FALSE;
+    }
+    return VK_SUCCESS;
+''',
+'vkGetPhysicalDeviceMultisamplePropertiesEXT': '''
+    if (pMultisampleProperties) {
+        // arbitrary
+        pMultisampleProperties->maxSampleLocationGridSize = {32, 32};
+    }
+''',
+'vkGetPhysicalDeviceFragmentShadingRatesKHR': '''
+    if (!pFragmentShadingRates) {
+        *pFragmentShadingRateCount = 1;
+    } else {
+        // arbitrary
+        pFragmentShadingRates->sampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT;
+        pFragmentShadingRates->fragmentSize = {8, 8};
+    }
+    return VK_SUCCESS;
+''',
+'vkGetPhysicalDeviceCalibrateableTimeDomainsEXT': '''
+    if (!pTimeDomains) {
+        *pTimeDomainCount = 1;
+    } else {
+        // arbitrary
+        *pTimeDomains = VK_TIME_DOMAIN_DEVICE_EXT;
+    }
+    return VK_SUCCESS;
+''',
+'vkGetPhysicalDeviceCalibrateableTimeDomainsKHR': '''
+    if (!pTimeDomains) {
+        *pTimeDomainCount = 1;
+    } else {
+        // arbitrary
+        *pTimeDomains = VK_TIME_DOMAIN_DEVICE_KHR;
+    }
+    return VK_SUCCESS;
+''',
+'vkGetFenceWin32HandleKHR': '''
+    *pHandle = (HANDLE)0x12345678;
+    return VK_SUCCESS;
+''',
+'vkGetFenceFdKHR': '''
+    *pFd = 0x42;
+    return VK_SUCCESS;
+''',
+'vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR': '''
+    if (!pCounters) {
+        *pCounterCount = 3;
+    } else {
+        if (*pCounterCount == 0){
+            return VK_INCOMPLETE;
+        }
+        // arbitrary
+        pCounters[0].unit = VK_PERFORMANCE_COUNTER_UNIT_GENERIC_KHR;
+        pCounters[0].scope = VK_QUERY_SCOPE_COMMAND_BUFFER_KHR;
+        pCounters[0].storage = VK_PERFORMANCE_COUNTER_STORAGE_INT32_KHR;
+        pCounters[0].uuid[0] = 0x01;
+        if (*pCounterCount == 1){
+            return VK_INCOMPLETE;
+        }
+        pCounters[1].unit = VK_PERFORMANCE_COUNTER_UNIT_GENERIC_KHR;
+        pCounters[1].scope = VK_QUERY_SCOPE_RENDER_PASS_KHR;
+        pCounters[1].storage = VK_PERFORMANCE_COUNTER_STORAGE_INT32_KHR;
+        pCounters[1].uuid[0] = 0x02;
+        if (*pCounterCount == 2){
+            return VK_INCOMPLETE;
+        }
+        pCounters[2].unit = VK_PERFORMANCE_COUNTER_UNIT_GENERIC_KHR;
+        pCounters[2].scope = VK_QUERY_SCOPE_COMMAND_KHR;
+        pCounters[2].storage = VK_PERFORMANCE_COUNTER_STORAGE_INT32_KHR;
+        pCounters[2].uuid[0] = 0x03;
+        *pCounterCount = 3;
+    }
+    return VK_SUCCESS;
+''',
+'vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR': '''
+    if (pNumPasses) {
+        // arbitrary
+        *pNumPasses = 1;
+    }
+''',
+'vkGetShaderModuleIdentifierEXT': '''
+    if (pIdentifier) {
+        // arbitrary
+        pIdentifier->identifierSize = 1;
+        pIdentifier->identifier[0] = 0x01;
+    }
+''',
+'vkGetImageSparseMemoryRequirements': '''
+    if (!pSparseMemoryRequirements) {
+        *pSparseMemoryRequirementCount = 1;
+    } else {
+        // arbitrary
+        pSparseMemoryRequirements->imageMipTailFirstLod = 0;
+        pSparseMemoryRequirements->imageMipTailSize = 8;
+        pSparseMemoryRequirements->imageMipTailOffset = 0;
+        pSparseMemoryRequirements->imageMipTailStride = 4;
+        pSparseMemoryRequirements->formatProperties.imageGranularity = {4, 4, 4};
+        pSparseMemoryRequirements->formatProperties.flags = VK_SPARSE_IMAGE_FORMAT_SINGLE_MIPTAIL_BIT;
+        // Would need to track the VkImage to know format for better value here
+        pSparseMemoryRequirements->formatProperties.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT | VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT | VK_IMAGE_ASPECT_METADATA_BIT;
+    }
+
+''',
+'vkGetImageSparseMemoryRequirements2KHR': '''
+    if (pSparseMemoryRequirementCount && pSparseMemoryRequirements) {
+        GetImageSparseMemoryRequirements(device, pInfo->image, pSparseMemoryRequirementCount, &pSparseMemoryRequirements->memoryRequirements);
+    } else {
+        GetImageSparseMemoryRequirements(device, pInfo->image, pSparseMemoryRequirementCount, nullptr);
+    }
+''',
+'vkGetBufferDeviceAddress': '''
+    VkDeviceAddress address = 0;
+    auto d_iter = buffer_map.find(device);
+    if (d_iter != buffer_map.end()) {
+        auto iter = d_iter->second.find(pInfo->buffer);
+        if (iter != d_iter->second.end()) {
+            address = iter->second.address;
+        }
+    }
+    return address;
+''',
+'vkGetBufferDeviceAddressKHR': '''
+    return GetBufferDeviceAddress(device, pInfo);
+''',
+'vkGetBufferDeviceAddressEXT': '''
+    return GetBufferDeviceAddress(device, pInfo);
+''',
+'vkGetDescriptorSetLayoutSizeEXT': '''
+    // Need to give something non-zero
+    *pLayoutSizeInBytes = 4;
+''',
+'vkGetAccelerationStructureBuildSizesKHR': '''
+    // arbitrary
+    pSizeInfo->accelerationStructureSize = 4;
+    pSizeInfo->updateScratchSize = 4;
+    pSizeInfo->buildScratchSize = 4;
+''',
+'vkGetAccelerationStructureMemoryRequirementsNV': '''
+    // arbitrary
+    pMemoryRequirements->memoryRequirements.size = 4096;
+    pMemoryRequirements->memoryRequirements.alignment = 1;
+    pMemoryRequirements->memoryRequirements.memoryTypeBits = 0xFFFF;
+''',
+'vkGetAccelerationStructureDeviceAddressKHR': '''
+    // arbitrary - need to be aligned to 256 bytes
+    return 0x262144;
+''',
+'vkGetVideoSessionMemoryRequirementsKHR': '''
+    if (!pMemoryRequirements) {
+        *pMemoryRequirementsCount = 1;
+    } else {
+        // arbitrary
+        pMemoryRequirements[0].memoryBindIndex = 0;
+        pMemoryRequirements[0].memoryRequirements.size = 4096;
+        pMemoryRequirements[0].memoryRequirements.alignment = 1;
+        pMemoryRequirements[0].memoryRequirements.memoryTypeBits = 0xFFFF;
+    }
+    return VK_SUCCESS;
+''',
+'vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR': '''
+    if (!pProperties) {
+        *pPropertyCount = 2;
+    } else {
+        // arbitrary
+        pProperties[0].MSize = 16;
+        pProperties[0].NSize = 16;
+        pProperties[0].KSize = 16;
+        pProperties[0].AType = VK_COMPONENT_TYPE_UINT32_KHR;
+        pProperties[0].BType = VK_COMPONENT_TYPE_UINT32_KHR;
+        pProperties[0].CType = VK_COMPONENT_TYPE_UINT32_KHR;
+        pProperties[0].ResultType = VK_COMPONENT_TYPE_UINT32_KHR;
+        pProperties[0].saturatingAccumulation = VK_FALSE;
+        pProperties[0].scope = VK_SCOPE_SUBGROUP_KHR;
+
+        pProperties[1] = pProperties[0];
+        pProperties[1].scope = VK_SCOPE_DEVICE_KHR;
+    }
+    return VK_SUCCESS;
+''',
+'vkGetPhysicalDeviceVideoCapabilitiesKHR': '''
+    // We include some reasonable set of capability combinations to cover a wide range of use cases
+    auto caps = pCapabilities;
+    auto caps_decode = lvl_find_mod_in_chain<VkVideoDecodeCapabilitiesKHR>(pCapabilities->pNext);
+    auto caps_decode_h264 = lvl_find_mod_in_chain<VkVideoDecodeH264CapabilitiesKHR>(pCapabilities->pNext);
+    auto caps_decode_h265 = lvl_find_mod_in_chain<VkVideoDecodeH265CapabilitiesKHR>(pCapabilities->pNext);
+    auto caps_encode = lvl_find_mod_in_chain<VkVideoEncodeCapabilitiesKHR>(pCapabilities->pNext);
+    auto caps_encode_h264 = lvl_find_mod_in_chain<VkVideoEncodeH264CapabilitiesKHR>(pCapabilities->pNext);
+    auto caps_encode_h265 = lvl_find_mod_in_chain<VkVideoEncodeH265CapabilitiesKHR>(pCapabilities->pNext);
+
+    switch (pVideoProfile->videoCodecOperation) {
+        case VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR: {
+            auto profile = lvl_find_in_chain<VkVideoDecodeH264ProfileInfoKHR>(pVideoProfile->pNext);
+            if (profile->stdProfileIdc != STD_VIDEO_H264_PROFILE_IDC_BASELINE &&
+                profile->stdProfileIdc != STD_VIDEO_H264_PROFILE_IDC_MAIN) {
+                return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+
+            caps->flags = VK_VIDEO_CAPABILITY_PROTECTED_CONTENT_BIT_KHR;
+            caps->minBitstreamBufferOffsetAlignment = 256;
+            caps->minBitstreamBufferSizeAlignment   = 256;
+            caps->pictureAccessGranularity          = {16,16};
+            caps->minCodedExtent                    = {16,16};
+            caps->maxCodedExtent                    = {1920,1080};
+            caps->maxDpbSlots                       = 33;
+            caps->maxActiveReferencePictures        = 32;
+            std::strncpy(caps->stdHeaderVersion.extensionName, VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_EXTENSION_NAME,
+                         sizeof(caps->stdHeaderVersion.extensionName));
+            caps->stdHeaderVersion.specVersion      = VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_SPEC_VERSION;
+
+            switch (pVideoProfile->chromaSubsampling) {
+                case VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR:
+                    if (profile->pictureLayout != VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR) {
+                        return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+                    }
+                    caps_decode->flags = VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR;
+                    caps_decode_h264->maxLevelIdc = STD_VIDEO_H264_LEVEL_IDC_6_2;
+                    caps_decode_h264->fieldOffsetGranularity = {0,0};
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR:
+                    if (profile->pictureLayout != VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR &&
+                        profile->pictureLayout != VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_INTERLACED_SEPARATE_PLANES_BIT_KHR) {
+                        return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+                    }
+                    caps_decode->flags = VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR;
+                    caps_decode_h264->maxLevelIdc = STD_VIDEO_H264_LEVEL_IDC_5_0;
+                    caps_decode_h264->fieldOffsetGranularity = {0,16};
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR:
+                    if (profile->pictureLayout != VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR &&
+                        profile->pictureLayout != VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_INTERLACED_INTERLEAVED_LINES_BIT_KHR) {
+                        return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+                    }
+                    caps_decode->flags = VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
+                                       | VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR;
+                    caps_decode_h264->maxLevelIdc = STD_VIDEO_H264_LEVEL_IDC_3_2;
+                    caps_decode_h264->fieldOffsetGranularity = {0,1};
+                    break;
+                default:
+                    return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+            break;
+        }
+        case VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR: {
+            auto profile = lvl_find_in_chain<VkVideoDecodeH265ProfileInfoKHR>(pVideoProfile->pNext);
+            if (profile->stdProfileIdc != STD_VIDEO_H265_PROFILE_IDC_MAIN) {
+                return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+
+            caps->flags = VK_VIDEO_CAPABILITY_SEPARATE_REFERENCE_IMAGES_BIT_KHR;
+            caps->minBitstreamBufferOffsetAlignment = 64;
+            caps->minBitstreamBufferSizeAlignment   = 64;
+            caps->pictureAccessGranularity          = {32,32};
+            caps->minCodedExtent                    = {48,48};
+            caps->maxCodedExtent                    = {3840,2160};
+            caps->maxDpbSlots                       = 16;
+            caps->maxActiveReferencePictures        = 15;
+            std::strncpy(caps->stdHeaderVersion.extensionName, VK_STD_VULKAN_VIDEO_CODEC_H265_DECODE_EXTENSION_NAME,
+                         sizeof(caps->stdHeaderVersion.extensionName));
+            caps->stdHeaderVersion.specVersion      = VK_STD_VULKAN_VIDEO_CODEC_H265_DECODE_SPEC_VERSION;
+
+            switch (pVideoProfile->chromaSubsampling) {
+                case VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR:
+                    caps_decode->flags = VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR;
+                    caps_decode_h265->maxLevelIdc = STD_VIDEO_H265_LEVEL_IDC_6_0;
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR:
+                    caps_decode->flags = VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR;
+                    caps_decode_h265->maxLevelIdc = STD_VIDEO_H265_LEVEL_IDC_5_2;
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR:
+                    caps_decode->flags = VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
+                                       | VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR;
+                    caps_decode_h265->maxLevelIdc = STD_VIDEO_H265_LEVEL_IDC_4_1;
+                    break;
+                default:
+                    return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+            break;
+        }
+        case VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR: {
+            auto profile = lvl_find_in_chain<VkVideoEncodeH264ProfileInfoKHR>(pVideoProfile->pNext);
+            if (profile->stdProfileIdc != STD_VIDEO_H264_PROFILE_IDC_BASELINE) {
+                return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+
+            caps->flags = VK_VIDEO_CAPABILITY_SEPARATE_REFERENCE_IMAGES_BIT_KHR;
+            caps->minBitstreamBufferOffsetAlignment = 4096;
+            caps->minBitstreamBufferSizeAlignment   = 4096;
+            caps->pictureAccessGranularity          = {16,16};
+            caps->minCodedExtent                    = {160,128};
+            caps->maxCodedExtent                    = {1920,1080};
+            caps->maxDpbSlots                       = 10;
+            caps->maxActiveReferencePictures        = 4;
+            std::strncpy(caps->stdHeaderVersion.extensionName, VK_STD_VULKAN_VIDEO_CODEC_H264_ENCODE_EXTENSION_NAME,
+                         sizeof(caps->stdHeaderVersion.extensionName));
+            caps->stdHeaderVersion.specVersion      = VK_STD_VULKAN_VIDEO_CODEC_H264_ENCODE_SPEC_VERSION;
+
+            switch (pVideoProfile->chromaSubsampling) {
+                case VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR:
+                    caps_encode->flags = VK_VIDEO_ENCODE_CAPABILITY_PRECEDING_EXTERNALLY_ENCODED_BYTES_BIT_KHR;
+                    caps_encode->rateControlModes = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR
+                                                  | VK_VIDEO_ENCODE_RATE_CONTROL_MODE_CBR_BIT_KHR
+                                                  | VK_VIDEO_ENCODE_RATE_CONTROL_MODE_VBR_BIT_KHR;
+                    caps_encode->maxRateControlLayers = 4;
+                    caps_encode->maxBitrate = 800000000;
+                    caps_encode->maxQualityLevels = 4;
+                    caps_encode->encodeInputPictureGranularity = {16,16};
+                    caps_encode->supportedEncodeFeedbackFlags = VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BUFFER_OFFSET_BIT_KHR
+                                                              | VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BYTES_WRITTEN_BIT_KHR
+                                                              | VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_HAS_OVERRIDES_BIT_KHR;
+                    caps_encode_h264->flags = VK_VIDEO_ENCODE_H264_CAPABILITY_HRD_COMPLIANCE_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_PREDICTION_WEIGHT_TABLE_GENERATED_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_ROW_UNALIGNED_SLICE_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_B_FRAME_IN_L0_LIST_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_PER_PICTURE_TYPE_MIN_MAX_QP_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_GENERATE_PREFIX_NALU_BIT_KHR;
+                    caps_encode_h264->maxLevelIdc = STD_VIDEO_H264_LEVEL_IDC_6_2;
+                    caps_encode_h264->maxSliceCount = 8;
+                    caps_encode_h264->maxPPictureL0ReferenceCount = 4;
+                    caps_encode_h264->maxBPictureL0ReferenceCount = 3;
+                    caps_encode_h264->maxL1ReferenceCount = 2;
+                    caps_encode_h264->maxTemporalLayerCount = 4;
+                    caps_encode_h264->expectDyadicTemporalLayerPattern = VK_FALSE;
+                    caps_encode_h264->minQp = 0;
+                    caps_encode_h264->maxQp = 51;
+                    caps_encode_h264->prefersGopRemainingFrames = VK_FALSE;
+                    caps_encode_h264->requiresGopRemainingFrames = VK_FALSE;
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR:
+                    caps_encode->flags = VK_VIDEO_ENCODE_CAPABILITY_PRECEDING_EXTERNALLY_ENCODED_BYTES_BIT_KHR;
+                    caps_encode->rateControlModes = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR
+                                                  | VK_VIDEO_ENCODE_RATE_CONTROL_MODE_VBR_BIT_KHR;
+                    caps_encode->maxRateControlLayers = 1;
+                    caps_encode->maxBitrate = 480000000;
+                    caps_encode->maxQualityLevels = 3;
+                    caps_encode->encodeInputPictureGranularity = {32,32};
+                    caps_encode->supportedEncodeFeedbackFlags = VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BUFFER_OFFSET_BIT_KHR
+                                                              | VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BYTES_WRITTEN_BIT_KHR;
+                    caps_encode_h264->flags = VK_VIDEO_ENCODE_H264_CAPABILITY_DIFFERENT_SLICE_TYPE_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_PER_SLICE_CONSTANT_QP_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_GENERATE_PREFIX_NALU_BIT_KHR;
+                    caps_encode_h264->maxLevelIdc = STD_VIDEO_H264_LEVEL_IDC_6_1;
+                    caps_encode_h264->maxSliceCount = 4;
+                    caps_encode_h264->maxPPictureL0ReferenceCount = 4;
+                    caps_encode_h264->maxBPictureL0ReferenceCount = 0;
+                    caps_encode_h264->maxL1ReferenceCount = 0;
+                    caps_encode_h264->maxTemporalLayerCount = 4;
+                    caps_encode_h264->expectDyadicTemporalLayerPattern = VK_TRUE;
+                    caps_encode_h264->minQp = 0;
+                    caps_encode_h264->maxQp = 30;
+                    caps_encode_h264->prefersGopRemainingFrames = VK_TRUE;
+                    caps_encode_h264->requiresGopRemainingFrames = VK_FALSE;
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR:
+                    caps_encode->flags = 0;
+                    caps_encode->rateControlModes = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_CBR_BIT_KHR;
+                    caps_encode->maxRateControlLayers = 1;
+                    caps_encode->maxBitrate = 240000000;
+                    caps_encode->maxQualityLevels = 1;
+                    caps_encode->encodeInputPictureGranularity = {1,1};
+                    caps_encode->supportedEncodeFeedbackFlags = VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BUFFER_OFFSET_BIT_KHR
+                                                              | VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BYTES_WRITTEN_BIT_KHR;
+                    caps_encode_h264->flags = VK_VIDEO_ENCODE_H264_CAPABILITY_ROW_UNALIGNED_SLICE_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_B_FRAME_IN_L1_LIST_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H264_CAPABILITY_PER_PICTURE_TYPE_MIN_MAX_QP_BIT_KHR;
+                    caps_encode_h264->maxLevelIdc = STD_VIDEO_H264_LEVEL_IDC_5_1;
+                    caps_encode_h264->maxSliceCount = 1;
+                    caps_encode_h264->maxPPictureL0ReferenceCount = 0;
+                    caps_encode_h264->maxBPictureL0ReferenceCount = 2;
+                    caps_encode_h264->maxL1ReferenceCount = 2;
+                    caps_encode_h264->maxTemporalLayerCount = 1;
+                    caps_encode_h264->expectDyadicTemporalLayerPattern = VK_FALSE;
+                    caps_encode_h264->minQp = 5;
+                    caps_encode_h264->maxQp = 40;
+                    caps_encode_h264->prefersGopRemainingFrames = VK_TRUE;
+                    caps_encode_h264->requiresGopRemainingFrames = VK_TRUE;
+                    break;
+                default:
+                    return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+            break;
+        }
+        case VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR: {
+            auto profile = lvl_find_in_chain<VkVideoEncodeH265ProfileInfoKHR>(pVideoProfile->pNext);
+            if (profile->stdProfileIdc != STD_VIDEO_H265_PROFILE_IDC_MAIN) {
+                return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+
+            caps->flags = VK_VIDEO_CAPABILITY_PROTECTED_CONTENT_BIT_KHR;
+            caps->minBitstreamBufferOffsetAlignment = 1;
+            caps->minBitstreamBufferSizeAlignment   = 1;
+            caps->pictureAccessGranularity          = {8,8};
+            caps->minCodedExtent                    = {64,48};
+            caps->maxCodedExtent                    = {4096,2560};
+            caps->maxDpbSlots                       = 8;
+            caps->maxActiveReferencePictures        = 2;
+            std::strncpy(caps->stdHeaderVersion.extensionName, VK_STD_VULKAN_VIDEO_CODEC_H265_ENCODE_EXTENSION_NAME, sizeof(caps->stdHeaderVersion.extensionName));
+            caps->stdHeaderVersion.specVersion      = VK_STD_VULKAN_VIDEO_CODEC_H265_ENCODE_SPEC_VERSION;
+
+            switch (pVideoProfile->chromaSubsampling) {
+                case VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR:
+                    caps_encode->flags = 0;
+                    caps_encode->rateControlModes = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_CBR_BIT_KHR;
+                    caps_encode->maxRateControlLayers = 1;
+                    caps_encode->maxBitrate = 800000000;
+                    caps_encode->maxQualityLevels = 1;
+                    caps_encode->encodeInputPictureGranularity = {64,64};
+                    caps_encode->supportedEncodeFeedbackFlags = VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BUFFER_OFFSET_BIT_KHR
+                                                              | VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BYTES_WRITTEN_BIT_KHR;
+                    caps_encode_h265->flags = VK_VIDEO_ENCODE_H265_CAPABILITY_HRD_COMPLIANCE_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H265_CAPABILITY_PREDICTION_WEIGHT_TABLE_GENERATED_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H265_CAPABILITY_ROW_UNALIGNED_SLICE_SEGMENT_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H265_CAPABILITY_B_FRAME_IN_L0_LIST_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H265_CAPABILITY_PER_SLICE_SEGMENT_CONSTANT_QP_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H265_CAPABILITY_MULTIPLE_SLICE_SEGMENTS_PER_TILE_BIT_KHR;
+                    caps_encode_h265->maxLevelIdc = STD_VIDEO_H265_LEVEL_IDC_6_2;
+                    caps_encode_h265->maxSliceSegmentCount = 8;
+                    caps_encode_h265->maxTiles = {1,1};
+                    caps_encode_h265->ctbSizes = VK_VIDEO_ENCODE_H265_CTB_SIZE_32_BIT_KHR
+                                               | VK_VIDEO_ENCODE_H265_CTB_SIZE_64_BIT_KHR;
+                    caps_encode_h265->transformBlockSizes = VK_VIDEO_ENCODE_H265_TRANSFORM_BLOCK_SIZE_4_BIT_KHR
+                                                          | VK_VIDEO_ENCODE_H265_TRANSFORM_BLOCK_SIZE_8_BIT_KHR
+                                                          | VK_VIDEO_ENCODE_H265_TRANSFORM_BLOCK_SIZE_32_BIT_KHR;
+                    caps_encode_h265->maxPPictureL0ReferenceCount = 4;
+                    caps_encode_h265->maxBPictureL0ReferenceCount = 3;
+                    caps_encode_h265->maxL1ReferenceCount = 2;
+                    caps_encode_h265->maxSubLayerCount = 1;
+                    caps_encode_h265->expectDyadicTemporalSubLayerPattern = VK_FALSE;
+                    caps_encode_h265->minQp = 16;
+                    caps_encode_h265->maxQp = 32;
+                    caps_encode_h265->prefersGopRemainingFrames = VK_FALSE;
+                    caps_encode_h265->requiresGopRemainingFrames = VK_FALSE;
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR:
+                    caps_encode->flags = 0;
+                    caps_encode->rateControlModes = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR;
+                    caps_encode->maxRateControlLayers = 0;
+                    caps_encode->maxBitrate = 480000000;
+                    caps_encode->maxQualityLevels = 2;
+                    caps_encode->encodeInputPictureGranularity = {32,32};
+                    caps_encode->supportedEncodeFeedbackFlags = VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BUFFER_OFFSET_BIT_KHR
+                                                              | VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BYTES_WRITTEN_BIT_KHR;
+                    caps_encode_h265->flags = VK_VIDEO_ENCODE_H265_CAPABILITY_DIFFERENT_SLICE_SEGMENT_TYPE_BIT_KHR;
+                    caps_encode_h265->maxLevelIdc = STD_VIDEO_H265_LEVEL_IDC_6_1;
+                    caps_encode_h265->maxSliceSegmentCount = 4;
+                    caps_encode_h265->maxTiles = {2,2};
+                    caps_encode_h265->ctbSizes = VK_VIDEO_ENCODE_H265_CTB_SIZE_16_BIT_KHR
+                                               | VK_VIDEO_ENCODE_H265_CTB_SIZE_64_BIT_KHR;
+                    caps_encode_h265->transformBlockSizes = VK_VIDEO_ENCODE_H265_TRANSFORM_BLOCK_SIZE_8_BIT_KHR
+                                                          | VK_VIDEO_ENCODE_H265_TRANSFORM_BLOCK_SIZE_16_BIT_KHR
+                                                          | VK_VIDEO_ENCODE_H265_TRANSFORM_BLOCK_SIZE_32_BIT_KHR;
+                    caps_encode_h265->maxPPictureL0ReferenceCount = 4;
+                    caps_encode_h265->maxBPictureL0ReferenceCount = 0;
+                    caps_encode_h265->maxL1ReferenceCount = 0;
+                    caps_encode_h265->maxSubLayerCount = 1;
+                    caps_encode_h265->expectDyadicTemporalSubLayerPattern = VK_FALSE;
+                    caps_encode_h265->minQp = 0;
+                    caps_encode_h265->maxQp = 51;
+                    caps_encode_h265->prefersGopRemainingFrames = VK_TRUE;
+                    caps_encode_h265->requiresGopRemainingFrames = VK_FALSE;
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR:
+                    caps_encode->flags = VK_VIDEO_ENCODE_CAPABILITY_PRECEDING_EXTERNALLY_ENCODED_BYTES_BIT_KHR;
+                    caps_encode->rateControlModes = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR
+                                                  | VK_VIDEO_ENCODE_RATE_CONTROL_MODE_CBR_BIT_KHR
+                                                  | VK_VIDEO_ENCODE_RATE_CONTROL_MODE_VBR_BIT_KHR;
+                    caps_encode->maxRateControlLayers = 2;
+                    caps_encode->maxBitrate = 240000000;
+                    caps_encode->maxQualityLevels = 3;
+                    caps_encode->encodeInputPictureGranularity = {16,16};
+                    caps_encode->supportedEncodeFeedbackFlags = VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BUFFER_OFFSET_BIT_KHR
+                                                              | VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BYTES_WRITTEN_BIT_KHR
+                                                              | VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_HAS_OVERRIDES_BIT_KHR;
+                    caps_encode_h265->flags = VK_VIDEO_ENCODE_H265_CAPABILITY_B_FRAME_IN_L1_LIST_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H265_CAPABILITY_PER_PICTURE_TYPE_MIN_MAX_QP_BIT_KHR
+                                            | VK_VIDEO_ENCODE_H265_CAPABILITY_MULTIPLE_TILES_PER_SLICE_SEGMENT_BIT_KHR;
+                    caps_encode_h265->maxLevelIdc = STD_VIDEO_H265_LEVEL_IDC_5_1;
+                    caps_encode_h265->maxSliceSegmentCount = 1;
+                    caps_encode_h265->maxTiles = {2,2};
+                    caps_encode_h265->ctbSizes = VK_VIDEO_ENCODE_H265_CTB_SIZE_32_BIT_KHR;
+                    caps_encode_h265->transformBlockSizes = VK_VIDEO_ENCODE_H265_TRANSFORM_BLOCK_SIZE_32_BIT_KHR;
+                    caps_encode_h265->maxPPictureL0ReferenceCount = 0;
+                    caps_encode_h265->maxBPictureL0ReferenceCount = 2;
+                    caps_encode_h265->maxL1ReferenceCount = 2;
+                    caps_encode_h265->maxSubLayerCount = 4;
+                    caps_encode_h265->expectDyadicTemporalSubLayerPattern = VK_TRUE;
+                    caps_encode_h265->minQp = 16;
+                    caps_encode_h265->maxQp = 51;
+                    caps_encode_h265->prefersGopRemainingFrames = VK_TRUE;
+                    caps_encode_h265->requiresGopRemainingFrames = VK_TRUE;
+                    break;
+                default:
+                    return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+    return VK_SUCCESS;
+''',
+'vkGetPhysicalDeviceVideoFormatPropertiesKHR': '''
+    // We include some reasonable set of format combinations to cover a wide range of use cases
+    auto profile_list = lvl_find_in_chain<VkVideoProfileListInfoKHR>(pVideoFormatInfo->pNext);
+    if (profile_list->profileCount != 1) {
+        return VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR;
+    }
+
+    std::vector<VkVideoFormatPropertiesKHR> format_props{};
+
+    VkVideoFormatPropertiesKHR props = {};
+    props.sType = VK_STRUCTURE_TYPE_VIDEO_FORMAT_PROPERTIES_KHR;
+    props.imageCreateFlags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT
+                           | VK_IMAGE_CREATE_ALIAS_BIT
+                           | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT
+                           | VK_IMAGE_CREATE_PROTECTED_BIT
+                           | VK_IMAGE_CREATE_DISJOINT_BIT;
+    props.imageType = VK_IMAGE_TYPE_2D;
+    props.imageTiling = VK_IMAGE_TILING_OPTIMAL;
+
+    switch (profile_list->pProfiles[0].videoCodecOperation) {
+        case VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR:
+        case VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR:
+            switch (profile_list->pProfiles[0].chromaSubsampling) {
+                case VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR:
+                    props.format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+                    format_props.push_back(props);
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_SAMPLED_BIT
+                                          | VK_IMAGE_USAGE_STORAGE_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR
+                                          | VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
+                    format_props.push_back(props);
+                    props.format = VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
+                    format_props.push_back(props);
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR:
+                    props.imageUsageFlags = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+                    props.format = VK_FORMAT_G8_B8R8_2PLANE_422_UNORM;
+                    format_props.push_back(props);
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_SAMPLED_BIT
+                                          | VK_IMAGE_USAGE_STORAGE_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR
+                                          | VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
+                    format_props.push_back(props);
+                    props.format = VK_FORMAT_B10X6G10X6R10X6G10X6_422_UNORM_4PACK16;
+                    format_props.push_back(props);
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR:
+                    props.format = VK_FORMAT_G8_B8R8_2PLANE_444_UNORM;
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+                    format_props.push_back(props);
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_SAMPLED_BIT
+                                          | VK_IMAGE_USAGE_STORAGE_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR
+                                          | VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
+                    format_props.push_back(props);
+                    break;
+                default:
+                    return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+            break;
+        case VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR:
+        case VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR:
+            switch (profile_list->pProfiles[0].chromaSubsampling) {
+                case VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR:
+                    props.format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR;
+                    format_props.push_back(props);
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_SAMPLED_BIT
+                                          | VK_IMAGE_USAGE_STORAGE_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR
+                                          | VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
+                    format_props.push_back(props);
+                    props.format = VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
+                    format_props.push_back(props);
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR:
+                    props.format = VK_FORMAT_G8_B8R8_2PLANE_422_UNORM;
+                    props.imageUsageFlags = VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR;
+                    format_props.push_back(props);
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_SAMPLED_BIT
+                                          | VK_IMAGE_USAGE_STORAGE_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR
+                                          | VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
+                    format_props.push_back(props);
+                    props.format = VK_FORMAT_B10X6G10X6R10X6G10X6_422_UNORM_4PACK16;
+                    format_props.push_back(props);
+                    break;
+                case VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR:
+                    props.format = VK_FORMAT_G8_B8R8_2PLANE_444_UNORM;
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR;
+                    format_props.push_back(props);
+                    props.imageUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                                          | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                          | VK_IMAGE_USAGE_SAMPLED_BIT
+                                          | VK_IMAGE_USAGE_STORAGE_BIT
+                                          | VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR
+                                          | VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
+                    format_props.push_back(props);
+                    break;
+                default:
+                    return VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR;
+            }
+            break;
+
+        default:
+            break;
+    }
+
+    std::vector<VkVideoFormatPropertiesKHR> filtered_props;
+    for (const auto& fmt_props : format_props) {
+        if ((pVideoFormatInfo->imageUsage & fmt_props.imageUsageFlags) == pVideoFormatInfo->imageUsage) {
+            filtered_props.push_back(fmt_props);
+        }
+    }
+
+    if (pVideoFormatProperties != nullptr) {
+        for (uint32_t i = 0; i < (std::min)(*pVideoFormatPropertyCount, (uint32_t)filtered_props.size()); ++i) {
+            pVideoFormatProperties[i] = filtered_props[i];
+        }
+    }
+    *pVideoFormatPropertyCount = (uint32_t)filtered_props.size();
+    return VK_SUCCESS;
+''',
+'vkGetDescriptorSetLayoutSupport':'''
+    if (pSupport) {
+        pSupport->supported = VK_TRUE;
+    }
+''',
+'vkGetDescriptorSetLayoutSupportKHR':'''
+    GetDescriptorSetLayoutSupport(device, pCreateInfo, pSupport);
+''',
+'vkGetRenderAreaGranularity': '''
+    pGranularity->width = 1;
+    pGranularity->height = 1;
+''',
+'vkGetMemoryFdKHR': '''
+    *pFd = 1;
+    return VK_SUCCESS;
+''',
+'vkGetMemoryHostPointerPropertiesEXT': '''
+    pMemoryHostPointerProperties->memoryTypeBits = 1 << 5; // DEVICE_LOCAL only type
+    return VK_SUCCESS;
+''',
+'vkGetAndroidHardwareBufferPropertiesANDROID': '''
+    pProperties->allocationSize = 65536;
+    pProperties->memoryTypeBits = 1 << 5; // DEVICE_LOCAL only type
+
+    auto *format_prop = lvl_find_mod_in_chain<VkAndroidHardwareBufferFormatPropertiesANDROID>(pProperties->pNext);
+    if (format_prop) {
+        // Likley using this format
+        format_prop->format = VK_FORMAT_R8G8B8A8_UNORM;
+        format_prop->externalFormat = 37;
+    }
+
+    auto *format_resolve_prop = lvl_find_mod_in_chain<VkAndroidHardwareBufferFormatResolvePropertiesANDROID>(pProperties->pNext);
+    if (format_resolve_prop) {
+        format_resolve_prop->colorAttachmentFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    }
+    return VK_SUCCESS;
+''',
+'vkGetPhysicalDeviceDisplayPropertiesKHR': '''
+    if (!pProperties) {
+        *pPropertyCount = 1;
+    } else {
+        unique_lock_t lock(global_lock);
+        pProperties[0].display = (VkDisplayKHR)global_unique_handle++;
+        display_map[physicalDevice].insert(pProperties[0].display);
+    }
+    return VK_SUCCESS;
+''',
+'vkRegisterDisplayEventEXT': '''
+    unique_lock_t lock(global_lock);
+    *pFence = (VkFence)global_unique_handle++;
+    return VK_SUCCESS;
 ''',
 }
 
@@ -1162,6 +1734,7 @@ class MockICDOutputGenerator(OutputGenerator):
         # Internal state - accumulators for different inner block text
         self.sections = dict([(section, []) for section in self.ALL_SECTIONS])
         self.intercepts = []
+        self.function_declarations = False
 
     # Check if the parameter passed in is a pointer to an array
     def paramIsArray(self, param):
@@ -1191,48 +1764,32 @@ class MockICDOutputGenerator(OutputGenerator):
         else:
             return False
 
+    # Check that the target API is in the supported list for the extension
+    def checkExtensionAPISupport(self, supported):
+        return self.genOpts.apiname in supported.split(',')
+
     def beginFile(self, genOpts):
         OutputGenerator.beginFile(self, genOpts)
         # C-specific
         #
         # Multiple inclusion protection & C++ namespace.
-        self.header = False
-        if (genOpts.protectFile and self.genOpts.filename and 'h' == self.genOpts.filename[-1]):
-            self.header = True
-            headerSym = '__' + re.sub(r'\.h', '_h_', os.path.basename(self.genOpts.filename))
-            write('#ifndef', headerSym, file=self.outFile)
-            write('#define', headerSym, '1', file=self.outFile)
-            self.newline()
-        #
+        if (genOpts.protectFile and self.genOpts.filename == "function_declarations.h"):
+            self.function_declarations = True
+
         # User-supplied prefix text, if any (list of strings)
         if (genOpts.prefixText):
             for s in genOpts.prefixText:
                 write(s, file=self.outFile)
-        if self.header:
-            write('#include <unordered_map>', file=self.outFile)
-            write('#include <mutex>', file=self.outFile)
-            write('#include <string>', file=self.outFile)
-            write('#include <cstring>', file=self.outFile)
-            write('#include "vulkan/vk_icd.h"', file=self.outFile)
-        else:
-            write('#include "mock_icd.h"', file=self.outFile)
-            write('#include <stdlib.h>', file=self.outFile)
-            write('#include <algorithm>', file=self.outFile)
-            write('#include <array>', file=self.outFile)
-            write('#include <vector>', file=self.outFile)
-            write('#include "vk_typemap_helper.h"', file=self.outFile)
 
-        write('namespace vkmock {', file=self.outFile)
-        if self.header:
+        if self.function_declarations:
             self.newline()
-            write(HEADER_C_CODE, file=self.outFile)
             # Include all of the extensions in ICD except specific ignored ones
             device_exts = []
             instance_exts = []
             # Ignore extensions that ICDs should not implement or are not safe to report
             ignore_exts = ['VK_EXT_validation_cache', 'VK_KHR_portability_subset']
             for ext in self.registry.tree.findall("extensions/extension"):
-                if ext.attrib['supported'] != 'disabled': # Only include enabled extensions
+                if self.checkExtensionAPISupport(ext.attrib['supported']): # Only include API-relevant extensions
                     if (ext.attrib['name'] not in ignore_exts):
                         # Search for extension version enum
                         for enum in ext.findall('require/enum'):
@@ -1243,7 +1800,14 @@ class MockICDOutputGenerator(OutputGenerator):
                                 else:
                                     device_exts.append('    {"%s", %s},' % (ext.attrib['name'], ext_version))
                                 break
-
+            write('#pragma once\n',file=self.outFile)
+            write('#include <stdint.h>',file=self.outFile)
+            write('#include <cstring>',file=self.outFile)
+            write('#include <string>',file=self.outFile)
+            write('#include <unordered_map>',file=self.outFile)
+            write('#include <vulkan/vulkan.h>',file=self.outFile)
+            self.newline()
+            write('namespace vkmock {\n', file=self.outFile)
             write('// Map of instance extension name to version', file=self.outFile)
             write('static const std::unordered_map<std::string, uint32_t> instance_extension_map = {', file=self.outFile)
             write('\n'.join(instance_exts), file=self.outFile)
@@ -1252,27 +1816,26 @@ class MockICDOutputGenerator(OutputGenerator):
             write('static const std::unordered_map<std::string, uint32_t> device_extension_map = {', file=self.outFile)
             write('\n'.join(device_exts), file=self.outFile)
             write('};', file=self.outFile)
-
         else:
-            self.newline()
-            write(SOURCE_CPP_PREFIX, file=self.outFile)
+            write('#pragma once\n',file=self.outFile)
+            write('#include "mock_icd.h"',file=self.outFile)
+            write('#include "function_declarations.h"\n',file=self.outFile)
+            write('namespace vkmock {', file=self.outFile)
+
 
     def endFile(self):
         # C-specific
-        # Finish C++ namespace and multiple inclusion protection
+        # Finish C++ namespace
         self.newline()
-        if self.header:
+        if self.function_declarations:
             # record intercepted procedures
             write('// Map of all APIs to be intercepted by this layer', file=self.outFile)
             write('static const std::unordered_map<std::string, void*> name_to_funcptr_map = {', file=self.outFile)
             write('\n'.join(self.intercepts), file=self.outFile)
             write('};\n', file=self.outFile)
-            self.newline()
-            write('} // namespace vkmock', file=self.outFile)
-            self.newline()
-            write('#endif', file=self.outFile)
-        else: # Loader-layer-interface, need to implement global interface functions
-            write(SOURCE_CPP_POSTFIX, file=self.outFile)
+        write('} // namespace vkmock', file=self.outFile)
+        self.newline()
+
         # Finish processing in superclass
         OutputGenerator.endFile(self)
     def beginFeature(self, interface, emit):
@@ -1358,7 +1921,7 @@ class MockICDOutputGenerator(OutputGenerator):
     # Command generation
     def genCmd(self, cmdinfo, name, alias):
         decls = self.makeCDecls(cmdinfo.elem)
-        if self.header: # In the header declare all intercepts
+        if self.function_declarations: # In the header declare all intercepts
             self.appendSection('command', '')
             self.appendSection('command', 'static %s' % (decls[0]))
             if (self.featureExtraProtect != None):
@@ -1464,7 +2027,10 @@ class MockICDOutputGenerator(OutputGenerator):
         elif True in [ftxt in api_function_name for ftxt in ['Destroy', 'Free']]:
             self.appendSection('command', '//Destroy object')
             if 'FreeMemory' in api_function_name:
+                # If the memory is mapped, unmap it
+                self.appendSection('command', '    UnmapMemory(device, memory);')
                 # Remove from allocation map
+                self.appendSection('command', '    unique_lock_t lock(global_lock);')
                 self.appendSection('command', '    allocated_memory_size_map.erase(memory);')
         else:
             self.appendSection('command', '//Not a CREATE or DESTROY function')

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,7 @@ extern "C" {
 #include <string>
 #include <utility>
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 namespace internal {
 
@@ -72,7 +71,12 @@ DEFINE_AV_UNIQUE_PTR(SwrContext, swr_alloc, swr_free);
 // receiver.
 std::string AvErrorToString(int error_num);
 
-}  // namespace cast
-}  // namespace openscreen
+// Macros to enable backwards compability codepaths for older versions of
+// ffmpeg, where newer versions have deprecated APIs.  Note that ffmpeg defines
+// its own FF_API* macros that are related to removing APIs (not deprecating
+// them).
+#define _LIBAVUTIL_OLD_CHANNEL_LAYOUT (LIBAVUTIL_VERSION_MAJOR < 57)
+
+}  // namespace openscreen::cast
 
 #endif  // CAST_STANDALONE_SENDER_FFMPEG_GLUE_H_

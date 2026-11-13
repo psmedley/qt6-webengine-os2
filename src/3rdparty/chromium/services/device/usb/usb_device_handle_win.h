@@ -10,7 +10,7 @@
 #include <memory>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -143,7 +143,7 @@ class UsbDeviceHandleWin : public UsbDeviceHandle {
   };
 
   struct Endpoint {
-    raw_ptr<const mojom::UsbInterfaceInfo> interface;
+    raw_ptr<const mojom::UsbInterfaceInfo, DanglingUntriaged> interface;
     mojom::UsbTransferType type;
   };
 

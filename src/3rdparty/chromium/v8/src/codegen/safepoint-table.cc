@@ -20,16 +20,14 @@
 namespace v8 {
 namespace internal {
 
-SafepointTable::SafepointTable(Isolate* isolate, Address pc, Code code)
-    : SafepointTable(code.InstructionStart(isolate, pc),
-                     code.SafepointTableAddress()) {}
+SafepointTable::SafepointTable(Isolate* isolate, Address pc, Tagged<Code> code)
+    : SafepointTable(code->InstructionStart(isolate, pc),
+                     code->safepoint_table_address()) {}
 
-#ifdef V8_EXTERNAL_CODE_SPACE
 SafepointTable::SafepointTable(Isolate* isolate, Address pc,
-                               CodeDataContainer code)
-    : SafepointTable(code.InstructionStart(isolate, pc),
-                     code.SafepointTableAddress()) {}
-#endif  // V8_EXTERNAL_CODE_SPACE
+                               Tagged<GcSafeCode> code)
+    : SafepointTable(code->InstructionStart(isolate, pc),
+                     code->safepoint_table_address()) {}
 
 #if V8_ENABLE_WEBASSEMBLY
 SafepointTable::SafepointTable(const wasm::WasmCode* code)
@@ -56,7 +54,7 @@ int SafepointTable::find_return_pc(int pc_offset) {
   UNREACHABLE();
 }
 
-SafepointEntry SafepointTable::FindEntry(Address pc) const {
+SafepointEntry SafepointTable::TryFindEntry(Address pc) const {
   int pc_offset = static_cast<int>(pc - instruction_start_);
 
   // Check if the PC is pointing at a trampoline.
@@ -73,11 +71,24 @@ SafepointEntry SafepointTable::FindEntry(Address pc) const {
   for (int i = 0; i < length_; ++i) {
     SafepointEntry entry = GetEntry(i);
     if (i == length_ - 1 || GetEntry(i + 1).pc() > pc_offset) {
-      DCHECK_LE(entry.pc(), pc_offset);
+      if (entry.pc() > pc_offset) return {};
       return entry;
     }
   }
-  UNREACHABLE();
+  return {};
+}
+
+SafepointEntry SafepointTable::FindEntry(Address pc) const {
+  SafepointEntry result = TryFindEntry(pc);
+  CHECK(result.is_initialized());
+  return result;
+}
+
+// static
+SafepointEntry SafepointTable::FindEntry(Isolate* isolate,
+                                         Tagged<GcSafeCode> code, Address pc) {
+  SafepointTable table(isolate, pc, code);
+  return table.FindEntry(pc);
 }
 
 void SafepointTable::Print(std::ostream& os) const {
@@ -117,8 +128,9 @@ void SafepointTable::Print(std::ostream& os) const {
 }
 
 SafepointTableBuilder::Safepoint SafepointTableBuilder::DefineSafepoint(
-    Assembler* assembler) {
-  entries_.push_back(EntryBuilder(zone_, assembler->pc_offset_for_safepoint()));
+    Assembler* assembler, int pc_offset) {
+  pc_offset = pc_offset ? pc_offset : assembler->pc_offset_for_safepoint();
+  entries_.emplace_back(zone_, pc_offset);
   return SafepointTableBuilder::Safepoint(&entries_.back(), this);
 }
 
@@ -127,7 +139,7 @@ int SafepointTableBuilder::UpdateDeoptimizationInfo(int pc, int trampoline,
                                                     int deopt_index) {
   DCHECK_NE(SafepointEntry::kNoTrampolinePC, trampoline);
   DCHECK_NE(SafepointEntry::kNoDeoptIndex, deopt_index);
-  auto it = entries_.Find(start);
+  auto it = entries_.begin() + start;
   DCHECK(std::any_of(it, entries_.end(),
                      [pc](auto& entry) { return entry.pc == pc; }));
   int index = start;
@@ -171,7 +183,7 @@ void SafepointTableBuilder::Emit(Assembler* assembler, int tagged_slots_size) {
 #endif
 
   // Make sure the safepoint table is properly aligned. Pad with nops.
-  assembler->Align(Code::kMetadataAlignment);
+  assembler->Align(InstructionStream::kMetadataAlignment);
   assembler->RecordComment(";;; Safepoint table.");
   set_safepoint_table_offset(assembler->pc_offset());
 
@@ -289,10 +301,9 @@ void SafepointTableBuilder::RemoveDuplicates() {
   };
 
   auto remaining_it = entries_.begin();
-  size_t remaining = 0;
+  auto end = entries_.end();
 
-  for (auto it = entries_.begin(), end = entries_.end(); it != end;
-       ++remaining_it, ++remaining) {
+  for (auto it = entries_.begin(); it != end; ++remaining_it) {
     if (remaining_it != it) *remaining_it = *it;
     // Merge identical entries.
     do {
@@ -300,7 +311,7 @@ void SafepointTableBuilder::RemoveDuplicates() {
     } while (it != end && is_identical_except_for_pc(*it, *remaining_it));
   }
 
-  entries_.Rewind(remaining);
+  entries_.erase(remaining_it, end);
 }
 
 }  // namespace internal

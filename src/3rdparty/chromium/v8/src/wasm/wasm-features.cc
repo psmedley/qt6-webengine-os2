@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 #include "src/wasm/wasm-features.h"
-#include "src/execution/isolate.h"
+
+#include "src/execution/isolate-inl.h"
 #include "src/flags/flags.h"
 #include "src/handles/handles-inl.h"
 
@@ -26,19 +27,29 @@ WasmFeatures WasmFeatures::FromFlags() {
 
 // static
 WasmFeatures WasmFeatures::FromIsolate(Isolate* isolate) {
-  return FromContext(isolate, handle(isolate->context(), isolate));
+  return FromContext(isolate, isolate->native_context());
 }
 
 // static
 WasmFeatures WasmFeatures::FromContext(Isolate* isolate,
-                                       Handle<Context> context) {
+                                       Handle<NativeContext> context) {
   WasmFeatures features = WasmFeatures::FromFlags();
-  if (isolate->IsWasmSimdEnabled(context)) {
-    features.Add(kFeature_simd);
+  if (isolate->IsWasmGCEnabled(context)) {
+    features.Add(kFeature_gc);
+    // Also enable typed function references, since the commandline flag
+    // implication won't do that for us in this case.
+    features.Add(kFeature_typed_funcref);
   }
-  if (isolate->AreWasmExceptionsEnabled(context)) {
-    features.Add(kFeature_eh);
+  if (isolate->IsWasmStringRefEnabled(context)) {
+    features.Add(kFeature_stringref);
   }
+  if (isolate->IsWasmInliningEnabled(context)) {
+    features.Add(kFeature_inlining);
+  }
+  if (isolate->IsWasmImportedStringsEnabled(context)) {
+    features.Add(kFeature_imported_strings);
+  }
+  // This space intentionally left blank for future Wasm origin trials.
   return features;
 }
 

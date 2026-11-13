@@ -18,33 +18,12 @@ $pure float4 unpackSnorm4x8(uint p);
 $pure uint packHalf2x16(float2 v);
 $pure float2 unpackHalf2x16(uint v);
 
-$pure $bvec lessThan($svec x, $svec y);
-$pure $bvec lessThan($usvec x, $usvec y);
-$pure $bvec lessThan($uvec x, $uvec y);
-$pure $bvec lessThanEqual($uvec x, $uvec y);
-$pure $bvec lessThanEqual($svec x, $svec y);
-$pure $bvec lessThanEqual($usvec x, $usvec y);
-$pure $bvec greaterThan($uvec x, $uvec y);
-$pure $bvec greaterThan($svec x, $svec y);
-$pure $bvec greaterThan($usvec x, $usvec y);
-$pure $bvec greaterThanEqual($uvec x, $uvec y);
-$pure $bvec greaterThanEqual($svec x, $svec y);
-$pure $bvec greaterThanEqual($usvec x, $usvec y);
-$pure $bvec equal($uvec x, $uvec y);
-$pure $bvec equal($svec x, $svec y);
-$pure $bvec equal($usvec x, $usvec y);
-$pure $bvec notEqual($uvec x, $uvec y);
-$pure $bvec notEqual($svec x, $svec y);
-$pure $bvec notEqual($usvec x, $usvec y);
-
 $pure $genIType bitCount($genIType value);
 $pure $genIType bitCount($genUType value);
 $pure $genIType findLSB($genIType value);
 $pure $genIType findLSB($genUType value);
 $pure $genIType findMSB($genIType value);
 $pure $genIType findMSB($genUType value);
-
-$pure sampler2D makeSampler2D(texture2D texture, sampler s);
 
 $pure half4 sample(sampler2D s, float2 P);
 $pure half4 sample(sampler2D s, float3 P);
@@ -65,6 +44,18 @@ $pure half4 sampleGrad(sampler2D s, float2, float2 dPdx, float2 dPdy);
 // versions that we currently use
 $pure half4 subpassLoad(subpassInput subpass);
 $pure half4 subpassLoad(subpassInputMS subpass, int sample);
+
+/** Atomically loads the value from `a` and returns it. */
+$pure uint atomicLoad(atomicUint a);
+
+/** Atomically stores the value of `value` to `a` */
+void atomicStore(atomicUint a, uint value);
+
+/**
+ * Performs an atomic addition of `value` to the contents of `a` and returns the original contents
+ * of `a` from before the addition occurred.
+ */
+uint atomicAdd(atomicUint a, uint value);
 
 // Definitions of functions implementing all of the SkBlendMode blends.
 
@@ -171,7 +162,7 @@ $pure half $color_dodge_component(half2 s, half2 d) {
     } else {
         half delta = s.y - s.x;
         if (delta == 0) {
-             return s.y*d.y + s.x*(1 - d.y) + d.x*(1 - s.y);
+            return s.y*d.y + s.x*(1 - d.y) + d.x*(1 - s.y);
         } else {
             delta = min(d.y, $guarded_divide(d.x*s.y, delta));
             return delta*s.y + s.x*(1 - d.y) + d.x*(1 - s.y);
@@ -312,4 +303,20 @@ $pure float cross_length_2d(float2 a, float2 b) {
 
 $pure half cross_length_2d(half2 a, half2 b) {
     return determinant(half2x2(a, b));
+}
+
+$pure float2 perp(float2 v) {
+    return float2(-v.y, v.x);
+}
+
+$pure half2 perp(half2 v) {
+    return half2(-v.y, v.x);
+}
+
+// Returns a bias given a scale factor, such that 'scale * (dist + bias)' converts the distance to
+// a per-pixel coverage value, automatically widening the visible coverage ramp for subpixel
+// dimensions. The 'scale' must already be equal to the narrowest dimension of the shape and clamped
+// to [0, 1.0].
+$pure float coverage_bias(float scale) {
+    return 1.0 - 0.5 * scale;
 }

@@ -7,14 +7,15 @@ import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
 import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import type * as Protocol from '../../generated/protocol.js';
 import * as TextUtils from '../../models/text_utils/text_utils.js';
+import * as IconButton from '../../ui/components/icon_button/icon_button.js';
 import * as DataGrid from '../../ui/legacy/components/data_grid/data_grid.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
-import type * as Protocol from '../../generated/protocol.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import cssOverviewCompletedViewStyles from './cssOverviewCompletedView.css.js';
-
 import {
   Events as CSSOverViewControllerEvents,
   type OverviewController,
@@ -22,157 +23,157 @@ import {
   type PopulateNodesEventNodes,
   type PopulateNodesEventNodeTypes,
 } from './CSSOverviewController.js';
-import {CSSOverviewSidebarPanel, SidebarEvents} from './CSSOverviewSidebarPanel.js';
+import {CSSOverviewSidebarPanel, type ItemSelectedEvent, SidebarEvents} from './CSSOverviewSidebarPanel.js';
 import {type UnusedDeclaration} from './CSSOverviewUnusedDeclarations.js';
 
 const UIStrings = {
   /**
-  *@description Label for the summary in the CSS Overview report
-  */
+   *@description Label for the summary in the CSS overview report
+   */
   overviewSummary: 'Overview summary',
   /**
-  *@description Title of colors subsection in the CSS Overview Panel
-  */
+   *@description Title of colors subsection in the CSS overview panel
+   */
   colors: 'Colors',
   /**
-  *@description Title of font info subsection in the CSS Overview Panel
-  */
+   *@description Title of font info subsection in the CSS overview panel
+   */
   fontInfo: 'Font info',
   /**
-  *@description Label to denote unused declarations in the target page
-  */
+   *@description Label to denote unused declarations in the target page
+   */
   unusedDeclarations: 'Unused declarations',
   /**
-  *@description Label for the number of media queries in the CSS Overview report
-  */
+   *@description Label for the number of media queries in the CSS overview report
+   */
   mediaQueries: 'Media queries',
   /**
-  *@description Title of the Elements Panel
-  */
+   *@description Title of the Elements Panel
+   */
   elements: 'Elements',
   /**
-  *@description Label for the number of External stylesheets in the CSS Overview report
-  */
+   *@description Label for the number of External stylesheets in the CSS overview report
+   */
   externalStylesheets: 'External stylesheets',
   /**
-  *@description Label for the number of inline style elements in the CSS Overview report
-  */
+   *@description Label for the number of inline style elements in the CSS overview report
+   */
   inlineStyleElements: 'Inline style elements',
   /**
-  *@description Label for the number of style rules in CSS Overview report
-  */
+   *@description Label for the number of style rules in CSS overview report
+   */
   styleRules: 'Style rules',
   /**
-  *@description Label for the number of type selectors in the CSS Overview report
-  */
+   *@description Label for the number of type selectors in the CSS overview report
+   */
   typeSelectors: 'Type selectors',
   /**
-  *@description Label for the number of ID selectors in the CSS Overview report
-  */
+   *@description Label for the number of ID selectors in the CSS overview report
+   */
   idSelectors: 'ID selectors',
   /**
-  *@description Label for the number of class selectors in the CSS Overview report
-  */
+   *@description Label for the number of class selectors in the CSS overview report
+   */
   classSelectors: 'Class selectors',
   /**
-  *@description Label for the number of universal selectors in the CSS Overview report
-  */
+   *@description Label for the number of universal selectors in the CSS overview report
+   */
   universalSelectors: 'Universal selectors',
   /**
-  *@description Label for the number of Attribute selectors in the CSS Overview report
-  */
+   *@description Label for the number of Attribute selectors in the CSS overview report
+   */
   attributeSelectors: 'Attribute selectors',
   /**
-  *@description Label for the number of non-simple selectors in the CSS Overview report
-  */
+   *@description Label for the number of non-simple selectors in the CSS overview report
+   */
   nonsimpleSelectors: 'Non-simple selectors',
   /**
-  *@description Label for unique background colors in the CSS Overview Panel
-  *@example {32} PH1
-  */
+   *@description Label for unique background colors in the CSS overview panel
+   *@example {32} PH1
+   */
   backgroundColorsS: 'Background colors: {PH1}',
   /**
-  *@description Label for unique text colors in the CSS Overview Panel
-  *@example {32} PH1
-  */
+   *@description Label for unique text colors in the CSS overview panel
+   *@example {32} PH1
+   */
   textColorsS: 'Text colors: {PH1}',
   /**
-  *@description Label for unique fill colors in the CSS Overview Panel
-  *@example {32} PH1
-  */
+   *@description Label for unique fill colors in the CSS overview panel
+   *@example {32} PH1
+   */
   fillColorsS: 'Fill colors: {PH1}',
   /**
-  *@description Label for unique border colors in the CSS Overview Panel
-  *@example {32} PH1
-  */
+   *@description Label for unique border colors in the CSS overview panel
+   *@example {32} PH1
+   */
   borderColorsS: 'Border colors: {PH1}',
   /**
-  *@description Label to indicate that there are no fonts in use
-  */
+   *@description Label to indicate that there are no fonts in use
+   */
   thereAreNoFonts: 'There are no fonts.',
   /**
-  *@description Message to show when no unused declarations in the target page
-  */
+   *@description Message to show when no unused declarations in the target page
+   */
   thereAreNoUnusedDeclarations: 'There are no unused declarations.',
   /**
-  *@description Message to show when no media queries are found in the target page
-  */
+   *@description Message to show when no media queries are found in the target page
+   */
   thereAreNoMediaQueries: 'There are no media queries.',
   /**
-  *@description Title of the Drawer for contrast issues in the CSS Overview Panel
-  */
+   *@description Title of the Drawer for contrast issues in the CSS overview panel
+   */
   contrastIssues: 'Contrast issues',
   /**
-  * @description Text to indicate how many times this CSS rule showed up.
-  */
+   * @description Text to indicate how many times this CSS rule showed up.
+   */
   nOccurrences: '{n, plural, =1 {# occurrence} other {# occurrences}}',
   /**
-  *@description Section header for contrast issues in the CSS Overview Panel
-  *@example {1} PH1
-  */
+   *@description Section header for contrast issues in the CSS overview panel
+   *@example {1} PH1
+   */
   contrastIssuesS: 'Contrast issues: {PH1}',
   /**
-  *@description Title of the button for a contrast issue in the CSS Overview Panel
-  *@example {#333333} PH1
-  *@example {#333333} PH2
-  *@example {2} PH3
-  */
+   *@description Title of the button for a contrast issue in the CSS overview panel
+   *@example {#333333} PH1
+   *@example {#333333} PH2
+   *@example {2} PH3
+   */
   textColorSOverSBackgroundResults: 'Text color {PH1} over {PH2} background results in low contrast for {PH3} elements',
   /**
-  *@description Label aa text content in Contrast Details of the Color Picker
-  */
+   *@description Label aa text content in Contrast Details of the Color Picker
+   */
   aa: 'AA',
   /**
-  *@description Label aaa text content in Contrast Details of the Color Picker
-  */
+   *@description Label aaa text content in Contrast Details of the Color Picker
+   */
   aaa: 'AAA',
   /**
-  *@description Label for the APCA contrast in Color Picker
-  */
+   *@description Label for the APCA contrast in Color Picker
+   */
   apca: 'APCA',
   /**
-  *@description Label for the column in the element list in the CSS Overview report
-  */
+   *@description Label for the column in the element list in the CSS overview report
+   */
   element: 'Element',
   /**
-  *@description Column header title denoting which declaration is unused
-  */
+   *@description Column header title denoting which declaration is unused
+   */
   declaration: 'Declaration',
   /**
-  *@description Text for the source of something
-  */
+   *@description Text for the source of something
+   */
   source: 'Source',
   /**
-  *@description Text of a DOM element in Contrast Details of the Color Picker
-  */
+   *@description Text of a DOM element in Contrast Details of the Color Picker
+   */
   contrastRatio: 'Contrast ratio',
   /**
-  *@description Accessible title of a table in the CSS Overview Elements.
-  */
-  cssOverviewElements: 'CSS Overview Elements',
+   *@description Accessible title of a table in the CSS overview elements.
+   */
+  cssOverviewElements: 'CSS overview elements',
   /**
-  *@description Title of the button to show the element in the CSS Overview panel
-  */
+   *@description Title of the button to show the element in the CSS overview panel
+   */
   showElement: 'Show element',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/css_overview/CSSOverviewCompletedView.ts', UIStrings);
@@ -211,8 +212,8 @@ export interface OverviewData {
 
 export type FontInfo = Map<string, Map<string, Map<string, number[]>>>;
 
-function getBorderString(color: Common.Color.Color): string {
-  let [h, s, l] = color.hsla();
+function getBorderString(color: Common.Color.Legacy): string {
+  let {h, s, l} = color.as(Common.Color.Format.HSL);
   h = Math.round(h * 360);
   s = Math.round(s * 100);
   l = Math.round(l * 100);
@@ -223,7 +224,8 @@ function getBorderString(color: Common.Color.Color): string {
   return `1px solid hsl(${h}deg ${s}% ${l}%)`;
 }
 
-export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
+export class CSSOverviewCompletedView extends UI.Widget.VBox {
+  readonly #splitWidget: UI.SplitWidget.SplitWidget;
   #controller: OverviewController;
   #formatter: Intl.NumberFormat;
   readonly #mainContainer: UI.SplitWidget.SplitWidget;
@@ -238,10 +240,13 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
   #fragment?: UI.Fragment.Fragment;
 
   constructor(controller: OverviewController) {
-    super('css_overview_completed_view');
+    super();
 
     this.#controller = controller;
     this.#formatter = new Intl.NumberFormat('en-US');
+
+    this.#splitWidget = new UI.SplitWidget.SplitWidget(true, false, undefined, 200);
+    this.#splitWidget.show(this.element);
 
     this.#mainContainer = new UI.SplitWidget.SplitWidget(true, true);
     this.#resultsContainer = new UI.Widget.VBox();
@@ -264,8 +269,8 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
 
     this.#sideBar = new CSSOverviewSidebarPanel();
     this.#sideBar.setMinimumSize(100, 25);
-    this.splitWidget().setSidebarWidget(this.#sideBar);
-    this.splitWidget().setMainWidget(this.#mainContainer);
+    this.#splitWidget.setSidebarWidget(this.#sideBar);
+    this.#splitWidget.setMainWidget(this.#mainContainer);
 
     this.#linkifier = new Components.Linkifier.Linkifier(/* maxLinkLength */ 20, /* useLinkDecorator */ true);
 
@@ -276,7 +281,7 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
     this.#sideBar.addItem(i18nString(UIStrings.fontInfo), 'font-info');
     this.#sideBar.addItem(i18nString(UIStrings.unusedDeclarations), 'unused-declarations');
     this.#sideBar.addItem(i18nString(UIStrings.mediaQueries), 'media-queries');
-    this.#sideBar.select('summary');
+    this.#sideBar.select('summary', false);
 
     this.#sideBar.addEventListener(SidebarEvents.ItemSelected, this.#sideBarItemSelected, this);
     this.#sideBar.addEventListener(SidebarEvents.Reset, this.#sideBarReset, this);
@@ -287,7 +292,7 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
     this.#data = null;
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.#mainContainer.registerCSSFiles([cssOverviewCompletedViewStyles]);
     this.registerCSSFiles([cssOverviewCompletedViewStyles]);
@@ -305,14 +310,19 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
     this.#domModel = domModel;
   }
 
-  #sideBarItemSelected(event: Common.EventTarget.EventTargetEvent<string>): void {
+  #sideBarItemSelected(event: Common.EventTarget.EventTargetEvent<ItemSelectedEvent>): void {
     const {data} = event;
-    const section = (this.#fragment as UI.Fragment.Fragment).$(data);
+    const section = (this.#fragment as UI.Fragment.Fragment).$(data.id);
     if (!section) {
       return;
     }
 
     section.scrollIntoView();
+    // Set focus for keyboard invoked event
+    if (!data.isMouseEvent && data.key === 'Enter') {
+      const focusableElement: HTMLElement|null = section.querySelector('button, [tabindex="0"]');
+      focusableElement?.focus();
+    }
   }
 
   #sideBarReset(): void {
@@ -325,7 +335,7 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
     this.#elementContainer.closeTabs();
     this.#viewMap = new Map();
     CSSOverviewCompletedView.pushedNodes.clear();
-    this.#sideBar.select('summary');
+    this.#sideBar.select('summary', false);
   }
 
   #onClick(evt: Event): void {
@@ -644,7 +654,7 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
     let view = this.#viewMap.get(id);
     if (!view) {
       if (!this.#domModel || !this.#cssModel) {
-        throw new Error('Unable to initialize CSS Overview, missing models');
+        throw new Error('Unable to initialize CSS overview, missing models');
       }
       view = new ElementDetailsView(this.#controller, this.#domModel, this.#cssModel, this.#linkifier);
       void view.populateNodes(payload.nodes);
@@ -699,7 +709,8 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
 
       return UI.Fragment.Fragment.build`<li>
         <div class="title">${title}</div>
-        <button data-type="${type}" data-path="${path}" data-${dataLabel}="${title}">
+        <button data-type="${type}" data-path="${path}" data-${dataLabel}="${title}"
+        jslog="${VisualLogging.action().track({click: true}).context(`css-overview.${type}`)}">
           <div class="details">${itemLabel}</div>
           <div class="bar-container">
             <div class="bar" style="width: ${width}%;"></div>
@@ -739,14 +750,17 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
 
     const showAPCA = Root.Runtime.experiments.isEnabled('APCA');
 
-    const blockFragment = UI.Fragment.Fragment.build`<li>
-      <button
-        title="${i18nString(UIStrings.textColorSOverSBackgroundResults, {
+    const title = i18nString(UIStrings.textColorSOverSBackgroundResults, {
       PH1: color,
       PH2: backgroundColor,
       PH3: issues.length,
-    })}"
-        data-type="contrast" data-key="${key}" data-section="contrast" class="block" $="color">
+    });
+
+    const blockFragment = UI.Fragment.Fragment.build`<li>
+      <button
+        title="${title}" aria-label="${title}"
+        data-type="contrast" data-key="${key}" data-section="contrast" class="block" $="color"
+        jslog="${VisualLogging.action().track({click: true}).context('css-overview.contrast')}">
         Text
       </button>
       <div class="block-title">
@@ -762,23 +776,23 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
     if (showAPCA) {
       const apca = (blockFragment.$('apca') as HTMLElement);
       if (minContrastIssue.thresholdsViolated.apca) {
-        apca.appendChild(UI.Icon.Icon.create('smallicon-no'));
+        apca.appendChild(createClearIcon());
       } else {
-        apca.appendChild(UI.Icon.Icon.create('smallicon-checkmark-square'));
+        apca.appendChild(createCheckIcon());
       }
       apca.classList.remove('hidden');
     } else {
       const aa = (blockFragment.$('aa') as HTMLElement);
       if (minContrastIssue.thresholdsViolated.aa) {
-        aa.appendChild(UI.Icon.Icon.create('smallicon-no'));
+        aa.appendChild(createClearIcon());
       } else {
-        aa.appendChild(UI.Icon.Icon.create('smallicon-checkmark-square'));
+        aa.appendChild(createCheckIcon());
       }
       const aaa = (blockFragment.$('aaa') as HTMLElement);
       if (minContrastIssue.thresholdsViolated.aaa) {
-        aaa.appendChild(UI.Icon.Icon.create('smallicon-no'));
+        aaa.appendChild(createClearIcon());
       } else {
-        aaa.appendChild(UI.Icon.Icon.create('smallicon-checkmark-square'));
+        aaa.appendChild(createCheckIcon());
       }
       aa.classList.remove('hidden');
       aaa.classList.remove('hidden');
@@ -787,21 +801,23 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
     const block = (blockFragment.$('color') as HTMLElement);
     block.style.backgroundColor = backgroundColor;
     block.style.color = color;
-    block.style.border = getBorderString(minContrastIssue.backgroundColor);
+    block.style.border = getBorderString(minContrastIssue.backgroundColor.asLegacyColor());
 
     return blockFragment;
   }
 
   #colorsToFragment(section: string, color: string): UI.Fragment.Fragment|undefined {
     const blockFragment = UI.Fragment.Fragment.build`<li>
-      <button data-type="color" data-color="${color}" data-section="${section}" class="block" $="color"></button>
+      <button title=${color} data-type="color" data-color="${color}"
+        data-section="${section}" class="block" $="color"
+        jslog="${VisualLogging.action().track({click: true}).context('css-overview.color')}"></button>
       <div class="block-title color-text">${color}</div>
     </li>`;
 
     const block = (blockFragment.$('color') as HTMLElement);
     block.style.backgroundColor = color;
 
-    const borderColor = Common.Color.Color.parse(color);
+    const borderColor = Common.Color.parse(color)?.asLegacyColor();
     if (!borderColor) {
       return;
     }
@@ -812,8 +828,8 @@ export class CSSOverviewCompletedView extends UI.Panel.PanelWithSidebar {
 
   #sortColorsByLuminance(srcColors: Map<string, Set<number>>): string[] {
     return Array.from(srcColors.keys()).sort((colA, colB) => {
-      const colorA = Common.Color.Color.parse(colA);
-      const colorB = Common.Color.Color.parse(colB);
+      const colorA = Common.Color.parse(colA)?.asLegacyColor();
+      const colorB = Common.Color.parse(colB)?.asLegacyColor();
       if (!colorA || !colorB) {
         return 0;
       }
@@ -879,9 +895,10 @@ export class ElementDetailsView extends UI.Widget.Widget {
     this.#cssModel = cssModel;
     this.#linkifier = linkifier;
 
+    const k = Platform.StringUtilities.kebab;
     this.#elementGridColumns = [
       {
-        id: 'nodeId',
+        id: k('node-id'),
         title: i18nString(UIStrings.element),
         sortable: true,
         weight: 50,
@@ -899,7 +916,7 @@ export class ElementDetailsView extends UI.Widget.Widget {
         defaultWeight: undefined,
       },
       {
-        id: 'declaration',
+        id: k('declaration'),
         title: i18nString(UIStrings.declaration),
         sortable: true,
         weight: 50,
@@ -917,7 +934,7 @@ export class ElementDetailsView extends UI.Widget.Widget {
         defaultWeight: undefined,
       },
       {
-        id: 'sourceURL',
+        id: k('source-url'),
         title: i18nString(UIStrings.source),
         sortable: false,
         weight: 100,
@@ -935,7 +952,7 @@ export class ElementDetailsView extends UI.Widget.Widget {
         defaultWeight: undefined,
       },
       {
-        id: 'contrastRatio',
+        id: k('contrast-ratio'),
         title: i18nString(UIStrings.contrastRatio),
         sortable: true,
         weight: 25,
@@ -1001,13 +1018,13 @@ export class ElementDetailsView extends UI.Widget.Widget {
 
     const [firstItem] = data;
     const visibility = new Set<string>();
-    'nodeId' in firstItem && firstItem.nodeId && visibility.add('nodeId');
+    'nodeId' in firstItem && firstItem.nodeId && visibility.add('node-id');
     'declaration' in firstItem && firstItem.declaration && visibility.add('declaration');
-    'sourceURL' in firstItem && firstItem.sourceURL && visibility.add('sourceURL');
-    'contrastRatio' in firstItem && firstItem.contrastRatio && visibility.add('contrastRatio');
+    'sourceURL' in firstItem && firstItem.sourceURL && visibility.add('source-url');
+    'contrastRatio' in firstItem && firstItem.contrastRatio && visibility.add('contrast-ratio');
 
     let relatedNodesMap: Map<Protocol.DOM.BackendNodeId, SDK.DOMModel.DOMNode|null>|null|undefined;
-    if ('nodeId' in firstItem && visibility.has('nodeId')) {
+    if ('nodeId' in firstItem && visibility.has('node-id')) {
       // Grab the nodes from the frontend, but only those that have not been
       // retrieved already.
       const nodeIds = (data as {nodeId: Protocol.DOM.BackendNodeId}[]).reduce((prev, curr) => {
@@ -1023,7 +1040,7 @@ export class ElementDetailsView extends UI.Widget.Widget {
 
     for (const item of data) {
       let frontendNode;
-      if ('nodeId' in item && visibility.has('nodeId')) {
+      if ('nodeId' in item && visibility.has('node-id')) {
         if (!relatedNodesMap) {
           continue;
         }
@@ -1059,10 +1076,10 @@ export class ElementNode extends DataGrid.SortableDataGrid.SortableDataGridNode<
     this.#cssModel = cssModel;
   }
 
-  createCell(columnId: string): HTMLElement {
+  override createCell(columnId: string): HTMLElement {
     // Nodes.
     const frontendNode = this.#frontendNode;
-    if (columnId === 'nodeId') {
+    if (columnId === 'node-id') {
       const cell = this.createTD(columnId);
       cell.textContent = '...';
 
@@ -1074,18 +1091,19 @@ export class ElementNode extends DataGrid.SortableDataGrid.SortableDataGridNode<
         cell.textContent = '';
         (link as HTMLElement).dataset.backendNodeId = frontendNode.backendNodeId().toString();
         cell.appendChild(link);
-        const button = document.createElement('button');
-        button.classList.add('show-element');
-        UI.Tooltip.Tooltip.install(button, i18nString(UIStrings.showElement));
-        button.tabIndex = 0;
-        button.onclick = (): Promise<void> => frontendNode.scrollIntoView();
-        cell.appendChild(button);
+        const showNodeIcon = new IconButton.Icon.Icon();
+        showNodeIcon.data = {iconName: 'select-element', color: 'var(--icon-show-element)', width: '16px'};
+        showNodeIcon.classList.add('show-element');
+        UI.Tooltip.Tooltip.install(showNodeIcon, i18nString(UIStrings.showElement));
+        showNodeIcon.tabIndex = 0;
+        showNodeIcon.onclick = (): Promise<void> => frontendNode.scrollIntoView();
+        cell.appendChild(showNodeIcon);
       });
       return cell;
     }
 
     // Links to CSS.
-    if (columnId === 'sourceURL') {
+    if (columnId === 'source-url') {
       const cell = this.createTD(columnId);
 
       if (this.data.range) {
@@ -1104,7 +1122,7 @@ export class ElementNode extends DataGrid.SortableDataGrid.SortableDataGridNode<
       return cell;
     }
 
-    if (columnId === 'contrastRatio') {
+    if (columnId === 'contrast-ratio') {
       const cell = this.createTD(columnId);
       const showAPCA = Root.Runtime.experiments.isEnabled('APCA');
       const contrastRatio = Platform.NumberUtilities.floor(this.data.contrastRatio, 2);
@@ -1124,22 +1142,22 @@ export class ElementNode extends DataGrid.SortableDataGrid.SortableDataGridNode<
       if (showAPCA) {
         container.append(UI.Fragment.Fragment.build`<span>${i18nString(UIStrings.apca)}</span>`.element());
         if (this.data.thresholdsViolated.apca) {
-          container.appendChild(UI.Icon.Icon.create('smallicon-no'));
+          container.appendChild(createClearIcon());
         } else {
-          container.appendChild(UI.Icon.Icon.create('smallicon-checkmark-square'));
+          container.appendChild(createCheckIcon());
         }
       } else {
         container.append(UI.Fragment.Fragment.build`<span>${i18nString(UIStrings.aa)}</span>`.element());
         if (this.data.thresholdsViolated.aa) {
-          container.appendChild(UI.Icon.Icon.create('smallicon-no'));
+          container.appendChild(createClearIcon());
         } else {
-          container.appendChild(UI.Icon.Icon.create('smallicon-checkmark-square'));
+          container.appendChild(createCheckIcon());
         }
         container.append(UI.Fragment.Fragment.build`<span>${i18nString(UIStrings.aaa)}</span>`.element());
         if (this.data.thresholdsViolated.aaa) {
-          container.appendChild(UI.Icon.Icon.create('smallicon-no'));
+          container.appendChild(createClearIcon());
         } else {
-          container.appendChild(UI.Icon.Icon.create('smallicon-checkmark-square'));
+          container.appendChild(createCheckIcon());
         }
       }
       cell.appendChild(contrastFragment.element());
@@ -1161,4 +1179,16 @@ export class ElementNode extends DataGrid.SortableDataGrid.SortableDataGridNode<
     const matchingSelectorLocation = new SDK.CSSModel.CSSLocation(styleSheetHeader, lineNumber, columnNumber);
     return linkifier.linkifyCSSLocation(matchingSelectorLocation);
   }
+}
+
+function createClearIcon(): IconButton.Icon.Icon {
+  const icon = new IconButton.Icon.Icon();
+  icon.data = {iconName: 'clear', color: 'var(--icon-error)', width: '14px', height: '14px'};
+  return icon;
+}
+
+function createCheckIcon(): IconButton.Icon.Icon {
+  const icon = new IconButton.Icon.Icon();
+  icon.data = {iconName: 'checkmark', color: 'var(--icon-checkmark-green)', width: '14px', height: '14px'};
+  return icon;
 }

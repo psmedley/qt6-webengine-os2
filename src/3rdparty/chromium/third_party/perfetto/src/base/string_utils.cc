@@ -24,6 +24,8 @@
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
 #include <xlocale.h>
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#include <Windows.h>
 #endif
 
 #include <cinttypes>
@@ -120,6 +122,18 @@ std::vector<std::string> SplitString(const std::string& text,
   return output;
 }
 
+std::string TrimWhitespace(const std::string& str) {
+  std::string whitespaces = "\t\n ";
+
+  size_t front_idx = str.find_first_not_of(whitespaces);
+  std::string front_trimmed =
+      front_idx == std::string::npos ? "" : str.substr(front_idx);
+
+  size_t end_idx = front_trimmed.find_last_not_of(whitespaces);
+  return end_idx == std::string::npos ? ""
+                                      : front_trimmed.substr(0, end_idx + 1);
+}
+
 std::string StripPrefix(const std::string& str, const std::string& prefix) {
   return StartsWith(str, prefix) ? str.substr(prefix.size()) : str;
 }
@@ -205,6 +219,43 @@ std::string ReplaceAll(std::string str,
   return str;
 }
 
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+bool WideToUTF8(const std::wstring& source, std::string& output) {
+  if (source.empty() ||
+      source.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    return false;
+  }
+  int size = ::WideCharToMultiByte(CP_UTF8, 0, &source[0],
+                                   static_cast<int>(source.size()), nullptr, 0,
+                                   nullptr, nullptr);
+  output.assign(static_cast<size_t>(size), '\0');
+  if (::WideCharToMultiByte(CP_UTF8, 0, &source[0],
+                            static_cast<int>(source.size()), &output[0], size,
+                            nullptr, nullptr) != size) {
+    return false;
+  }
+  return true;
+}
+#endif // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+bool UTF8ToWide(const std::string& source, std::wstring& output) {
+  if (source.empty() ||
+      source.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    return false;
+  }
+  int size = ::MultiByteToWideChar(CP_UTF8, 0, &source[0],
+                                   static_cast<int>(source.size()), nullptr, 0);
+  output.assign(static_cast<size_t>(size), L'\0');
+  if (::MultiByteToWideChar(CP_UTF8, 0, &source[0],
+                            static_cast<int>(source.size()), &output[0],
+                            size) != size) {
+    return false;
+  }
+  return true;
+}
+#endif // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+
 size_t SprintfTrunc(char* dst, size_t dst_size, const char* fmt, ...) {
   if (PERFETTO_UNLIKELY(dst_size) == 0)
     return 0;
@@ -231,6 +282,29 @@ size_t SprintfTrunc(char* dst, size_t dst_size, const char* fmt, ...) {
   PERFETTO_DCHECK(res < dst_size);
   PERFETTO_DCHECK(dst[res] == '\0');
   return res;
+}
+
+std::optional<LineWithOffset> FindLineWithOffset(base::StringView str,
+                                                 uint32_t offset) {
+  static constexpr char kNewLine = '\n';
+  uint32_t line_offset = 0;
+  uint32_t line_count = 1;
+  for (uint32_t i = 0; i < str.size(); ++i) {
+    if (str.at(i) == kNewLine) {
+      line_offset = i + 1;
+      line_count++;
+      continue;
+    }
+    if (i == offset) {
+      size_t end_offset = str.find(kNewLine, i);
+      if (end_offset == std::string::npos) {
+        end_offset = str.size();
+      }
+      base::StringView line = str.substr(line_offset, end_offset - line_offset);
+      return LineWithOffset{line, offset - line_offset, line_count};
+    }
+  }
+  return std::nullopt;
 }
 
 }  // namespace base

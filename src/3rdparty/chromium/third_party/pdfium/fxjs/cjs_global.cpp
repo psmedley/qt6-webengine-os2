@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@
 #include "fxjs/js_resources.h"
 #include "third_party/base/check.h"
 #include "third_party/base/containers/contains.h"
+#include "third_party/base/containers/span.h"
 #include "v8/include/v8-isolate.h"
 
 namespace {
@@ -155,14 +156,14 @@ void CJS_Global::DefineJSObjects(CFXJS_Engine* pEngine) {
 }
 
 CJS_Global::CJS_Global(v8::Local<v8::Object> pObject, CJS_Runtime* pRuntime)
-    : CJS_Object(pObject, pRuntime) {
-  m_pGlobalData = CFX_GlobalData::GetRetainedInstance(nullptr);
+    : CJS_Object(pObject, pRuntime),
+      m_pGlobalData(CFX_GlobalData::GetRetainedInstance(nullptr)) {
   UpdateGlobalPersistentVariables();
 }
 
 CJS_Global::~CJS_Global() {
   DestroyGlobalPersisitentVariables();
-  m_pGlobalData.Release()->Release();
+  m_pGlobalData.ExtractAsDangling()->Release();
 }
 
 bool CJS_Global::HasProperty(const ByteString& propname) {
@@ -201,10 +202,7 @@ CJS_Result CJS_Global::GetProperty(CJS_Runtime* pRuntime,
           v8::Local<v8::Object>::New(pRuntime->GetIsolate(), pData->pData));
     case CFX_Value::DataType::kNull:
       return CJS_Result::Success(pRuntime->NewNull());
-    default:
-      break;
   }
-  return CJS_Result::Failure(JSMessage::kObjectTypeError);
 }
 
 CJS_Result CJS_Global::SetProperty(CJS_Runtime* pRuntime,
@@ -257,7 +255,7 @@ void CJS_Global::EnumProperties(
 
 CJS_Result CJS_Global::setPersistent(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   if (params.size() != 2)
     return CJS_Result::Failure(JSMessage::kParamError);
 
@@ -491,8 +489,6 @@ CJS_Result CJS_Global::SetGlobalVariables(const ByteString& propname,
         break;
       case CFX_Value::DataType::kNull:
         break;
-      default:
-        return CJS_Result::Failure(JSMessage::kObjectTypeError);
     }
     return CJS_Result::Success();
   }
@@ -523,8 +519,6 @@ CJS_Result CJS_Global::SetGlobalVariables(const ByteString& propname,
       pNewData->nType = CFX_Value::DataType::kNull;
       pNewData->bPersistent = bDefaultPersistent;
       break;
-    default:
-      return CJS_Result::Failure(JSMessage::kObjectTypeError);
   }
   m_MapGlobal[propname] = std::move(pNewData);
   return CJS_Result::Success();

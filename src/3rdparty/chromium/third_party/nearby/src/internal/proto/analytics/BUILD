@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:defs.bzl", "cc_proto_library")
+
 licenses(["notice"])
 
 package(default_visibility = ["//visibility:public"])
@@ -27,18 +29,29 @@ proto_library(
     ],
 )
 
+proto_library(
+    name = "fast_pair_log_proto",
+    srcs = ["fast_pair_log.proto"],
+    compatible_with = ["//buildenv/target:non_prod"],
+    deps = ["//proto:fast_pair_enums_proto"],
+)
+
+cc_proto_library(
+    name = "fast_pair_log_cc_proto",
+    deps = [":fast_pair_log_proto"],
+)
+
+java_proto_library(
+    name = "fast_pair_log_java_proto",
+    deps = [":fast_pair_log_proto"],
+)
+
 cc_proto_library(
     name = "connections_log_cc_proto",
     visibility = [
         "//connections:__subpackages__",
-        "//internal/analytics:__subpackages__",
         "//location/nearby/analytics/cpp:__subpackages__",
     ],
-    deps = [":connections_log_proto"],
-)
-
-java_lite_proto_library(
-    name = "connections_log_java_proto_lite",
     deps = [":connections_log_proto"],
 )
 
@@ -51,11 +64,11 @@ cc_test(
     shard_count = 16,
     deps = [
         ":connections_log_cc_proto",
-        "//internal/platform:logging",
+        "//internal/platform:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//proto:connections_enums_cc_proto",
+        "//third_party/protobuf",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
-        "@com_google_protobuf//:protobuf",
     ],
 )

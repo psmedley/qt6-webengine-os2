@@ -8,12 +8,13 @@
 #include "src/gpu/ganesh/vk/GrVkBuffer.h"
 
 #include "include/gpu/GrDirectContext.h"
+#include "include/private/base/SkDebug.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
 #include "src/gpu/ganesh/vk/GrVkDescriptorSet.h"
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
-#include "src/gpu/ganesh/vk/GrVkMemory.h"
 #include "src/gpu/ganesh/vk/GrVkUtil.h"
+#include "src/gpu/vk/VulkanMemory.h"
 
 #define VK_CALL(GPU, X) GR_VK_CALL(GPU->vkInterface(), X)
 
@@ -32,7 +33,7 @@ GrVkBuffer::GrVkBuffer(GrVkGpu* gpu,
     // We always require dynamic buffers to be mappable
     SkASSERT(accessPattern != kDynamic_GrAccessPattern || this->isVkMappable());
     SkASSERT(bufferType != GrGpuBufferType::kUniform || uniformDescriptorSet);
-    this->registerWithCache(SkBudgeted::kYes);
+    this->registerWithCache(skgpu::Budgeted::kYes);
 }
 
 static const GrVkDescriptorSet* make_uniform_desc_set(GrVkGpu* gpu, VkBuffer buffer, size_t size) {
@@ -149,7 +150,31 @@ sk_sp<GrVkBuffer> GrVkBuffer::Make(GrVkGpu* gpu,
         return nullptr;
     }
 
-    if (!GrVkMemory::AllocAndBindBufferMemory(gpu, buffer, allocUsage, &alloc)) {
+    bool shouldPersistentlyMapCpuToGpu = gpu->vkCaps().shouldPersistentlyMapCpuToGpuBuffers();
+    auto checkResult = [gpu, allocUsage, shouldPersistentlyMapCpuToGpu](VkResult result) {
+        GR_VK_LOG_IF_NOT_SUCCESS(gpu, result, "skgpu::VulkanMemory::AllocBufferMemory "
+                                 "(allocUsage:%d, shouldPersistentlyMapCpuToGpu:%d)",
+                                 (int)allocUsage, (int)shouldPersistentlyMapCpuToGpu);
+        return gpu->checkVkResult(result);
+    };
+    auto allocator = gpu->memoryAllocator();
+    if (!skgpu::VulkanMemory::AllocBufferMemory(allocator,
+                                                buffer,
+                                                allocUsage,
+                                                shouldPersistentlyMapCpuToGpu,
+                                                checkResult,
+                                                &alloc)) {
+        VK_CALL(gpu, DestroyBuffer(gpu->device(), buffer, nullptr));
+        return nullptr;
+    }
+
+    // Bind buffer
+    GR_VK_CALL_RESULT(gpu, err, BindBufferMemory(gpu->device(),
+                                                 buffer,
+                                                 alloc.fMemory,
+                                                 alloc.fOffset));
+    if (err) {
+        skgpu::VulkanMemory::FreeBufferMemory(allocator, alloc);
         VK_CALL(gpu, DestroyBuffer(gpu->device(), buffer, nullptr));
         return nullptr;
     }
@@ -160,7 +185,7 @@ sk_sp<GrVkBuffer> GrVkBuffer::Make(GrVkGpu* gpu,
         uniformDescSet = make_uniform_desc_set(gpu, buffer, size);
         if (!uniformDescSet) {
             VK_CALL(gpu, DestroyBuffer(gpu->device(), buffer, nullptr));
-            GrVkMemory::FreeBufferMemory(gpu, alloc);
+            skgpu::VulkanMemory::FreeBufferMemory(allocator, alloc);
             return nullptr;
         }
     }
@@ -180,11 +205,28 @@ void GrVkBuffer::vkMap(size_t readOffset, size_t readSize) {
         SkASSERT(this->internalHasNoCommandBufferUsages());
         SkASSERT(fAlloc.fSize > 0);
         SkASSERT(fAlloc.fSize >= readOffset + readSize);
-        fMapPtr = GrVkMemory::MapAlloc(this->getVkGpu(), fAlloc);
+
+        GrVkGpu* gpu = this->getVkGpu();
+        auto checkResult_mapAlloc = [gpu](VkResult result) {
+            GR_VK_LOG_IF_NOT_SUCCESS(gpu, result, "skgpu::VulkanMemory::MapAlloc");
+            return gpu->checkVkResult(result);
+        };
+        auto allocator = gpu->memoryAllocator();
+        fMapPtr = skgpu::VulkanMemory::MapAlloc(allocator, fAlloc, checkResult_mapAlloc);
         if (fMapPtr && readSize != 0) {
+            auto checkResult_invalidateMapAlloc = [gpu, readOffset, readSize](VkResult result) {
+                GR_VK_LOG_IF_NOT_SUCCESS(gpu, result, "skgpu::VulkanMemory::InvalidateMappedAlloc "
+                                         "(readOffset:%zu, readSize:%zu)",
+                                         readOffset, readSize);
+                return gpu->checkVkResult(result);
+            };
             // "Invalidate" here means make device writes visible to the host. That is, it makes
             // sure any GPU writes are finished in the range we might read from.
-            GrVkMemory::InvalidateMappedAlloc(this->getVkGpu(), fAlloc, readOffset, readSize);
+            skgpu::VulkanMemory::InvalidateMappedAlloc(allocator,
+                                                       fAlloc,
+                                                       readOffset,
+                                                       readSize,
+                                                       checkResult_invalidateMapAlloc);
         }
     }
 }
@@ -196,8 +238,15 @@ void GrVkBuffer::vkUnmap(size_t flushOffset, size_t flushSize) {
     SkASSERT(fAlloc.fSize >= flushOffset + flushSize);
 
     GrVkGpu* gpu = this->getVkGpu();
-    GrVkMemory::FlushMappedAlloc(gpu, fAlloc, flushOffset, flushSize);
-    GrVkMemory::UnmapAlloc(gpu, fAlloc);
+    auto checkResult = [gpu, flushOffset, flushSize](VkResult result) {
+        GR_VK_LOG_IF_NOT_SUCCESS(gpu, result, "skgpu::VulkanMemory::FlushMappedAlloc "
+                                 "(flushOffset:%zu, flushSize:%zu)",
+                                 flushOffset, flushSize);
+        return gpu->checkVkResult(result);
+    };
+    auto allocator = this->getVkGpu()->memoryAllocator();
+    skgpu::VulkanMemory::FlushMappedAlloc(allocator, fAlloc, flushOffset, flushSize, checkResult);
+    skgpu::VulkanMemory::UnmapAlloc(allocator, fAlloc);
 }
 
 void GrVkBuffer::copyCpuDataToGpuBuffer(const void* src, size_t offset, size_t size) {
@@ -274,7 +323,7 @@ void GrVkBuffer::vkRelease() {
     VK_CALL(this->getVkGpu(), DestroyBuffer(this->getVkGpu()->device(), fBuffer, nullptr));
     fBuffer = VK_NULL_HANDLE;
 
-    GrVkMemory::FreeBufferMemory(this->getVkGpu(), fAlloc);
+    skgpu::VulkanMemory::FreeBufferMemory(this->getVkGpu()->memoryAllocator(), fAlloc);
     fAlloc.fMemory = VK_NULL_HANDLE;
     fAlloc.fBackendMemory = 0;
 }

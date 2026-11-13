@@ -20,11 +20,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <tuple>
 
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/hash.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/scoped_file.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/utils.h"
@@ -33,7 +33,7 @@
 #include "protos/perfetto/common/interceptor_descriptor.gen.h"
 #include "protos/perfetto/config/data_source_config.gen.h"
 #include "protos/perfetto/config/interceptor_config.gen.h"
-#include "protos/perfetto/config/interceptors/console_config.pbzero.h"
+#include "protos/perfetto/config/interceptors/console_config.gen.h"
 #include "protos/perfetto/trace/interned_data/interned_data.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 #include "protos/perfetto/trace/trace_packet_defaults.pbzero.h"
@@ -129,7 +129,7 @@ class ConsoleInterceptor::Delegate : public TrackEventStateTracker::Delegate {
   using SelfHandle = LockedHandle<ConsoleInterceptor>;
 
   InterceptorContext& context_;
-  base::Optional<SelfHandle> locked_self_;
+  std::optional<SelfHandle> locked_self_;
 };
 
 ConsoleInterceptor::~ConsoleInterceptor() = default;
@@ -157,7 +157,7 @@ ConsoleInterceptor::Delegate::GetSessionState() {
   if (locked_self_.has_value())
     return &locked_self_.value()->session_state_;
   locked_self_ =
-      base::make_optional<SelfHandle>(context_.GetInterceptorLocked());
+      std::make_optional<SelfHandle>(context_.GetInterceptorLocked());
   return &locked_self_.value()->session_state_;
 }
 
@@ -275,13 +275,13 @@ void ConsoleInterceptor::OnSetup(const SetupArgs& args) {
 #else
   bool use_colors = false;
 #endif
-  protos::pbzero::ConsoleConfig::Decoder config(
-      args.config.interceptor_config().console_config_raw());
+  const protos::gen::ConsoleConfig& config =
+      args.config.interceptor_config().console_config();
   if (config.has_enable_colors())
     use_colors = config.enable_colors();
-  if (config.output() == protos::pbzero::ConsoleConfig::OUTPUT_STDOUT) {
+  if (config.output() == protos::gen::ConsoleConfig::OUTPUT_STDOUT) {
     fd = STDOUT_FILENO;
-  } else if (config.output() == protos::pbzero::ConsoleConfig::OUTPUT_STDERR) {
+  } else if (config.output() == protos::gen::ConsoleConfig::OUTPUT_STDERR) {
     fd = STDERR_FILENO;
   }
   fd_ = fd;

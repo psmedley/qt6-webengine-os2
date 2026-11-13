@@ -33,6 +33,7 @@
 #include "logging/rtc_event_log/events/rtc_event_generic_packet_sent.h"
 #include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair.h"
 #include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.h"
+#include "logging/rtc_event_log/events/rtc_event_neteq_set_minimum_delay.h"
 #include "logging/rtc_event_log/events/rtc_event_probe_cluster_created.h"
 #include "logging/rtc_event_log/events/rtc_event_probe_result_failure.h"
 #include "logging/rtc_event_log/events/rtc_event_probe_result_success.h"
@@ -125,6 +126,14 @@ bool Convert(std::string inputfile,
             event.ssrc);
   };
 
+  auto neteq_set_minimum_delay_handler =
+      [&](const LoggedNetEqSetMinimumDelayEvent& event) {
+        fprintf(output,
+                "NETEQ_SET_MINIMUM_DELAY %" PRId64
+                " remote_ssrc=%u minimum_delay=%d\n",
+                event.log_time_ms(), event.remote_ssrc, event.minimum_delay_ms);
+      };
+
   auto audio_network_adaptation_handler =
       [&](const LoggedAudioNetworkAdaptationEvent& event) {
         fprintf(output, "AUDIO_NETWORK_ADAPTATION %" PRId64,
@@ -166,7 +175,8 @@ bool Convert(std::string inputfile,
   auto bwe_probe_failure_handler =
       [&](const LoggedBweProbeFailureEvent& event) {
         fprintf(output, "BWE_PROBE_FAILURE %" PRId64 " id=%d reason=%d\n",
-                event.log_time_ms(), event.id, event.failure_reason);
+                event.log_time_ms(), event.id,
+                static_cast<int>(event.failure_reason));
       };
 
   auto bwe_probe_success_handler =
@@ -200,7 +210,8 @@ bool Convert(std::string inputfile,
   auto dtls_transport_state_handler =
       [&](const LoggedDtlsTransportState& event) {
         fprintf(output, "DTLS_TRANSPORT_STATE %" PRId64 " state=%d\n",
-                event.log_time_ms(), event.dtls_transport_state);
+                event.log_time_ms(),
+                static_cast<int>(event.dtls_transport_state));
       };
 
   auto dtls_transport_writable_handler =
@@ -419,7 +430,8 @@ bool Convert(std::string inputfile,
         {VideoCodecType::kVideoCodecVP9, "VP9"},
         {VideoCodecType::kVideoCodecAV1, "AV1"},
         {VideoCodecType::kVideoCodecH264, "H264"},
-        {VideoCodecType::kVideoCodecMultiplex, "MULTIPLEX"}};
+        {VideoCodecType::kVideoCodecMultiplex, "MULTIPLEX"},
+        {VideoCodecType::kVideoCodecH265, "H265"}};
 
     fprintf(output,
             "FRAME_DECODED %" PRId64 " render_time=%" PRId64
@@ -449,6 +461,11 @@ bool Convert(std::string inputfile,
   for (const auto& kv : parsed_log.audio_playout_events()) {
     processor.AddEvents(kv.second, audio_playout_handler);
   }
+
+  for (const auto& kv : parsed_log.neteq_set_minimum_delay_events()) {
+    processor.AddEvents(kv.second, neteq_set_minimum_delay_handler);
+  }
+
   processor.AddEvents(parsed_log.audio_network_adaptation_events(),
                       audio_network_adaptation_handler);
 

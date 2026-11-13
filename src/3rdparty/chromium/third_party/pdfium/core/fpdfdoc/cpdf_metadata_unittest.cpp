@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,6 +104,39 @@ TEST(CPDF_MetadataTest, CheckSharedFormAsNoAdhoc) {
 
   auto results = metadata.CheckForSharedForm();
   EXPECT_EQ(0U, results.size());
+}
+
+TEST(CPDF_MetadataTest, CheckSharedFormExceedMaxDepth) {
+  // Node <parent> has the depth of 130, which exceeds the maximum node depth of
+  // `kMaxMetaDataDepth`.
+  static const char kData[] =
+      "<?xml charset=\"utf-8\"?>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<node><node><node><node><node><node><node><node><node><node>\n"
+      "<parent>\n"
+      "<node xmlns:adhocwf=\"http://ns.adobe.com/AcrobatAdhocWorkflow/1.0/\">\n"
+      "<adhocwf:workflowType>0</adhocwf:workflowType>\n"
+      "<adhocwf:version>1.1</adhocwf:version>\n"
+      "</node>"
+      "</parent>";
+
+  auto stream = pdfium::MakeRetain<CPDF_Stream>();
+  stream->SetData(ByteStringView(kData).raw_span());
+  CPDF_Metadata metadata(stream);
+
+  auto results = metadata.CheckForSharedForm();
+  ASSERT_EQ(0U, results.size());
 }
 
 TEST(CPDF_MetadataTest, CheckSharedFormWrongNamespace) {

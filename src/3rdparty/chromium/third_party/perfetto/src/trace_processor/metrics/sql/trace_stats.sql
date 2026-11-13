@@ -15,7 +15,7 @@
 --
 
 DROP VIEW IF EXISTS trace_stats_output;
-CREATE VIEW trace_stats_output AS
+CREATE PERFETTO VIEW trace_stats_output AS
 SELECT TraceAnalysisStats(
   'stat', (
     SELECT RepeatedField(TraceAnalysisStats_Stat(
@@ -33,7 +33,7 @@ SELECT TraceAnalysisStats(
         WHEN 'error' THEN 'SEVERITY_ERROR'
         ELSE 'SEVERITY_UNKNOWN'
       END
-    ))
+      ))
     FROM stats ORDER BY name ASC
   )
 );

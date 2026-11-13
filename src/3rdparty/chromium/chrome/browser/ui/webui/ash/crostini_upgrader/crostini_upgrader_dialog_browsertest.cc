@@ -4,8 +4,8 @@
 
 #include "chrome/browser/ui/webui/ash/crostini_upgrader/crostini_upgrader_dialog.h"
 
-#include "base/callback_helpers.h"
 #include "base/feature_list.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_base.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -47,7 +47,7 @@ class CrostiniUpgraderDialogBrowserTest : public CrostiniDialogBrowserTest {
   ash::CrostiniUpgraderDialog* GetCrostiniUpgraderDialog() {
     auto url = GURL{chrome::kChromeUICrostiniUpgraderUrl};
     return static_cast<ash::CrostiniUpgraderDialog*>(
-        chromeos::SystemWebDialogDelegate::FindInstance(url.spec()));
+        ash::SystemWebDialogDelegate::FindInstance(url.spec()));
   }
 
   void SafelyCloseDialog() {

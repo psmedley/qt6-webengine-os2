@@ -6,16 +6,17 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/api/platform_keys/platform_keys_api.h"
 #include "chrome/common/extensions/api/platform_keys_internal.h"
-#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_registry_factory.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_verifier.h"
@@ -46,7 +47,7 @@ class VerifyTrustAPI::IOPart {
   // with the result (see the declaration of VerifyCallback).
   // Will not call back after this object is destructed or the verifier for this
   // extension is deleted (see OnExtensionUnloaded).
-  void Verify(std::unique_ptr<Params> params,
+  void Verify(std::optional<Params> params,
               const std::string& extension_id,
               VerifyCallback callback);
 
@@ -101,7 +102,7 @@ VerifyTrustAPI::~VerifyTrustAPI() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
-void VerifyTrustAPI::Verify(std::unique_ptr<Params> params,
+void VerifyTrustAPI::Verify(std::optional<Params> params,
                             const std::string& extension_id,
                             VerifyCallback ui_callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -154,7 +155,7 @@ VerifyTrustAPI::IOPart::~IOPart() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 }
 
-void VerifyTrustAPI::IOPart::Verify(std::unique_ptr<Params> params,
+void VerifyTrustAPI::IOPart::Verify(std::optional<Params> params,
                                     const std::string& extension_id,
                                     VerifyCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);

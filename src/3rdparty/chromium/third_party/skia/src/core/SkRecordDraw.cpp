@@ -5,14 +5,42 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkBBHFactory.h"
-#include "include/core/SkImage.h"
-#include "include/private/SkTDArray.h"
-#include "src/core/SkCanvasPriv.h"
-#include "src/core/SkColorFilterBase.h"
-#include "src/core/SkImageFilter_Base.h"
 #include "src/core/SkRecordDraw.h"
+
+#include "include/core/SkBBHFactory.h"
+#include "include/core/SkBlendMode.h"
+#include "include/core/SkBlender.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkMesh.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkRRect.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkRegion.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkShader.h"
+#include "include/core/SkString.h"
+#include "include/core/SkTextBlob.h"
+#include "include/core/SkVertices.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkPoint_impl.h"
+#include "include/private/base/SkTDArray.h"
+#include "include/private/base/SkTemplates.h"
+#include "include/private/chromium/Slug.h"
+#include "src/core/SkCanvasPriv.h"
+#include "src/core/SkDrawShadowInfo.h"
+#include "src/core/SkImageFilter_Base.h"
+#include "src/core/SkRecord.h"
+#include "src/core/SkRecords.h"
+#include "src/effects/colorfilters/SkColorFilterBase.h"
 #include "src/utils/SkPatchUtils.h"
+
+#include <algorithm>
+#include <optional>
+#include <vector>
+
+class SkImageFilter;
 
 void SkRecordDraw(const SkRecord& record,
                   SkCanvas* canvas,
@@ -59,33 +87,23 @@ void SkRecordDraw(const SkRecord& record,
     }
 }
 
-void SkRecordPartialDraw(const SkRecord& record, SkCanvas* canvas,
-                         SkPicture const* const drawablePicts[], int drawableCount,
-                         int start, int stop,
-                         const SkM44& initialCTM) {
-    SkAutoCanvasRestore saveRestore(canvas, true /*save now, restore at exit*/);
-
-    stop = std::min(stop, record.count());
-    SkRecords::Draw draw(canvas, drawablePicts, nullptr, drawableCount, &initialCTM);
-    for (int i = start; i < stop; i++) {
-        record.visit(i, draw);
-    }
-}
-
 namespace SkRecords {
 
 // NoOps draw nothing.
 template <> void Draw::draw(const NoOp&) {}
 
 #define DRAW(T, call) template <> void Draw::draw(const T& r) { fCanvas->call; }
-DRAW(Flush, flush());
-DRAW(Restore, restore());
-DRAW(Save, save());
-DRAW(SaveLayer, saveLayer(SkCanvasPriv::ScaledBackdropLayer(r.bounds,
-                                                            r.paint,
-                                                            r.backdrop.get(),
-                                                            r.backdropScale,
-                                                            r.saveLayerFlags)));
+DRAW(Restore, restore())
+DRAW(Save, save())
+DRAW(SaveLayer,
+     saveLayer(SkCanvasPriv::ScaledBackdropLayer(
+             r.bounds,
+             r.paint,
+             r.backdrop.get(),
+             r.backdropScale,
+             r.saveLayerFlags,
+             SkCanvas::FilterSpan{const_cast<sk_sp<SkImageFilter>*>(r.filters.data()),
+                                  r.filters.size()})))
 
 template <> void Draw::draw(const SaveBehind& r) {
     SkCanvasPriv::SaveBehind(fCanvas, r.subset);
@@ -95,26 +113,26 @@ template <> void Draw::draw(const DrawBehind& r) {
     SkCanvasPriv::DrawBehind(fCanvas, r.paint);
 }
 
-DRAW(SetMatrix, setMatrix(fInitialCTM.asM33() * r.matrix));
-DRAW(SetM44, setMatrix(fInitialCTM * r.matrix));
-DRAW(Concat44, concat(r.matrix));
-DRAW(Concat, concat(r.matrix));
-DRAW(Translate, translate(r.dx, r.dy));
-DRAW(Scale, scale(r.sx, r.sy));
+DRAW(SetMatrix, setMatrix(fInitialCTM.asM33() * r.matrix))
+DRAW(SetM44, setMatrix(fInitialCTM * r.matrix))
+DRAW(Concat44, concat(r.matrix))
+DRAW(Concat, concat(r.matrix))
+DRAW(Translate, translate(r.dx, r.dy))
+DRAW(Scale, scale(r.sx, r.sy))
 
-DRAW(ClipPath, clipPath(r.path, r.opAA.op(), r.opAA.aa()));
-DRAW(ClipRRect, clipRRect(r.rrect, r.opAA.op(), r.opAA.aa()));
-DRAW(ClipRect, clipRect(r.rect, r.opAA.op(), r.opAA.aa()));
-DRAW(ClipRegion, clipRegion(r.region, r.op));
-DRAW(ClipShader, clipShader(r.shader, r.op));
+DRAW(ClipPath, clipPath(r.path, r.opAA.op(), r.opAA.aa()))
+DRAW(ClipRRect, clipRRect(r.rrect, r.opAA.op(), r.opAA.aa()))
+DRAW(ClipRect, clipRect(r.rect, r.opAA.op(), r.opAA.aa()))
+DRAW(ClipRegion, clipRegion(r.region, r.op))
+DRAW(ClipShader, clipShader(r.shader, r.op))
 
 template <> void Draw::draw(const ResetClip& r) {
     SkCanvasPriv::ResetClip(fCanvas);
 }
 
-DRAW(DrawArc, drawArc(r.oval, r.startAngle, r.sweepAngle, r.useCenter, r.paint));
-DRAW(DrawDRRect, drawDRRect(r.outer, r.inner, r.paint));
-DRAW(DrawImage, drawImage(r.image.get(), r.left, r.top, r.sampling, r.paint));
+DRAW(DrawArc, drawArc(r.oval, r.startAngle, r.sweepAngle, r.useCenter, r.paint))
+DRAW(DrawDRRect, drawDRRect(r.outer, r.inner, r.paint))
+DRAW(DrawImage, drawImage(r.image.get(), r.left, r.top, r.sampling, r.paint))
 
 template <> void Draw::draw(const DrawImageLattice& r) {
     SkCanvas::Lattice lattice;
@@ -128,33 +146,29 @@ template <> void Draw::draw(const DrawImageLattice& r) {
     fCanvas->drawImageLattice(r.image.get(), lattice, r.dst, r.filter, r.paint);
 }
 
-DRAW(DrawImageRect, drawImageRect(r.image.get(), r.src, r.dst, r.sampling, r.paint, r.constraint));
-DRAW(DrawOval, drawOval(r.oval, r.paint));
-DRAW(DrawPaint, drawPaint(r.paint));
-DRAW(DrawPath, drawPath(r.path, r.paint));
-DRAW(DrawPatch, drawPatch(r.cubics, r.colors, r.texCoords, r.bmode, r.paint));
-DRAW(DrawPicture, drawPicture(r.picture.get(), &r.matrix, r.paint));
-DRAW(DrawPoints, drawPoints(r.mode, r.count, r.pts, r.paint));
-DRAW(DrawRRect, drawRRect(r.rrect, r.paint));
-DRAW(DrawRect, drawRect(r.rect, r.paint));
-DRAW(DrawRegion, drawRegion(r.region, r.paint));
-DRAW(DrawTextBlob, drawTextBlob(r.blob.get(), r.x, r.y, r.paint));
-#if SK_SUPPORT_GPU
-DRAW(DrawSlug, drawSlug(r.slug.get()));
-#else
-// Turn draw into a nop.
-template <> void Draw::draw(const DrawSlug&) {}
-#endif
+DRAW(DrawImageRect, drawImageRect(r.image.get(), r.src, r.dst, r.sampling, r.paint, r.constraint))
+DRAW(DrawOval, drawOval(r.oval, r.paint))
+DRAW(DrawPaint, drawPaint(r.paint))
+DRAW(DrawPath, drawPath(r.path, r.paint))
+DRAW(DrawPatch, drawPatch(r.cubics, r.colors, r.texCoords, r.bmode, r.paint))
+DRAW(DrawPicture, drawPicture(r.picture.get(), &r.matrix, r.paint))
+DRAW(DrawPoints, drawPoints(r.mode, r.count, r.pts, r.paint))
+DRAW(DrawRRect, drawRRect(r.rrect, r.paint))
+DRAW(DrawRect, drawRect(r.rect, r.paint))
+DRAW(DrawRegion, drawRegion(r.region, r.paint))
+DRAW(DrawTextBlob, drawTextBlob(r.blob.get(), r.x, r.y, r.paint))
+DRAW(DrawSlug, drawSlug(r.slug.get()))
 DRAW(DrawAtlas, drawAtlas(r.atlas.get(), r.xforms, r.texs, r.colors, r.count, r.mode, r.sampling,
-                          r.cull, r.paint));
-DRAW(DrawVertices, drawVertices(r.vertices, r.bmode, r.paint));
-DRAW(DrawShadowRec, private_draw_shadow_rec(r.path, r.rec));
-DRAW(DrawAnnotation, drawAnnotation(r.rect, r.key.c_str(), r.value.get()));
+                          r.cull, r.paint))
+DRAW(DrawVertices, drawVertices(r.vertices, r.bmode, r.paint))
+DRAW(DrawMesh, drawMesh(r.mesh, r.blender, r.paint))
+DRAW(DrawShadowRec, private_draw_shadow_rec(r.path, r.rec))
+DRAW(DrawAnnotation, drawAnnotation(r.rect, r.key.c_str(), r.value.get()))
 
 DRAW(DrawEdgeAAQuad, experimental_DrawEdgeAAQuad(
-        r.rect, r.clip, r.aa, r.color, r.mode));
+        r.rect, r.clip, r.aa, r.color, r.mode))
 DRAW(DrawEdgeAAImageSet, experimental_DrawEdgeAAImageSet(
-        r.set.get(), r.count, r.dstClips, r.preViewMatrices, r.sampling, r.paint, r.constraint));
+        r.set.get(), r.count, r.dstClips, r.preViewMatrices, r.sampling, r.paint, r.constraint))
 
 #undef DRAW
 
@@ -349,7 +363,6 @@ private:
                 case SkBlendMode::kDstATop:
                 case SkBlendMode::kModulate:
                     return true;
-                    break;
                 default:
                     break;
             }
@@ -392,8 +405,6 @@ private:
             fSaveStack.back().bounds.join(bounds);
         }
     }
-
-    Bounds bounds(const Flush&) const { return fCullRect; }
 
     Bounds bounds(const DrawPaint&) const { return fCullRect; }
     Bounds bounds(const DrawBehind&) const { return fCullRect; }
@@ -447,7 +458,9 @@ private:
     Bounds bounds(const DrawVertices& op) const {
         return this->adjustAndMap(op.vertices->bounds(), &op.paint);
     }
-
+    Bounds bounds(const DrawMesh& op) const {
+        return this->adjustAndMap(op.mesh.bounds(), &op.paint);
+    }
     Bounds bounds(const DrawAtlas& op) const {
         if (op.cull) {
             // TODO: <reed> can we pass nullptr for the paint? Isn't cull already "correct"
@@ -476,16 +489,10 @@ private:
         return this->adjustAndMap(dst, &op.paint);
     }
 
-#if SK_SUPPORT_GPU
     Bounds bounds(const DrawSlug& op) const {
         SkRect dst = op.slug->sourceBoundsWithOrigin();
         return this->adjustAndMap(dst, &op.slug->initialPaint());
     }
-#else
-    Bounds bounds(const DrawSlug& op) const {
-        return SkRect::MakeEmpty();
-    }
-#endif
 
     Bounds bounds(const DrawDrawable& op) const {
         return this->adjustAndMap(op.worstCaseBounds, nullptr);

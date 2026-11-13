@@ -5,6 +5,7 @@
 #ifndef TOOLS_GN_TRACE_H_
 #define TOOLS_GN_TRACE_H_
 
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -24,7 +25,10 @@ class TraceItem {
     TRACE_FILE_LOAD,
     TRACE_FILE_PARSE,
     TRACE_FILE_EXECUTE,
+    TRACE_FILE_EXECUTE_TEMPLATE,
     TRACE_FILE_WRITE,
+    TRACE_FILE_WRITE_GENERATED,
+    TRACE_FILE_WRITE_NINJA,
     TRACE_IMPORT_LOAD,
     TRACE_IMPORT_BLOCK,
     TRACE_SCRIPT_EXECUTE,
@@ -32,6 +36,7 @@ class TraceItem {
     TRACE_ON_RESOLVED,
     TRACE_CHECK_HEADER,   // One file.
     TRACE_CHECK_HEADERS,  // All files.
+    TRACE_WALK_METADATA,
   };
 
   TraceItem(Type type, const std::string& name, std::thread::id thread_id);
@@ -80,7 +85,7 @@ class ScopedTrace {
   void Done();
 
  private:
-  TraceItem* item_;
+  std::unique_ptr<TraceItem> item_;
   bool done_;
 };
 
@@ -90,8 +95,8 @@ void EnableTracing();
 // Returns whether tracing is enabled.
 bool TracingEnabled();
 
-// Adds a trace event to the log. Takes ownership of the pointer.
-void AddTrace(TraceItem* item);
+// Adds a trace event to the log.
+void AddTrace(std::unique_ptr<TraceItem> item);
 
 // Returns a summary of the current traces, or the empty string if tracing is
 // not enabled.

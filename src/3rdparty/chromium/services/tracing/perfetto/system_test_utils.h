@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "services/tracing/public/cpp/perfetto/posix_system_producer.h"
 
 namespace base {
@@ -41,7 +41,7 @@ class MockSystemService {
   void StartService();
 
   const bool used_tmpdir_;
-  const char* old_tmpdir_ = nullptr;
+  absl::optional<std::string> old_tmpdir_;
   std::string consumer_;
   std::string producer_;
   std::unique_ptr<perfetto::ServiceIPCHost> service_;

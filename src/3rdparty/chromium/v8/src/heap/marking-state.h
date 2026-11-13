@@ -18,11 +18,6 @@ class MemoryChunk;
 template <typename ConcreteState, AccessMode access_mode>
 class MarkingStateBase {
  public:
-  // Declares that this marking state is not collecting retainers, so the
-  // marking visitor may update the heap state to store information about
-  // progress, and may avoid fully visiting an object if it is safe to do so.
-  static constexpr bool kCollectRetainers = false;
-
   explicit MarkingStateBase(PtrComprCageBase cage_base)
 #if V8_COMPRESS_POINTERS
       : cage_base_(cage_base)
@@ -31,7 +26,7 @@ class MarkingStateBase {
   }
 
   // The pointer compression cage base value used for decompression of all
-  // tagged values except references to Code objects.
+  // tagged values except references to InstructionStream objects.
   V8_INLINE PtrComprCageBase cage_base() const {
 #if V8_COMPRESS_POINTERS
     return cage_base_;
@@ -40,41 +35,15 @@ class MarkingStateBase {
 #endif  // V8_COMPRESS_POINTERS
   }
 
-  V8_INLINE MarkBit MarkBitFrom(const HeapObject obj) const;
-
-  // {addr} may be tagged or aligned.
-  V8_INLINE MarkBit MarkBitFrom(const BasicMemoryChunk* p, Address addr) const;
-
-  V8_INLINE Marking::ObjectColor Color(const HeapObject obj) const;
-
-  V8_INLINE bool IsImpossible(const HeapObject obj) const;
-
-  V8_INLINE bool IsBlack(const HeapObject obj) const;
-
-  V8_INLINE bool IsWhite(const HeapObject obj) const;
-
-  V8_INLINE bool IsGrey(const HeapObject obj) const;
-
-  V8_INLINE bool IsBlackOrGrey(const HeapObject obj) const;
-
-  V8_INLINE bool WhiteToGrey(HeapObject obj);
-
-  V8_INLINE bool WhiteToBlack(HeapObject obj);
-
-  V8_INLINE bool GreyToBlack(HeapObject obj);
-
-  V8_INLINE bool GreyToBlackUnaccounted(HeapObject obj);
-
-  V8_INLINE void ClearLiveness(MemoryChunk* chunk);
-
-  void AddStrongReferenceForReferenceSummarizer(HeapObject host,
-                                                HeapObject obj) {
-    // This is not a reference summarizer, so there is nothing to do here.
-  }
-
-  void AddWeakReferenceForReferenceSummarizer(HeapObject host, HeapObject obj) {
-    // This is not a reference summarizer, so there is nothing to do here.
-  }
+  V8_INLINE bool TryMark(Tagged<HeapObject> obj);
+  // Helper method for fully marking an object and accounting its live bytes.
+  // Should be used to mark individual objects in one-off cases.
+  V8_INLINE bool TryMarkAndAccountLiveBytes(Tagged<HeapObject> obj);
+  // Same, but does not require the object to be initialized.
+  V8_INLINE bool TryMarkAndAccountLiveBytes(Tagged<HeapObject> obj,
+                                            int object_size);
+  V8_INLINE bool IsMarked(const Tagged<HeapObject> obj) const;
+  V8_INLINE bool IsUnmarked(const Tagged<HeapObject> obj) const;
 
  private:
 #if V8_COMPRESS_POINTERS
@@ -88,17 +57,6 @@ class MarkingState final
  public:
   explicit MarkingState(PtrComprCageBase cage_base)
       : MarkingStateBase(cage_base) {}
-
-  V8_INLINE ConcurrentBitmap<AccessMode::ATOMIC>* bitmap(
-      const BasicMemoryChunk* chunk) const;
-
-  // Concurrent marking uses local live bytes so we may do these accesses
-  // non-atomically.
-  V8_INLINE void IncrementLiveBytes(MemoryChunk* chunk, intptr_t by);
-
-  V8_INLINE intptr_t live_bytes(const MemoryChunk* chunk) const;
-
-  V8_INLINE void SetLiveBytes(MemoryChunk* chunk, intptr_t value);
 };
 
 class NonAtomicMarkingState final
@@ -106,29 +64,6 @@ class NonAtomicMarkingState final
  public:
   explicit NonAtomicMarkingState(PtrComprCageBase cage_base)
       : MarkingStateBase(cage_base) {}
-
-  V8_INLINE ConcurrentBitmap<AccessMode::NON_ATOMIC>* bitmap(
-      const BasicMemoryChunk* chunk) const;
-
-  V8_INLINE void IncrementLiveBytes(MemoryChunk* chunk, intptr_t by);
-
-  V8_INLINE intptr_t live_bytes(const MemoryChunk* chunk) const;
-
-  V8_INLINE void SetLiveBytes(MemoryChunk* chunk, intptr_t value);
-};
-
-// This is used by Scavenger and Evacuator in TransferColor.
-// Live byte increments have to be atomic.
-class AtomicMarkingState final
-    : public MarkingStateBase<AtomicMarkingState, AccessMode::ATOMIC> {
- public:
-  explicit AtomicMarkingState(PtrComprCageBase cage_base)
-      : MarkingStateBase(cage_base) {}
-
-  V8_INLINE ConcurrentBitmap<AccessMode::ATOMIC>* bitmap(
-      const BasicMemoryChunk* chunk) const;
-
-  V8_INLINE void IncrementLiveBytes(MemoryChunk* chunk, intptr_t by);
 };
 
 }  // namespace internal

@@ -1,58 +1,46 @@
-// Copyright 2021 The Dawn Authors
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "src/dawn/node/binding/GPUAdapter.h"
 
+#include <limits>
+#include <memory>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "src/dawn/node/binding/Converter.h"
 #include "src/dawn/node/binding/Errors.h"
 #include "src/dawn/node/binding/Flags.h"
+#include "src/dawn/node/binding/GPUAdapterInfo.h"
 #include "src/dawn/node/binding/GPUDevice.h"
+#include "src/dawn/node/binding/GPUSupportedFeatures.h"
 #include "src/dawn/node/binding/GPUSupportedLimits.h"
-
-namespace {
-// TODO(amaiorano): Move to utility header
-std::vector<std::string> Split(const std::string& s, char delim) {
-    if (s.empty()) {
-        return {};
-    }
-
-    std::vector<std::string> result;
-    const size_t lastIndex = s.length() - 1;
-    size_t startIndex = 0;
-    size_t i = startIndex;
-
-    while (i <= lastIndex) {
-        if (s[i] == delim) {
-            auto token = s.substr(startIndex, i - startIndex);
-            if (!token.empty()) {  // Discard empty tokens
-                result.push_back(token);
-            }
-            startIndex = i + 1;
-        } else if (i == lastIndex) {
-            auto token = s.substr(startIndex, i - startIndex + 1);
-            if (!token.empty()) {  // Discard empty tokens
-                result.push_back(token);
-            }
-        }
-        ++i;
-    }
-    return result;
-}
-}  // namespace
+#include "src/dawn/node/binding/TogglesLoader.h"
 
 #define FOR_EACH_LIMIT(X)                        \
     X(maxTextureDimension1D)                     \
@@ -60,6 +48,8 @@ std::vector<std::string> Split(const std::string& s, char delim) {
     X(maxTextureDimension3D)                     \
     X(maxTextureArrayLayers)                     \
     X(maxBindGroups)                             \
+    X(maxBindGroupsPlusVertexBuffers)            \
+    X(maxBindingsPerBindGroup)                   \
     X(maxDynamicUniformBuffersPerPipelineLayout) \
     X(maxDynamicStorageBuffersPerPipelineLayout) \
     X(maxSampledTexturesPerShaderStage)          \
@@ -72,9 +62,13 @@ std::vector<std::string> Split(const std::string& s, char delim) {
     X(minUniformBufferOffsetAlignment)           \
     X(minStorageBufferOffsetAlignment)           \
     X(maxVertexBuffers)                          \
+    X(maxBufferSize)                             \
     X(maxVertexAttributes)                       \
     X(maxVertexBufferArrayStride)                \
     X(maxInterStageShaderComponents)             \
+    X(maxInterStageShaderVariables)              \
+    X(maxColorAttachments)                       \
+    X(maxColorAttachmentBytesPerSample)          \
     X(maxComputeWorkgroupStorageSize)            \
     X(maxComputeInvocationsPerWorkgroup)         \
     X(maxComputeWorkgroupSizeX)                  \
@@ -83,72 +77,6 @@ std::vector<std::string> Split(const std::string& s, char delim) {
     X(maxComputeWorkgroupsPerDimension)
 
 namespace wgpu::binding {
-
-namespace {
-
-////////////////////////////////////////////////////////////////////////////////
-// wgpu::binding::<anon>::Features
-// Implements interop::GPUSupportedFeatures
-////////////////////////////////////////////////////////////////////////////////
-class Features : public interop::GPUSupportedFeatures {
-  public:
-    explicit Features(std::vector<wgpu::FeatureName> features) {
-        for (wgpu::FeatureName feature : features) {
-            switch (feature) {
-                case wgpu::FeatureName::Depth32FloatStencil8:
-                    enabled_.emplace(interop::GPUFeatureName::kDepth32FloatStencil8);
-                    break;
-                case wgpu::FeatureName::TimestampQuery:
-                    enabled_.emplace(interop::GPUFeatureName::kTimestampQuery);
-                    break;
-                case wgpu::FeatureName::TextureCompressionBC:
-                    enabled_.emplace(interop::GPUFeatureName::kTextureCompressionBc);
-                    break;
-                case wgpu::FeatureName::TextureCompressionETC2:
-                    enabled_.emplace(interop::GPUFeatureName::kTextureCompressionEtc2);
-                    break;
-                case wgpu::FeatureName::TextureCompressionASTC:
-                    enabled_.emplace(interop::GPUFeatureName::kTextureCompressionAstc);
-                    break;
-                case wgpu::FeatureName::IndirectFirstInstance:
-                    enabled_.emplace(interop::GPUFeatureName::kIndirectFirstInstance);
-                    break;
-                case wgpu::FeatureName::DepthClipControl:
-                    enabled_.emplace(interop::GPUFeatureName::kDepthClipControl);
-                    break;
-                default:
-                    break;
-            }
-        }
-        // TODO(dawn:1123) add support for these extensions when possible.
-        // wgpu::interop::GPUFeatureName::kShaderF16
-        // wgpu::interop::GPUFeatureName::kBgra8UnormStorage
-    }
-
-    bool has(interop::GPUFeatureName feature) { return enabled_.count(feature) != 0; }
-
-    // interop::GPUSupportedFeatures compliance
-    bool has(Napi::Env, std::string name) override {
-        interop::GPUFeatureName feature;
-        if (interop::Converter<interop::GPUFeatureName>::FromString(name, feature)) {
-            return has(feature);
-        }
-        return false;
-    }
-    std::vector<std::string> keys(Napi::Env) override {
-        std::vector<std::string> out;
-        out.reserve(enabled_.size());
-        for (auto feature : enabled_) {
-            out.push_back(interop::Converter<interop::GPUFeatureName>::ToString(feature));
-        }
-        return out;
-    }
-
-  private:
-    std::unordered_set<interop::GPUFeatureName> enabled_;
-};
-
-}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // wgpu::bindings::GPUAdapter
@@ -163,7 +91,8 @@ interop::Interface<interop::GPUSupportedFeatures> GPUAdapter::getFeatures(Napi::
     size_t count = adapter.EnumerateFeatures(nullptr);
     std::vector<wgpu::FeatureName> features(count);
     adapter.EnumerateFeatures(&features[0]);
-    return interop::GPUSupportedFeatures::Create<Features>(env, std::move(features));
+    return interop::GPUSupportedFeatures::Create<GPUSupportedFeatures>(env, env,
+                                                                       std::move(features));
 }
 
 interop::Interface<interop::GPUSupportedLimits> GPUAdapter::getLimits(Napi::Env env) {
@@ -182,49 +111,54 @@ interop::Interface<interop::GPUSupportedLimits> GPUAdapter::getLimits(Napi::Env 
 }
 
 bool GPUAdapter::getIsFallbackAdapter(Napi::Env) {
-    UNIMPLEMENTED();
+    WGPUAdapterProperties adapterProperties = {};
+    adapter_.GetProperties(&adapterProperties);
+    return adapterProperties.adapterType == WGPUAdapterType_CPU;
+}
+
+bool GPUAdapter::getIsCompatibilityMode(Napi::Env) {
+    WGPUAdapterProperties adapterProperties = {};
+    adapter_.GetProperties(&adapterProperties);
+    return adapterProperties.compatibilityMode;
 }
 
 interop::Promise<interop::Interface<interop::GPUDevice>> GPUAdapter::requestDevice(
     Napi::Env env,
     interop::GPUDeviceDescriptor descriptor) {
     wgpu::DeviceDescriptor desc{};  // TODO(crbug.com/dawn/1133): Fill in.
-    interop::Promise<interop::Interface<interop::GPUDevice>> promise(env, PROMISE_INFO);
 
+    Converter conv(env);
     std::vector<wgpu::FeatureName> requiredFeatures;
-    // See src/dawn/native/Features.cpp for enum <-> string mappings.
     for (auto required : descriptor.requiredFeatures) {
-        switch (required) {
-            case interop::GPUFeatureName::kTextureCompressionBc:
-                requiredFeatures.emplace_back(wgpu::FeatureName::TextureCompressionBC);
-                continue;
-            case interop::GPUFeatureName::kTextureCompressionEtc2:
-                requiredFeatures.emplace_back(wgpu::FeatureName::TextureCompressionETC2);
-                continue;
-            case interop::GPUFeatureName::kTextureCompressionAstc:
-                requiredFeatures.emplace_back(wgpu::FeatureName::TextureCompressionASTC);
-                continue;
-            case interop::GPUFeatureName::kTimestampQuery:
-                requiredFeatures.emplace_back(wgpu::FeatureName::TimestampQuery);
-                continue;
-            case interop::GPUFeatureName::kDepth32FloatStencil8:
-                requiredFeatures.emplace_back(wgpu::FeatureName::Depth32FloatStencil8);
-                continue;
-            case interop::GPUFeatureName::kDepthClipControl:
-            case interop::GPUFeatureName::kShaderF16:
-            case interop::GPUFeatureName::kIndirectFirstInstance:
-            case interop::GPUFeatureName::kBgra8UnormStorage:
-                // TODO(dawn:1123) Add support for these extensions when possible.
-                continue;
+        wgpu::FeatureName feature = wgpu::FeatureName::Undefined;
+
+        // requiredFeatures is a "sequence<GPUFeatureName>" so a Javascript exception should be
+        // thrown if one of the strings isn't one of the known features.
+        if (!conv(feature, required)) {
+            return {env, interop::kUnusedPromise};
         }
-        UNIMPLEMENTED("required: ", required);
+
+        requiredFeatures.emplace_back(feature);
+    }
+    if (!conv(desc.label, descriptor.label)) {
+        return {env, interop::kUnusedPromise};
     }
 
+    interop::Promise<interop::Interface<interop::GPUDevice>> promise(env, PROMISE_INFO);
+
     wgpu::RequiredLimits limits;
-#define COPY_LIMIT(LIMIT)                                        \
-    if (descriptor.requiredLimits.count(#LIMIT)) {               \
-        limits.limits.LIMIT = descriptor.requiredLimits[#LIMIT]; \
-        descriptor.requiredLimits.erase(#LIMIT);                 \
+#define COPY_LIMIT(LIMIT)                                                                    \
+    if (descriptor.requiredLimits.count(#LIMIT)) {                                           \
+        using DawnLimitType = decltype(WGPULimits::LIMIT);                                   \
+        DawnLimitType* dawnLimit = &limits.limits.LIMIT;                                     \
+        uint64_t jsLimit = descriptor.requiredLimits[#LIMIT];                                \
+        if (jsLimit > std::numeric_limits<DawnLimitType>::max() - 1) {                       \
+            promise.Reject(                                                                  \
+                binding::Errors::OperationError(env, "Limit \"" #LIMIT "\" out of range.")); \
+            return promise;                                                                  \
+        }                                                                                    \
+        *dawnLimit = jsLimit;                                                                \
+        descriptor.requiredLimits.erase(#LIMIT);                                             \
     }
     FOR_EACH_LIMIT(COPY_LIMIT)
 #undef COPY_LIMIT
@@ -234,51 +168,41 @@ interop::Promise<interop::Interface<interop::GPUDevice>> GPUAdapter::requestDevi
         return promise;
     }
 
-    // Propogate enabled/disabled dawn features
-    // Note: DawnDeviceTogglesDescriptor::forceEnabledToggles and forceDisabledToggles are
-    // vectors of 'const char*', so we make sure the parsed strings survive the CreateDevice()
-    // call by storing them on the stack.
-    std::vector<std::string> enabledToggles;
-    std::vector<std::string> disabledToggles;
-    std::vector<const char*> forceEnabledToggles;
-    std::vector<const char*> forceDisabledToggles;
-    if (auto values = flags_.Get("enable-dawn-features")) {
-        enabledToggles = Split(*values, ',');
-        for (auto& t : enabledToggles) {
-            forceEnabledToggles.emplace_back(t.c_str());
-        }
-    }
-    if (auto values = flags_.Get("disable-dawn-features")) {
-        disabledToggles = Split(*values, ',');
-        for (auto& t : disabledToggles) {
-            forceDisabledToggles.emplace_back(t.c_str());
-        }
-    }
-
-    desc.requiredFeaturesCount = requiredFeatures.size();
+    desc.requiredFeatureCount = requiredFeatures.size();
     desc.requiredFeatures = requiredFeatures.data();
     desc.requiredLimits = &limits;
 
-    DawnTogglesDeviceDescriptor togglesDesc = {};
-    desc.nextInChain = &togglesDesc;
-    togglesDesc.forceEnabledTogglesCount = forceEnabledToggles.size();
-    togglesDesc.forceEnabledToggles = forceEnabledToggles.data();
-    togglesDesc.forceDisabledTogglesCount = forceDisabledToggles.size();
-    togglesDesc.forceDisabledToggles = forceDisabledToggles.data();
+    // Propagate enabled/disabled dawn features
+    TogglesLoader togglesLoader(flags_);
+    DawnTogglesDescriptor deviceTogglesDesc = togglesLoader.GetDescriptor();
+    desc.nextInChain = &deviceTogglesDesc;
 
     auto wgpu_device = adapter_.CreateDevice(&desc);
-    if (wgpu_device) {
-        promise.Resolve(interop::GPUDevice::Create<GPUDevice>(env, env, wgpu_device));
-    } else {
+    if (wgpu_device == nullptr) {
         promise.Reject(binding::Errors::OperationError(env, "failed to create device"));
+        return promise;
     }
+
+    auto gpu_device = std::make_unique<GPUDevice>(env, desc, wgpu_device);
+    if (!valid_) {
+        gpu_device->ForceLoss(interop::GPUDeviceLostReason::kUnknown,
+                              "Device was marked as lost due to a stale adapter.");
+    }
+    valid_ = false;
+
+    promise.Resolve(interop::GPUDevice::Bind(env, std::move(gpu_device)));
     return promise;
 }
 
 interop::Promise<interop::Interface<interop::GPUAdapterInfo>> GPUAdapter::requestAdapterInfo(
-    Napi::Env,
-    std::vector<std::string> unmaskHints) {
-    UNIMPLEMENTED();
+    Napi::Env env) {
+    interop::Promise<interop::Interface<interop::GPUAdapterInfo>> promise(env, PROMISE_INFO);
+
+    WGPUAdapterProperties adapterProperties = {};
+    adapter_.GetProperties(&adapterProperties);
+
+    promise.Resolve(interop::GPUAdapterInfo::Create<GPUAdapterInfo>(env, adapterProperties));
+    return promise;
 }
 
 }  // namespace wgpu::binding

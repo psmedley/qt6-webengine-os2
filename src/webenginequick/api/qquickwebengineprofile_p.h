@@ -28,6 +28,7 @@ class ProfileAdapter;
 
 QT_BEGIN_NAMESPACE
 
+class QWebEngineClientHints;
 class QQuickWebEngineDownloadRequest;
 class QQuickWebEngineSettings;
 class QQuickWebEngineScriptCollection;
@@ -49,14 +50,16 @@ public:
 
     void cleanDownloads();
 
-    void downloadRequested(DownloadItemInfo &info) override;
+    void downloadRequested(const DownloadItemInfo &info) override;
     void downloadUpdated(const DownloadItemInfo &info) override;
 
     void showNotification(QSharedPointer<QtWebEngineCore::UserNotificationController> &controller) override;
+    void clearHttpCacheCompleted() override;
 
 private:
     QQuickWebEngineProfile *q_ptr;
     QScopedPointer<QQuickWebEngineSettings> m_settings;
+    QScopedPointer<QWebEngineClientHints> m_clientHints;
     QPointer<QtWebEngineCore::ProfileAdapter> m_profileAdapter;
     QMap<quint32, QPointer<QQuickWebEngineDownloadRequest> > m_ongoingDownloads;
 

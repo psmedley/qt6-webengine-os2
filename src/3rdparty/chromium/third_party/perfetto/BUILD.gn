@@ -39,6 +39,9 @@ if (enable_perfetto_platform_services) {
   if (enable_perfetto_traced_probes) {
     all_targets += [ "src/traced/probes:traced_probes" ]
   }
+  if (enable_perfetto_traced_relay) {
+    all_targets += [ "src/traced_relay:traced_relay" ]
+  }
 }
 
 if (enable_perfetto_trace_processor && enable_perfetto_trace_processor_sqlite) {
@@ -113,6 +116,12 @@ if (enable_perfetto_integration_tests) {
     "test:client_api_example",
     "test/stress_test",
   ]
+  if (!is_win && !is_mac) {
+    all_targets += [
+      "examples/shared_lib:example_shlib_data_source",
+      "examples/shared_lib:example_shlib_track_event",
+    ]
+  }
 }
 
 if (enable_perfetto_trace_processor_json) {
@@ -149,6 +158,9 @@ if (enable_perfetto_fuzzers) {
 if (perfetto_build_standalone) {
   all_targets += [
     "test/configs",
+
+    # Used to evaluate the Python folder for Bazel script generation.
+    "python:trace_processor_py",
 
     # For syntax-checking the protos.
     "protos/perfetto/trace:merged_trace_lite",
@@ -203,6 +215,12 @@ if (enable_perfetto_ui) {
   }
 }
 
+if (enable_perfetto_site) {
+  group("site") {
+    deps = [ "infra/perfetto.dev:site" ]
+  }
+}
+
 # In Android builds, we build the code of traced and traced_probes in one shared
 # library that exposes one xxx_main() for each. The executables themselves are
 # tiny shells that just invoke their own entry point into the library.
@@ -228,6 +246,8 @@ if (enable_perfetto_platform_services) {
     deps = [
       "gn:default_deps",
       "src/traced/service",
+      "src/perfetto_cmd",
+      "src/perfetto_cmd:trigger_perfetto_cmd",
     ]
     if (enable_perfetto_traced_probes) {
       deps += [ "src/traced/probes" ]
@@ -262,10 +282,8 @@ if (build_with_chromium) {
     deps = [
       "src/trace_processor/importers/memory_tracker:graph_processor",
       "src/tracing:client_api",
+      "src/tracing:platform_impl",
       "src/tracing/core",
-
-      # TODO(eseckler): Create a platform for chrome and hook it up somehow.
-      "src/tracing:platform_fake",
     ]
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [ "//build/config/compiler:no_chromium_code" ]
@@ -276,6 +294,7 @@ if (build_with_chromium) {
       "protos/perfetto/common:zero",
       "protos/perfetto/trace:zero",
       "protos/perfetto/trace/chrome:zero",
+      "protos/perfetto/trace/etw:zero",
       "protos/perfetto/trace/interned_data:zero",
       "protos/perfetto/trace/profiling:zero",
       "protos/perfetto/trace/ps:zero",
@@ -288,7 +307,7 @@ if (build_with_chromium) {
       ]
       public_deps += [ "include/perfetto/ext/tracing/ipc:ipc" ]
     }
-    if (!is_nacl && !is_ios) {
+    if (!is_nacl) {
       deps += [
         "src/trace_processor:export_json",
         "src/trace_processor:storage_minimal",
@@ -299,7 +318,20 @@ if (build_with_chromium) {
       ]
     }
   }
-  component("libtrace_processor") {
+
+  # TODO(altimin): this is a temp workaround around very strange link failures
+  # on win-dbg-ng buildbot.
+  if (!is_win) {
+    libtrace_processor_target_type = "source_set"
+  } else {
+    libtrace_processor_target_type = "component"
+  }
+
+  # In Chromium, we want to ensure that we don't link dynamically against sqlite
+  # (as Chromium also uses a more restricted version of sqlite which is actually
+  # shipped to the users).
+  # source_set helps us to achieve that.
+  target(libtrace_processor_target_type, "libtrace_processor") {
     public_configs = [ "gn:public_config" ]
     deps = [ "src/trace_processor:lib" ]
     configs -= [ "//build/config/compiler:chromium_code" ]

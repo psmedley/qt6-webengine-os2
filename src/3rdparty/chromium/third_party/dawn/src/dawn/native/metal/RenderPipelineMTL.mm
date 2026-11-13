@@ -1,26 +1,42 @@
-// Copyright 2017 The Dawn Authors
+// Copyright 2017 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/metal/RenderPipelineMTL.h"
 
+#include "dawn/native/Adapter.h"
 #include "dawn/native/CreatePipelineAsyncTask.h"
-#include "dawn/native/VertexFormat.h"
+#include "dawn/native/Instance.h"
+#include "dawn/native/metal/BackendMTL.h"
 #include "dawn/native/metal/DeviceMTL.h"
 #include "dawn/native/metal/PipelineLayoutMTL.h"
 #include "dawn/native/metal/ShaderModuleMTL.h"
 #include "dawn/native/metal/TextureMTL.h"
 #include "dawn/native/metal/UtilsMetal.h"
+#include "dawn/platform/metrics/HistogramMacros.h"
 
 namespace dawn::native::metal {
 
@@ -87,8 +103,10 @@ MTLVertexFormat VertexFormatType(wgpu::VertexFormat format) {
             return MTLVertexFormatInt3;
         case wgpu::VertexFormat::Sint32x4:
             return MTLVertexFormatInt4;
+        case wgpu::VertexFormat::Unorm10_10_10_2:
+            return MTLVertexFormatUInt1010102Normalized;
         default:
-            UNREACHABLE();
+            DAWN_UNREACHABLE();
     }
 }
 
@@ -99,8 +117,10 @@ MTLVertexStepFunction VertexStepModeFunction(wgpu::VertexStepMode mode) {
         case wgpu::VertexStepMode::Instance:
             return MTLVertexStepFunctionPerInstance;
         case wgpu::VertexStepMode::VertexBufferNotUsed:
-            UNREACHABLE();
+        case wgpu::VertexStepMode::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 MTLPrimitiveType MTLPrimitiveTopology(wgpu::PrimitiveTopology primitiveTopology) {
@@ -115,7 +135,10 @@ MTLPrimitiveType MTLPrimitiveTopology(wgpu::PrimitiveTopology primitiveTopology)
             return MTLPrimitiveTypeTriangle;
         case wgpu::PrimitiveTopology::TriangleStrip:
             return MTLPrimitiveTypeTriangleStrip;
+        case wgpu::PrimitiveTopology::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 MTLPrimitiveTopologyClass MTLInputPrimitiveTopology(wgpu::PrimitiveTopology primitiveTopology) {
@@ -128,7 +151,10 @@ MTLPrimitiveTopologyClass MTLInputPrimitiveTopology(wgpu::PrimitiveTopology prim
         case wgpu::PrimitiveTopology::TriangleList:
         case wgpu::PrimitiveTopology::TriangleStrip:
             return MTLPrimitiveTopologyClassTriangle;
+        case wgpu::PrimitiveTopology::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 MTLBlendFactor MetalBlendFactor(wgpu::BlendFactor factor, bool alpha) {
@@ -159,7 +185,18 @@ MTLBlendFactor MetalBlendFactor(wgpu::BlendFactor factor, bool alpha) {
             return alpha ? MTLBlendFactorBlendAlpha : MTLBlendFactorBlendColor;
         case wgpu::BlendFactor::OneMinusConstant:
             return alpha ? MTLBlendFactorOneMinusBlendAlpha : MTLBlendFactorOneMinusBlendColor;
+        case wgpu::BlendFactor::Src1:
+            return MTLBlendFactorSource1Color;
+        case wgpu::BlendFactor::OneMinusSrc1:
+            return MTLBlendFactorOneMinusSource1Color;
+        case wgpu::BlendFactor::Src1Alpha:
+            return MTLBlendFactorSource1Alpha;
+        case wgpu::BlendFactor::OneMinusSrc1Alpha:
+            return MTLBlendFactorOneMinusSource1Alpha;
+        case wgpu::BlendFactor::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 MTLBlendOperation MetalBlendOperation(wgpu::BlendOperation operation) {
@@ -174,7 +211,10 @@ MTLBlendOperation MetalBlendOperation(wgpu::BlendOperation operation) {
             return MTLBlendOperationMin;
         case wgpu::BlendOperation::Max:
             return MTLBlendOperationMax;
+        case wgpu::BlendOperation::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 MTLColorWriteMask MetalColorWriteMask(wgpu::ColorWriteMask writeMask,
@@ -236,7 +276,10 @@ MTLStencilOperation MetalStencilOperation(wgpu::StencilOperation stencilOperatio
             return MTLStencilOperationIncrementWrap;
         case wgpu::StencilOperation::DecrementWrap:
             return MTLStencilOperationDecrementWrap;
+        case wgpu::StencilOperation::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 NSRef<MTLDepthStencilDescriptor> MakeDepthStencilDesc(const DepthStencilState* descriptor) {
@@ -289,7 +332,10 @@ MTLWinding MTLFrontFace(wgpu::FrontFace face) {
             return MTLWindingClockwise;
         case wgpu::FrontFace::CCW:
             return MTLWindingCounterClockwise;
+        case wgpu::FrontFace::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 MTLCullMode ToMTLCullMode(wgpu::CullMode mode) {
@@ -300,7 +346,10 @@ MTLCullMode ToMTLCullMode(wgpu::CullMode mode) {
             return MTLCullModeFront;
         case wgpu::CullMode::Back:
             return MTLCullModeBack;
+        case wgpu::CullMode::Undefined:
+            break;
     }
+    DAWN_UNREACHABLE();
 }
 
 }  // anonymous namespace
@@ -308,11 +357,11 @@ MTLCullMode ToMTLCullMode(wgpu::CullMode mode) {
 // static
 Ref<RenderPipelineBase> RenderPipeline::CreateUninitialized(
     Device* device,
-    const RenderPipelineDescriptor* descriptor) {
+    const UnpackedPtr<RenderPipelineDescriptor>& descriptor) {
     return AcquireRef(new RenderPipeline(device, descriptor));
 }
 
-RenderPipeline::RenderPipeline(DeviceBase* dev, const RenderPipelineDescriptor* desc)
+RenderPipeline::RenderPipeline(DeviceBase* dev, const UnpackedPtr<RenderPipelineDescriptor>& desc)
     : RenderPipelineBase(dev, desc) {}
 
 RenderPipeline::~RenderPipeline() = default;
@@ -321,19 +370,32 @@ MaybeError RenderPipeline::Initialize() {
     mMtlPrimitiveTopology = MTLPrimitiveTopology(GetPrimitiveTopology());
     mMtlFrontFace = MTLFrontFace(GetFrontFace());
     mMtlCullMode = ToMTLCullMode(GetCullMode());
+    // Build a mapping of vertex buffer slots to packed indices
+    {
+        // Vertex buffers are placed after all the buffers for the bind groups.
+        uint32_t mtlVertexBufferIndex =
+            ToBackend(GetLayout())->GetBufferBindingCount(SingleShaderStage::Vertex);
+
+        for (VertexBufferSlot slot : IterateBitSet(GetVertexBuffersUsed())) {
+            mMtlVertexBufferIndices[slot] = mtlVertexBufferIndex;
+            mtlVertexBufferIndex++;
+        }
+    }
+
     auto mtlDevice = ToBackend(GetDevice())->GetMTLDevice();
 
     NSRef<MTLRenderPipelineDescriptor> descriptorMTLRef =
         AcquireNSRef([MTLRenderPipelineDescriptor new]);
     MTLRenderPipelineDescriptor* descriptorMTL = descriptorMTLRef.Get();
 
-    // TODO(dawn:1384): MakeVertexDesc should be const in the future, so we don't need to call
-    // it here when vertex pulling is enabled
-    NSRef<MTLVertexDescriptor> vertexDesc = MakeVertexDesc();
+    NSRef<NSString> label = MakeDebugName(GetDevice(), "Dawn_RenderPipeline", GetLabel());
+    descriptorMTL.label = label.Get();
 
-    // Calling MakeVertexDesc first is important since it sets indices for packed bindings
+    NSRef<MTLVertexDescriptor> vertexDesc;
     if (GetDevice()->IsToggleEnabled(Toggle::MetalEnableVertexPulling)) {
         vertexDesc = AcquireNSRef([MTLVertexDescriptor new]);
+    } else {
+        vertexDesc = MakeVertexDesc();
     }
     descriptorMTL.vertexDescriptor = vertexDesc.Get();
 
@@ -354,40 +416,71 @@ MaybeError RenderPipeline::Initialize() {
         ShaderModule::MetalFunctionData fragmentData;
         DAWN_TRY(ToBackend(fragmentStage.module.Get())
                      ->CreateFunction(SingleShaderStage::Fragment, fragmentStage,
-                                      ToBackend(GetLayout()), &fragmentData, GetSampleMask()));
+                                      ToBackend(GetLayout()), &fragmentData, GetSampleMask(),
+                                      this));
 
         descriptorMTL.fragmentFunction = fragmentData.function.Get();
         if (fragmentData.needsStorageBufferLength) {
             mStagesRequiringStorageBufferLength |= wgpu::ShaderStage::Fragment;
         }
 
-        const auto& fragmentOutputsWritten = fragmentStage.metadata->fragmentOutputsWritten;
-        for (ColorAttachmentIndex i : IterateBitSet(GetColorAttachmentsMask())) {
+        const auto& fragmentOutputMask = fragmentStage.metadata->fragmentOutputMask;
+        for (auto i : IterateBitSet(GetColorAttachmentsMask())) {
             descriptorMTL.colorAttachments[static_cast<uint8_t>(i)].pixelFormat =
-                MetalPixelFormat(GetColorAttachmentFormat(i));
+                MetalPixelFormat(GetDevice(), GetColorAttachmentFormat(i));
             const ColorTargetState* descriptor = GetColorTargetState(i);
             ComputeBlendDesc(descriptorMTL.colorAttachments[static_cast<uint8_t>(i)], descriptor,
-                             fragmentOutputsWritten[i]);
+                             fragmentOutputMask[i]);
+        }
+
+        if (GetAttachmentState()->HasPixelLocalStorage()) {
+            const std::vector<wgpu::TextureFormat>& storageAttachmentSlots =
+                GetAttachmentState()->GetStorageAttachmentSlots();
+            std::vector<ColorAttachmentIndex> storageAttachmentPacking =
+                GetAttachmentState()->ComputeStorageAttachmentPackingInColorAttachments();
+
+            for (size_t i = 0; i < storageAttachmentSlots.size(); i++) {
+                uint8_t index = static_cast<uint8_t>(storageAttachmentPacking[i]);
+
+                if (storageAttachmentSlots[i] == wgpu::TextureFormat::Undefined) {
+                    descriptorMTL.colorAttachments[index].pixelFormat =
+                        MetalPixelFormat(GetDevice(), kImplicitPLSSlotFormat);
+                } else {
+                    descriptorMTL.colorAttachments[index].pixelFormat =
+                        MetalPixelFormat(GetDevice(), storageAttachmentSlots[i]);
+                }
+            }
         }
     }
 
     if (HasDepthStencilAttachment()) {
         wgpu::TextureFormat depthStencilFormat = GetDepthStencilFormat();
-        const Format& internalFormat = GetDevice()->GetValidInternalFormat(depthStencilFormat);
-        MTLPixelFormat metalFormat = MetalPixelFormat(depthStencilFormat);
+        MTLPixelFormat metalFormat = MetalPixelFormat(GetDevice(), depthStencilFormat);
 
-        if (internalFormat.HasDepth()) {
-            descriptorMTL.depthAttachmentPixelFormat = metalFormat;
-        }
-        if (internalFormat.HasStencil()) {
-            descriptorMTL.stencilAttachmentPixelFormat = metalFormat;
+        if (GetDevice()->IsToggleEnabled(
+                Toggle::MetalUseBothDepthAndStencilAttachmentsForCombinedDepthStencilFormats)) {
+            if (GetDepthStencilAspects(metalFormat) & Aspect::Depth) {
+                descriptorMTL.depthAttachmentPixelFormat = metalFormat;
+            }
+            if (GetDepthStencilAspects(metalFormat) & Aspect::Stencil) {
+                descriptorMTL.stencilAttachmentPixelFormat = metalFormat;
+            }
+        } else {
+            const Format& internalFormat = GetDevice()->GetValidInternalFormat(depthStencilFormat);
+            if (internalFormat.HasDepth()) {
+                descriptorMTL.depthAttachmentPixelFormat = metalFormat;
+            }
+            if (internalFormat.HasStencil()) {
+                descriptorMTL.stencilAttachmentPixelFormat = metalFormat;
+            }
         }
     }
 
     descriptorMTL.inputPrimitiveTopology = MTLInputPrimitiveTopology(GetPrimitiveTopology());
-    descriptorMTL.sampleCount = GetSampleCount();
+    descriptorMTL.rasterSampleCount = GetSampleCount();
     descriptorMTL.alphaToCoverageEnabled = IsAlphaToCoverageEnabled();
 
+    platform::metrics::DawnHistogramTimer timer(GetDevice()->GetPlatform());
     NSError* error = nullptr;
     mMtlRenderPipelineState =
         AcquireNSPRef([mtlDevice newRenderPipelineStateWithDescriptor:descriptorMTL error:&error]);
@@ -395,7 +488,8 @@ MaybeError RenderPipeline::Initialize() {
         return DAWN_INTERNAL_ERROR(std::string("Error creating pipeline state ") +
                                    [error.localizedDescription UTF8String]);
     }
-    ASSERT(mMtlRenderPipelineState != nil);
+    DAWN_ASSERT(mMtlRenderPipelineState != nil);
+    timer.RecordMicroseconds("Metal.newRenderPipelineStateWithDescriptor.CacheMiss");
 
     // Create depth stencil state and cache it, fetch the cached depth stencil state when we
     // call setDepthStencilState() for a given render pipeline in CommandEncoder, in order
@@ -429,7 +523,7 @@ id<MTLDepthStencilState> RenderPipeline::GetMTLDepthStencilState() {
 }
 
 uint32_t RenderPipeline::GetMtlVertexBufferIndex(VertexBufferSlot slot) const {
-    ASSERT(slot < kMaxVertexBuffersTyped);
+    DAWN_ASSERT(slot < kMaxVertexBuffersTyped);
     return mMtlVertexBufferIndices[slot];
 }
 
@@ -437,14 +531,10 @@ wgpu::ShaderStage RenderPipeline::GetStagesRequiringStorageBufferLength() const 
     return mStagesRequiringStorageBufferLength;
 }
 
-NSRef<MTLVertexDescriptor> RenderPipeline::MakeVertexDesc() {
+NSRef<MTLVertexDescriptor> RenderPipeline::MakeVertexDesc() const {
     MTLVertexDescriptor* mtlVertexDescriptor = [MTLVertexDescriptor new];
 
-    // Vertex buffers are packed after all the buffers for the bind groups.
-    uint32_t mtlVertexBufferIndex =
-        ToBackend(GetLayout())->GetBufferBindingCount(SingleShaderStage::Vertex);
-
-    for (VertexBufferSlot slot : IterateBitSet(GetVertexBufferSlotsUsed())) {
+    for (VertexBufferSlot slot : IterateBitSet(GetVertexBuffersUsed())) {
         const VertexBufferInfo& info = GetVertexBuffer(slot);
 
         MTLVertexBufferLayoutDescriptor* layoutDesc = [MTLVertexBufferLayoutDescriptor new];
@@ -474,11 +564,8 @@ NSRef<MTLVertexDescriptor> RenderPipeline::MakeVertexDesc() {
             layoutDesc.stride = info.arrayStride;
         }
 
-        mtlVertexDescriptor.layouts[mtlVertexBufferIndex] = layoutDesc;
+        mtlVertexDescriptor.layouts[GetMtlVertexBufferIndex(slot)] = layoutDesc;
         [layoutDesc release];
-
-        mMtlVertexBufferIndices[slot] = mtlVertexBufferIndex;
-        mtlVertexBufferIndex++;
     }
 
     for (VertexAttributeLocation loc : IterateBitSet(GetAttributeLocationsUsed())) {
@@ -487,7 +574,7 @@ NSRef<MTLVertexDescriptor> RenderPipeline::MakeVertexDesc() {
         auto attribDesc = [MTLVertexAttributeDescriptor new];
         attribDesc.format = VertexFormatType(info.format);
         attribDesc.offset = info.offset;
-        attribDesc.bufferIndex = mMtlVertexBufferIndices[info.vertexBufferSlot];
+        attribDesc.bufferIndex = GetMtlVertexBufferIndex(info.vertexBufferSlot);
         mtlVertexDescriptor.attributes[static_cast<uint8_t>(loc)] = attribDesc;
         [attribDesc release];
     }
@@ -498,9 +585,17 @@ NSRef<MTLVertexDescriptor> RenderPipeline::MakeVertexDesc() {
 void RenderPipeline::InitializeAsync(Ref<RenderPipelineBase> renderPipeline,
                                      WGPUCreateRenderPipelineAsyncCallback callback,
                                      void* userdata) {
+    PhysicalDeviceBase* physicalDevice = renderPipeline->GetDevice()->GetPhysicalDevice();
     std::unique_ptr<CreateRenderPipelineAsyncTask> asyncTask =
         std::make_unique<CreateRenderPipelineAsyncTask>(std::move(renderPipeline), callback,
                                                         userdata);
+    // Workaround a crash where the validation layers on AMD crash with partition alloc.
+    // See crbug.com/dawn/1200.
+    if (IsMetalValidationEnabled(physicalDevice) &&
+        gpu_info::IsAMD(physicalDevice->GetVendorId())) {
+        asyncTask->Run();
+        return;
+    }
     CreateRenderPipelineAsyncTask::RunAsync(std::move(asyncTask));
 }
 

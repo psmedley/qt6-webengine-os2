@@ -1,5 +1,5 @@
 // Copyright (C) 2021 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 import QtQuick
 import QtTest
@@ -19,8 +19,9 @@ TestWebEngineView {
     }
 
     property QtObject nonOTRProfile: WebEngineProfile {
-        persistentStoragePath: tempDir.path() + '/WebEngineFavicon'
         offTheRecord: false
+        storageName: 'WebEngineFavicon'
+        persistentStoragePath: tempDir.path() + '/WebEngineFavicon'
     }
 
     function getFaviconPixel(faviconImage) {
@@ -101,8 +102,7 @@ TestWebEngineView {
             webEngineView.url = Qt.resolvedUrl("favicon.html"); // favicon.png -> 165
             verify(webEngineView.waitForLoadSucceeded());
 
-            iconChangedSpy.wait();
-            compare(iconChangedSpy.count, 1);
+            tryCompare(iconChangedSpy, "count", 1);
 
             var previousIcon = webEngineView.icon;
             iconChangedSpy.clear();
@@ -148,8 +148,9 @@ TestWebEngineView {
                     TestWebEngineView {\n
                         TempDir { id: tempDir }
                         profile: WebEngineProfile {\n
-                            persistentStoragePath: tempDir.path() + '/WebEngineFavicon1'\n
                             offTheRecord: false\n
+                            storageName: 'WebEngineFavicon1'\n
+                            persistentStoragePath: tempDir.path() + '/WebEngineFavicon1'\n
                         }\n
                     }", testCase);
 
@@ -160,8 +161,9 @@ TestWebEngineView {
                     TestWebEngineView {\n
                         TempDir { id: tempDir }
                         profile: WebEngineProfile {\n
-                            persistentStoragePath: tempDir.path() + '/WebEngineFavicon2'\n
                             offTheRecord: false\n
+                            storageName: 'WebEngineFavicon2'\n
+                            persistentStoragePath: tempDir.path() + '/WebEngineFavicon2'\n
                         }\n
                     }", testCase);
 
@@ -213,4 +215,3 @@ TestWebEngineView {
         }
     }
 }
-

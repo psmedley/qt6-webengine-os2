@@ -29,76 +29,77 @@
 import * as Common from '../../../../core/common/common.js';
 import * as i18n from '../../../../core/i18n/i18n.js';
 import * as Platform from '../../../../core/platform/platform.js';
+import * as VisualLogging from '../../../visual_logging/visual_logging.js';
 import * as UI from '../../legacy.js';
 
 import dataGridStyles from './dataGrid.css.js';
 
 const UIStrings = {
   /**
-  *@description Accessible text label for expandible nodes in datagrids
-  */
+   *@description Accessible text label for expandible nodes in datagrids
+   */
   expanded: 'expanded',
   /**
-  *@description accessible name for expandible nodes in datagrids
-  */
+   *@description accessible name for expandible nodes in datagrids
+   */
   collapsed: 'collapsed',
   /**
-  *@description Accessible text for datagrid
-  *@example {Coverage grid} PH1
-  *@example {expanded} PH2
-  */
+   *@description Accessible text for datagrid
+   *@example {Coverage grid} PH1
+   *@example {expanded} PH2
+   */
   sRowS: '{PH1} Row {PH2}',
   /**
-  *@description Number of rows in a grid
-  *@example {1} PH1
-  */
+   *@description Number of rows in a grid
+   *@example {1} PH1
+   */
   rowsS: 'Rows: {PH1}',
   /**
-  * @description Default Accessible Text for a Datagrid. This text is read to the user by a
-  * screenreader when they navigate to a table structure. The placeholders tell the user something
-  * brief about the table contents i.e. the topic and how much data is in it.
-  * @example {Network} PH1
-  * @example {Rows: 27} PH2
-  */
+   * @description Default Accessible Text for a Datagrid. This text is read to the user by a
+   * screenreader when they navigate to a table structure. The placeholders tell the user something
+   * brief about the table contents i.e. the topic and how much data is in it.
+   * @example {Network} PH1
+   * @example {Rows: 27} PH2
+   */
   sSUseTheUpAndDownArrowKeysTo:
       '{PH1} {PH2}, use the up and down arrow keys to navigate and interact with the rows of the table; Use browse mode to read cell by cell.',
   /**
-  *@description A context menu item in the Data Grid of a data grid
-  */
+   *@description A context menu item in the Data Grid of a data grid
+   */
   sortByString: 'Sort By',
   /**
-  *@description A context menu item in data grids to reset the columns to their default weight
-  */
+   *@description A context menu item in data grids to reset the columns to their default weight
+   */
   resetColumns: 'Reset Columns',
   /**
-  *@description A context menu item in data grids to list header options.
-  */
+   *@description A context menu item in data grids to list header options.
+   */
   headerOptions: 'Header Options',
   /**
-  *@description Text to refresh the page
-  */
+   *@description Text to refresh the page
+   */
   refresh: 'Refresh',
   /**
-  *@description A context menu item in the Data Grid of a data grid
-  */
+   *@description A context menu item in the Data Grid of a data grid
+   */
   addNew: 'Add new',
   /**
-  *@description A context menu item in the Data Grid of a data grid
-  *@example {pattern} PH1
-  */
+   *@description A context menu item in the Data Grid of a data grid
+   *@example {pattern} PH1
+   */
   editS: 'Edit "{PH1}"',
   /**
-  *@description Text to delete something
-  */
+   *@description Text to delete something
+   */
   delete: 'Delete',
   /**
-  *@description Depth of a node in the datagrid
-  *@example {1} PH1
-  */
+   *@description Depth of a node in the datagrid
+   *@example {1} PH1
+   */
   levelS: 'level {PH1}',
   /**
-  *@description Text exposed to screen readers on checked items.
-  */
+   *@description Text exposed to screen readers on checked items.
+   */
   checked: 'checked',
   /**
    *@description Accessible text indicating an empty row is created.
@@ -111,8 +112,6 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 const elementToLongTextMap = new WeakMap<Element, string>();
 
 const nodeToColumnIdMap = new WeakMap<Node, string>();
-
-const elementToSortIconMap = new WeakMap<Element, UI.Icon.Icon>();
 
 const elementToPreferedWidthMap = new WeakMap<Element, number>();
 
@@ -178,7 +177,6 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
       event.consume(true);
     });
     this.element.addEventListener('focusout', event => {
-      this.updateGridAccessibleName(/* text */ '');
       event.consume(true);
     });
 
@@ -354,13 +352,18 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     this.element.classList.toggle('no-selection', !hasSelected);
   }
 
-  updateGridAccessibleName(text?: string): void {
-    // Update the label with the provided text or the current selected node
-    const accessibleText =
-        (this.selectedNode && this.selectedNode.existingElement()) ? this.selectedNode.nodeAccessibleText : '';
-    if (this.element === Platform.DOMUtilities.deepActiveElement(this.element.ownerDocument)) {
-      // Only alert if the datagrid has focus
-      UI.ARIAUtils.alert(text ? text : accessibleText);
+  announceSelectedGridNode(): void {
+    // Only alert if the datagrid has focus
+    if (this.element === Platform.DOMUtilities.deepActiveElement(this.element.ownerDocument) && this.selectedNode &&
+        this.selectedNode.existingElement()) {
+      // Update the expand/collapse state for the current selected node
+      let expandText;
+      if (this.selectedNode.hasChildren()) {
+        expandText = this.selectedNode.expanded ? i18nString(UIStrings.expanded) : i18nString(UIStrings.collapsed);
+      }
+      const accessibleText =
+          expandText ? `${this.selectedNode.nodeAccessibleText}, ${expandText}` : this.selectedNode.nodeAccessibleText;
+      UI.ARIAUtils.alert(accessibleText);
     }
   }
 
@@ -407,6 +410,7 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     }
 
     const cell = document.createElement('th');
+    cell.setAttribute('jslog', `${VisualLogging.tableHeader().track({click: column.sortable}).context(columnId)}`);
     cell.className = columnId + '-column';
     nodeToColumnIdMap.set(cell, columnId);
     this.dataTableHeaders[columnId] = cell;
@@ -427,9 +431,9 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     if (column.sortable) {
       cell.addEventListener('click', this.clickInHeaderCell.bind(this), false);
       cell.classList.add('sortable');
-      const icon = UI.Icon.Icon.create('', 'sort-order-icon');
+      const icon = document.createElement('span');
+      icon.className = 'sort-order-icon';
       cell.createChild('div', 'sort-order-icon-container').appendChild(icon);
-      elementToSortIconMap.set(cell, icon);
     }
   }
 
@@ -559,7 +563,7 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     const column = this.visibleColumnsArray[cellIndex];
     if (column.dataType === DataType.Boolean) {
       const checkboxLabel = UI.UIUtils.CheckboxLabel.create(undefined, (node.data[column.id] as boolean));
-      UI.ARIAUtils.setAccessibleName(checkboxLabel, column.title || '');
+      UI.ARIAUtils.setLabel(checkboxLabel, column.title || '');
 
       let hasChanged = false;
       checkboxLabel.style.height = '100%';
@@ -608,10 +612,11 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     }
   }
 
-  startEditingNextEditableColumnOfDataGridNode(node: DataGridNode<T>, columnIdentifier: string): void {
+  startEditingNextEditableColumnOfDataGridNode(node: DataGridNode<T>, columnIdentifier: string, inclusive?: boolean):
+      void {
     const column = this.columns[columnIdentifier];
     const cellIndex = this.visibleColumnsArray.indexOf(column);
-    const nextEditableColumn = this.nextEditableColumn(cellIndex);
+    const nextEditableColumn = this.nextEditableColumn(cellIndex, false, inclusive);
     if (nextEditableColumn !== -1) {
       this.startEditingColumnOfDataGridNode(node, nextEditableColumn);
     }
@@ -753,10 +758,11 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     this.editingNode = null;
   }
 
-  private nextEditableColumn(cellIndex: number, moveBackward?: boolean): number {
+  private nextEditableColumn(cellIndex: number, moveBackward?: boolean, inclusive?: boolean): number {
     const increment = moveBackward ? -1 : 1;
+    const start = inclusive ? cellIndex : cellIndex + increment;
     const columns = this.visibleColumnsArray;
-    for (let i = cellIndex + increment; (i >= 0) && (i < columns.length); i += increment) {
+    for (let i = start; (i >= 0) && (i < columns.length); i += increment) {
       if (columns[i].editable) {
         return i;
       }
@@ -941,7 +947,14 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     if (!this.columnWeightsSetting) {
       return;
     }
-    const weights = this.columnWeightsSetting.get();
+    const weights: {
+      [x: string]: any,
+    } = {};
+    // TODO(b/320405843): remove this when kebab migration is complete and
+    // replace with settings version upgrade
+    for (const [key, value] of Object.entries(this.columnWeightsSetting.get())) {
+      weights[Platform.StringUtilities.toKebabCase(key)] = value;
+    }
     for (let i = 0; i < this.columnsArray.length; ++i) {
       const column = this.columnsArray[i];
       const weight = weights[column.id];
@@ -1181,7 +1194,7 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
       nextSelectedNode.select();
     }
 
-    if (handled && document.activeElement !== this.element) {
+    if (handled && this.element !== document.activeElement && !this.element.contains(document.activeElement)) {
       // crbug.com/1005449, crbug.com/1329956
       // navigational or delete keys pressed but current DataGrid panel has lost focus;
       // re-focus to ensure subsequent keydowns can be registered within this DataGrid
@@ -1265,11 +1278,6 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
     this.sortColumnCell = cell;
 
     cell.classList.add(sortOrder);
-    const icon = elementToSortIconMap.get(cell);
-    if (!icon) {
-      return;
-    }
-    icon.setIconType(sortOrder === Order.Ascending ? 'smallicon-triangle-up' : 'smallicon-triangle-down');
 
     this.dispatchEventToListeners(Events.SortingChanged);
   }
@@ -1338,7 +1346,9 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
       for (const column of sortableColumns) {
         const headerCell = this.dataTableHeaders[column.id];
         sortMenu.defaultSection().appendItem(
-            (column.title as string), this.sortByColumnHeaderCell.bind(this, headerCell));
+            (column.title as string), this.sortByColumnHeaderCell.bind(this, headerCell), {
+              jslogContext: column.id,
+            });
       }
     }
 
@@ -1454,7 +1464,7 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
 
     // Constrain the dragpoint to be within the containing div of the
     // datagrid.
-    let dragPoint: number = event.clientX - this.element.totalOffsetLeft();
+    let dragPoint: number = event.clientX - this.element.getBoundingClientRect().left;
     let leftEdgeOfPreviousColumn = 0;
     // Constrain the dragpoint to be within the space made up by the
     // column directly to the left and the column directly to the right.
@@ -1569,9 +1579,7 @@ export class DataGridImpl<T> extends Common.ObjectWrapper.ObjectWrapper<EventTyp
 // Keep in sync with .data-grid col.corner style rule.
 export const CornerWidth = 14;
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   SelectedNode = 'SelectedNode',
   DeselectedNode = 'DeselectedNode',
   OpenedNode = 'OpenedNode',
@@ -1587,33 +1595,25 @@ export type EventTypes<T> = {
   [Events.PaddingChanged]: void,
 };
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
 export enum Order {
   Ascending = 'sort-ascending',
   Descending = 'sort-descending',
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Align {
+export const enum Align {
   Center = 'center',
   Right = 'right',
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum DataType {
+export const enum DataType {
   String = 'String',
   Boolean = 'Boolean',
 }
 
-export const ColumnResizePadding = 24;
+export const ColumnResizePadding = 34;
 export const CenterResizerOverBorderAdjustment = 3;
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum ResizeMethod {
+export const enum ResizeMethod {
   Nearest = 'nearest',
   First = 'first',
   Last = 'last',
@@ -1645,7 +1645,7 @@ export class DataGridNode<T> {
   parent: DataGridNode<T>|null;
   previousSibling: DataGridNode<T>|null;
   nextSibling: DataGridNode<T>|null;
-  disclosureToggleWidth: number;
+  #disclosureToggleWidth: number = 15;
   selectable: boolean;
   isRoot: boolean;
   nodeAccessibleText: string;
@@ -1668,7 +1668,6 @@ export class DataGridNode<T> {
     this.parent = null;
     this.previousSibling = null;
     this.nextSibling = null;
-    this.disclosureToggleWidth = 10;
 
     this.selectable = true;
 
@@ -1931,6 +1930,12 @@ export class DataGridNode<T> {
 
   createTD(columnId: string): HTMLElement {
     const cell = this.createTDWithClass(columnId + '-column');
+    cell.setAttribute(
+        'jslog',
+        `${
+            VisualLogging.tableCell()
+                .track({click: true, keydown: Boolean(this.dataGrid?.columns[columnId].editable)})
+                .context(columnId)}`);
     nodeToColumnIdMap.set(cell, columnId);
 
     if (this.dataGrid) {
@@ -1944,6 +1949,13 @@ export class DataGridNode<T> {
         if (this.leftPadding) {
           cell.style.setProperty('padding-left', this.leftPadding + 'px');
         }
+      }
+
+      // Allow accessibility tool to identify the editable cell and display context menu
+      const editableCell = this.dataGrid.columns[columnId].editable;
+      if (editableCell) {
+        cell.tabIndex = 0;
+        cell.ariaHasPopup = 'true';
       }
     }
 
@@ -1968,7 +1980,7 @@ export class DataGridNode<T> {
     for (let i = 0; i < cell.children.length; i++) {
       UI.ARIAUtils.markAsHidden(cell.children[i]);
     }
-    UI.ARIAUtils.setAccessibleName(cell, name);
+    UI.ARIAUtils.setLabel(cell, name);
   }
 
   nodeSelfHeight(): number {
@@ -2113,7 +2125,7 @@ export class DataGridNode<T> {
 
     this.expandedInternal = false;
     if (this.selected && this.dataGrid) {
-      this.dataGrid.updateGridAccessibleName(/* text */ i18nString(UIStrings.collapsed));
+      this.dataGrid.announceSelectedGridNode();
     }
 
     for (let i = 0; i < this.children.length; ++i) {
@@ -2172,7 +2184,7 @@ export class DataGridNode<T> {
       this.elementInternal.classList.add('expanded');
     }
     if (this.selected && this.dataGrid) {
-      this.dataGrid.updateGridAccessibleName(/* text */ i18nString(UIStrings.expanded));
+      this.dataGrid.announceSelectedGridNode();
     }
 
     this.expandedInternal = true;
@@ -2216,7 +2228,7 @@ export class DataGridNode<T> {
     if (this.elementInternal) {
       this.elementInternal.classList.add('selected');
       this.dataGrid.setHasSelection(true);
-      this.dataGrid.updateGridAccessibleName();
+      this.dataGrid.announceSelectedGridNode();
     }
 
     if (!supressSelectedEvent) {
@@ -2243,7 +2255,6 @@ export class DataGridNode<T> {
     if (this.elementInternal) {
       this.elementInternal.classList.remove('selected');
       this.dataGrid.setHasSelection(false);
-      this.dataGrid.updateGridAccessibleName('');
     }
 
     if (!supressDeselectedEvent) {
@@ -2329,8 +2340,8 @@ export class DataGridNode<T> {
       return false;
     }
 
-    const left = cell.totalOffsetLeft() + this.leftPadding;
-    return event.pageX >= left && event.pageX <= left + this.disclosureToggleWidth;
+    const left = cell.getBoundingClientRect().left + this.leftPadding;
+    return event.pageX >= left && event.pageX <= left + this.#disclosureToggleWidth;
   }
 
   private attach(): void {
@@ -2392,7 +2403,7 @@ export class DataGridNode<T> {
 }
 
 export class CreationDataGridNode<T> extends DataGridNode<T> {
-  isCreationNode: boolean;
+  override isCreationNode: boolean;
   constructor(
       data?: {
         [x: string]: any,
@@ -2416,20 +2427,20 @@ export class DataGridWidget<T> extends UI.Widget.VBox {
     this.setDefaultFocusedElement(dataGrid.element);
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     this.registerCSSFiles([dataGridStyles]);
     this.dataGrid.wasShown();
   }
 
-  willHide(): void {
+  override willHide(): void {
     this.dataGrid.willHide();
   }
 
-  onResize(): void {
+  override onResize(): void {
     this.dataGrid.onResize();
   }
 
-  elementsToRestoreScrollPositionsFor(): Element[] {
+  override elementsToRestoreScrollPositionsFor(): Element[] {
     return [this.dataGrid.scrollContainer];
   }
 }
@@ -2441,7 +2452,7 @@ export interface Parameters {
   refreshCallback?: (() => void);
 }
 export interface ColumnDescriptor {
-  id: string;
+  id: Platform.StringUtilities.KebabString;
   title?: Common.UIString.LocalizedString;
   titleDOMFragment?: DocumentFragment|null;
   sortable: boolean;

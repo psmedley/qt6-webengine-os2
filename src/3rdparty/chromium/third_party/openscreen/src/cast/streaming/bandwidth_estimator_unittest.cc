@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,10 @@
 #include "platform/api/time.h"
 #include "util/chrono_helpers.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 namespace {
 
-using openscreen::operator<<;  // For std::chrono::duration gtest pretty-print.
+using clock_operators::operator<<;
 
 // BandwidthEstimator configuration common to all tests.
 constexpr int kMaxPacketsPerTimeslice = 10;
@@ -228,5 +227,4 @@ TEST_F(BandwidthEstimatorTest, ClampsEstimateToMaxInt) {
 }
 
 }  // namespace
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

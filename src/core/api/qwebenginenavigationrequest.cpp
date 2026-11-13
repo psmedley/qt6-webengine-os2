@@ -1,5 +1,6 @@
 // Copyright (C) 2021 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qwebenginenavigationrequest.h"
 
@@ -9,15 +10,17 @@ QT_BEGIN_NAMESPACE
 
 class QWebEngineNavigationRequestPrivate {
 public:
-    QWebEngineNavigationRequestPrivate(const QUrl& url, QWebEngineNavigationRequest::NavigationType navigationType, bool mainFrame)
+    QWebEngineNavigationRequestPrivate(const QUrl& url, QWebEngineNavigationRequest::NavigationType navigationType, bool mainFrame, bool formData)
         : url(url)
         , navigationType(navigationType)
         , isMainFrame(mainFrame)
+        , hasFormData(formData)
     {}
 
     QUrl url;
     QWebEngineNavigationRequest::NavigationType navigationType;
     bool isMainFrame;
+    bool hasFormData;
     bool isAccepted = true;
 };
 
@@ -39,7 +42,7 @@ public:
 
 /*!
     \qmltype WebEngineNavigationRequest
-    \instantiates QWebEngineNavigationRequest
+    \nativetype QWebEngineNavigationRequest
     \inqmlmodule QtWebEngine
     \since QtWebEngine 1.0
 
@@ -51,9 +54,9 @@ public:
 
 /*! \internal
 */
-QWebEngineNavigationRequest::QWebEngineNavigationRequest(const QUrl& url, QWebEngineNavigationRequest::NavigationType navigationType, bool mainFrame, QObject* parent)
+QWebEngineNavigationRequest::QWebEngineNavigationRequest(const QUrl& url, QWebEngineNavigationRequest::NavigationType navigationType, bool mainFrame, bool formData, QObject* parent)
     : QObject(parent)
-    , d_ptr(new QWebEngineNavigationRequestPrivate(url, navigationType, mainFrame))
+    , d_ptr(new QWebEngineNavigationRequestPrivate(url, navigationType, mainFrame, formData))
 {
 }
 
@@ -172,6 +175,25 @@ bool QWebEngineNavigationRequest::isMainFrame() const
 {
     Q_D(const QWebEngineNavigationRequest);
     return d->isMainFrame;
+}
+
+/*!
+    \property QWebEngineNavigationRequest::hasFormData
+    \brief Whether the navigation request contains form data
+    \since 6.8
+*/
+/*!
+    \qmlproperty bool WebEngineNavigationRequest::hasFormData
+    \since 6.8
+    \readonly
+
+    Whether the navigation request contains form data
+*/
+
+bool QWebEngineNavigationRequest::hasFormData() const
+{
+    Q_D(const QWebEngineNavigationRequest);
+    return d->hasFormData;
 }
 
 /*! \internal */

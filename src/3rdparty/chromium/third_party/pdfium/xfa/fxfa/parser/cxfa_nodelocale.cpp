@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,6 +43,7 @@ CXFA_NodeLocale::CXFA_NodeLocale(CXFA_Node* pNode) : m_pNode(pNode) {}
 CXFA_NodeLocale::~CXFA_NodeLocale() = default;
 
 void CXFA_NodeLocale::Trace(cppgc::Visitor* visitor) const {
+  GCedLocaleIface::Trace(visitor);
   visitor->Trace(m_pNode);
 }
 

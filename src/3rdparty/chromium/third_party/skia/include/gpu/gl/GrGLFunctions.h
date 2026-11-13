@@ -11,7 +11,7 @@
 
 #include <cstring>
 #include "include/gpu/gl/GrGLTypes.h"
-#include "include/private/SkTLogic.h"
+#include "include/private/base/SkTLogic.h"
 
 
 extern "C" {
@@ -268,7 +268,7 @@ public:
         if (fn_ptr) {
             memcpy(fBuf, &fn_ptr, sizeof(fn_ptr));
             fCall = [](const void* buf, Args... args) {
-                return (*(Fn**)buf)(std::forward<Args>(args)...);
+                return (*(Fn* const *)buf)(std::forward<Args>(args)...);
             };
         }
     }

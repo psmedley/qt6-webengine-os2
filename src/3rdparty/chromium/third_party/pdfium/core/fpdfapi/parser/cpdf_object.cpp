@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "core/fpdfapi/parser/cpdf_parser.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fxcrt/fx_string.h"
+#include "third_party/base/check.h"
 #include "third_party/base/notreached.h"
 
 CPDF_Object::~CPDF_Object() = default;
@@ -33,11 +34,15 @@ uint64_t CPDF_Object::KeyForCache() const {
 }
 
 RetainPtr<CPDF_Object> CPDF_Object::GetMutableDirect() {
-  return pdfium::WrapRetain(this);
+  return pdfium::WrapRetain(const_cast<CPDF_Object*>(GetDirectInternal()));
 }
 
 RetainPtr<const CPDF_Object> CPDF_Object::GetDirect() const {
-  return const_cast<CPDF_Object*>(this)->GetMutableDirect();
+  return pdfium::WrapRetain(GetDirectInternal());
+}
+
+const CPDF_Object* CPDF_Object::GetDirectInternal() const {
+  return this;
 }
 
 RetainPtr<CPDF_Object> CPDF_Object::CloneObjectNonCyclic(bool bDirect) const {
@@ -71,16 +76,20 @@ int CPDF_Object::GetInteger() const {
   return 0;
 }
 
-RetainPtr<CPDF_Dictionary> CPDF_Object::GetMutableDict() {
-  return pdfium::WrapRetain(const_cast<CPDF_Dictionary*>(GetDict().Get()));
+RetainPtr<const CPDF_Dictionary> CPDF_Object::GetDict() const {
+  return pdfium::WrapRetain(GetDictInternal());
 }
 
-RetainPtr<const CPDF_Dictionary> CPDF_Object::GetDict() const {
+RetainPtr<CPDF_Dictionary> CPDF_Object::GetMutableDict() {
+  return pdfium::WrapRetain(const_cast<CPDF_Dictionary*>(GetDictInternal()));
+}
+
+const CPDF_Dictionary* CPDF_Object::GetDictInternal() const {
   return nullptr;
 }
 
 void CPDF_Object::SetString(const ByteString& str) {
-  NOTREACHED();
+  NOTREACHED_NORETURN();
 }
 
 CPDF_Array* CPDF_Object::AsMutableArray() {
@@ -157,9 +166,6 @@ const CPDF_String* CPDF_Object::AsString() const {
 
 RetainPtr<CPDF_Reference> CPDF_Object::MakeReference(
     CPDF_IndirectObjectHolder* holder) const {
-  if (IsInline()) {
-    NOTREACHED();
-    return nullptr;
-  }
+  CHECK(!IsInline());
   return pdfium::MakeRetain<CPDF_Reference>(holder, GetObjNum());
 }

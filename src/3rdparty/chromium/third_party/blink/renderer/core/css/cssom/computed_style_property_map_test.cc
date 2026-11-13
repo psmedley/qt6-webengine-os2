@@ -15,8 +15,9 @@ class ComputedStylePropertyMapTest : public PageTestBase {
   ComputedStylePropertyMapTest() = default;
 
  protected:
-  ComputedStylePropertyMap* SetBodyStyle(const AtomicString& style) {
-    GetDocument().body()->setAttribute(html_names::kStyleAttr, style);
+  ComputedStylePropertyMap* SetBodyStyle(const char* style) {
+    GetDocument().body()->setAttribute(html_names::kStyleAttr,
+                                       AtomicString(style));
     UpdateAllLifecyclePhasesForTest();
     return MakeGarbageCollected<ComputedStylePropertyMap>(GetDocument().body());
   }
@@ -49,6 +50,15 @@ TEST_F(ComputedStylePropertyMapTest, TransformPerspectiveZoom) {
                                         "transform", ASSERT_NO_EXCEPTION);
   ASSERT_TRUE(style_value);
   EXPECT_EQ("perspective(100px)", style_value->toString());
+}
+
+TEST_F(ComputedStylePropertyMapTest, TopWithAnchor) {
+  ComputedStylePropertyMap* map =
+      SetBodyStyle("position: absolute; top: anchor(bottom, 17px);");
+  CSSStyleValue* style_value =
+      map->get(GetDocument().GetExecutionContext(), "top", ASSERT_NO_EXCEPTION);
+  ASSERT_TRUE(style_value);
+  EXPECT_EQ("anchor(bottom, 17px)", style_value->toString());
 }
 
 }  // namespace blink

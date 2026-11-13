@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
 #include <random>
 #include <sstream>
 #include <string>
@@ -33,16 +34,18 @@
 #include "quiche/common/platform/api/quiche_logging.h"
 #include "quiche/common/platform/api/quiche_test.h"
 
-using testing::_;
-using testing::AnyNumber;
-using testing::AtLeast;
-using testing::InSequence;
-using testing::IsEmpty;
-using testing::Mock;
-using testing::NiceMock;
-using testing::Range;
-using testing::StrEq;
-using testing::StrictMock;
+using ::testing::_;
+using ::testing::AnyNumber;
+using ::testing::AtLeast;
+using ::testing::InSequence;
+using ::testing::IsEmpty;
+using ::testing::Mock;
+using ::testing::NiceMock;
+using ::testing::Pointee;
+using ::testing::Property;
+using ::testing::Range;
+using ::testing::StrEq;
+using ::testing::StrictMock;
 
 DEFINE_QUICHE_COMMAND_LINE_FLAG(
     std::string, randseed, "",
@@ -530,20 +533,18 @@ class BalsaVisitorMock : public BalsaVisitorInterface {
     GenerateFakeHeaders(headers, &fake_headers);
     ProcessHeaders(fake_headers);
   }
-  void ProcessTrailers(const BalsaHeaders& trailer) override {
-    FakeHeaders fake_headers;
-    GenerateFakeHeaders(trailer, &fake_headers);
-    ProcessTrailers(fake_headers);
+  void OnTrailers(std::unique_ptr<BalsaHeaders> trailers) override {
+    FakeHeaders fake_trailers;
+    GenerateFakeHeaders(*trailers, &fake_trailers);
+    OnTrailers(fake_trailers);
   }
 
   MOCK_METHOD(void, OnRawBodyInput, (absl::string_view input), (override));
   MOCK_METHOD(void, OnBodyChunkInput, (absl::string_view input), (override));
   MOCK_METHOD(void, OnHeaderInput, (absl::string_view input), (override));
-  MOCK_METHOD(void, OnHeader, (absl::string_view key, absl::string_view value),
-              (override));
   MOCK_METHOD(void, OnTrailerInput, (absl::string_view input), (override));
   MOCK_METHOD(void, ProcessHeaders, (const FakeHeaders& headers));
-  MOCK_METHOD(void, ProcessTrailers, (const FakeHeaders& headers));
+  MOCK_METHOD(void, OnTrailers, (const FakeHeaders& trailers));
   MOCK_METHOD(void, OnRequestFirstLineInput,
               (absl::string_view line_input, absl::string_view method_input,
                absl::string_view request_uri, absl::string_view version_input),
@@ -554,6 +555,8 @@ class BalsaVisitorMock : public BalsaVisitorInterface {
               (override));
   MOCK_METHOD(void, OnChunkLength, (size_t length), (override));
   MOCK_METHOD(void, OnChunkExtensionInput, (absl::string_view input),
+              (override));
+  MOCK_METHOD(void, OnInterimHeaders, (std::unique_ptr<BalsaHeaders> headers),
               (override));
   MOCK_METHOD(void, ContinueHeaderDone, (), (override));
   MOCK_METHOD(void, HeaderDone, (), (override));
@@ -576,14 +579,10 @@ class BalsaVisitorMock : public BalsaVisitorInterface {
 class HTTPBalsaFrameTest : public QuicheTest {
  protected:
   void SetUp() override {
-    balsa_frame_.set_http_validation_policy(
-        HttpValidationPolicy::CreateDefault());
     balsa_frame_.set_balsa_headers(&headers_);
-    balsa_frame_.set_balsa_trailer(&trailer_);
     balsa_frame_.set_balsa_visitor(&visitor_mock_);
     balsa_frame_.set_is_request(true);
-
-    EXPECT_CALL(visitor_mock_, OnHeader).Times(AnyNumber());
+    balsa_frame_.EnableTrailers();
   }
 
   void VerifyFirstLineParsing(const std::string& firstline,
@@ -593,7 +592,6 @@ class HTTPBalsaFrameTest : public QuicheTest {
   }
 
   BalsaHeaders headers_;
-  BalsaHeaders trailer_;
   BalsaFrame balsa_frame_;
   NiceMock<BalsaVisitorMock> visitor_mock_;
 };
@@ -641,10 +639,11 @@ TEST_F(HTTPBalsaFrameTest, MissingColonInTrailer) {
   BalsaFrame::Lines lines;
   lines.push_back({0, 4});
   lines.push_back({4, trailer.length()});
-  BalsaHeadersTestPeer::WriteFromFramer(&trailer_, trailer.data(),
+  BalsaHeaders trailers;
+  BalsaHeadersTestPeer::WriteFromFramer(&trailers, trailer.data(),
                                         trailer.length());
   BalsaFrameTestPeer::FindColonsAndParseIntoKeyValue(
-      &balsa_frame_, lines, true /*is_trailer*/, &trailer_);
+      &balsa_frame_, lines, true /*is_trailer*/, &trailers);
   // Note missing colon is not an error, just a warning.
   EXPECT_FALSE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::TRAILER_MISSING_COLON, balsa_frame_.ErrorCode());
@@ -665,14 +664,15 @@ TEST_F(HTTPBalsaFrameTest, FindColonsAndParseIntoKeyValueInTrailer) {
                    trailer_line1.length() + trailer_line2.length()});
   lines.push_back(
       {trailer_line1.length() + trailer_line2.length(), trailer.length()});
-  BalsaHeadersTestPeer::WriteFromFramer(&trailer_, trailer.data(),
+  BalsaHeaders trailers;
+  BalsaHeadersTestPeer::WriteFromFramer(&trailers, trailer.data(),
                                         trailer.length());
   BalsaFrameTestPeer::FindColonsAndParseIntoKeyValue(
-      &balsa_frame_, lines, true /*is_trailer*/, &trailer_);
+      &balsa_frame_, lines, true /*is_trailer*/, &trailers);
   EXPECT_FALSE(balsa_frame_.Error());
-  absl::string_view fraction = trailer_.GetHeader("Fraction");
+  absl::string_view fraction = trailers.GetHeader("Fraction");
   EXPECT_EQ("0.23", fraction);
-  absl::string_view some = trailer_.GetHeader("Some");
+  absl::string_view some = trailers.GetHeader("Some");
   EXPECT_EQ("junk", some);
 }
 
@@ -689,10 +689,11 @@ TEST_F(HTTPBalsaFrameTest, InvalidTrailer) {
                    trailer_line1.length() + trailer_line2.length()});
   lines.push_back(
       {trailer_line1.length() + trailer_line2.length(), trailer.length()});
-  BalsaHeadersTestPeer::WriteFromFramer(&trailer_, trailer.data(),
+  BalsaHeaders trailers;
+  BalsaHeadersTestPeer::WriteFromFramer(&trailers, trailer.data(),
                                         trailer.length());
   BalsaFrameTestPeer::FindColonsAndParseIntoKeyValue(
-      &balsa_frame_, lines, true /*is_trailer*/, &trailer_);
+      &balsa_frame_, lines, true /*is_trailer*/, &trailers);
   EXPECT_TRUE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::INVALID_TRAILER_NAME_CHARACTER,
             balsa_frame_.ErrorCode());
@@ -826,6 +827,7 @@ TEST(HTTPBalsaFrame, RequestLinesParsedProperly) {
       std::pair<std::string, std::string>("normal_key", "normal_value"),
   };
   const size_t headers_len = ABSL_ARRAYSIZE(headers);
+  HeaderLineTestHelper(firstline, true, headers, headers_len, ":", "\n");
   HeaderLineTestHelper(firstline, true, headers, headers_len, ": ", "\n");
   HeaderLineTestHelper(firstline, true, headers, headers_len, ": ", "\r\n");
   HeaderLineTestHelper(firstline, true, headers, headers_len, ":\t", "\n");
@@ -864,6 +866,7 @@ TEST(HTTPBalsaFrame, ResponseLinesParsedProperly) {
       std::pair<std::string, std::string>("normal_key", "normal_value"),
   };
   const size_t headers_len = ABSL_ARRAYSIZE(headers);
+  HeaderLineTestHelper(firstline, false, headers, headers_len, ":", "\n");
   HeaderLineTestHelper(firstline, false, headers, headers_len, ": ", "\n");
   HeaderLineTestHelper(firstline, false, headers, headers_len, ": ", "\r\n");
   HeaderLineTestHelper(firstline, false, headers, headers_len, ":\t", "\n");
@@ -924,6 +927,15 @@ TEST(HTTPBalsaFrame, WhitespaceInRequestsProcessedProperly) {
       " \r\n"
       "\r\n",
       true, BalsaFrameEnums::BALSA_NO_ERROR);
+  SCOPED_TRACE(
+      "Test a confusing and ambiguous case: is it a line continuation or a new "
+      "header field?");
+  WhitespaceHeaderTestHelper(
+      "GET / HTTP/1.1\r\n"
+      "test: test\r\n"
+      "  confusing:continued\r\n"
+      "\r\n",
+      true, BalsaFrameEnums::BALSA_NO_ERROR);
 }
 
 TEST(HTTPBalsaFrame, WhitespaceInResponsesProcessedProperly) {
@@ -948,6 +960,16 @@ TEST(HTTPBalsaFrame, WhitespaceInResponsesProcessedProperly) {
       "HTTP/1.0 200 Reason\r\n"
       "test: test\r\n"
       " \r\n"
+      "Content-Length: 0\r\n"
+      "\r\n",
+      false, BalsaFrameEnums::BALSA_NO_ERROR);
+  SCOPED_TRACE(
+      "Test a confusing and ambiguous case: is it a line continuation or a new "
+      "header field?");
+  WhitespaceHeaderTestHelper(
+      "HTTP/1.0 200 Reason\r\n"
+      "test: test\r\n"
+      "   confusing:continued\r\n"
       "Content-Length: 0\r\n"
       "\r\n",
       false, BalsaFrameEnums::BALSA_NO_ERROR);
@@ -998,7 +1020,7 @@ TEST_F(HTTPBalsaFrameTest, VisitorInvokedProperlyForRequestWithBlankLines) {
 }
 
 TEST_F(HTTPBalsaFrameTest,
-       VisitorInvokedProperlyForRequestWitSplithBlankLines) {
+       VisitorInvokedProperlyForRequestWithSplitBlankLines) {
   std::string blanks =
       "\n"
       "\n"
@@ -1068,6 +1090,20 @@ TEST_F(HTTPBalsaFrameTest,
   EXPECT_FALSE(balsa_frame_.MessageFullyRead());
   EXPECT_TRUE(balsa_frame_.Error());
   EXPECT_EQ(error_code, balsa_frame_.ErrorCode());
+}
+
+TEST_F(HTTPBalsaFrameTest, ContentLengthNotRequired) {
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.require_content_length_if_body_required = false;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  std::string message =
+      "PUT /search?q=fo HTTP/1.1\n"
+      "\n";
+
+  balsa_frame_.ProcessInput(message.data(), message.size());
+  EXPECT_TRUE(balsa_frame_.MessageFullyRead());
+  EXPECT_FALSE(balsa_frame_.Error());
 }
 
 TEST_F(HTTPBalsaFrameTest,
@@ -1202,10 +1238,6 @@ TEST_F(HTTPBalsaFrameTest, NothingBadHappensWhenNoVisitorIsAssigned) {
             balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
-  const absl::string_view crass = trailer_.GetHeader("crass");
-  EXPECT_EQ("monkeys", crass);
-  const absl::string_view funky = trailer_.GetHeader("funky");
-  EXPECT_EQ("monkeys", funky);
 }
 
 TEST_F(HTTPBalsaFrameTest, RequestWithTrailers) {
@@ -1226,9 +1258,10 @@ TEST_F(HTTPBalsaFrameTest, RequestWithTrailers) {
 
   InSequence s;
 
-  // OnHeader() visitor method is called as soon as headers are parsed.
-  EXPECT_CALL(visitor_mock_, OnHeader("Connection", "close"));
-  EXPECT_CALL(visitor_mock_, OnHeader("transfer-encoding", "chunked"));
+  FakeHeaders fake_headers;
+  fake_headers.AddKeyValue("Connection", "close");
+  fake_headers.AddKeyValue("transfer-encoding", "chunked");
+  EXPECT_CALL(visitor_mock_, ProcessHeaders(fake_headers));
   ASSERT_EQ(headers.size(),
             balsa_frame_.ProcessInput(headers.data(), headers.size()));
   testing::Mock::VerifyAndClearExpectations(&visitor_mock_);
@@ -1236,13 +1269,10 @@ TEST_F(HTTPBalsaFrameTest, RequestWithTrailers) {
   ASSERT_EQ(chunks.size(),
             balsa_frame_.ProcessInput(chunks.data(), chunks.size()));
 
-  EXPECT_CALL(visitor_mock_, OnHeader("crass", "monkeys"));
-  EXPECT_CALL(visitor_mock_, OnHeader("funky", "monkeys"));
-
   FakeHeaders fake_trailers;
   fake_trailers.AddKeyValue("crass", "monkeys");
   fake_trailers.AddKeyValue("funky", "monkeys");
-  EXPECT_CALL(visitor_mock_, ProcessTrailers(fake_trailers));
+  EXPECT_CALL(visitor_mock_, OnTrailers(fake_trailers));
 
   EXPECT_CALL(visitor_mock_, OnTrailerInput(_)).Times(AtLeast(1));
 
@@ -1251,11 +1281,6 @@ TEST_F(HTTPBalsaFrameTest, RequestWithTrailers) {
 
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
-
-  const absl::string_view crass = trailer_.GetHeader("crass");
-  EXPECT_EQ("monkeys", crass);
-  const absl::string_view funky = trailer_.GetHeader("funky");
-  EXPECT_EQ("monkeys", funky);
 }
 
 TEST_F(HTTPBalsaFrameTest, NothingBadHappensWhenNoVisitorIsAssignedInResponse) {
@@ -1284,10 +1309,6 @@ TEST_F(HTTPBalsaFrameTest, NothingBadHappensWhenNoVisitorIsAssignedInResponse) {
             balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
-  const absl::string_view crass = trailer_.GetHeader("crass");
-  EXPECT_EQ("monkeys", crass);
-  const absl::string_view funky = trailer_.GetHeader("funky");
-  EXPECT_EQ("monkeys", funky);
 }
 
 TEST_F(HTTPBalsaFrameTest, TransferEncodingIdentityIsIgnored) {
@@ -1365,10 +1386,6 @@ TEST_F(HTTPBalsaFrameTest,
             balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
-  const absl::string_view crass = trailer_.GetHeader("crass");
-  EXPECT_EQ("monkeys", crass);
-  const absl::string_view funky = trailer_.GetHeader("funky");
-  EXPECT_EQ("monkeys", funky);
 }
 
 TEST_F(HTTPBalsaFrameTest,
@@ -1711,6 +1728,9 @@ TEST_F(HTTPBalsaFrameTest,
   fake_headers.AddKeyValue("trAnsfer-eNcoding", "chunked");
   fake_headers.AddKeyValue("another_random_header", "includes a continuation");
 
+  FakeHeaders fake_trailers;
+  fake_trailers.AddKeyValue("a_trailer_key", "and a trailer value");
+
   {
     InSequence s1;
 
@@ -1723,6 +1743,7 @@ TEST_F(HTTPBalsaFrameTest,
     EXPECT_CALL(visitor_mock_, OnChunkLength(63));
     EXPECT_CALL(visitor_mock_, OnChunkLength(1));
     EXPECT_CALL(visitor_mock_, OnChunkLength(0));
+    EXPECT_CALL(visitor_mock_, OnTrailers(fake_trailers));
     EXPECT_CALL(visitor_mock_, MessageDone());
   }
   EXPECT_CALL(visitor_mock_, OnHeaderInput(message_headers));
@@ -2196,7 +2217,7 @@ TEST_F(HTTPBalsaFrameTest,
     EXPECT_CALL(visitor_mock_, OnChunkLength(10));
     EXPECT_CALL(visitor_mock_, OnChunkLength(63));
     EXPECT_CALL(visitor_mock_, OnChunkLength(0));
-    EXPECT_CALL(visitor_mock_, ProcessTrailers(fake_headers_in_trailer));
+    EXPECT_CALL(visitor_mock_, OnTrailers(fake_headers_in_trailer));
     EXPECT_CALL(visitor_mock_, MessageDone());
   }
   EXPECT_CALL(visitor_mock_, OnHeaderInput(message_headers));
@@ -2223,9 +2244,6 @@ TEST_F(HTTPBalsaFrameTest,
 
   EXPECT_EQ(message_body, body_input);
   EXPECT_EQ(message_body_data, body_data);
-
-  const absl::string_view a_trailer_key = trailer_.GetHeader("a_trailer_key");
-  EXPECT_EQ("and a trailer value", a_trailer_key);
 }
 
 TEST_F(
@@ -2268,7 +2286,7 @@ TEST_F(
     EXPECT_CALL(visitor_mock_, OnChunkLength(10));
     EXPECT_CALL(visitor_mock_, OnChunkLength(63));
     EXPECT_CALL(visitor_mock_, OnChunkLength(0));
-    EXPECT_CALL(visitor_mock_, ProcessTrailers(fake_headers_in_trailer));
+    EXPECT_CALL(visitor_mock_, OnTrailers(fake_headers_in_trailer));
     EXPECT_CALL(visitor_mock_, MessageDone());
   }
   EXPECT_CALL(visitor_mock_, OnHeaderInput(message_headers));
@@ -2298,9 +2316,6 @@ TEST_F(
   EXPECT_EQ(message_body, body_input);
   EXPECT_EQ(message_body_data, body_data);
   EXPECT_EQ(trailer_data, trailer_input);
-
-  const absl::string_view a_trailer_key = trailer_.GetHeader("a_trailer_key");
-  EXPECT_EQ("and a trailer value", a_trailer_key);
 }
 
 TEST(HTTPBalsaFrame,
@@ -2339,11 +2354,10 @@ TEST(HTTPBalsaFrame,
     StrictMock<BalsaVisitorMock> visitor_mock;
 
     BalsaHeaders headers;
-    BalsaHeaders trailer;
     BalsaFrame balsa_frame;
     balsa_frame.set_is_request(false);
     balsa_frame.set_balsa_headers(&headers);
-    balsa_frame.set_balsa_trailer(&trailer);
+    balsa_frame.EnableTrailers();
     balsa_frame.set_balsa_visitor(&visitor_mock);
 
     {
@@ -2351,11 +2365,9 @@ TEST(HTTPBalsaFrame,
       EXPECT_CALL(visitor_mock, OnResponseFirstLineInput(
                                     "HTTP/1.1  \t 200 Ok all is well",
                                     "HTTP/1.1", "200", "Ok all is well"));
-      EXPECT_CALL(visitor_mock, OnHeader);
       EXPECT_CALL(visitor_mock, ProcessHeaders(fake_headers));
       EXPECT_CALL(visitor_mock, HeaderDone());
-      EXPECT_CALL(visitor_mock, OnHeader);
-      EXPECT_CALL(visitor_mock, ProcessTrailers(fake_headers_in_trailer));
+      EXPECT_CALL(visitor_mock, OnTrailers(fake_headers_in_trailer));
       EXPECT_CALL(visitor_mock, MessageDone());
     }
     EXPECT_CALL(visitor_mock, OnHeaderInput(message_headers));
@@ -2379,13 +2391,13 @@ TEST(HTTPBalsaFrame,
 
     size_t count = 0;
     size_t total_processed = 0;
-    for (size_t i = 0; i < message.size();) {
-      auto dist = std::uniform_int_distribution<>(0, message.size() - i + 1);
+    for (size_t j = 0; j < message.size();) {
+      auto dist = std::uniform_int_distribution<>(0, message.size() - j + 1);
       count = dist(rng);
-      size_t processed = balsa_frame.ProcessInput(message.data() + i, count);
+      size_t processed = balsa_frame.ProcessInput(message.data() + j, count);
       ASSERT_GE(count, processed);
       total_processed += processed;
-      i += processed;
+      j += processed;
     }
     EXPECT_EQ(message.size(), total_processed);
     EXPECT_TRUE(balsa_frame.MessageFullyRead());
@@ -2395,9 +2407,6 @@ TEST(HTTPBalsaFrame,
     EXPECT_EQ(message_body, body_input);
     EXPECT_EQ(message_body_data, body_data);
     EXPECT_EQ(trailer_data, trailer_input);
-
-    const absl::string_view a_trailer_key = trailer.GetHeader("a_trailer_key");
-    EXPECT_EQ("and a trailer value", a_trailer_key);
   }
 }
 
@@ -2464,8 +2473,6 @@ TEST_F(HTTPBalsaFrameTest, AppropriateActionTakenWhenHeadersTooLongWhenReset) {
 class BalsaFrameParsingTest : public QuicheTest {
  protected:
   void SetUp() override {
-    balsa_frame_.set_http_validation_policy(
-        HttpValidationPolicy::CreateDefault());
     balsa_frame_.set_is_request(true);
     balsa_frame_.set_balsa_headers(&headers_);
     balsa_frame_.set_balsa_visitor(&visitor_mock_);
@@ -2476,7 +2483,6 @@ class BalsaFrameParsingTest : public QuicheTest {
     EXPECT_CALL(visitor_mock_, OnRequestFirstLineInput("GET / HTTP/1.1", "GET",
                                                        "/", "HTTP/1.1"));
     EXPECT_CALL(visitor_mock_, OnHeaderInput(_));
-    EXPECT_CALL(visitor_mock_, OnHeader).Times(AnyNumber());
     EXPECT_CALL(visitor_mock_,
                 HandleError(BalsaFrameEnums::INVALID_HEADER_FORMAT));
 
@@ -2489,7 +2495,7 @@ class BalsaFrameParsingTest : public QuicheTest {
   void TestInvalidTrailerFormat(const std::string& trailer,
                                 bool invalid_name_char) {
     balsa_frame_.set_is_request(false);
-    balsa_frame_.set_balsa_trailer(&trailer_);
+    balsa_frame_.EnableTrailers();
 
     std::string headers =
         "HTTP/1.0 200 ok\r\n"
@@ -2505,7 +2511,6 @@ class BalsaFrameParsingTest : public QuicheTest {
 
     EXPECT_CALL(visitor_mock_, OnResponseFirstLineInput);
     EXPECT_CALL(visitor_mock_, OnHeaderInput);
-    EXPECT_CALL(visitor_mock_, OnHeader).Times(AnyNumber());
     EXPECT_CALL(visitor_mock_, ProcessHeaders);
     EXPECT_CALL(visitor_mock_, HeaderDone);
     EXPECT_CALL(visitor_mock_, OnChunkLength(3));
@@ -2516,13 +2521,12 @@ class BalsaFrameParsingTest : public QuicheTest {
     EXPECT_CALL(visitor_mock_, OnChunkExtensionInput);
     EXPECT_CALL(visitor_mock_, OnRawBodyInput);
     EXPECT_CALL(visitor_mock_, OnRawBodyInput);
-    EXPECT_CALL(visitor_mock_, OnHeader).Times(AnyNumber());
     const auto expected_error =
         invalid_name_char ? BalsaFrameEnums::INVALID_TRAILER_NAME_CHARACTER
                           : BalsaFrameEnums::INVALID_TRAILER_FORMAT;
     EXPECT_CALL(visitor_mock_, HandleError(expected_error)).Times(1);
 
-    EXPECT_CALL(visitor_mock_, ProcessTrailers(_)).Times(0);
+    EXPECT_CALL(visitor_mock_, OnTrailers(_)).Times(0);
     EXPECT_CALL(visitor_mock_, MessageDone()).Times(0);
 
     ASSERT_EQ(headers.size(),
@@ -2539,15 +2543,11 @@ class BalsaFrameParsingTest : public QuicheTest {
   }
 
   BalsaHeaders headers_;
-  BalsaHeaders trailer_;
   BalsaFrame balsa_frame_;
   StrictMock<BalsaVisitorMock> visitor_mock_;
 };
 
 TEST_F(BalsaFrameParsingTest, AppropriateActionTakenWhenHeaderColonsAreFunny) {
-  // Believe it or not, the following message is not structured willy-nilly.
-  // It is structured so that both codepaths in both SSE2 and non SSE2 paths
-  // for finding colons are exersized.
   std::string message =
       "GET / HTTP/1.1\r\n"
       "a\r\n"
@@ -2584,8 +2584,6 @@ TEST_F(BalsaFrameParsingTest, AppropriateActionTakenWhenHeaderColonsAreFunny) {
   EXPECT_CALL(visitor_mock_, OnRequestFirstLineInput("GET / HTTP/1.1", "GET",
                                                      "/", "HTTP/1.1"));
   EXPECT_CALL(visitor_mock_, OnHeaderInput(_));
-  EXPECT_CALL(visitor_mock_, OnHeader("i", ""));
-  EXPECT_CALL(visitor_mock_, OnHeader("", "val"));
   EXPECT_CALL(visitor_mock_,
               HandleWarning(BalsaFrameEnums::HEADER_MISSING_COLON))
       .Times(27);
@@ -2622,7 +2620,7 @@ TEST_F(BalsaFrameParsingTest, InvalidTrailerFormat) {
   std::string trailer =
       ":monkeys\n"
       "\r\n";
-  TestInvalidTrailerFormat(trailer, false);
+  TestInvalidTrailerFormat(trailer, /*invalid_name_char=*/false);
 
   balsa_frame_.Reset();
 
@@ -2630,7 +2628,7 @@ TEST_F(BalsaFrameParsingTest, InvalidTrailerFormat) {
       "   \r\n"
       "test: test\r\n"
       "\r\n";
-  TestInvalidTrailerFormat(trailer2, true);
+  TestInvalidTrailerFormat(trailer2, /*invalid_name_char=*/true);
 
   balsa_frame_.Reset();
 
@@ -2638,7 +2636,7 @@ TEST_F(BalsaFrameParsingTest, InvalidTrailerFormat) {
       "a: b\r\n"
       ": test\r\n"
       "\r\n";
-  TestInvalidTrailerFormat(trailer3, false);
+  TestInvalidTrailerFormat(trailer3, /*invalid_name_char=*/false);
 }
 
 TEST_F(HTTPBalsaFrameTest,
@@ -2920,7 +2918,7 @@ TEST_F(HTTPBalsaFrameTest, BytesSafeToSpliceAndBytesSplicedWorksWithChunks) {
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
 }
 
-TEST_F(HTTPBalsaFrameTest, TwoDifferentContentHeadersIsAnError) {
+TEST_F(HTTPBalsaFrameTest, TwoDifferentContentLengthHeadersIsAnError) {
   std::string header =
       "HTTP/1.1 200 OK\r\n"
       "content-length: 12\r\n"
@@ -2933,7 +2931,7 @@ TEST_F(HTTPBalsaFrameTest, TwoDifferentContentHeadersIsAnError) {
             balsa_frame_.ErrorCode());
 }
 
-TEST_F(HTTPBalsaFrameTest, TwoSameContentHeadersIsNotAnError) {
+TEST_F(HTTPBalsaFrameTest, TwoSameContentLengthHeadersIsNotAnError) {
   std::string header =
       "POST / HTTP/1.1\r\n"
       "content-length: 1\r\n"
@@ -2949,11 +2947,29 @@ TEST_F(HTTPBalsaFrameTest, TwoSameContentHeadersIsNotAnError) {
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
 }
 
+TEST_F(HTTPBalsaFrameTest, TwoSameContentLengthHeadersIsAnError) {
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.disallow_multiple_content_length = true;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  std::string header =
+      "POST / HTTP/1.1\r\n"
+      "content-length: 1\r\n"
+      "content-length: 1\r\n"
+      "\r\n"
+      "1";
+  balsa_frame_.ProcessInput(header.data(), header.size());
+  EXPECT_TRUE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::MULTIPLE_CONTENT_LENGTH_KEYS,
+            balsa_frame_.ErrorCode());
+}
+
 TEST_F(HTTPBalsaFrameTest, TwoTransferEncodingHeadersIsAnError) {
   std::string header =
       "HTTP/1.1 200 OK\r\n"
       "transfer-encoding: chunked\r\n"
       "transfer-encoding: identity\r\n"
+      "content-length: 3\r\n"
       "\r\n";
   balsa_frame_.set_is_request(false);
   balsa_frame_.ProcessInput(header.data(), header.size());
@@ -2962,10 +2978,29 @@ TEST_F(HTTPBalsaFrameTest, TwoTransferEncodingHeadersIsAnError) {
             balsa_frame_.ErrorCode());
 }
 
+TEST_F(HTTPBalsaFrameTest, AcceptTwoTransferEncodingHeaders) {
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.validate_transfer_encoding = false;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  std::string header =
+      "HTTP/1.1 200 OK\r\n"
+      "transfer-encoding: chunked\r\n"
+      "transfer-encoding: identity\r\n"
+      "content-length: 3\r\n"
+      "\r\n";
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.ProcessInput(header.data(), header.size());
+
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
+}
+
 TEST_F(HTTPBalsaFrameTest, TwoTransferEncodingTokensIsAnError) {
   std::string header =
       "HTTP/1.1 200 OK\r\n"
       "transfer-encoding: chunked, identity\r\n"
+      "content-length: 3\r\n"
       "\r\n";
   balsa_frame_.set_is_request(false);
   balsa_frame_.ProcessInput(header.data(), header.size());
@@ -2974,15 +3009,78 @@ TEST_F(HTTPBalsaFrameTest, TwoTransferEncodingTokensIsAnError) {
             balsa_frame_.ErrorCode());
 }
 
+TEST_F(HTTPBalsaFrameTest, AcceptTwoTransferEncodingTokens) {
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.validate_transfer_encoding = false;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  std::string header =
+      "HTTP/1.1 200 OK\r\n"
+      "transfer-encoding: chunked, identity\r\n"
+      "content-length: 3\r\n"
+      "\r\n";
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.ProcessInput(header.data(), header.size());
+
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
+}
+
 TEST_F(HTTPBalsaFrameTest, UnknownTransferEncodingTokenIsAnError) {
   std::string header =
       "HTTP/1.1 200 OK\r\n"
       "transfer-encoding: chunked-identity\r\n"
+      "content-length: 3\r\n"
       "\r\n";
   balsa_frame_.set_is_request(false);
   balsa_frame_.ProcessInput(header.data(), header.size());
   EXPECT_TRUE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::UNKNOWN_TRANSFER_ENCODING,
+            balsa_frame_.ErrorCode());
+}
+
+TEST_F(HTTPBalsaFrameTest, AcceptUnknownTransferEncodingToken) {
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.validate_transfer_encoding = false;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  std::string header =
+      "HTTP/1.1 200 OK\r\n"
+      "transfer-encoding: chunked-identity\r\n"
+      "content-length: 3\r\n"
+      "\r\n";
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.ProcessInput(header.data(), header.size());
+
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
+}
+
+TEST_F(HTTPBalsaFrameTest, MissingContentLength) {
+  std::string header = "HTTP/1.1 200 OK\r\n\r\n";
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.ProcessInput(header.data(), header.size());
+
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::MAYBE_BODY_BUT_NO_CONTENT_LENGTH,
+            balsa_frame_.ErrorCode());
+}
+
+TEST_F(HTTPBalsaFrameTest, MultipleTransferEncodingsWithMissingContentLength) {
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.validate_transfer_encoding = false;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  std::string header =
+      "HTTP/1.1 200 OK\r\n"
+      "transfer-encoding: chunked\r\n"
+      "transfer-encoding: identity\r\n"
+      "\r\n";
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.ProcessInput(header.data(), header.size());
+
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::MAYBE_BODY_BUT_NO_CONTENT_LENGTH,
             balsa_frame_.ErrorCode());
 }
 
@@ -3168,6 +3266,34 @@ TEST_F(HTTPBalsaFrameTest, KeyHasMultipleContinuations) {
             balsa_frame_.ErrorCode());
 }
 
+TEST_F(HTTPBalsaFrameTest, KeyHasDoubleQuote) {
+  const std::string message =
+      "GET / HTTP/1.1\r\n"
+      "key\"hasquote: lock\r\n"
+      "\r\n";
+  EXPECT_EQ(message.size(),
+            balsa_frame_.ProcessInput(message.data(), message.size()));
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
+  EXPECT_TRUE(headers_.HasHeader("key\"hasquote"));
+}
+
+TEST_F(HTTPBalsaFrameTest, KeyHasDisallowedDoubleQuote) {
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.disallow_double_quote_in_header_name = true;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  const std::string message =
+      "GET / HTTP/1.1\r\n"
+      "key\"hasquote: lock\r\n"
+      "\r\n";
+  EXPECT_EQ(message.size(),
+            balsa_frame_.ProcessInput(message.data(), message.size()));
+  EXPECT_TRUE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::INVALID_HEADER_NAME_CHARACTER,
+            balsa_frame_.ErrorCode());
+}
+
 // Missing colon is a warning, not an error.
 TEST_F(HTTPBalsaFrameTest, TrailerMissingColon) {
   std::string headers =
@@ -3190,15 +3316,16 @@ TEST_F(HTTPBalsaFrameTest, TrailerMissingColon) {
             balsa_frame_.ProcessInput(headers.data(), headers.size()));
   ASSERT_EQ(chunks.size(),
             balsa_frame_.ProcessInput(chunks.data(), chunks.size()));
+
+  FakeHeaders fake_trailers;
+  fake_trailers.AddKeyValue("crass_monkeys", "");
+  EXPECT_CALL(visitor_mock_, OnTrailers(fake_trailers));
   EXPECT_EQ(trailer.size(),
             balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
+
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_FALSE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::TRAILER_MISSING_COLON, balsa_frame_.ErrorCode());
-  EXPECT_FALSE(trailer_.HasHeader("crass"));
-  EXPECT_TRUE(trailer_.HasHeader("crass_monkeys"));
-  const absl::string_view crass_monkeys = trailer_.GetHeader("crass_monkeys");
-  EXPECT_TRUE(crass_monkeys.empty());
 }
 
 // This tests multiple headers in trailer. We currently do not and have no plan
@@ -3262,7 +3389,7 @@ TEST_F(HTTPBalsaFrameTest, MultipleHeadersInTrailer) {
     EXPECT_CALL(visitor_mock_, HeaderDone());
     EXPECT_CALL(visitor_mock_, OnChunkLength(3));
     EXPECT_CALL(visitor_mock_, OnChunkLength(0));
-    EXPECT_CALL(visitor_mock_, ProcessTrailers(fake_headers_in_trailer));
+    EXPECT_CALL(visitor_mock_, OnTrailers(fake_headers_in_trailer));
     EXPECT_CALL(visitor_mock_, OnTrailerInput(trailer_data));
     EXPECT_CALL(visitor_mock_, MessageDone());
   }
@@ -3287,11 +3414,6 @@ TEST_F(HTTPBalsaFrameTest, MultipleHeadersInTrailer) {
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
 
   EXPECT_EQ(chunks, body_input);
-
-  for (iter = trailer.begin(); iter != trailer.end(); ++iter) {
-    const absl::string_view value = trailer_.GetHeader(iter->first);
-    EXPECT_EQ(iter->second, value);
-  }
 }
 
 // Test if trailer is not set (the common case), everything will be fine.
@@ -3310,19 +3432,21 @@ TEST_F(HTTPBalsaFrameTest, NothingBadHappensWithNULLTrailer) {
       "funky: monkeys\r\n"
       "\n";
 
-  balsa_frame_.set_is_request(false);
-  balsa_frame_.set_balsa_visitor(nullptr);
-  balsa_frame_.set_balsa_trailer(nullptr);
+  // Use another BalsaFrame, which does not have the trailers option set.
+  BalsaFrame balsa_frame;
+  balsa_frame.set_balsa_headers(&headers_);
+  balsa_frame.set_is_request(false);
+  balsa_frame.set_balsa_visitor(nullptr);
 
   ASSERT_EQ(headers.size(),
-            balsa_frame_.ProcessInput(headers.data(), headers.size()));
+            balsa_frame.ProcessInput(headers.data(), headers.size()));
   ASSERT_EQ(chunks.size(),
-            balsa_frame_.ProcessInput(chunks.data(), chunks.size()));
+            balsa_frame.ProcessInput(chunks.data(), chunks.size()));
   ASSERT_EQ(trailer.size(),
-            balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
-  EXPECT_TRUE(balsa_frame_.MessageFullyRead());
-  EXPECT_FALSE(balsa_frame_.Error());
-  EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
+            balsa_frame.ProcessInput(trailer.data(), trailer.size()));
+  EXPECT_TRUE(balsa_frame.MessageFullyRead());
+  EXPECT_FALSE(balsa_frame.Error());
+  EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame.ErrorCode());
 }
 
 // Test Reset() correctly resets trailer related states.
@@ -3341,20 +3465,21 @@ TEST_F(HTTPBalsaFrameTest, FrameAndResetAndFrameAgain) {
       "\n";
 
   balsa_frame_.set_is_request(false);
-  balsa_frame_.set_balsa_visitor(nullptr);
 
   ASSERT_EQ(headers.size(),
             balsa_frame_.ProcessInput(headers.data(), headers.size()));
   ASSERT_EQ(chunks.size(),
             balsa_frame_.ProcessInput(chunks.data(), chunks.size()));
+  {
+    FakeHeaders fake_trailers;
+    fake_trailers.AddKeyValue("k", "v");
+    EXPECT_CALL(visitor_mock_, OnTrailers(fake_trailers));
+  }
   ASSERT_EQ(trailer.size(),
             balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_FALSE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
-
-  absl::string_view value = trailer_.GetHeader("k");
-  EXPECT_EQ("v", value);
 
   balsa_frame_.Reset();
 
@@ -3375,16 +3500,16 @@ TEST_F(HTTPBalsaFrameTest, FrameAndResetAndFrameAgain) {
             balsa_frame_.ProcessInput(headers.data(), headers.size()));
   ASSERT_EQ(chunks.size(),
             balsa_frame_.ProcessInput(chunks.data(), chunks.size()));
+  {
+    FakeHeaders fake_trailers;
+    fake_trailers.AddKeyValue("nk", "nv");
+    EXPECT_CALL(visitor_mock_, OnTrailers(fake_trailers));
+  }
   ASSERT_EQ(trailer.size(),
             balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_FALSE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
-
-  value = trailer_.GetHeader("k");
-  EXPECT_TRUE(value.empty());
-  value = trailer_.GetHeader("nk");
-  EXPECT_EQ("nv", value);
 }
 
 TEST_F(HTTPBalsaFrameTest, TrackInvalidChars) {
@@ -3432,7 +3557,7 @@ TEST_F(HTTPBalsaFrameTest, InvalidCharsInHeaderKeyError) {
   EXPECT_FALSE(balsa_frame_.MessageFullyRead());
 }
 
-TEST_F(HTTPBalsaFrameTest, InvalidCharsInHeaderError) {
+TEST_F(HTTPBalsaFrameTest, InvalidCharsInRequestHeaderError) {
   balsa_frame_.set_invalid_chars_level(BalsaFrame::InvalidCharsLevel::kError);
   const std::string kEscapedInvalid =
       "GET /foo HTTP/1.1\r\n"
@@ -3447,6 +3572,43 @@ TEST_F(HTTPBalsaFrameTest, InvalidCharsInHeaderError) {
   balsa_frame_.ProcessInput(message.data(), message.size());
   EXPECT_TRUE(balsa_frame_.Error());
   EXPECT_FALSE(balsa_frame_.MessageFullyRead());
+}
+
+TEST_F(HTTPBalsaFrameTest, InvalidCharsInResponseHeaderAllowed) {
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.set_invalid_chars_level(BalsaFrame::InvalidCharsLevel::kError);
+
+  const absl::string_view headers =
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Length: 5\r\n"
+      "foo: a\022b\r\n"
+      "\r\n";
+  EXPECT_EQ(headers.size(),
+            balsa_frame_.ProcessInput(headers.data(), headers.size()));
+
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
+}
+
+TEST_F(HTTPBalsaFrameTest, InvalidCharsInResponseHeaderError) {
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.set_invalid_chars_level(BalsaFrame::InvalidCharsLevel::kError);
+
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.disallow_invalid_header_characters_in_response = true;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  const absl::string_view headers =
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Length: 5\r\n"
+      "foo: a\022b\r\n"
+      "\r\n";
+  EXPECT_EQ(headers.size(),
+            balsa_frame_.ProcessInput(headers.data(), headers.size()));
+
+  EXPECT_TRUE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::INVALID_HEADER_CHARACTER,
+            balsa_frame_.ErrorCode());
 }
 
 class HTTPBalsaFrameTestOneChar : public HTTPBalsaFrameTest,
@@ -3571,14 +3733,20 @@ TEST_F(HTTPBalsaFrameTest, GibberishInHeadersAndTrailer) {
   std::string trailer = absl::StrCat("k: v\n", gibberish_headers, "\n");
 
   balsa_frame_.set_is_request(false);
-  balsa_frame_.set_balsa_visitor(nullptr);
 
   ASSERT_EQ(headers.size(),
             balsa_frame_.ProcessInput(headers.data(), headers.size()));
   ASSERT_EQ(chunks.size(),
             balsa_frame_.ProcessInput(chunks.data(), chunks.size()));
+
+  FakeHeaders fake_trailers;
+  fake_trailers.AddKeyValue("k", "v");
+  fake_trailers.AddKeyValue(kGibberish1, kGibberish2);
+  fake_trailers.AddKeyValue("foo", "bar : eeep : baz");
+  EXPECT_CALL(visitor_mock_, OnTrailers(fake_trailers));
   ASSERT_EQ(trailer.size(),
             balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
+
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_FALSE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
@@ -3588,13 +3756,6 @@ TEST_F(HTTPBalsaFrameTest, GibberishInHeadersAndTrailer) {
   absl::string_view field_value = headers_.GetHeader(kGibberish1);
   EXPECT_EQ(kGibberish2, field_value);
   field_value = headers_.GetHeader("foo");
-  EXPECT_EQ("bar : eeep : baz", field_value);
-
-  field_value = trailer_.GetHeader("k");
-  EXPECT_EQ("v", field_value);
-  field_value = trailer_.GetHeader(kGibberish1);
-  EXPECT_EQ(kGibberish2, field_value);
-  field_value = trailer_.GetHeader("foo");
   EXPECT_EQ("bar : eeep : baz", field_value);
 }
 
@@ -3621,7 +3782,7 @@ TEST_F(HTTPBalsaFrameTest, TrailerTooLong) {
   balsa_frame_.set_max_header_length(headers.size());
 
   EXPECT_CALL(visitor_mock_, HandleError(BalsaFrameEnums::TRAILER_TOO_LONG));
-  EXPECT_CALL(visitor_mock_, ProcessTrailers(_)).Times(0);
+  EXPECT_CALL(visitor_mock_, OnTrailers(_)).Times(0);
   EXPECT_CALL(visitor_mock_, MessageDone()).Times(0);
   ASSERT_EQ(headers.size(),
             balsa_frame_.ProcessInput(headers.data(), headers.size()));
@@ -3634,33 +3795,77 @@ TEST_F(HTTPBalsaFrameTest, TrailerTooLong) {
   EXPECT_EQ(BalsaFrameEnums::TRAILER_TOO_LONG, balsa_frame_.ErrorCode());
 }
 
-// If the `trailer_` object in the framer is set to `nullptr`,
-// ProcessTrailers() will not be called.
-TEST_F(HTTPBalsaFrameTest,
-       NoProcessTrailersCallWhenFramerHasNullTrailerObject) {
-  std::string headers =
-      "HTTP/1.0 200 ok\r\n"
-      "transfer-encoding: chunked\r\n"
+TEST_F(HTTPBalsaFrameTest, Parse100ContinueNoContinueHeadersNoCallback) {
+  std::string continue_headers =
+      "HTTP/1.1 100 Continue\r\n"
       "\r\n";
 
-  std::string chunks =
-      "3\r\n"
-      "123\r\n"
-      "0\r\n";
-  std::string trailer =
-      "trailer_key : trailer_value\n"
+  // Do not set continue headers (or use interim callbacks). Then the parsed
+  // continue headers are treated as final headers.
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.set_use_interim_headers_callback(false);
+
+  InSequence s;
+  EXPECT_CALL(visitor_mock_, HeaderDone());
+  EXPECT_CALL(visitor_mock_, MessageDone());
+
+  ASSERT_EQ(balsa_frame_.ProcessInput(continue_headers.data(),
+                                      continue_headers.size()),
+            continue_headers.size())
+      << balsa_frame_.ErrorCode();
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(headers_.parsed_response_code(), 100);
+  EXPECT_TRUE(balsa_frame_.MessageFullyRead());
+}
+
+TEST_F(HTTPBalsaFrameTest, Parse100Continue) {
+  std::string continue_headers =
+      "HTTP/1.1 100 Continue\r\n"
       "\r\n";
+
+  // The parsed continue headers are delivered as interim headers.
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.set_use_interim_headers_callback(true);
+
+  InSequence s;
+  EXPECT_CALL(visitor_mock_, OnInterimHeaders(Pointee(Property(
+                                 &BalsaHeaders::parsed_response_code, 100))));
+  EXPECT_CALL(visitor_mock_, HeaderDone()).Times(0);
+  EXPECT_CALL(visitor_mock_, MessageDone()).Times(0);
+
+  ASSERT_EQ(balsa_frame_.ProcessInput(continue_headers.data(),
+                                      continue_headers.size()),
+            continue_headers.size())
+      << balsa_frame_.ErrorCode();
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(headers_.parsed_response_code(), 0u);
+  EXPECT_FALSE(balsa_frame_.MessageFullyRead());
+}
+
+// Handle two sets of headers when set up properly and the first is 100
+// Continue.
+TEST_F(HTTPBalsaFrameTest, Support100ContinueNoCallback) {
+  std::string initial_headers =
+      "HTTP/1.1 100 Continue\r\n"
+      "\r\n";
+  std::string real_headers =
+      "HTTP/1.1 200 OK\r\n"
+      "content-length: 3\r\n"
+      "\r\n";
+  std::string body = "foo";
 
   balsa_frame_.set_is_request(false);
-  balsa_frame_.set_balsa_trailer(nullptr);
+  BalsaHeaders continue_headers;
+  balsa_frame_.set_continue_headers(&continue_headers);
+  balsa_frame_.set_use_interim_headers_callback(false);
 
-  EXPECT_CALL(visitor_mock_, ProcessTrailers(_)).Times(0);
-  ASSERT_EQ(headers.size(),
-            balsa_frame_.ProcessInput(headers.data(), headers.size()));
-  ASSERT_EQ(chunks.size(),
-            balsa_frame_.ProcessInput(chunks.data(), chunks.size()));
-  EXPECT_EQ(trailer.size(),
-            balsa_frame_.ProcessInput(trailer.data(), trailer.size()));
+  ASSERT_EQ(initial_headers.size(),
+            balsa_frame_.ProcessInput(initial_headers.data(),
+                                      initial_headers.size()));
+  ASSERT_EQ(real_headers.size(),
+            balsa_frame_.ProcessInput(real_headers.data(), real_headers.size()))
+      << balsa_frame_.ErrorCode();
+  ASSERT_EQ(body.size(), balsa_frame_.ProcessInput(body.data(), body.size()));
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_FALSE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
@@ -3679,8 +3884,87 @@ TEST_F(HTTPBalsaFrameTest, Support100Continue) {
   std::string body = "foo";
 
   balsa_frame_.set_is_request(false);
+  balsa_frame_.set_use_interim_headers_callback(true);
+
+  InSequence s;
+  EXPECT_CALL(visitor_mock_, OnInterimHeaders(Pointee(Property(
+                                 &BalsaHeaders::parsed_response_code, 100))));
+  ASSERT_EQ(
+      balsa_frame_.ProcessInput(initial_headers.data(), initial_headers.size()),
+      initial_headers.size());
+  ASSERT_FALSE(balsa_frame_.Error());
+
+  EXPECT_CALL(visitor_mock_, HeaderDone());
+  ASSERT_EQ(balsa_frame_.ProcessInput(real_headers.data(), real_headers.size()),
+            real_headers.size())
+      << balsa_frame_.ErrorCode();
+  EXPECT_EQ(headers_.parsed_response_code(), 200);
+
+  EXPECT_CALL(visitor_mock_, MessageDone());
+  ASSERT_EQ(balsa_frame_.ProcessInput(body.data(), body.size()), body.size());
+
+  EXPECT_TRUE(balsa_frame_.MessageFullyRead());
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(balsa_frame_.ErrorCode(), BalsaFrameEnums::BALSA_NO_ERROR);
+}
+
+// If both the interim headers callback and continue headers are set, only the
+// former should be used.
+TEST_F(HTTPBalsaFrameTest, InterimHeadersCallbackTakesPrecedence) {
+  std::string initial_headers =
+      "HTTP/1.1 100 Continue\r\n"
+      "\r\n";
+  std::string real_headers =
+      "HTTP/1.1 200 OK\r\n"
+      "content-length: 3\r\n"
+      "\r\n";
+  std::string body = "foo";
+
+  balsa_frame_.set_is_request(false);
   BalsaHeaders continue_headers;
   balsa_frame_.set_continue_headers(&continue_headers);
+  balsa_frame_.set_use_interim_headers_callback(true);
+
+  InSequence s;
+  EXPECT_CALL(visitor_mock_, OnInterimHeaders(Pointee(Property(
+                                 &BalsaHeaders::parsed_response_code, 100))));
+  EXPECT_CALL(visitor_mock_, ContinueHeaderDone).Times(0);
+  ASSERT_EQ(
+      balsa_frame_.ProcessInput(initial_headers.data(), initial_headers.size()),
+      initial_headers.size());
+  EXPECT_EQ(continue_headers.parsed_response_code(), 0u);
+  ASSERT_FALSE(balsa_frame_.Error());
+
+  EXPECT_CALL(visitor_mock_, HeaderDone());
+  ASSERT_EQ(balsa_frame_.ProcessInput(real_headers.data(), real_headers.size()),
+            real_headers.size())
+      << balsa_frame_.ErrorCode();
+  EXPECT_EQ(headers_.parsed_response_code(), 200);
+
+  EXPECT_CALL(visitor_mock_, MessageDone());
+  ASSERT_EQ(balsa_frame_.ProcessInput(body.data(), body.size()), body.size());
+
+  EXPECT_TRUE(balsa_frame_.MessageFullyRead());
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(balsa_frame_.ErrorCode(), BalsaFrameEnums::BALSA_NO_ERROR);
+}
+
+// Handle two sets of headers when set up properly and the first is 100
+// Continue and it meets the conditions for b/62408297.
+TEST_F(HTTPBalsaFrameTest, Support100Continue401UnauthorizedNoCallback) {
+  std::string initial_headers =
+      "HTTP/1.1 100 Continue\r\n"
+      "\r\n";
+  std::string real_headers =
+      "HTTP/1.1 401 Unauthorized\r\n"
+      "content-length: 3\r\n"
+      "\r\n";
+  std::string body = "foo";
+
+  balsa_frame_.set_is_request(false);
+  BalsaHeaders continue_headers;
+  balsa_frame_.set_continue_headers(&continue_headers);
+  balsa_frame_.set_use_interim_headers_callback(false);
 
   ASSERT_EQ(initial_headers.size(),
             balsa_frame_.ProcessInput(initial_headers.data(),
@@ -3695,7 +3979,7 @@ TEST_F(HTTPBalsaFrameTest, Support100Continue) {
 }
 
 // Handle two sets of headers when set up properly and the first is 100
-// Continue and it meets the conditions for b/62408297
+// Continue and it meets the conditions for b/62408297.
 TEST_F(HTTPBalsaFrameTest, Support100Continue401Unauthorized) {
   std::string initial_headers =
       "HTTP/1.1 100 Continue\r\n"
@@ -3707,22 +3991,31 @@ TEST_F(HTTPBalsaFrameTest, Support100Continue401Unauthorized) {
   std::string body = "foo";
 
   balsa_frame_.set_is_request(false);
-  BalsaHeaders continue_headers;
-  balsa_frame_.set_continue_headers(&continue_headers);
+  balsa_frame_.set_use_interim_headers_callback(true);
 
-  ASSERT_EQ(initial_headers.size(),
-            balsa_frame_.ProcessInput(initial_headers.data(),
-                                      initial_headers.size()));
-  ASSERT_EQ(real_headers.size(),
-            balsa_frame_.ProcessInput(real_headers.data(), real_headers.size()))
+  InSequence s;
+  EXPECT_CALL(visitor_mock_, OnInterimHeaders(Pointee(Property(
+                                 &BalsaHeaders::parsed_response_code, 100))));
+  ASSERT_EQ(
+      balsa_frame_.ProcessInput(initial_headers.data(), initial_headers.size()),
+      initial_headers.size());
+  ASSERT_FALSE(balsa_frame_.Error());
+
+  EXPECT_CALL(visitor_mock_, HeaderDone());
+  ASSERT_EQ(balsa_frame_.ProcessInput(real_headers.data(), real_headers.size()),
+            real_headers.size())
       << balsa_frame_.ErrorCode();
-  ASSERT_EQ(body.size(), balsa_frame_.ProcessInput(body.data(), body.size()));
+  EXPECT_EQ(headers_.parsed_response_code(), 401);
+
+  EXPECT_CALL(visitor_mock_, MessageDone());
+  ASSERT_EQ(balsa_frame_.ProcessInput(body.data(), body.size()), body.size());
+
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_FALSE(balsa_frame_.Error());
-  EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
+  EXPECT_EQ(balsa_frame_.ErrorCode(), BalsaFrameEnums::BALSA_NO_ERROR);
 }
 
-TEST_F(HTTPBalsaFrameTest, Support100ContinueRunTogether) {
+TEST_F(HTTPBalsaFrameTest, Support100ContinueRunTogetherNoCallback) {
   std::string both_headers =
       "HTTP/1.1 100 Continue\r\n"
       "\r\n"
@@ -3741,6 +4034,7 @@ TEST_F(HTTPBalsaFrameTest, Support100ContinueRunTogether) {
   balsa_frame_.set_is_request(false);
   BalsaHeaders continue_headers;
   balsa_frame_.set_continue_headers(&continue_headers);
+  balsa_frame_.set_use_interim_headers_callback(false);
 
   ASSERT_EQ(both_headers.size(),
             balsa_frame_.ProcessInput(both_headers.data(), both_headers.size()))
@@ -3749,6 +4043,197 @@ TEST_F(HTTPBalsaFrameTest, Support100ContinueRunTogether) {
   EXPECT_TRUE(balsa_frame_.MessageFullyRead());
   EXPECT_FALSE(balsa_frame_.Error());
   EXPECT_EQ(BalsaFrameEnums::BALSA_NO_ERROR, balsa_frame_.ErrorCode());
+}
+
+TEST_F(HTTPBalsaFrameTest, Support100ContinueRunTogether) {
+  std::string both_headers =
+      "HTTP/1.1 100 Continue\r\n"
+      "\r\n"
+      "HTTP/1.1 200 OK\r\n"
+      "content-length: 3\r\n"
+      "\r\n";
+  std::string body = "foo";
+
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.set_use_interim_headers_callback(true);
+
+  InSequence s;
+  EXPECT_CALL(visitor_mock_, OnInterimHeaders(Pointee(Property(
+                                 &BalsaHeaders::parsed_response_code, 100))));
+  EXPECT_CALL(visitor_mock_, HeaderDone());
+
+  ASSERT_EQ(balsa_frame_.ProcessInput(both_headers.data(), both_headers.size()),
+            both_headers.size())
+      << balsa_frame_.ErrorCode();
+  ASSERT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(headers_.parsed_response_code(), 200);
+
+  EXPECT_CALL(visitor_mock_, MessageDone());
+  ASSERT_EQ(balsa_frame_.ProcessInput(body.data(), body.size()), body.size());
+  EXPECT_TRUE(balsa_frame_.MessageFullyRead());
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(balsa_frame_.ErrorCode(), BalsaFrameEnums::BALSA_NO_ERROR);
+}
+
+TEST_F(HTTPBalsaFrameTest, MultipleInterimHeaders) {
+  std::string all_headers =
+      "HTTP/1.1 100 Continue\r\n"
+      "\r\n"
+      "HTTP/1.1 103 Early Hints\r\n"
+      "\r\n"
+      "HTTP/1.1 200 OK\r\n"
+      "content-length: 3\r\n"
+      "\r\n";
+  std::string body = "foo";
+
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.set_use_interim_headers_callback(true);
+
+  InSequence s;
+  EXPECT_CALL(visitor_mock_, OnInterimHeaders(Pointee(Property(
+                                 &BalsaHeaders::parsed_response_code, 100))));
+  EXPECT_CALL(visitor_mock_, OnInterimHeaders(Pointee(Property(
+                                 &BalsaHeaders::parsed_response_code, 103))));
+  EXPECT_CALL(visitor_mock_, HeaderDone());
+
+  ASSERT_EQ(balsa_frame_.ProcessInput(all_headers.data(), all_headers.size()),
+            all_headers.size())
+      << balsa_frame_.ErrorCode();
+  ASSERT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(headers_.parsed_response_code(), 200);
+
+  EXPECT_CALL(visitor_mock_, MessageDone());
+  ASSERT_EQ(balsa_frame_.ProcessInput(body.data(), body.size()), body.size());
+  EXPECT_TRUE(balsa_frame_.MessageFullyRead());
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(balsa_frame_.ErrorCode(), BalsaFrameEnums::BALSA_NO_ERROR);
+}
+
+TEST_F(HTTPBalsaFrameTest, SwitchingProtocols) {
+  const std::string headers =
+      "HTTP/1.1 101 Switching Protocols\r\n"
+      "\r\n";
+  const std::string body = "Bytes for the new protocol";
+  const std::string message = absl::StrCat(headers, body);
+
+  // Even with the interim headers callback set, the 101 response is delivered
+  // as final response headers.
+  balsa_frame_.set_is_request(false);
+  balsa_frame_.set_use_interim_headers_callback(true);
+
+  InSequence s;
+  EXPECT_CALL(visitor_mock_, ProcessHeaders);
+  EXPECT_CALL(visitor_mock_, HeaderDone());
+
+  ASSERT_EQ(balsa_frame_.ProcessInput(message.data(), message.size()),
+            headers.size())
+      << balsa_frame_.ErrorCode();
+  ASSERT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(headers_.parsed_response_code(), 101);
+
+  balsa_frame_.AllowArbitraryBody();
+
+  EXPECT_CALL(visitor_mock_, OnRawBodyInput("Bytes for the new protocol"));
+  EXPECT_CALL(visitor_mock_, OnBodyChunkInput("Bytes for the new protocol"));
+  EXPECT_CALL(visitor_mock_, MessageDone()).Times(0);
+
+  ASSERT_EQ(balsa_frame_.ProcessInput(body.data(), body.size()), body.size());
+  EXPECT_FALSE(balsa_frame_.MessageFullyRead());
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(balsa_frame_.ErrorCode(), BalsaFrameEnums::BALSA_NO_ERROR);
+}
+
+TEST_F(HTTPBalsaFrameTest, Http09) {
+  constexpr absl::string_view request = "GET /\r\n";
+
+  InSequence s;
+  StrictMock<BalsaVisitorMock> visitor_mock;
+  balsa_frame_.set_balsa_visitor(&visitor_mock);
+
+  EXPECT_CALL(
+      visitor_mock,
+      HandleWarning(
+          BalsaFrameEnums::FAILED_TO_FIND_WS_AFTER_REQUEST_REQUEST_URI));
+  EXPECT_CALL(visitor_mock, OnRequestFirstLineInput("GET /", "GET", "/", ""));
+  EXPECT_CALL(visitor_mock, OnHeaderInput(request));
+  EXPECT_CALL(visitor_mock, ProcessHeaders(FakeHeaders{}));
+  EXPECT_CALL(visitor_mock, HeaderDone());
+  EXPECT_CALL(visitor_mock, MessageDone());
+
+  EXPECT_EQ(request.size(),
+            balsa_frame_.ProcessInput(request.data(), request.size()));
+
+  // HTTP/0.9 request is parsed with a warning.
+  EXPECT_FALSE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::FAILED_TO_FIND_WS_AFTER_REQUEST_REQUEST_URI,
+            balsa_frame_.ErrorCode());
+}
+
+TEST_F(HTTPBalsaFrameTest, ContinuationAllowed) {
+  // See RFC7230 Section 3.2 for the definition of obs-fold:
+  // https://httpwg.org/specs/rfc7230.html#header.fields.
+  const std::string message =
+      "GET / HTTP/1.1\r\n"
+      "key1: \n value starts with obs-fold\r\n"
+      "key2: value\n includes obs-fold\r\n"
+      "key3: value ends in obs-fold \n \r\n"
+      "\r\n";
+
+  // TODO(b/314138604): RFC9110 Section 5.5 requires received CR, LF and NUL
+  // characters to be replaced with SP, see
+  // https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values.
+  // BalsaFrame currently strips (instead of replacing) CR and LF if the value
+  // starts or ends with obs-fold, and keeps them if they occur in the middle.
+  FakeHeaders fake_headers;
+  fake_headers.AddKeyValue("key1", "value starts with obs-fold");
+  fake_headers.AddKeyValue("key2", "value\n includes obs-fold");
+  fake_headers.AddKeyValue("key3", "value ends in obs-fold");
+  EXPECT_CALL(visitor_mock_, ProcessHeaders(fake_headers));
+
+  EXPECT_EQ(message.size(),
+            balsa_frame_.ProcessInput(message.data(), message.size()));
+  EXPECT_FALSE(balsa_frame_.Error());
+}
+
+TEST_F(HTTPBalsaFrameTest, ContinuationDisallowed) {
+  HttpValidationPolicy http_validation_policy;
+  http_validation_policy.disallow_header_continuation_lines = true;
+  balsa_frame_.set_http_validation_policy(http_validation_policy);
+
+  const std::string message =
+      "GET / HTTP/1.1\r\n"
+      "key: value\n includes obs-fold\r\n"
+      "\r\n";
+  EXPECT_EQ(message.size(),
+            balsa_frame_.ProcessInput(message.data(), message.size()));
+  EXPECT_TRUE(balsa_frame_.Error());
+  EXPECT_EQ(BalsaFrameEnums::INVALID_HEADER_FORMAT, balsa_frame_.ErrorCode());
+}
+
+TEST_F(HTTPBalsaFrameTest, NullInValue) {
+  constexpr absl::string_view null_string("\0", 1);
+  const std::string message =
+      absl::StrCat("GET / HTTP/1.1\r\n",                                 //
+                   "key1: ", null_string, "value starts with null\r\n",  //
+                   "key2: value ", null_string, "includes null\r\n",     //
+                   "key3: value ends in null", null_string, "\r\n",      //
+                   "\r\n");
+
+  // TODO(b/314138604): RFC9110 Section 5.5 requires received CR, LF and NUL
+  // characters to be replaced with SP, see
+  // https://www.rfc-editor.org/rfc/rfc9110.html#name-field-values.
+  // BalsaFrame currently strips (instead of replacing) NUL at the beginning or
+  // end of the header value, but keeps it if it occurs in the middle.
+  FakeHeaders fake_headers;
+  fake_headers.AddKeyValue("key1", "value starts with null");
+  fake_headers.AddKeyValue(
+      "key2", absl::StrCat("value ", null_string, "includes null"));
+  fake_headers.AddKeyValue("key3", "value ends in null");
+  EXPECT_CALL(visitor_mock_, ProcessHeaders(fake_headers));
+
+  EXPECT_EQ(message.size(),
+            balsa_frame_.ProcessInput(message.data(), message.size()));
+  EXPECT_FALSE(balsa_frame_.Error());
 }
 
 }  // namespace

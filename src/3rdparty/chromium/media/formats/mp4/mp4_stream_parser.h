@@ -11,8 +11,8 @@
 #include <set>
 #include <vector>
 
-#include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "media/base/media_export.h"
 #include "media/base/stream_parser.h"
@@ -35,7 +35,9 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
  public:
   MP4StreamParser(const std::set<int>& audio_object_types,
                   bool has_sbr,
-                  bool has_flac);
+                  bool has_flac,
+                  bool has_iamf,
+                  bool has_dv);
 
   MP4StreamParser(const MP4StreamParser&) = delete;
   MP4StreamParser& operator=(const MP4StreamParser&) = delete;
@@ -45,14 +47,15 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
   void Init(InitCB init_cb,
             NewConfigCB config_cb,
             NewBuffersCB new_buffers_cb,
-            bool ignore_text_tracks,
             EncryptedMediaInitDataCB encrypted_media_init_data_cb,
             NewMediaSegmentCB new_segment_cb,
             EndMediaSegmentCB end_of_segment_cb,
             MediaLog* media_log) override;
   void Flush() override;
   bool GetGenerateTimestampsFlag() const override;
-  bool Parse(const uint8_t* buf, int size) override;
+  [[nodiscard]] bool AppendToParseBuffer(const uint8_t* buf,
+                                         size_t size) override;
+  [[nodiscard]] ParseStatus Parse(int max_pending_bytes_to_inspect) override;
 
   // Calculates the rotation value from the track header display matricies.
   VideoTransformation CalculateRotation(const TrackHeader& track,
@@ -66,6 +69,11 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
     kEmittingSamples,
     kError
   };
+
+  // Wrappers of `queue_` that observe constraint of `max_parse_offset_`.
+  void ModulatedPeek(const uint8_t** buf, int* size);
+  void ModulatedPeekAt(int64_t offset, const uint8_t** buf, int* size);
+  bool ModulatedTrim(int64_t max_offset);
 
   ParseResult ParseBox();
   bool ParseMoov(mp4::BoxReader* reader);
@@ -92,6 +100,11 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
                         std::vector<uint8_t>* frame_buf,
                         std::vector<SubsampleEntry>* subsamples) const;
 #endif
+#if BUILDFLAG(ENABLE_PLATFORM_IAMF_AUDIO)
+  bool PrependIADescriptors(const IamfSpecificBox& iamf_box,
+                            std::vector<uint8_t>* frame_buf,
+                            std::vector<SubsampleEntry>* subsamples) const;
+#endif  // BUILDFLAG(ENABLE_PLATFORM_IAMF_AUDIO)
   ParseResult EnqueueSample(BufferQueueMap* buffers);
   bool SendAndFlushSamples(BufferQueueMap* buffers);
 
@@ -115,6 +128,19 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
   EndMediaSegmentCB end_of_segment_cb_;
   raw_ptr<MediaLog> media_log_;
 
+  // Bytes of the mp4 stream.
+  // `max_parse_offset_` tracks the point in `queue_` beyond which no data may
+  // yet be parsed even if it is less than the queue's tail offset. This allows
+  // incremental parsing. `max_parse_offset_` must be less than or equal to the
+  // queue_'s current tail offset. Note that operations like Trim() and PeekAt()
+  // on the offset queue can involve offsets beyond tail or `max_parse_offset_`,
+  // so this parser must consider `max_parse_offset_` too when using those
+  // operations, otherwise more data than the amount indicated in the Parse()
+  // call's `max_pending_bytes_to_inspect` increment might be inspected in a
+  // Parse() call. See the various Modulated*() wrappers in this class.
+  // TODO(https://crbug.com/1286464): Consider reworking all these parsers to
+  // use a new type of queue that internally modulates the increment.
+  int64_t max_parse_offset_ = 0;
   OffsetByteQueue queue_;
 
   // These two parameters are only valid in the |kEmittingSegments| state.
@@ -144,6 +170,14 @@ class MEDIA_EXPORT MP4StreamParser : public StreamParser {
   const std::set<int> audio_object_types_;
   const bool has_sbr_;
   const bool has_flac_;
+  const bool has_iamf_;
+  // Indicate if source buffer has been set as Dolby Vision. If true,
+  // always treat the source buffer as Dolby Vision, if false and if
+  // the source buffer is cross-compatible, use its compatible codec
+  // defined in Dolby Vision Profiles and Levels specification:
+  // https://professionalsupport.dolby.com/s/article/What-is-Dolby-Vision-Profile,
+  // otherwise still treat the buffer as Dolby Vision.
+  const bool has_dv_;
 
   // Tracks the number of MEDIA_LOGS for skipping empty trun samples.
   int num_empty_samples_skipped_;

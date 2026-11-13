@@ -174,7 +174,7 @@ const FieldTrialTestingExperiment array_kFieldTrialConfig_experiments_0[] = {
      /*platforms_size=*/10,
      /*form_factors=*/{},
      /*form_factors_size=*/0,
-     /*is_low_end_device=*/absl::nullopt,
+     /*is_low_end_device=*/std::nullopt,
      /*min_os_version=*/nullptr,
      /*params=*/array_kFieldTrialConfig_params_0,
      /*params_size=*/1,
@@ -303,7 +303,8 @@ const FieldTrialTestingConfig kTestingConfig = {
 
 std::unique_ptr<ClientFilterableState> CreateDummyClientFilterableState() {
   auto client_state = std::make_unique<ClientFilterableState>(
-      base::BindOnce([] { return false; }));
+      base::BindOnce([] { return false; }),
+      base::BindOnce([] { return base::flat_set<uint64_t>(); }));
   client_state->locale = "en-CA";
   client_state->reference_date = base::Time::Now();
   client_state->version = base::Version("20.0.0.0");
@@ -315,10 +316,9 @@ std::unique_ptr<ClientFilterableState> CreateDummyClientFilterableState() {
 
 MockEntropyProviders::MockEntropyProviders(
     MockEntropyProviders::Results results,
-    size_t low_entropy_domain)
+    uint32_t low_entropy_domain)
     : EntropyProviders(results.high_entropy.has_value() ? "client_id" : "",
-                       0,
-                       low_entropy_domain),
+                       {0, low_entropy_domain}),
       low_provider_(results.low_entropy),
       high_provider_(results.high_entropy.value_or(0)) {}
 

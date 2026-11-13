@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // Based on chrome/renderer/content_settings_observer.cc:
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
@@ -39,6 +40,7 @@ ContentSettingsObserverQt::ContentSettingsObserverQt(content::RenderFrame *rende
 
 ContentSettingsObserverQt::~ContentSettingsObserverQt() {}
 
+#if BUILDFLAG(CONTENT_ENABLE_LEGACY_IPC)
 bool ContentSettingsObserverQt::OnMessageReceived(const IPC::Message &message)
 {
     bool handled = true;
@@ -49,6 +51,7 @@ bool ContentSettingsObserverQt::OnMessageReceived(const IPC::Message &message)
 
     return handled;
 }
+#endif
 
 void ContentSettingsObserverQt::DidCommitProvisionalLoad(ui::PageTransition /*transition*/)
 {
@@ -83,11 +86,12 @@ void ContentSettingsObserverQt::AllowStorageAccess(StorageType storage_type,
 
     // Verify there are no duplicate insertions.
     DCHECK(inserted);
-
+#if BUILDFLAG(CONTENT_ENABLE_LEGACY_IPC)
     Send(new QtWebEngineHostMsg_RequestStorageAccessAsync(routing_id(), m_currentRequestId,
                                                           url::Origin(frame->GetSecurityOrigin()).GetURL(),
                                                           url::Origin(frame->Top()->GetSecurityOrigin()).GetURL(),
                                                           int(storage_type)));
+#endif
 }
 
 bool ContentSettingsObserverQt::AllowStorageAccessSync(StorageType storage_type)
@@ -105,9 +109,11 @@ bool ContentSettingsObserverQt::AllowStorageAccessSync(StorageType storage_type)
     }
 
     bool result = false;
+#if BUILDFLAG(CONTENT_ENABLE_LEGACY_IPC)
     Send(new QtWebEngineHostMsg_AllowStorageAccess(routing_id(), url::Origin(frame->GetSecurityOrigin()).GetURL(),
                                                    url::Origin(frame->Top()->GetSecurityOrigin()).GetURL(),
                                                    int(storage_type), &result));
+#endif
     if (sameOrigin)
         m_cachedStoragePermissions[key] = result;
     return result;

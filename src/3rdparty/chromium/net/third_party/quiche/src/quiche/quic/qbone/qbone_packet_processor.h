@@ -6,6 +6,7 @@
 #define QUICHE_QUIC_QBONE_QBONE_PACKET_PROCESSOR_H_
 
 #include <netinet/icmp6.h>
+#include <netinet/in.h>
 #include <netinet/ip6.h>
 
 #include "absl/strings/string_view.h"
@@ -109,6 +110,10 @@ class QbonePacketProcessor {
     uint8_t TransportProtocolFromHeader(absl::string_view ipv6_header) {
       return ipv6_header[6];
     }
+    uint8_t TrafficClassFromHeader(absl::string_view ipv6_header) {
+      return ipv6_header[0] << 4 | ipv6_header[1] >> 4;
+    }
+
     QuicIpAddress SourceIpFromHeader(absl::string_view ipv6_header) {
       QuicIpAddress address;
       address.FromPackedString(&ipv6_header[8],
@@ -163,8 +168,8 @@ class QbonePacketProcessor {
                                               char** transport_data,
                                               icmp6_hdr* icmp_header);
 
-  void SendIcmpResponse(icmp6_hdr* icmp_header,
-                        absl::string_view original_packet,
+  void SendIcmpResponse(in6_addr dst, icmp6_hdr* icmp_header,
+                        absl::string_view payload,
                         Direction original_direction);
 
   void SendTcpReset(absl::string_view original_packet,
@@ -191,6 +196,8 @@ class QbonePacketProcessor {
                                      icmp6_hdr* icmp_header);
 
   void SendResponse(Direction original_direction, absl::string_view packet);
+
+  in6_addr GetDestinationFromPacket(absl::string_view packet);
 };
 
 }  // namespace quic

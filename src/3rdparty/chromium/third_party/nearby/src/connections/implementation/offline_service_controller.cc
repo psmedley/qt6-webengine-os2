@@ -15,10 +15,14 @@
 #include "connections/implementation/offline_service_controller.h"
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/strings/str_join.h"
+#include "connections/discovery_options.h"
+#include "connections/listeners.h"
+#include "internal/interop/device.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -52,13 +56,12 @@ void OfflineServiceController::StopAdvertising(ClientProxy* client) {
 
 Status OfflineServiceController::StartDiscovery(
     ClientProxy* client, const std::string& service_id,
-    const DiscoveryOptions& discovery_options,
-    const DiscoveryListener& listener) {
+    const DiscoveryOptions& discovery_options, DiscoveryListener listener) {
   if (stop_) return {Status::kOutOfOrderApiCall};
   NEARBY_LOGS(INFO) << "Client " << client->GetClientId()
                     << " requested discovery to start.";
   return pcp_manager_.StartDiscovery(client, service_id, discovery_options,
-                                     listener);
+                                     std::move(listener));
 }
 
 void OfflineServiceController::StopDiscovery(ClientProxy* client) {
@@ -66,6 +69,20 @@ void OfflineServiceController::StopDiscovery(ClientProxy* client) {
   NEARBY_LOGS(INFO) << "Client " << client->GetClientId()
                     << " requested discovery to stop.";
   pcp_manager_.StopDiscovery(client);
+}
+
+std::pair<Status, std::vector<ConnectionInfoVariant>>
+OfflineServiceController::StartListeningForIncomingConnections(
+    ClientProxy* client, absl::string_view service_id,
+    v3::ConnectionListener listener,
+    const v3::ConnectionListeningOptions& options) {
+  return pcp_manager_.StartListeningForIncomingConnections(
+      client, service_id, std::move(listener), options);
+}
+
+void OfflineServiceController::StopListeningForIncomingConnections(
+    ClientProxy* client) {
+  pcp_manager_.StopListeningForIncomingConnections(client);
 }
 
 void OfflineServiceController::InjectEndpoint(
@@ -86,14 +103,27 @@ Status OfflineServiceController::RequestConnection(
                                         connection_options);
 }
 
+Status OfflineServiceController::RequestConnectionV3(
+    ClientProxy* client, const NearbyDevice& remote_device,
+    const ConnectionRequestInfo& info,
+    const ConnectionOptions& connection_options) {
+  if (stop_) return {Status::kOutOfOrderApiCall};
+  NEARBY_LOGS(INFO) << "Client " << client->GetClientId()
+                    << " requested a connection to endpoint_id="
+                    << remote_device.GetEndpointId();
+  return pcp_manager_.RequestConnectionV3(client, remote_device, info,
+                                          connection_options);
+}
+
 Status OfflineServiceController::AcceptConnection(
     ClientProxy* client, const std::string& endpoint_id,
-    const PayloadListener& listener) {
+    PayloadListener listener) {
   if (stop_) return {Status::kOutOfOrderApiCall};
   NEARBY_LOGS(INFO) << "Client " << client->GetClientId()
                     << " accepted the connection with endpoint_id="
                     << endpoint_id;
-  return pcp_manager_.AcceptConnection(client, endpoint_id, listener);
+  return pcp_manager_.AcceptConnection(client, endpoint_id,
+                                       std::move(listener));
 }
 
 Status OfflineServiceController::RejectConnection(
@@ -142,10 +172,33 @@ void OfflineServiceController::DisconnectFromEndpoint(
   endpoint_manager_.UnregisterEndpoint(client, endpoint_id);
 }
 
+Status OfflineServiceController::UpdateAdvertisingOptions(
+    ClientProxy* client, absl::string_view service_id,
+    const AdvertisingOptions& advertising_options) {
+  if (stop_) return {Status::kOutOfOrderApiCall};
+  return pcp_manager_.UpdateAdvertisingOptions(client, service_id,
+                                               advertising_options);
+}
+
+Status OfflineServiceController::UpdateDiscoveryOptions(
+    ClientProxy* client, absl::string_view service_id,
+    const DiscoveryOptions& discovery_options) {
+  if (stop_) return {Status::kOutOfOrderApiCall};
+  return pcp_manager_.UpdateDiscoveryOptions(client, service_id,
+                                             discovery_options);
+}
+
+void OfflineServiceController::SetCustomSavePath(ClientProxy* client,
+                                                 const std::string& path) {
+  if (stop_) return;
+  NEARBY_LOGS(INFO) << "Client " << client->GetClientId()
+                    << " requested to set custom save path: " << path;
+  payload_manager_.SetCustomSavePath(client, path);
+}
+
 void OfflineServiceController::ShutdownBwuManagerExecutors() {
   bwu_manager_.ShutdownExecutors();
 }
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

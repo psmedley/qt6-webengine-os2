@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CONTROLLER_HIGHEST_PMF_REPORTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CONTROLLER_HIGHEST_PMF_REPORTER_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "third_party/blink/renderer/controller/controller_export.h"
 #include "third_party/blink/renderer/controller/memory_usage_monitor.h"
@@ -26,10 +27,12 @@ class CONTROLLER_EXPORT HighestPmfReporter
 
  public:
   // Returns the shared instance.
-  static HighestPmfReporter& Instance();
+  static void Initialize(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
  private:
-  HighestPmfReporter();
+  explicit HighestPmfReporter(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   // The constructor for testing.
   HighestPmfReporter(
@@ -47,7 +50,7 @@ class CONTROLLER_EXPORT HighestPmfReporter
   virtual void ReportMetrics();
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  const base::TickClock* clock_;
+  raw_ptr<const base::TickClock, ExperimentalRenderer> clock_;
 
   bool first_navigation_detected_ = false;
   double current_highest_pmf_ = 0.0;

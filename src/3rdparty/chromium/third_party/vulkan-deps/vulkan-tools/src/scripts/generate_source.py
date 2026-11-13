@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# Copyright (c) 2019 The Khronos Group Inc.
-# Copyright (c) 2019 Valve Corporation
-# Copyright (c) 2019 LunarG, Inc.
-# Copyright (c) 2019 Google Inc.
+# Copyright (c) 2019-2023 The Khronos Group Inc.
+# Copyright (c) 2019-2023 Valve Corporation
+# Copyright (c) 2019-2023 LunarG, Inc.
+# Copyright (c) 2019-2023 Google Inc.
+# Copyright (c) 2023-2023 RasterGrid Kft.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +22,7 @@
 import argparse
 import filecmp
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -33,6 +35,11 @@ verify_exclude = ['.clang-format']
 
 def main(argv):
     parser = argparse.ArgumentParser(description='Generate source code for this repository')
+    parser.add_argument('--api',
+                        default='vulkan',
+                        choices=['vulkan', 'vulkansc'],
+                        help='Specify API name to generate')
+    parser.add_argument('--generated-version', help='sets the header version used to generate the repo')
     parser.add_argument('registry', metavar='REGISTRY_PATH', help='path to the Vulkan-Headers registry directory')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-i', '--incremental', action='store_true', help='only update repo files that change')
@@ -41,12 +48,25 @@ def main(argv):
 
     # output paths and the list of files in the path
     files_to_gen = {str(os.path.join('icd','generated')) : ['vk_typemap_helper.h',
-                                            'mock_icd.h',
-                                            'mock_icd.cpp'],
+                                            'function_definitions.h',
+                                            'function_declarations.h'],
                     str(os.path.join('vulkaninfo','generated')): ['vulkaninfo.hpp']}
 
     #base directory for the source repository
     repo_dir = common_codegen.repo_relative('')
+
+    # Update the api_version in the respective json files
+    if args.generated_version:
+        json_files = []
+        json_files.append(common_codegen.repo_relative('icd/VkICD_mock_icd.json.in'))
+        for json_file in json_files:
+            with open(json_file) as f:
+                data = json.load(f)
+
+            data["ICD"]["api_version"] = args.generated_version
+
+            with open(json_file, mode='w', encoding='utf-8', newline='\n') as f:
+                f.write(json.dumps(data, indent=4))
 
     # get directory where generators will run if needed
     if args.verify or args.incremental:
@@ -65,6 +85,7 @@ def main(argv):
                 output_path = common_codegen.repo_relative(path)
 
             cmd = [common_codegen.repo_relative(os.path.join('scripts','kvt_genvk.py')),
+                '-api', args.api,
                 '-registry', os.path.abspath(os.path.join(args.registry,  'vk.xml')),
                 '-quiet', '-directory', output_path, filename]
             print(' '.join(cmd))

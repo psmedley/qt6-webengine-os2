@@ -19,6 +19,7 @@
 #include "libANGLE/renderer/null/FenceNVNULL.h"
 #include "libANGLE/renderer/null/FramebufferNULL.h"
 #include "libANGLE/renderer/null/ImageNULL.h"
+#include "libANGLE/renderer/null/ProgramExecutableNULL.h"
 #include "libANGLE/renderer/null/ProgramNULL.h"
 #include "libANGLE/renderer/null/ProgramPipelineNULL.h"
 #include "libANGLE/renderer/null/QueryNULL.h"
@@ -67,9 +68,12 @@ ContextNULL::ContextNULL(const gl::State &state,
     ASSERT(mAllocationTracker != nullptr);
 
     mExtensions                               = gl::Extensions();
+    mExtensions.blendEquationAdvancedKHR      = true;
+    mExtensions.blendFuncExtendedEXT          = true;
     mExtensions.copyCompressedTextureCHROMIUM = true;
     mExtensions.copyTextureCHROMIUM           = true;
     mExtensions.debugMarkerEXT                = true;
+    mExtensions.drawBuffersIndexedOES         = true;
     mExtensions.fenceNV                       = true;
     mExtensions.framebufferBlitANGLE          = true;
     mExtensions.framebufferBlitNV             = true;
@@ -111,6 +115,12 @@ ContextNULL::ContextNULL(const gl::State &state,
     mCaps = GenerateMinimumCaps(maxClientVersion, mExtensions);
 
     InitMinimumTextureCapsMap(maxClientVersion, mExtensions, &mTextureCaps);
+
+    if (mExtensions.shaderPixelLocalStorageANGLE)
+    {
+        mPLSOptions.type             = ShPixelLocalStorageType::FramebufferFetch;
+        mPLSOptions.fragmentSyncType = ShFragmentSynchronizationType::Automatic;
+    }
 }
 
 ContextNULL::~ContextNULL() {}
@@ -365,8 +375,10 @@ angle::Result ContextNULL::popDebugGroup(const gl::Context *context)
 }
 
 angle::Result ContextNULL::syncState(const gl::Context *context,
-                                     const gl::State::DirtyBits &dirtyBits,
-                                     const gl::State::DirtyBits &bitMask,
+                                     const gl::state::DirtyBits dirtyBits,
+                                     const gl::state::DirtyBits bitMask,
+                                     const gl::state::ExtendedDirtyBits extendedDirtyBits,
+                                     const gl::state::ExtendedDirtyBits extendedBitMask,
                                      gl::Command command)
 {
     return angle::Result::Continue;
@@ -407,11 +419,9 @@ const gl::Limitations &ContextNULL::getNativeLimitations() const
     return mLimitations;
 }
 
-ShPixelLocalStorageType ContextNULL::getNativePixelLocalStorageType() const
+const ShPixelLocalStorageOptions &ContextNULL::getNativePixelLocalStorageOptions() const
 {
-    return getNativeExtensions().shaderPixelLocalStorageANGLE
-               ? ShPixelLocalStorageType::FramebufferFetch
-               : ShPixelLocalStorageType::NotSupported;
+    return mPLSOptions;
 }
 
 CompilerImpl *ContextNULL::createCompiler()
@@ -427,6 +437,11 @@ ShaderImpl *ContextNULL::createShader(const gl::ShaderState &data)
 ProgramImpl *ContextNULL::createProgram(const gl::ProgramState &data)
 {
     return new ProgramNULL(data);
+}
+
+ProgramExecutableImpl *ContextNULL::createProgramExecutable(const gl::ProgramExecutable *executable)
+{
+    return new ProgramExecutableNULL(executable);
 }
 
 FramebufferImpl *ContextNULL::createFramebuffer(const gl::FramebufferState &data)

@@ -8,8 +8,15 @@
 #ifndef SkGeometry_DEFINED
 #define SkGeometry_DEFINED
 
-#include "include/core/SkMatrix.h"
-#include "include/private/SkVx.h"
+#include "include/core/SkPoint.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkTypes.h"
+#include "src/base/SkVx.h"
+
+#include <cstring>
+
+class SkMatrix;
+struct SkRect;
 
 static inline skvx::float2 from_point(const SkPoint& point) {
     return skvx::float2::Load(&point);
@@ -229,8 +236,29 @@ int SkChopCubicAtMaxCurvature(const SkPoint src[4], SkPoint dst[13],
  */
 SkScalar SkFindCubicCusp(const SkPoint src[4]);
 
-bool SkChopMonoCubicAtX(SkPoint src[4], SkScalar y, SkPoint dst[7]);
-bool SkChopMonoCubicAtY(SkPoint src[4], SkScalar x, SkPoint dst[7]);
+/** Given a monotonically increasing or decreasing cubic bezier src, chop it
+ *  where the X value is the specified value. The returned cubics will be in
+ *  dst, sharing the middle point. That is, the first cubic is dst[0..3] and
+ *  the second dst[3..6].
+ *
+ *  If the cubic provided is *not* monotone, it will be chopped at the first
+ *  time the curve has the specified X value.
+ *
+ *  If the cubic never reaches the specified value, the function returns false.
+*/
+bool SkChopMonoCubicAtX(const SkPoint src[4], SkScalar x, SkPoint dst[7]);
+
+/** Given a monotonically increasing or decreasing cubic bezier src, chop it
+ *  where the Y value is the specified value. The returned cubics will be in
+ *  dst, sharing the middle point. That is, the first cubic is dst[0..3] and
+ *  the second dst[3..6].
+ *
+ *  If the cubic provided is *not* monotone, it will be chopped at the first
+ *  time the curve has the specified Y value.
+ *
+ *  If the cubic never reaches the specified value, the function returns false.
+*/
+bool SkChopMonoCubicAtY(const SkPoint src[4], SkScalar y, SkPoint dst[7]);
 
 enum class SkCubicType {
     kSerpentine,
@@ -297,14 +325,11 @@ enum SkRotationDirection {
 struct SkConic {
     SkConic() {}
     SkConic(const SkPoint& p0, const SkPoint& p1, const SkPoint& p2, SkScalar w) {
-        fPts[0] = p0;
-        fPts[1] = p1;
-        fPts[2] = p2;
-        fW = w;
+        this->set(p0, p1, p2, w);
     }
+
     SkConic(const SkPoint pts[3], SkScalar w) {
-        memcpy(fPts, pts, sizeof(fPts));
-        fW = w;
+        this->set(pts, w);
     }
 
     SkPoint  fPts[3];
@@ -312,14 +337,23 @@ struct SkConic {
 
     void set(const SkPoint pts[3], SkScalar w) {
         memcpy(fPts, pts, 3 * sizeof(SkPoint));
-        fW = w;
+        this->setW(w);
     }
 
     void set(const SkPoint& p0, const SkPoint& p1, const SkPoint& p2, SkScalar w) {
         fPts[0] = p0;
         fPts[1] = p1;
         fPts[2] = p2;
-        fW = w;
+        this->setW(w);
+    }
+
+    void setW(SkScalar w) {
+        if (SkScalarIsFinite(w)) {
+            SkASSERT(w > 0);
+        }
+
+        // Guard against bad weights by forcing them to 1.
+        fW = w > 0 && SkScalarIsFinite(w) ? w : 1;
     }
 
     /**
@@ -330,7 +364,7 @@ struct SkConic {
      *  be used.
      */
     void evalAt(SkScalar t, SkPoint* pos, SkVector* tangent = nullptr) const;
-    bool SK_WARN_UNUSED_RESULT chopAt(SkScalar t, SkConic dst[2]) const;
+    [[nodiscard]] bool chopAt(SkScalar t, SkConic dst[2]) const;
     void chopAt(SkScalar t1, SkScalar t2, SkConic* dst) const;
     void chop(SkConic dst[2]) const;
 
@@ -350,7 +384,7 @@ struct SkConic {
      *  Chop this conic into N quads, stored continguously in pts[], where
      *  N = 1 << pow2. The amount of storage needed is (1 + 2 * N)
      */
-    int SK_SPI SK_WARN_UNUSED_RESULT chopIntoQuadsPOW2(SkPoint pts[], int pow2) const;
+    [[nodiscard]] int SK_SPI chopIntoQuadsPOW2(SkPoint pts[], int pow2) const;
 
     float findMidTangent() const;
     bool findXExtrema(SkScalar* t) const;
@@ -465,7 +499,7 @@ struct SkCubicCoeff {
 
 }  // namespace
 
-#include "include/private/SkTemplates.h"
+#include "include/private/base/SkTemplates.h"
 
 /**
  *  Help class to allocate storage for approximating a conic with N quads.
@@ -508,7 +542,7 @@ private:
         kQuadCount = 8, // should handle most conics
         kPointCount = 1 + 2 * kQuadCount,
     };
-    SkAutoSTMalloc<kPointCount, SkPoint> fStorage;
+    skia_private::AutoSTMalloc<kPointCount, SkPoint> fStorage;
     int fQuadCount; // #quads for current usage
 };
 

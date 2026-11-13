@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2020-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,17 +16,33 @@
 
 #include <winstring.h>
 
+#include <chrono>  // NOLINT(build/c++11)
 #include <codecvt>
+#include <exception>
 #include <locale>
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
+#include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Bluetooth.Rfcomm.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Bluetooth.h"
+#include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Enumeration.h"
+#include "internal/platform/implementation/windows/generated/winrt/Windows.Foundation.Collections.h"
+#include "internal/platform/implementation/windows/generated/winrt/base.h"
 #include "internal/platform/implementation/windows/utils.h"
+#include "internal/platform/logging.h"
+#include "winrt/Windows.Foundation.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
+namespace {
+using ::winrt::Windows::Foundation::TimeSpan;
+
+constexpr int kBluetoothTimeoutInSeconds = 10;
+constexpr int kCheckBluetoothServiceMaxTimes = 3;
+constexpr absl::Duration kCheckBluetoothServiceInterval = absl::Seconds(1);
+}  // namespace
 
 BluetoothDevice::~BluetoothDevice() {}
 
@@ -38,7 +54,8 @@ BluetoothDevice::BluetoothDevice(absl::string_view mac_address)
           FromBluetoothAddressAsync(mac_address_string_to_uint64(mac_address))
               .get();
   if (windows_bluetooth_device_ != nullptr) {
-      id_ = winrt::to_string(windows_bluetooth_device_.DeviceId());
+    id_ = winrt::to_string(windows_bluetooth_device_.DeviceId());
+    name_ = winrt::to_string(windows_bluetooth_device_.Name());
   }
 }
 
@@ -51,27 +68,84 @@ BluetoothDevice::BluetoothDevice(
   auto bluetoothAddress = bluetoothDevice.BluetoothAddress();
 
   mac_address_ = uint64_to_mac_address_string(bluetoothAddress);
-}
-
-// https://developer.android.com/reference/android/bluetooth/BluetoothDevice.html#getName()
-std::string BluetoothDevice::GetName() const {
-  return winrt::to_string(windows_bluetooth_device_.Name());
+  name_ = winrt::to_string(windows_bluetooth_device_.Name());
 }
 
 // Returns BT MAC address assigned to this device.
 std::string BluetoothDevice::GetMacAddress() const { return mac_address_; }
 
-// We are using Uncached because:
-// For the following APIs, Cached means only use values cached in the system
-// cached (if not cached then don't fall back to querying the device).
-// The device may be present, but not entered into the cache yet, so always
-// check the actual device.
-IAsyncOperation<RfcommDeviceServicesResult>
-BluetoothDevice::GetRfcommServicesForIdAsync(const RfcommServiceId serviceId) {
-  return windows_bluetooth_device_.GetRfcommServicesForIdAsync(
-      serviceId, BluetoothCacheMode::Uncached);
+// Checks cache first, will check uncached if no result.
+RfcommDeviceService BluetoothDevice::GetRfcommServiceForIdAsync(
+    const RfcommServiceId serviceId) {
+  int check_service_count = 0;
+  while (check_service_count < kCheckBluetoothServiceMaxTimes) {
+    try {
+      NEARBY_LOGS(INFO) << __func__ << ": Get RF services for service id:"
+                        << winrt::to_string(serviceId.AsString());
+
+      RfcommDeviceServicesResult rfcomm_device_services = nullptr;
+      // Try to get service from un cached mode.
+      auto rfcomm_device_services_async =
+          windows_bluetooth_device_.GetRfcommServicesForIdAsync(
+              serviceId, BluetoothCacheMode::Uncached);
+
+      switch (rfcomm_device_services_async.wait_for(
+          TimeSpan(std::chrono::seconds(kBluetoothTimeoutInSeconds)))) {
+        case winrt::Windows::Foundation::AsyncStatus::Completed:
+          rfcomm_device_services = rfcomm_device_services_async.GetResults();
+          break;
+        case winrt::Windows::Foundation::AsyncStatus::Started:
+          NEARBY_LOGS(ERROR)
+              << __func__
+              << ": Failed to get RfcommDeviceService due to timeout.";
+          rfcomm_device_services_async.Cancel();
+          return nullptr;
+        default:
+          NEARBY_LOGS(ERROR)
+              << __func__
+              << ": Failed to get RfcommDeviceService due to unknown reasons.";
+          return nullptr;
+      }
+
+      if (rfcomm_device_services != nullptr &&
+          rfcomm_device_services.Services().Size() > 0) {
+        NEARBY_LOGS(INFO) << __func__ << ": Get "
+                          << rfcomm_device_services.Services().Size()
+                          << " services without cache.";
+        // found the matched service.
+        for (auto rfcomm_device_service : rfcomm_device_services.Services()) {
+          if (rfcomm_device_service.Device() != nullptr &&
+              winrt::to_string(rfcomm_device_service.Device().DeviceId()) ==
+                  id_) {
+            NEARBY_LOGS(INFO)
+                << __func__ << ": Found service from no-cache mode.";
+            return rfcomm_device_service;
+          }
+        }
+      }
+
+      ++check_service_count;
+      absl::SleepFor(kCheckBluetoothServiceInterval);
+      NEARBY_LOGS(ERROR) << __func__ << ": No any services at "
+                         << check_service_count << "th check.";
+    } catch (std::exception exception) {
+      NEARBY_LOGS(ERROR) << __func__ << ": Failed to get RfcommDeviceService: "
+                         << exception.what();
+      return nullptr;
+    } catch (const winrt::hresult_error& ex) {
+      NEARBY_LOGS(ERROR) << __func__ << ": RfcommDeviceService: " << ex.code()
+                         << ", error message: "
+                         << winrt::to_string(ex.message());
+      return nullptr;
+    } catch (...) {
+      NEARBY_LOGS(ERROR) << __func__ << ": Unknown exception.";
+      return nullptr;
+    }
+  }
+
+  NEARBY_LOGS(ERROR) << __func__ << ": Failed to get RfcommDeviceService.";
+  return nullptr;
 }
 
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location

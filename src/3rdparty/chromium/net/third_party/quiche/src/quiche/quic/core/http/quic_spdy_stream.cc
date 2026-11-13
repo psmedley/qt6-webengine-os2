@@ -6,6 +6,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -13,8 +14,8 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "quiche/http2/adapter/header_validator.h"
 #include "quiche/http2/http2_constants.h"
-#include "quiche/quic/core/http/capsule.h"
 #include "quiche/quic/core/http/http_constants.h"
 #include "quiche/quic/core/http/http_decoder.h"
 #include "quiche/quic/core/http/http_frames.h"
@@ -23,6 +24,8 @@
 #include "quiche/quic/core/http/web_transport_http3.h"
 #include "quiche/quic/core/qpack/qpack_decoder.h"
 #include "quiche/quic/core/qpack/qpack_encoder.h"
+#include "quiche/quic/core/quic_error_codes.h"
+#include "quiche/quic/core/quic_stream_priority.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/core/quic_utils.h"
 #include "quiche/quic/core/quic_versions.h"
@@ -32,12 +35,17 @@
 #include "quiche/quic/platform/api/quic_flag_utils.h"
 #include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/quic/platform/api/quic_logging.h"
+#include "quiche/quic/platform/api/quic_testvalue.h"
+#include "quiche/common/capsule.h"
+#include "quiche/common/platform/api/quiche_flag_utils.h"
+#include "quiche/common/platform/api/quiche_logging.h"
 #include "quiche/common/quiche_mem_slice_storage.h"
 #include "quiche/common/quiche_text_utils.h"
 #include "quiche/spdy/core/spdy_protocol.h"
 
-using spdy::Http2HeaderBlock;
-using spdy::SpdyPriority;
+using ::quiche::Capsule;
+using ::quiche::CapsuleType;
+using ::spdy::Http2HeaderBlock;
 
 namespace quic {
 
@@ -163,16 +171,6 @@ class QuicSpdyStream::HttpDecoderVisitor : public HttpDecoder::Visitor {
                                                       : "Client:"  \
                                                         " ")
 
-namespace {
-HttpDecoder::Options HttpDecoderOptionsForBidiStream(
-    QuicSpdySession* spdy_session) {
-  HttpDecoder::Options options;
-  options.allow_web_transport_stream =
-      spdy_session->WillNegotiateWebTransport();
-  return options;
-}
-}  // namespace
-
 QuicSpdyStream::QuicSpdyStream(QuicStreamId id, QuicSpdySession* spdy_session,
                                StreamType type)
     : QuicStream(id, spdy_session, /*is_static=*/false, type),
@@ -186,12 +184,12 @@ QuicSpdyStream::QuicSpdyStream(QuicStreamId id, QuicSpdySession* spdy_session,
       trailers_decompressed_(false),
       trailers_consumed_(false),
       http_decoder_visitor_(std::make_unique<HttpDecoderVisitor>(this)),
-      decoder_(http_decoder_visitor_.get(),
-               HttpDecoderOptionsForBidiStream(spdy_session)),
+      decoder_(http_decoder_visitor_.get()),
       sequencer_offset_(0),
       is_decoder_processing_input_(false),
       ack_listener_(nullptr),
-      last_sent_urgency_(kDefaultUrgency) {
+      last_sent_priority_(
+          QuicStreamPriority::Default(spdy_session->priority_type())) {
   QUICHE_DCHECK_EQ(session()->connection(), spdy_session->connection());
   QUICHE_DCHECK_EQ(transport_version(), spdy_session->transport_version());
   QUICHE_DCHECK(!QuicUtils::IsCryptoStreamId(transport_version(), id));
@@ -226,7 +224,8 @@ QuicSpdyStream::QuicSpdyStream(PendingStream* pending,
       sequencer_offset_(sequencer()->NumBytesConsumed()),
       is_decoder_processing_input_(false),
       ack_listener_(nullptr),
-      last_sent_urgency_(kDefaultUrgency) {
+      last_sent_priority_(
+          QuicStreamPriority::Default(spdy_session->priority_type())) {
   QUICHE_DCHECK_EQ(session()->connection(), spdy_session->connection());
   QUICHE_DCHECK_EQ(transport_version(), spdy_session->transport_version());
   QUICHE_DCHECK(!QuicUtils::IsCryptoStreamId(transport_version(), id()));
@@ -258,7 +257,9 @@ size_t QuicSpdyStream::WriteHeaders(
   MaybeProcessSentWebTransportHeaders(header_block);
 
   if (web_transport_ != nullptr &&
-      spdy_session_->perspective() == Perspective::IS_SERVER) {
+      spdy_session_->perspective() == Perspective::IS_SERVER &&
+      spdy_session_->SupportedWebTransportVersion() ==
+          WebTransportHttp3Version::kDraft02) {
     header_block["sec-webtransport-http3-draft"] = "draft02";
   }
 
@@ -308,10 +309,6 @@ void QuicSpdyStream::WriteOrBufferBody(absl::string_view data, bool fin) {
     return;
   }
   QuicConnection::ScopedPacketFlusher flusher(spdy_session_->connection());
-
-  if (spdy_session_->debug_visitor()) {
-    spdy_session_->debug_visitor()->OnDataFrameSent(id(), data.length());
-  }
 
   const bool success =
       WriteDataFrameHeader(data.length(), /*force_write=*/true);
@@ -468,6 +465,13 @@ bool QuicSpdyStream::HasBytesToRead() const {
   return body_manager_.HasBytesToRead();
 }
 
+QuicByteCount QuicSpdyStream::ReadableBytes() const {
+  if (!VersionUsesHttp3(transport_version())) {
+    return sequencer()->ReadableBytes();
+  }
+  return body_manager_.ReadableBytes();
+}
+
 void QuicSpdyStream::MarkTrailersConsumed() { trailers_consumed_ = true; }
 
 uint64_t QuicSpdyStream::total_body_bytes_read() const {
@@ -505,7 +509,11 @@ void QuicSpdyStream::OnStreamHeadersPriority(
     const spdy::SpdyStreamPrecedence& precedence) {
   QUICHE_DCHECK_EQ(Perspective::IS_SERVER,
                    session()->connection()->perspective());
-  SetPriority(precedence);
+  if (session()->priority_type() != QuicPriorityType::kHttp) {
+    return;
+  }
+  SetPriority(QuicStreamPriority(HttpStreamPriority{
+      precedence.spdy3_priority(), HttpStreamPriority::kDefaultIncremental}));
 }
 
 void QuicSpdyStream::OnStreamHeaderList(bool fin, size_t frame_len,
@@ -534,7 +542,7 @@ void QuicSpdyStream::OnStreamHeaderList(bool fin, size_t frame_len,
       return;
     }
   }
-  if (!headers_decompressed_) {
+  if (!NextHeaderIsTrailer()) {
     OnInitialHeadersComplete(fin, frame_len, header_list);
   } else {
     OnTrailingHeadersComplete(fin, frame_len, header_list);
@@ -551,18 +559,12 @@ void QuicSpdyStream::OnHeadersDecoded(QuicHeaderList headers,
       /* is_sent = */ false, headers.compressed_header_bytes(),
       headers.uncompressed_header_bytes());
 
-  const QuicStreamId promised_stream_id = spdy_session()->promised_stream_id();
   Http3DebugVisitor* const debug_visitor = spdy_session()->debug_visitor();
-  if (promised_stream_id ==
-      QuicUtils::GetInvalidStreamId(transport_version())) {
-    if (debug_visitor) {
-      debug_visitor->OnHeadersDecoded(id(), headers);
-    }
-
-    OnStreamHeaderList(/* fin = */ false, headers_payload_length_, headers);
-  } else {
-    spdy_session_->OnHeaderList(headers);
+  if (debug_visitor) {
+    debug_visitor->OnHeadersDecoded(id(), headers);
   }
+
+  OnStreamHeaderList(/* fin = */ false, headers_payload_length_, headers);
 
   if (blocked_on_decoding_headers_) {
     blocked_on_decoding_headers_ = false;
@@ -586,19 +588,16 @@ void QuicSpdyStream::MaybeSendPriorityUpdateFrame() {
       session()->perspective() != Perspective::IS_CLIENT) {
     return;
   }
-
-  // Value between 0 and 7, inclusive.  Lower value means higher priority.
-  int urgency = precedence().spdy3_priority();
-  if (last_sent_urgency_ == urgency) {
+  if (spdy_session_->priority_type() != QuicPriorityType::kHttp) {
     return;
   }
-  last_sent_urgency_ = urgency;
 
-  PriorityUpdateFrame priority_update;
-  priority_update.prioritized_element_type = REQUEST_STREAM;
-  priority_update.prioritized_element_id = id();
-  priority_update.priority_field_value = absl::StrCat("u=", urgency);
-  spdy_session_->WriteHttp3PriorityUpdate(priority_update);
+  if (last_sent_priority_ == priority()) {
+    return;
+  }
+  last_sent_priority_ = priority();
+
+  spdy_session_->WriteHttp3PriorityUpdate(id(), priority().http());
 }
 
 void QuicSpdyStream::OnHeadersTooLarge() { Reset(QUIC_HEADERS_TOO_LARGE); }
@@ -617,8 +616,11 @@ void QuicSpdyStream::OnInitialHeadersComplete(
   }
   // Validate request headers if it did not exceed size limit. If it did,
   // OnHeadersTooLarge() should have already handled it previously.
-  if (!header_too_large && !AreHeadersValid(header_list)) {
+  if (!header_too_large && !ValidateReceivedHeaders(header_list)) {
     QUIC_CODE_COUNT_N(quic_validate_request_header, 1, 2);
+    QUICHE_DCHECK(!invalid_request_details().empty())
+        << "ValidatedRequestHeaders() returns false without populating "
+           "invalid_request_details_";
     if (GetQuicReloadableFlag(quic_act_upon_invalid_header)) {
       QUIC_RELOADABLE_FLAG_COUNT(quic_act_upon_invalid_header);
       OnInvalidHeaders();
@@ -627,8 +629,7 @@ void QuicSpdyStream::OnInitialHeadersComplete(
   }
   QUIC_CODE_COUNT_N(quic_validate_request_header, 2, 2);
 
-  if (!GetQuicReloadableFlag(quic_verify_request_headers_2) ||
-      !header_too_large) {
+  if (!header_too_large) {
     MaybeProcessReceivedWebTransportHeaders();
   }
 
@@ -650,13 +651,12 @@ void QuicSpdyStream::OnInitialHeadersComplete(
   }
 }
 
-void QuicSpdyStream::OnPromiseHeaderList(
-    QuicStreamId /* promised_id */, size_t /* frame_len */,
-    const QuicHeaderList& /*header_list */) {
-  // To be overridden in QuicSpdyClientStream.  Not supported on
-  // server side.
-  stream_delegate()->OnStreamError(QUIC_INVALID_HEADERS_STREAM_DATA,
-                                   "Promise headers received by server");
+bool QuicSpdyStream::CopyAndValidateTrailers(const QuicHeaderList& header_list,
+                                             bool expect_final_byte_offset,
+                                             size_t* final_byte_offset,
+                                             spdy::Http2HeaderBlock* trailers) {
+  return SpdyUtils::CopyAndValidateTrailers(
+      header_list, expect_final_byte_offset, final_byte_offset, trailers);
 }
 
 void QuicSpdyStream::OnTrailingHeadersComplete(
@@ -681,9 +681,8 @@ void QuicSpdyStream::OnTrailingHeadersComplete(
 
   size_t final_byte_offset = 0;
   const bool expect_final_byte_offset = !VersionUsesHttp3(transport_version());
-  if (!SpdyUtils::CopyAndValidateTrailers(header_list, expect_final_byte_offset,
-                                          &final_byte_offset,
-                                          &received_trailers_)) {
+  if (!CopyAndValidateTrailers(header_list, expect_final_byte_offset,
+                               &final_byte_offset, &received_trailers_)) {
     QUIC_DLOG(ERROR) << ENDPOINT << "Trailers for stream " << id()
                      << " are malformed.";
     stream_delegate()->OnStreamError(QUIC_INVALID_HEADERS_STREAM_DATA,
@@ -703,7 +702,11 @@ void QuicSpdyStream::OnPriorityFrame(
     const spdy::SpdyStreamPrecedence& precedence) {
   QUICHE_DCHECK_EQ(Perspective::IS_SERVER,
                    session()->connection()->perspective());
-  SetPriority(precedence);
+  if (session()->priority_type() != QuicPriorityType::kHttp) {
+    return;
+  }
+  SetPriority(QuicStreamPriority(HttpStreamPriority{
+      precedence.spdy3_priority(), HttpStreamPriority::kDefaultIncremental}));
 }
 
 void QuicSpdyStream::OnStreamReset(const QuicRstStreamFrame& frame) {
@@ -801,6 +804,13 @@ void QuicSpdyStream::OnDataAvailable() {
     return;
   }
 
+  if (spdy_session_->SupportsWebTransport()) {
+    // We do this here, since at this point, we have passed the
+    // ShouldProcessIncomingRequests() check above, meaning we know for a fact
+    // if we should be parsing WEBTRANSPORT_STREAM or not.
+    decoder_.EnableWebTransportStreamParsing();
+  }
+
   iovec iov;
   while (session()->connection()->connected() && !reading_stopped() &&
          decoder_.error() == QUIC_NO_ERROR) {
@@ -888,7 +898,6 @@ bool QuicSpdyStream::FinishedReadingHeaders() const {
   return headers_decompressed_ && header_list_.empty();
 }
 
-// static
 bool QuicSpdyStream::ParseHeaderStatusCode(const Http2HeaderBlock& header,
                                            int* status_code) {
   Http2HeaderBlock::const_iterator it = header.find(spdy::kHttp2StatusHeader);
@@ -896,6 +905,11 @@ bool QuicSpdyStream::ParseHeaderStatusCode(const Http2HeaderBlock& header,
     return false;
   }
   const absl::string_view status(it->second);
+  return ParseHeaderStatusCode(status, status_code);
+}
+
+bool QuicSpdyStream::ParseHeaderStatusCode(absl::string_view status,
+                                           int* status_code) {
   if (status.size() != 3) {
     return false;
   }
@@ -931,6 +945,17 @@ bool QuicSpdyStream::OnDataFrameStart(QuicByteCount header_length,
   }
 
   if (!headers_decompressed_ || trailers_decompressed_) {
+    QUICHE_LOG(INFO) << ENDPOINT << "stream_id: " << id()
+                     << ", headers_decompressed: "
+                     << (headers_decompressed_ ? "true" : "false")
+                     << ", trailers_decompressed: "
+                     << (trailers_decompressed_ ? "true" : "false")
+                     << ", NumBytesConsumed: "
+                     << sequencer()->NumBytesConsumed()
+                     << ", total_body_bytes_received: "
+                     << body_manager_.total_body_bytes_received()
+                     << ", header_length: " << header_length
+                     << ", payload_length: " << payload_length;
     stream_delegate()->OnStreamError(
         QUIC_HTTP_INVALID_FRAME_SEQUENCE_ON_SPDY_STREAM,
         "Unexpected DATA frame received.");
@@ -1020,6 +1045,13 @@ bool QuicSpdyStream::OnHeadersFrameStart(QuicByteCount header_length,
   headers_payload_length_ = payload_length;
 
   if (trailers_decompressed_) {
+    QUICHE_LOG(INFO) << ENDPOINT << "stream_id: " << id()
+                     << ", headers_decompressed: "
+                     << (headers_decompressed_ ? "true" : "false")
+                     << ", NumBytesConsumed: "
+                     << sequencer()->NumBytesConsumed()
+                     << ", total_body_bytes_received: "
+                     << body_manager_.total_body_bytes_received();
     stream_delegate()->OnStreamError(
         QUIC_HTTP_INVALID_FRAME_SEQUENCE_ON_SPDY_STREAM,
         "HEADERS frame received after trailing HEADERS.");
@@ -1083,22 +1115,47 @@ void QuicSpdyStream::OnWebTransportStreamFrameType(
     QuicByteCount header_length, WebTransportSessionId session_id) {
   QUIC_DVLOG(1) << ENDPOINT << " Received WEBTRANSPORT_STREAM on stream "
                 << id() << " for session " << session_id;
+  QuicStreamOffset offset = sequencer()->NumBytesConsumed();
   sequencer()->MarkConsumed(header_length);
 
-  if (headers_payload_length_ > 0 || headers_decompressed_) {
-    QUIC_PEER_BUG(WEBTRANSPORT_STREAM received on HTTP request)
-        << ENDPOINT << "Stream " << id()
-        << " tried to convert to WebTransport, but it already "
-           "has HTTP data on it";
-    Reset(QUIC_STREAM_FRAME_UNEXPECTED);
+  std::optional<WebTransportHttp3Version> version =
+      spdy_session_->SupportedWebTransportVersion();
+  QUICHE_DCHECK(version.has_value());
+  if (version == WebTransportHttp3Version::kDraft02) {
+    if (headers_payload_length_ > 0 || headers_decompressed_) {
+      std::string error =
+          absl::StrCat("Stream ", id(),
+                       " attempted to convert itself into a WebTransport data "
+                       "stream, but it already has HTTP data on it");
+      QUIC_PEER_BUG(WEBTRANSPORT_STREAM received on HTTP request)
+          << ENDPOINT << error;
+      OnUnrecoverableError(QUIC_HTTP_INVALID_FRAME_SEQUENCE_ON_SPDY_STREAM,
+                           error);
+      return;
+    }
+  } else {
+    if (offset > 0) {
+      std::string error =
+          absl::StrCat("Stream ", id(),
+                       " received WEBTRANSPORT_STREAM at a non-zero offset");
+      QUIC_DLOG(ERROR) << ENDPOINT << error;
+      OnUnrecoverableError(QUIC_HTTP_INVALID_FRAME_SEQUENCE_ON_SPDY_STREAM,
+                           error);
+      return;
+    }
   }
+
   if (QuicUtils::IsOutgoingStreamId(spdy_session_->version(), id(),
                                     spdy_session_->perspective())) {
+    std::string error = absl::StrCat(
+        "Stream ", id(),
+        " attempted to convert itself into a WebTransport data stream, but "
+        "only the initiator of the stream can do that");
     QUIC_PEER_BUG(WEBTRANSPORT_STREAM received on outgoing request)
-        << ENDPOINT << "Stream " << id()
-        << " tried to convert to WebTransport, but only the "
-           "initiator of the stream can do it.";
-    Reset(QUIC_STREAM_FRAME_UNEXPECTED);
+        << ENDPOINT << error;
+    OnUnrecoverableError(QUIC_HTTP_INVALID_FRAME_SEQUENCE_ON_SPDY_STREAM,
+                         error);
+    return;
   }
 
   QUICHE_DCHECK(web_transport_ == nullptr);
@@ -1144,7 +1201,8 @@ size_t QuicSpdyStream::WriteHeadersImpl(
         ack_listener) {
   if (!VersionUsesHttp3(transport_version())) {
     return spdy_session_->WriteHeadersOnHeadersStream(
-        id(), std::move(header_block), fin, precedence(),
+        id(), std::move(header_block), fin,
+        spdy::SpdyStreamPrecedence(priority().http().urgency),
         std::move(ack_listener));
   }
 
@@ -1165,28 +1223,12 @@ size_t QuicSpdyStream::WriteHeadersImpl(
       send_buffer().stream_offset(),
       send_buffer().stream_offset() + headers_frame_header.length());
 
-  if (GetQuicReloadableFlag(quic_one_write_for_headers)) {
-    QUIC_RELOADABLE_FLAG_COUNT(quic_one_write_for_headers);
-
-    QUIC_DLOG(INFO) << ENDPOINT << "Stream " << id()
-                    << " is writing HEADERS frame header of length "
-                    << headers_frame_header.length()
-                    << ", and payload of length " << encoded_headers.length()
-                    << " with fin " << fin;
-    WriteOrBufferData(absl::StrCat(headers_frame_header, encoded_headers), fin,
-                      /*ack_listener=*/nullptr);
-  } else {
-    QUIC_DLOG(INFO) << ENDPOINT << "Stream " << id()
-                    << " is writing HEADERS frame header of length "
-                    << headers_frame_header.length();
-    WriteOrBufferData(headers_frame_header, /* fin = */ false,
-                      /* ack_listener = */ nullptr);
-
-    QUIC_DLOG(INFO) << ENDPOINT << "Stream " << id()
-                    << " is writing HEADERS frame payload of length "
-                    << encoded_headers.length() << " with fin " << fin;
-    WriteOrBufferData(encoded_headers, fin, nullptr);
-  }
+  QUIC_DLOG(INFO) << ENDPOINT << "Stream " << id()
+                  << " is writing HEADERS frame header of length "
+                  << headers_frame_header.length() << ", and payload of length "
+                  << encoded_headers.length() << " with fin " << fin;
+  WriteOrBufferData(absl::StrCat(headers_frame_header, encoded_headers), fin,
+                    /*ack_listener=*/nullptr);
 
   QuicSpdySession::LogHeaderCompressionRatioHistogram(
       /* using_qpack = */ true,
@@ -1237,14 +1279,6 @@ void QuicSpdyStream::MaybeProcessReceivedWebTransportHeaders() {
                           "Datagram-Flow-Id header";
       return;
     }
-    if (header_name == "sec-webtransport-http3-draft02") {
-      if (header_value != "1") {
-        QUIC_DLOG(ERROR) << ENDPOINT
-                         << "Rejecting WebTransport due to invalid value of "
-                            "Sec-Webtransport-Http3-Draft02 header";
-        return;
-      }
-    }
   }
 
   if (method != "CONNECT" || protocol != "webtransport") {
@@ -1274,7 +1308,10 @@ void QuicSpdyStream::MaybeProcessSentWebTransportHeaders(
     return;
   }
 
-  headers["sec-webtransport-http3-draft02"] = "1";
+  if (spdy_session_->SupportedWebTransportVersion() ==
+      WebTransportHttp3Version::kDraft02) {
+    headers["sec-webtransport-http3-draft02"] = "1";
+  }
 
   web_transport_ =
       std::make_unique<WebTransportHttp3>(spdy_session_, this, id());
@@ -1359,15 +1396,18 @@ bool QuicSpdyStream::OnCapsule(const Capsule& capsule) {
     return false;
   }
   switch (capsule.capsule_type()) {
-    case CapsuleType::LEGACY_DATAGRAM: {
+    case CapsuleType::DATAGRAM:
+      HandleReceivedDatagram(capsule.datagram_capsule().http_datagram_payload);
+      return true;
+    case CapsuleType::LEGACY_DATAGRAM:
       HandleReceivedDatagram(
           capsule.legacy_datagram_capsule().http_datagram_payload);
-    } break;
-    case CapsuleType::DATAGRAM_WITHOUT_CONTEXT: {
-      HandleReceivedDatagram(
-          capsule.datagram_without_context_capsule().http_datagram_payload);
-    } break;
-    case CapsuleType::CLOSE_WEBTRANSPORT_SESSION: {
+      return true;
+    case CapsuleType::LEGACY_DATAGRAM_WITHOUT_CONTEXT:
+      HandleReceivedDatagram(capsule.legacy_datagram_without_context_capsule()
+                                 .http_datagram_payload);
+      return true;
+    case CapsuleType::CLOSE_WEBTRANSPORT_SESSION:
       if (web_transport_ == nullptr) {
         QUIC_DLOG(ERROR) << ENDPOINT << "Received capsule " << capsule
                          << " for a non-WebTransport stream.";
@@ -1376,7 +1416,15 @@ bool QuicSpdyStream::OnCapsule(const Capsule& capsule) {
       web_transport_->OnCloseReceived(
           capsule.close_web_transport_session_capsule().error_code,
           capsule.close_web_transport_session_capsule().error_message);
-    } break;
+      return true;
+    case CapsuleType::DRAIN_WEBTRANSPORT_SESSION:
+      if (web_transport_ == nullptr) {
+        QUIC_DLOG(ERROR) << ENDPOINT << "Received capsule " << capsule
+                         << " for a non-WebTransport stream.";
+        return false;
+      }
+      web_transport_->OnDrainSessionReceived();
+      return true;
     case CapsuleType::ADDRESS_ASSIGN:
       if (connect_ip_visitor_ == nullptr) {
         return true;
@@ -1395,11 +1443,24 @@ bool QuicSpdyStream::OnCapsule(const Capsule& capsule) {
       }
       return connect_ip_visitor_->OnRouteAdvertisementCapsule(
           capsule.route_advertisement_capsule());
+
+    // Ignore WebTransport over HTTP/2 capsules.
+    case CapsuleType::WT_RESET_STREAM:
+    case CapsuleType::WT_STOP_SENDING:
+    case CapsuleType::WT_STREAM:
+    case CapsuleType::WT_STREAM_WITH_FIN:
+    case CapsuleType::WT_MAX_STREAM_DATA:
+    case CapsuleType::WT_MAX_STREAMS_BIDI:
+    case CapsuleType::WT_MAX_STREAMS_UNIDI:
+      return true;
+  }
+  if (datagram_visitor_) {
+    datagram_visitor_->OnUnknownCapsule(id(), capsule.unknown_capsule());
   }
   return true;
 }
 
-void QuicSpdyStream::OnCapsuleParseFailure(const std::string& error_message) {
+void QuicSpdyStream::OnCapsuleParseFailure(absl::string_view error_message) {
   QUIC_DLOG(ERROR) << ENDPOINT << "Capsule parse failure: " << error_message;
   Reset(QUIC_BAD_APPLICATION_PAYLOAD);
 }
@@ -1452,7 +1513,7 @@ void QuicSpdyStream::RegisterHttp3DatagramVisitor(
   }
   datagram_visitor_ = visitor;
   QUICHE_DCHECK(!capsule_parser_);
-  capsule_parser_ = std::make_unique<CapsuleParser>(this);
+  capsule_parser_ = std::make_unique<quiche::CapsuleParser>(this);
 }
 
 void QuicSpdyStream::UnregisterHttp3DatagramVisitor() {
@@ -1530,12 +1591,12 @@ QuicByteCount QuicSpdyStream::GetMaxDatagramSize() const {
   QuicByteCount prefix_size = 0;
   switch (spdy_session_->http_datagram_support()) {
     case HttpDatagramSupport::kDraft04:
-    case HttpDatagramSupport::kDraft09:
+    case HttpDatagramSupport::kRfc:
       prefix_size =
           QuicDataWriter::GetVarInt62Len(id() / kHttpDatagramStreamIdDivisor);
       break;
     case HttpDatagramSupport::kNone:
-    case HttpDatagramSupport::kDraft04And09:
+    case HttpDatagramSupport::kRfcAndDraft04:
       QUIC_BUG(GetMaxDatagramSize called with no datagram support)
           << "GetMaxDatagramSize() called when no HTTP/3 datagram support has "
              "been negotiated.  Support value: "
@@ -1587,39 +1648,66 @@ void QuicSpdyStream::HandleBodyAvailable() {
 }
 
 namespace {
-// Return true if |c| is not allowed in an HTTP/3 wire-encoded header and
-// pseudo-header names according to
-// https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.1.1 and
-// https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-semantics-19#section-5.6.2
-constexpr bool isInvalidHeaderNameCharacter(unsigned char c) {
-  if (c == '!' || c == '|' || c == '~' || c == '*' || c == '+' || c == '-' ||
-      c == '.' ||
-      // #, $, %, &, '
-      (c >= '#' && c <= '\'') ||
-      // [0-9], :
-      (c >= '0' && c <= ':') ||
-      // ^, _, `, [a-z]
-      (c >= '^' && c <= 'z')) {
+
+// Return true if `name` only has allowed characters.
+bool IsValidHeaderName(absl::string_view name) {
+  if (name.empty()) {
+    return true;
+  }
+
+  // Remove leading colon of pseudo-headers.
+  // This is the only position where colon is allowed.
+  if (name[0] == ':') {
+    name.remove_prefix(1);
+  }
+
+  return http2::adapter::HeaderValidator::IsValidHeaderName(name);
+}
+
+}  // namespace
+
+bool QuicSpdyStream::ValidateReceivedHeaders(
+    const QuicHeaderList& header_list) {
+  bool force_fail_validation = false;
+  AdjustTestValue("quic::QuicSpdyStream::request_header_validation_adjust",
+                  &force_fail_validation);
+  if (force_fail_validation) {
+    invalid_request_details_ =
+        "request_header_validation_adjust force failed the validation.";
+    QUIC_DLOG(ERROR) << invalid_request_details_;
     return false;
+  }
+  bool is_response = false;
+  for (const std::pair<std::string, std::string>& pair : header_list) {
+    const std::string& name = pair.first;
+    if (!IsValidHeaderName(name)) {
+      invalid_request_details_ =
+          absl::StrCat("Invalid character in header name ", name);
+      QUIC_DLOG(ERROR) << invalid_request_details_;
+      return false;
+    }
+    if (name == ":status") {
+      is_response = !pair.second.empty();
+    }
+    if (is_response && name == "host") {
+      // Host header is allowed in response.
+      continue;
+    }
+    if (http2::GetInvalidHttp2HeaderSet().contains(name)) {
+      invalid_request_details_ = absl::StrCat(name, " header is not allowed");
+      QUIC_DLOG(ERROR) << invalid_request_details_;
+      return false;
+    }
   }
   return true;
 }
-}  // namespace
 
-bool QuicSpdyStream::AreHeadersValid(const QuicHeaderList& header_list) const {
-  QUICHE_DCHECK(GetQuicReloadableFlag(quic_verify_request_headers_2));
-  for (const std::pair<std::string, std::string>& pair : header_list) {
-    const std::string& name = pair.first;
-    if (std::any_of(name.begin(), name.end(), isInvalidHeaderNameCharacter)) {
-      QUIC_DLOG(ERROR) << "Invalid request header " << name;
-      return false;
-    }
-    if (http2::GetInvalidHttp2HeaderSet().contains(name)) {
-      QUIC_DLOG(ERROR) << name << " header is not allowed";
-      return false;
-    }
-  }
-  return true;
+void QuicSpdyStream::set_invalid_request_details(
+    std::string invalid_request_details) {
+  QUIC_BUG_IF(
+      empty invalid request detail,
+      !invalid_request_details_.empty() || invalid_request_details.empty());
+  invalid_request_details_ = std::move(invalid_request_details);
 }
 
 bool QuicSpdyStream::AreHeaderFieldValuesValid(
@@ -1647,6 +1735,14 @@ bool QuicSpdyStream::AreHeaderFieldValuesValid(
 }
 
 void QuicSpdyStream::OnInvalidHeaders() { Reset(QUIC_BAD_APPLICATION_PAYLOAD); }
+
+void QuicSpdyStream::CloseReadSide() {
+  QuicStream::CloseReadSide();
+
+  // QuicStream::CloseReadSide() releases buffered read data from
+  // QuicStreamSequencer, invalidating every reference held by `body_manager_`.
+  body_manager_.Clear();
+}
 
 #undef ENDPOINT  // undef for jumbo builds
 }  // namespace quic

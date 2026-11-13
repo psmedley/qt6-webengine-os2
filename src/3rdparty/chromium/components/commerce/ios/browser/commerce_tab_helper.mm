@@ -8,10 +8,6 @@
 #include "ios/web/public/navigation/navigation_context.h"
 #include "ios/web/public/web_state.h"
 
-#if !defined(__has_feature) || !__has_feature(objc_arc)
-#error "This file requires ARC support."
-#endif
-
 namespace commerce {
 
 CommerceTabHelper::CommerceTabHelper(web::WebState* state,
@@ -31,16 +27,32 @@ CommerceTabHelper::~CommerceTabHelper() = default;
 void CommerceTabHelper::DidFinishNavigation(
     web::WebState* web_state,
     web::NavigationContext* navigation_context) {
-  if (!shopping_service_ || navigation_context->IsSameDocument()) {
+  if (!shopping_service_ ||
+      previous_main_frame_url_ == navigation_context->GetUrl()) {
     return;
   }
 
   // Notify the service that we're no longer interested in a particular URL.
   shopping_service_->DidNavigateAway(web_wrapper_.get(),
                                      previous_main_frame_url_);
-  previous_main_frame_url_ = web_wrapper_->GetLastCommittedURL();
+  previous_main_frame_url_ = navigation_context->GetUrl();
+
+  // If navigating to a different document, expect PageLoaded to be
+  // triggered.
+  if (!navigation_context->IsSameDocument()) {
+    web_wrapper_->SetIsFirstLoadForNavigationFinished(false);
+  }
 
   shopping_service_->DidNavigatePrimaryMainFrame(web_wrapper_.get());
+}
+
+void CommerceTabHelper::DidStopLoading(web::WebState* web_state) {
+  if (!shopping_service_) {
+    return;
+  }
+
+  web_wrapper_->SetIsFirstLoadForNavigationFinished(true);
+  shopping_service_->DidStopLoading(web_wrapper_.get());
 }
 
 void CommerceTabHelper::PageLoaded(
@@ -48,6 +60,8 @@ void CommerceTabHelper::PageLoaded(
     web::PageLoadCompletionStatus load_completion_status) {
   if (!shopping_service_)
     return;
+
+  web_wrapper_->SetIsFirstLoadForNavigationFinished(true);
 
   shopping_service_->DidFinishLoad(web_wrapper_.get());
 }

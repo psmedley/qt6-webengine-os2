@@ -5,10 +5,10 @@
  */
 
 button.link {
-  color: var(--color-link);
+  color: var(--sys-color-primary);
   text-decoration: underline;
   cursor: pointer;
-  padding: 2px 0; /* adjust focus ring size */
+  outline-offset: 2px;
   border: none;
   background: none;
   font-family: inherit;

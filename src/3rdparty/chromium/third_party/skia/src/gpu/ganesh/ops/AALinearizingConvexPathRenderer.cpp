@@ -28,8 +28,10 @@
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
 
+using namespace skia_private;
+
 ///////////////////////////////////////////////////////////////////////////////
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 namespace {
 
@@ -212,7 +214,7 @@ private:
         }
 
         size_t vertexStride =  fProgramInfo->geomProc().vertexStride();
-        int instanceCount = fPaths.count();
+        int instanceCount = fPaths.size();
 
         int64_t vertexCount = 0;
         int64_t indexCount = 0;
@@ -296,12 +298,12 @@ private:
             return CombineResult::kCannotCombine;
         }
 
-        fPaths.push_back_n(that->fPaths.count(), that->fPaths.begin());
+        fPaths.push_back_n(that->fPaths.size(), that->fPaths.begin());
         fWideColor |= that->fWideColor;
         return CombineResult::kMerged;
     }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     SkString onDumpInfo() const override {
         SkString string;
         for (const auto& path : fPaths) {
@@ -326,7 +328,7 @@ private:
         SkPaint::Join fJoin;
     };
 
-    SkSTArray<1, PathData, true> fPaths;
+    STArray<1, PathData, true> fPaths;
     Helper fHelper;
     bool fWideColor;
 
@@ -369,7 +371,7 @@ AALinearizingConvexPathRenderer::onCanDrawPath(const CanDrawPathArgs& args) cons
         if (strokeWidth < 1.0f && stroke.getStyle() == SkStrokeRec::kStroke_Style) {
             return CanDrawPath::kNo;
         }
-        if (strokeWidth > kMaxStrokeWidth ||
+        if ((strokeWidth > kMaxStrokeWidth && !args.fShape->isRect()) ||
             !args.fShape->knownToBeClosed() ||
             stroke.getJoin() == SkPaint::Join::kRound_Join) {
             return CanDrawPath::kNo;
@@ -410,9 +412,9 @@ bool AALinearizingConvexPathRenderer::onDrawPath(const DrawPathArgs& args) {
     return true;
 }
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 
 GR_DRAW_OP_TEST_DEFINE(AAFlatteningConvexPathOp) {
     SkMatrix viewMatrix = GrTest::TestMatrixPreservesRightAngles(random);
@@ -438,9 +440,15 @@ GR_DRAW_OP_TEST_DEFINE(AAFlatteningConvexPathOp) {
         miterLimit = random->nextRangeF(0.5f, 2.0f);
     }
     const GrUserStencilSettings* stencilSettings = GrGetRandomStencil(random, context);
-    return skgpu::v1::AAFlatteningConvexPathOp::Make(context, std::move(paint), viewMatrix, path,
-                                                     strokeWidth, style, join, miterLimit,
-                                                     stencilSettings);
+    return skgpu::ganesh::AAFlatteningConvexPathOp::Make(context,
+                                                         std::move(paint),
+                                                         viewMatrix,
+                                                         path,
+                                                         strokeWidth,
+                                                         style,
+                                                         join,
+                                                         miterLimit,
+                                                         stencilSettings);
 }
 
 #endif

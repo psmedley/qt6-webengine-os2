@@ -8,6 +8,7 @@
 #ifndef GrVkTexture_DEFINED
 #define GrVkTexture_DEFINED
 
+#include "include/gpu/ganesh/SkImageGanesh.h"
 #include "include/gpu/vk/GrVkTypes.h"
 #include "src/core/SkLRUCache.h"
 #include "src/gpu/ganesh/GrSamplerState.h"
@@ -22,7 +23,7 @@ struct GrVkImageInfo;
 class GrVkTexture : public GrTexture {
 public:
     static sk_sp<GrVkTexture> MakeNewTexture(GrVkGpu*,
-                                             SkBudgeted budgeted,
+                                             skgpu::Budgeted budgeted,
                                              SkISize dimensions,
                                              VkFormat format,
                                              uint32_t mipLevels,
@@ -36,7 +37,7 @@ public:
                                                  GrWrapCacheable,
                                                  GrIOType,
                                                  const GrVkImageInfo&,
-                                                 sk_sp<skgpu::MutableTextureStateRef>);
+                                                 sk_sp<skgpu::MutableTextureState>);
 
     ~GrVkTexture() override;
 
@@ -70,7 +71,7 @@ protected:
     void onAbandon() override;
     void onRelease() override;
 
-    bool onStealBackendTexture(GrBackendTexture*, SkImage::BackendTextureReleaseProc*) override {
+    bool onStealBackendTexture(GrBackendTexture*, SkImages::BackendTextureReleaseProc*) override {
         return false;
     }
 
@@ -83,7 +84,7 @@ protected:
 
 private:
     GrVkTexture(GrVkGpu*,
-                SkBudgeted,
+                skgpu::Budgeted,
                 SkISize,
                 sk_sp<GrVkImage> texture,
                 GrMipmapStatus,

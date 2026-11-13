@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,10 +37,7 @@
 
 namespace {
 
-FXDIB_Format XFA_GetDIBFormat(FXCODEC_IMAGE_TYPE type,
-                              int32_t iComponents,
-                              int32_t iBitsPerComponent) {
-  FXDIB_Format dibFormat = FXDIB_Format::kArgb;
+FXDIB_Format XFA_GetDIBFormat(FXCODEC_IMAGE_TYPE type, int32_t bpp) {
   switch (type) {
     case FXCODEC_IMAGE_JPG:
 #ifdef PDF_ENABLE_XFA_BMP
@@ -49,20 +46,13 @@ FXDIB_Format XFA_GetDIBFormat(FXCODEC_IMAGE_TYPE type,
 #ifdef PDF_ENABLE_XFA_TIFF
     case FXCODEC_IMAGE_TIFF:
 #endif  // PDF_ENABLE_XFA_TIFF
-    {
-      dibFormat = FXDIB_Format::kRgb32;
-      int32_t bpp = iComponents * iBitsPerComponent;
-      if (bpp <= 24) {
-        dibFormat = FXDIB_Format::kRgb;
-      }
-    } break;
+      return bpp <= 24 ? FXDIB_Format::kRgb : FXDIB_Format::kRgb32;
 #ifdef PDF_ENABLE_XFA_PNG
     case FXCODEC_IMAGE_PNG:
 #endif  // PDF_ENABLE_XFA_PNG
     default:
-      break;
+      return FXDIB_Format::kArgb;
   }
-  return dibFormat;
 }
 
 }  // namespace
@@ -77,8 +67,11 @@ void XFA_DrawImage(CFGAS_GEGraphics* pGS,
                    XFA_AttributeValue iVertAlign) {
   if (rtImage.IsEmpty())
     return;
-  if (!pDIBitmap || !pDIBitmap->GetBuffer())
+
+  CHECK(pDIBitmap);
+  if (pDIBitmap->GetBuffer().empty()) {
     return;
+  }
 
   CFX_RectF rtFit(rtImage.TopLeft(),
                   XFA_UnitPx2Pt(pDIBitmap->GetWidth(), dpi.width),
@@ -144,14 +137,15 @@ void XFA_DrawImage(CFGAS_GEGraphics* pGS,
 }
 
 RetainPtr<CFX_DIBitmap> XFA_LoadImageFromBuffer(
-    const RetainPtr<IFX_SeekableReadStream>& pImageFileRead,
+    RetainPtr<IFX_SeekableReadStream> pImageFileRead,
     FXCODEC_IMAGE_TYPE type,
     int32_t& iImageXDpi,
     int32_t& iImageYDpi) {
   auto pProgressiveDecoder = std::make_unique<ProgressiveDecoder>();
 
   CFX_DIBAttribute dibAttr;
-  pProgressiveDecoder->LoadImageInfo(pImageFileRead, type, &dibAttr, false);
+  pProgressiveDecoder->LoadImageInfo(std::move(pImageFileRead), type, &dibAttr,
+                                     false);
   switch (dibAttr.m_wDPIUnit) {
     case CFX_DIBAttribute::kResUnitCentimeter:
       dibAttr.m_nXDPI = static_cast<int32_t>(dibAttr.m_nXDPI * 2.54f);
@@ -174,12 +168,14 @@ RetainPtr<CFX_DIBitmap> XFA_LoadImageFromBuffer(
   }
 
   type = pProgressiveDecoder->GetType();
-  int32_t iComponents = pProgressiveDecoder->GetNumComponents();
-  int32_t iBpc = pProgressiveDecoder->GetBPC();
-  FXDIB_Format dibFormat = XFA_GetDIBFormat(type, iComponents, iBpc);
+  FXDIB_Format format =
+      XFA_GetDIBFormat(type, pProgressiveDecoder->GetBitsPerPixel());
   RetainPtr<CFX_DIBitmap> pBitmap = pdfium::MakeRetain<CFX_DIBitmap>();
-  pBitmap->Create(pProgressiveDecoder->GetWidth(),
-                  pProgressiveDecoder->GetHeight(), dibFormat);
+  if (!pBitmap->Create(pProgressiveDecoder->GetWidth(),
+                       pProgressiveDecoder->GetHeight(), format)) {
+    return nullptr;
+  }
+
   pBitmap->Clear(0xffffffff);
 
   size_t nFrames;
@@ -338,7 +334,6 @@ bool CXFA_FFWidget::ProcessEventUnderHandler(CXFA_EventParam* params,
   if (!pNode->IsWidgetReady())
     return false;
 
-  params->m_pTarget = pNode;
   return pHandler->ProcessEvent(pNode, params) == XFA_EventError::kSuccess;
 }
 
@@ -429,9 +424,7 @@ bool CXFA_FFWidget::OnSetFocus(CXFA_FFWidget* pOldWidget) {
   }
   GetLayoutItem()->SetStatusBits(XFA_WidgetStatus::kFocused);
 
-  CXFA_EventParam eParam;
-  eParam.m_eType = XFA_EVENT_Enter;
-  eParam.m_pTarget = m_pNode.Get();
+  CXFA_EventParam eParam(XFA_EVENT_Enter);
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeValue::Enter, &eParam);
   return true;
 }
@@ -645,9 +638,7 @@ void CXFA_FFWidget::EventKillFocus() {
     pItem->ClearStatusBits(XFA_WidgetStatus::kAccess);
     return;
   }
-  CXFA_EventParam eParam;
-  eParam.m_eType = XFA_EVENT_Exit;
-  eParam.m_pTarget = m_pNode.Get();
+  CXFA_EventParam eParam(XFA_EVENT_Exit);
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeValue::Exit, &eParam);
 }
 

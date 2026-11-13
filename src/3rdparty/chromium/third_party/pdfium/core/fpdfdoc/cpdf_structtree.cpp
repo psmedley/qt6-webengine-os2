@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,13 +15,12 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfdoc/cpdf_numbertree.h"
 #include "core/fpdfdoc/cpdf_structelement.h"
-#include "core/fxcrt/stl_util.h"
 
 namespace {
 
 bool IsTagged(const CPDF_Document* pDoc) {
-  const CPDF_Dictionary* pCatalog = pDoc->GetRoot();
-  RetainPtr<const CPDF_Dictionary> pMarkInfo = pCatalog->GetDictFor("MarkInfo");
+  RetainPtr<const CPDF_Dictionary> pMarkInfo =
+      pDoc->GetRoot()->GetDictFor("MarkInfo");
   return pMarkInfo && pMarkInfo->GetIntegerFor("Marked");
 }
 
@@ -63,16 +62,16 @@ void CPDF_StructTree::LoadPageTree(RetainPtr<const CPDF_Dictionary> pPageDict) {
   if (!pKids)
     return;
 
-  uint32_t dwKids = 0;
+  size_t kids_count;
   if (pKids->IsDictionary())
-    dwKids = 1;
+    kids_count = 1;
   else if (const CPDF_Array* pArray = pKids->AsArray())
-    dwKids = fxcrt::CollectionSize<uint32_t>(*pArray);
+    kids_count = pArray->size();
   else
     return;
 
   m_Kids.clear();
-  m_Kids.resize(dwKids);
+  m_Kids.resize(kids_count);
 
   RetainPtr<const CPDF_Dictionary> pParentTree =
       m_pTreeRoot->GetDictFor("ParentTree");
@@ -84,7 +83,8 @@ void CPDF_StructTree::LoadPageTree(RetainPtr<const CPDF_Dictionary> pPageDict) {
   if (parents_id < 0)
     return;
 
-  const CPDF_Array* pParentArray = ToArray(parent_tree.LookupValue(parents_id));
+  RetainPtr<const CPDF_Array> pParentArray =
+      ToArray(parent_tree.LookupValue(parents_id));
   if (!pParentArray)
     return;
 
@@ -129,7 +129,6 @@ RetainPtr<CPDF_StructElement> CPDF_StructTree::AddPageNode(
   }
 
   pElement->SetParent(pParentElement.Get());
-
   return pElement;
 }
 

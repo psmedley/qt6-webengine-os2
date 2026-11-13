@@ -1,5 +1,6 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef GL_SURFACE_GLX_QT_H_
 #define GL_SURFACE_GLX_QT_H_
@@ -12,7 +13,7 @@ class GLSurfaceGLXQt: public GLSurfaceQt {
 public:
     explicit GLSurfaceGLXQt(const gfx::Size& size);
 
-    static gl::GLDisplay *InitializeOneOff(uint64_t system_device_id);
+    static gl::GLDisplay *InitializeOneOff(gl::GpuPreference preference);
     static bool InitializeExtensionSettingsOneOff();
 
     bool Initialize(GLSurfaceFormat format) override;

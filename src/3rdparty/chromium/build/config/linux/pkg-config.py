@@ -1,9 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from __future__ import print_function
 
 import json
 import os
@@ -52,6 +51,7 @@ def SetConfigPath(options):
 
   sysroot = options.sysroot
   assert sysroot
+  system_libdir = options.system_libdir
 
   # Compute the library path name based on the architecture.
   arch = options.arch
@@ -59,8 +59,12 @@ def SetConfigPath(options):
     print("You must specify an architecture via -a if using a sysroot.")
     sys.exit(1)
 
-  libdir = sysroot + '/usr/' + options.system_libdir + '/pkgconfig'
-  libdir += ':' + sysroot + '/usr/share/pkgconfig'
+  if '/' in system_libdir or ':' in system_libdir:
+    libdir = system_libdir
+  else:
+    libdir = sysroot + '/usr/' + system_libdir + '/pkgconfig'
+    libdir += ':' + sysroot + '/usr/share/pkgconfig'
+
   os.environ['PKG_CONFIG_LIBDIR'] = libdir
   return libdir
 
@@ -80,7 +84,7 @@ def GetPkgConfigPrefixToStrip(options, args):
   # from pkg-config's |prefix| variable.
   prefix = subprocess.check_output([options.pkg_config,
       "--variable=prefix"] + args, env=os.environ).decode('utf-8')
-  if prefix[-4] == '/usr':
+  if prefix[:4] == '/usr':
     return prefix[4:]
   return prefix
 

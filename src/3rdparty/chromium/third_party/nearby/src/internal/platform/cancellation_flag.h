@@ -18,9 +18,9 @@
 #include <memory>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/synchronization/mutex.h"
 
-namespace location {
 namespace nearby {
 
 // A cancellation flag to mark an operation has been cancelled and should be
@@ -28,7 +28,7 @@ namespace nearby {
 class CancellationFlag {
  public:
   // The listener for cancellation.
-  using CancelListener = std::function<void()>;
+  using CancelListener = absl::AnyInvocable<void()>;
 
   CancellationFlag();
   explicit CancellationFlag(bool cancelled);
@@ -40,6 +40,15 @@ class CancellationFlag {
 
   // Set the flag as cancelled.
   void Cancel() ABSL_LOCKS_EXCLUDED(mutex_);
+
+  // Set the flag as uncancelled. This is needed for the case where the same
+  // endpoint is being reused, and callers want to reset the cancellation flag
+  // for the new attempt. Without this API, the reused endpoint will
+  // use the cancelled flag.
+  //
+  // It is expected that calleers will only call `Uncancel()` if the flag is
+  // already cancelled (check via `Cancelled()`).
+  void Uncancel() ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Returns true if the flag has been set to cancelled.
   bool Cancelled() const ABSL_LOCKS_EXCLUDED(mutex_);
@@ -53,7 +62,7 @@ class CancellationFlag {
   // function. It conducts that 2 different pointers might point to the same
   // callback function which is unusual and should avoid. Hence we make it as
   // private and use `CancellationFlagListener` as a RAII to wrap the function.
-  // The caller should register listener as lambda or std::function
+  // The caller should register listener as lambda or absl::AnyInvocable
   // via `CancellationFlagListener`.
   void RegisterOnCancelListener(CancelListener *listener)
       ABSL_LOCKS_EXCLUDED(mutex_);
@@ -75,6 +84,5 @@ class CancellationFlag {
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_BASE_CANCELLATION_FLAG_H_

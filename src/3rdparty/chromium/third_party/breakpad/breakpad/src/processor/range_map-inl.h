@@ -1,5 +1,4 @@
-// Copyright (c) 2010 Google Inc.
-// All rights reserved.
+// Copyright 2010 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -58,7 +57,7 @@ template<typename AddressType, typename EntryType>
 bool RangeMap<AddressType, EntryType>::StoreRangeInternal(
     const AddressType& base, const AddressType& delta,
     const AddressType& size, const EntryType& entry) {
-  AddressType high;
+  AddressType high = AddressType();
   bool high_ok = false;
   if (size > 0) {
     std::pair<AddressType, bool> result = AddWithOverflowCheck(base, size - 1);

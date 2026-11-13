@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "fxjs/xfa/cfxjse_value.h"
+#include "third_party/base/containers/span.h"
 #include "xfa/fxfa/parser/cscript_logpseudomodel.h"
 
 const CJX_MethodSpec CJX_LogPseudoModel::MethodSpecs[] = {
@@ -31,7 +32,7 @@ bool CJX_LogPseudoModel::DynamicTypeIs(TypeTag eType) const {
 
 CJS_Result CJX_LogPseudoModel::message(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   // Uncomment to allow using xfa.log.message(""); from JS.
   // fprintf(stderr, "LOG\n");
   // for (auto& val : params) {
@@ -44,24 +45,24 @@ CJS_Result CJX_LogPseudoModel::message(
 
 CJS_Result CJX_LogPseudoModel::traceEnabled(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
 CJS_Result CJX_LogPseudoModel::traceActivate(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
 CJS_Result CJX_LogPseudoModel::traceDeactivate(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
 CJS_Result CJX_LogPseudoModel::trace(
     CFXJSE_Engine* runtime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }

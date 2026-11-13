@@ -11,7 +11,7 @@
 namespace quic {
 
 // Used to generate filtered supported versions based on flags.
-class QUIC_EXPORT_PRIVATE QuicVersionManager {
+class QUICHE_EXPORT QuicVersionManager {
  public:
   // |supported_versions| should be sorted in the order of preference (typically
   // highest supported version to the lowest supported version).
@@ -55,8 +55,8 @@ class QUIC_EXPORT_PRIVATE QuicVersionManager {
 
  private:
   // Cached value of reloadable flags.
-  // quic_enable_version_2_draft_01 flag
-  bool enable_version_2_draft_01_ = false;
+  // quic_enable_version_2_draft_08 flag
+  bool enable_version_2_draft_08_ = false;
   // quic_disable_version_rfcv1 flag
   bool disable_version_rfcv1_ = true;
   // quic_disable_version_draft_29 flag
@@ -65,8 +65,6 @@ class QUIC_EXPORT_PRIVATE QuicVersionManager {
   bool disable_version_q050_ = true;
   // quic_disable_version_q046 flag
   bool disable_version_q046_ = true;
-  // quic_disable_version_q043 flag
-  bool disable_version_q043_ = true;
 
   // The list of versions that may be supported.
   const ParsedQuicVersionVector allowed_supported_versions_;

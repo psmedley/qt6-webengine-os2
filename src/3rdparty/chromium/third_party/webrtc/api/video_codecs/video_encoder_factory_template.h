@@ -17,6 +17,7 @@
 
 #include "absl/algorithm/container.h"
 #include "api/array_view.h"
+#include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_encoder.h"
 #include "api/video_codecs/video_encoder_factory.h"
 #include "modules/video_coding/svc/scalability_mode_util.h"
@@ -51,7 +52,16 @@ class VideoEncoderFactoryTemplate : public VideoEncoderFactory {
 
   std::unique_ptr<VideoEncoder> CreateVideoEncoder(
       const SdpVideoFormat& format) override {
-    return CreateVideoEncoderInternal<Ts...>(format);
+    // We fuzzy match the specified format for both valid and not so valid
+    // reasons. The valid reason is that there are many standardized codec
+    // specific fmtp parameters that have not been implemented, and in those
+    // cases we should not fail to instantiate an encoder just because we don't
+    // recognize the parameter. The not so valid reason is that we have started
+    // adding parameters completely unrelated to the SDP to the SdpVideoFormat.
+    // TODO(bugs.webrtc.org/13868): Remove FuzzyMatchSdpVideoFormat
+    absl::optional<SdpVideoFormat> matched =
+        FuzzyMatchSdpVideoFormat(GetSupportedFormats(), format);
+    return CreateVideoEncoderInternal<Ts...>(matched.value_or(format));
   }
 
   CodecSupport QueryCodecSupport(
@@ -119,14 +129,14 @@ class VideoEncoderFactoryTemplate : public VideoEncoderFactory {
       const SdpVideoFormat& format,
       const absl::optional<std::string>& scalability_mode) const {
     if (IsFormatInList(format, V::SupportedFormats())) {
-      return {/*.is_supported =*/ IsScalabilityModeSupported<V>(scalability_mode)};
+      return {.is_supported = IsScalabilityModeSupported<V>(scalability_mode)};
     }
 
     if constexpr (sizeof...(Vs) > 0) {
       return QueryCodecSupportInternal<Vs...>(format, scalability_mode);
     }
 
-    return {/*.is_supported =*/ false};
+    return {.is_supported = false};
   }
 };
 

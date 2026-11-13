@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/dib/cfx_dibbase.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CPDF_Dictionary;
 class CPDF_Document;
@@ -45,7 +45,6 @@ class CPDF_DIB final : public CFX_DIBBase {
   CONSTRUCT_VIA_MAKE_RETAIN;
 
   // CFX_DIBBase:
-  uint8_t* GetBuffer() const override;
   pdfium::span<const uint8_t> GetScanline(int line) const override;
   bool SkipToScanline(int line, PauseIndicatorIface* pPause) const override;
   size_t GetEstimatedImageMemoryBurden() const override;
@@ -60,7 +59,8 @@ class CPDF_DIB final : public CFX_DIBBase {
                              const CPDF_Dictionary* pPageResources,
                              bool bStdCS,
                              CPDF_ColorSpace::Family GroupFamily,
-                             bool bLoadMask);
+                             bool bLoadMask,
+                             const CFX_Size& max_size_required);
   LoadState ContinueLoadDIBBase(PauseIndicatorIface* pPause);
   RetainPtr<CPDF_DIB> DetachMask();
 
@@ -72,8 +72,8 @@ class CPDF_DIB final : public CFX_DIBBase {
     JpxSMaskInlineData();
     ~JpxSMaskInlineData();
 
-    int width;
-    int height;
+    int width = 0;
+    int height = 0;
     DataVector<uint8_t> data;
   };
 
@@ -87,9 +87,9 @@ class CPDF_DIB final : public CFX_DIBBase {
   bool LoadColorInfo(const CPDF_Dictionary* pFormResources,
                      const CPDF_Dictionary* pPageResources);
   bool GetDecodeAndMaskArray();
-  RetainPtr<CFX_DIBitmap> LoadJpxBitmap();
+  RetainPtr<CFX_DIBitmap> LoadJpxBitmap(uint8_t resolution_levels_to_skip);
   void LoadPalette();
-  LoadState CreateDecoder();
+  LoadState CreateDecoder(uint8_t resolution_levels_to_skip);
   bool CreateDCTDecoder(pdfium::span<const uint8_t> src_span,
                         const CPDF_Dictionary* pParams);
   void TranslateScanline24bpp(pdfium::span<uint8_t> dest_scan,

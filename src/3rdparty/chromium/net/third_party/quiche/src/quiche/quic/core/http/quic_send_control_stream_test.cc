@@ -130,30 +130,28 @@ TEST_P(QuicSendControlStreamTest, WriteSettings) {
       "4040"  // 0x40 as the reserved frame type
       "01"    // 1 byte frame length
       "61");  //  payload "a"
-  if ((!GetQuicReloadableFlag(quic_verify_request_headers_2) ||
-       perspective() == Perspective::IS_CLIENT) &&
-      QuicSpdySessionPeer::LocalHttpDatagramSupport(&session_) ==
-          HttpDatagramSupport::kDraft04) {
+  if (perspective() == Perspective::IS_CLIENT &&
+      QuicSpdySessionPeer::LocalHttpDatagramSupport(&session_) !=
+          HttpDatagramSupport::kNone) {
     expected_write_data = absl::HexStringToBytes(
-        "00"         // stream type: control stream
-        "04"         // frame type: SETTINGS frame
-        "0b"         // frame length
-        "01"         // SETTINGS_QPACK_MAX_TABLE_CAPACITY
-        "40ff"       // 255
-        "06"         // SETTINGS_MAX_HEADER_LIST_SIZE
-        "4400"       // 1024
-        "07"         // SETTINGS_QPACK_BLOCKED_STREAMS
-        "10"         // 16
-        "4040"       // 0x40 as the reserved settings id
-        "14"         // 20
-        "800ffd277"  // SETTINGS_H3_DATAGRAM_DRAFT04
-        "01"         // 1
-        "4040"       // 0x40 as the reserved frame type
-        "01"         // 1 byte frame length
-        "61");       //  payload "a"
+        "00"    // stream type: control stream
+        "04"    // frame type: SETTINGS frame
+        "0d"    // frame length
+        "01"    // SETTINGS_QPACK_MAX_TABLE_CAPACITY
+        "40ff"  // 255
+        "06"    // SETTINGS_MAX_HEADER_LIST_SIZE
+        "4400"  // 1024
+        "07"    // SETTINGS_QPACK_BLOCKED_STREAMS
+        "10"    // 16
+        "33"    // SETTINGS_H3_DATAGRAM
+        "01"    // 1
+        "4040"  // 0x40 as the reserved settings id
+        "14"    // 20
+        "4040"  // 0x40 as the reserved frame type
+        "01"    // 1 byte frame length
+        "61");  //  payload "a"
   }
-  if (GetQuicReloadableFlag(quic_verify_request_headers_2) &&
-      perspective() == Perspective::IS_SERVER &&
+  if (perspective() == Perspective::IS_SERVER &&
       QuicSpdySessionPeer::LocalHttpDatagramSupport(&session_) ==
           HttpDatagramSupport::kNone) {
     expected_write_data = absl::HexStringToBytes(
@@ -174,33 +172,33 @@ TEST_P(QuicSendControlStreamTest, WriteSettings) {
         "01"    // 1 byte frame length
         "61");  //  payload "a"
   }
-  if (GetQuicReloadableFlag(quic_verify_request_headers_2) &&
-      perspective() == Perspective::IS_SERVER &&
+  if (perspective() == Perspective::IS_SERVER &&
       QuicSpdySessionPeer::LocalHttpDatagramSupport(&session_) !=
           HttpDatagramSupport::kNone) {
     expected_write_data = absl::HexStringToBytes(
-        "00"         // stream type: control stream
-        "04"         // frame type: SETTINGS frame
-        "0e"         // frame length
-        "01"         // SETTINGS_QPACK_MAX_TABLE_CAPACITY
-        "40ff"       // 255
-        "06"         // SETTINGS_MAX_HEADER_LIST_SIZE
-        "4400"       // 1024
-        "07"         // SETTINGS_QPACK_BLOCKED_STREAMS
-        "10"         // 16
-        "08"         // SETTINGS_ENABLE_CONNECT_PROTOCOL
-        "01"         // 1
-        "4040"       // 0x40 as the reserved settings id
-        "14"         // 20
-        "800ffd277"  // SETTINGS_H3_DATAGRAM_DRAFT04
-        "01"         // 1
-        "4040"       // 0x40 as the reserved frame type
-        "01"         // 1 byte frame length
-        "61");       //  payload "a"
+        "00"    // stream type: control stream
+        "04"    // frame type: SETTINGS frame
+        "0f"    // frame length
+        "01"    // SETTINGS_QPACK_MAX_TABLE_CAPACITY
+        "40ff"  // 255
+        "06"    // SETTINGS_MAX_HEADER_LIST_SIZE
+        "4400"  // 1024
+        "07"    // SETTINGS_QPACK_BLOCKED_STREAMS
+        "10"    // 16
+        "08"    // SETTINGS_ENABLE_CONNECT_PROTOCOL
+        "01"    // 1
+        "33"    // SETTINGS_H3_DATAGRAM
+        "01"    // 1
+        "4040"  // 0x40 as the reserved settings id
+        "14"    // 20
+        "4040"  // 0x40 as the reserved frame type
+        "01"    // 1 byte frame length
+        "61");  //  payload "a"
   }
 
-  auto buffer = std::make_unique<char[]>(expected_write_data.size());
-  QuicDataWriter writer(expected_write_data.size(), buffer.get());
+  char buffer[1000] = {};
+  QuicDataWriter writer(sizeof(buffer), buffer);
+  ASSERT_GE(sizeof(buffer), expected_write_data.size());
 
   // A lambda to save and consume stream data when QuicSession::WritevData() is
   // called.
@@ -208,19 +206,14 @@ TEST_P(QuicSendControlStreamTest, WriteSettings) {
       [&writer, this](QuicStreamId /*id*/, size_t write_length,
                       QuicStreamOffset offset, StreamSendingState /*state*/,
                       TransmissionType /*type*/,
-                      absl::optional<EncryptionLevel> /*level*/) {
+                      std::optional<EncryptionLevel> /*level*/) {
         send_control_stream_->WriteStreamData(offset, write_length, &writer);
         return QuicConsumedData(/* bytes_consumed = */ write_length,
                                 /* fin_consumed = */ false);
       };
 
-  EXPECT_CALL(session_, WritevData(send_control_stream_->id(), 1, _, _, _, _))
-      .WillOnce(Invoke(save_write_data));
-  EXPECT_CALL(session_, WritevData(send_control_stream_->id(),
-                                   expected_write_data.size() - 5, _, _, _, _))
-      .WillOnce(Invoke(save_write_data));
-  EXPECT_CALL(session_, WritevData(send_control_stream_->id(), 4, _, _, _, _))
-      .WillOnce(Invoke(save_write_data));
+  EXPECT_CALL(session_, WritevData(send_control_stream_->id(), _, _, _, _, _))
+      .WillRepeatedly(Invoke(save_write_data));
 
   send_control_stream_->MaybeSendSettingsFrame();
   quiche::test::CompareCharArraysWithHexError(
@@ -251,11 +244,16 @@ TEST_P(QuicSendControlStreamTest, WritePriorityBeforeSettings) {
   // SETTINGS frame, and a greased frame before the PRIORITY_UPDATE frame.
   EXPECT_CALL(session_, WritevData(send_control_stream_->id(), _, _, _, _, _))
       .Times(4);
-  PriorityUpdateFrame frame;
-  send_control_stream_->WritePriorityUpdate(frame);
+  send_control_stream_->WritePriorityUpdate(
+      /* stream_id = */ 0,
+      HttpStreamPriority{/* urgency = */ 3, /* incremental = */ false});
+
+  EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(&session_));
 
   EXPECT_CALL(session_, WritevData(send_control_stream_->id(), _, _, _, _, _));
-  send_control_stream_->WritePriorityUpdate(frame);
+  send_control_stream_->WritePriorityUpdate(
+      /* stream_id = */ 0,
+      HttpStreamPriority{/* urgency = */ 3, /* incremental = */ false});
 }
 
 TEST_P(QuicSendControlStreamTest, CloseControlStream) {

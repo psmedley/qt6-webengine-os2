@@ -1,166 +1,293 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createLauncher = exports.resolveExecutablePath = exports.executablePathForChannel = void 0;
+exports.ProductLauncher = void 0;
 /**
- * Copyright 2017 Google Inc. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * @license
+ * Copyright 2017 Google Inc.
+ * SPDX-License-Identifier: Apache-2.0
  */
-const os_1 = __importDefault(require("os"));
-const BrowserFetcher_js_1 = require("./BrowserFetcher.js");
-const ChromeLauncher_js_1 = require("./ChromeLauncher.js");
-const FirefoxLauncher_js_1 = require("./FirefoxLauncher.js");
 const fs_1 = require("fs");
+const os_1 = require("os");
+const path_1 = require("path");
+const browsers_1 = require("@puppeteer/browsers");
+const Browser_js_1 = require("../cdp/Browser.js");
+const Connection_js_1 = require("../cdp/Connection.js");
+const Errors_js_1 = require("../common/Errors.js");
+const util_js_1 = require("../common/util.js");
+const NodeWebSocketTransport_js_1 = require("./NodeWebSocketTransport.js");
+const PipeTransport_js_1 = require("./PipeTransport.js");
 /**
- * @internal
+ * Describes a launcher - a class that is able to create and launch a browser instance.
+ *
+ * @public
  */
-function executablePathForChannel(channel) {
-    const platform = os_1.default.platform();
-    let chromePath;
-    switch (platform) {
-        case 'win32':
-            switch (channel) {
-                case 'chrome':
-                    chromePath = `${process.env['PROGRAMFILES']}\\Google\\Chrome\\Application\\chrome.exe`;
-                    break;
-                case 'chrome-beta':
-                    chromePath = `${process.env['PROGRAMFILES']}\\Google\\Chrome Beta\\Application\\chrome.exe`;
-                    break;
-                case 'chrome-canary':
-                    chromePath = `${process.env['PROGRAMFILES']}\\Google\\Chrome SxS\\Application\\chrome.exe`;
-                    break;
-                case 'chrome-dev':
-                    chromePath = `${process.env['PROGRAMFILES']}\\Google\\Chrome Dev\\Application\\chrome.exe`;
-                    break;
+class ProductLauncher {
+    #product;
+    /**
+     * @internal
+     */
+    puppeteer;
+    /**
+     * @internal
+     */
+    actualBrowserRevision;
+    /**
+     * @internal
+     */
+    constructor(puppeteer, product) {
+        this.puppeteer = puppeteer;
+        this.#product = product;
+    }
+    get product() {
+        return this.#product;
+    }
+    async launch(options = {}) {
+        const { dumpio = false, env = process.env, handleSIGINT = true, handleSIGTERM = true, handleSIGHUP = true, ignoreHTTPSErrors = false, defaultViewport = util_js_1.DEFAULT_VIEWPORT, slowMo = 0, timeout = 30000, waitForInitialPage = true, protocolTimeout, protocol, } = options;
+        const launchArgs = await this.computeLaunchArguments(options);
+        const usePipe = launchArgs.args.includes('--remote-debugging-pipe');
+        const onProcessExit = async () => {
+            await this.cleanUserDataDir(launchArgs.userDataDir, {
+                isTemp: launchArgs.isTempUserDataDir,
+            });
+        };
+        const browserProcess = (0, browsers_1.launch)({
+            executablePath: launchArgs.executablePath,
+            args: launchArgs.args,
+            handleSIGHUP,
+            handleSIGTERM,
+            handleSIGINT,
+            dumpio,
+            env,
+            pipe: usePipe,
+            onExit: onProcessExit,
+        });
+        let browser;
+        let cdpConnection;
+        let closing = false;
+        const browserCloseCallback = async () => {
+            if (closing) {
+                return;
             }
-            break;
-        case 'darwin':
-            switch (channel) {
-                case 'chrome':
-                    chromePath =
-                        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-                    break;
-                case 'chrome-beta':
-                    chromePath =
-                        '/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta';
-                    break;
-                case 'chrome-canary':
-                    chromePath =
-                        '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary';
-                    break;
-                case 'chrome-dev':
-                    chromePath =
-                        '/Applications/Google Chrome Dev.app/Contents/MacOS/Google Chrome Dev';
-                    break;
+            closing = true;
+            await this.closeBrowser(browserProcess, cdpConnection);
+        };
+        try {
+            if (this.#product === 'firefox' && protocol === 'webDriverBiDi') {
+                browser = await this.createBiDiBrowser(browserProcess, browserCloseCallback, {
+                    timeout,
+                    protocolTimeout,
+                    slowMo,
+                    defaultViewport,
+                    ignoreHTTPSErrors,
+                });
             }
-            break;
-        case 'linux':
-            switch (channel) {
-                case 'chrome':
-                    chromePath = '/opt/google/chrome/chrome';
-                    break;
-                case 'chrome-beta':
-                    chromePath = '/opt/google/chrome-beta/chrome';
-                    break;
-                case 'chrome-dev':
-                    chromePath = '/opt/google/chrome-unstable/chrome';
-                    break;
+            else {
+                if (usePipe) {
+                    cdpConnection = await this.createCdpPipeConnection(browserProcess, {
+                        timeout,
+                        protocolTimeout,
+                        slowMo,
+                    });
+                }
+                else {
+                    cdpConnection = await this.createCdpSocketConnection(browserProcess, {
+                        timeout,
+                        protocolTimeout,
+                        slowMo,
+                    });
+                }
+                if (protocol === 'webDriverBiDi') {
+                    browser = await this.createBiDiOverCdpBrowser(browserProcess, cdpConnection, browserCloseCallback, {
+                        timeout,
+                        protocolTimeout,
+                        slowMo,
+                        defaultViewport,
+                        ignoreHTTPSErrors,
+                    });
+                }
+                else {
+                    browser = await Browser_js_1.CdpBrowser._create(this.product, cdpConnection, [], ignoreHTTPSErrors, defaultViewport, browserProcess.nodeProcess, browserCloseCallback, options.targetFilter);
+                }
             }
-            break;
+        }
+        catch (error) {
+            void browserCloseCallback();
+            if (error instanceof browsers_1.TimeoutError) {
+                throw new Errors_js_1.TimeoutError(error.message);
+            }
+            throw error;
+        }
+        if (waitForInitialPage && protocol !== 'webDriverBiDi') {
+            await this.waitForPageTarget(browser, timeout);
+        }
+        return browser;
     }
-    if (!chromePath) {
-        throw new Error(`Unable to detect browser executable path for '${channel}' on ${platform}.`);
+    /**
+     * Set only for Firefox, after the launcher resolves the `latest` revision to
+     * the actual revision.
+     * @internal
+     */
+    getActualBrowserRevision() {
+        return this.actualBrowserRevision;
     }
-    // Check if Chrome exists and is accessible.
-    try {
-        (0, fs_1.accessSync)(chromePath);
+    /**
+     * @internal
+     */
+    async closeBrowser(browserProcess, cdpConnection) {
+        if (cdpConnection) {
+            // Attempt to close the browser gracefully
+            try {
+                await cdpConnection.closeBrowser();
+                await browserProcess.hasClosed();
+            }
+            catch (error) {
+                (0, util_js_1.debugError)(error);
+                await browserProcess.close();
+            }
+        }
+        else {
+            await browserProcess.close();
+        }
     }
-    catch (error) {
-        throw new Error(`Could not find Google Chrome executable for channel '${channel}' at '${chromePath}'.`);
+    /**
+     * @internal
+     */
+    async waitForPageTarget(browser, timeout) {
+        try {
+            await browser.waitForTarget(t => {
+                return t.type() === 'page';
+            }, { timeout });
+        }
+        catch (error) {
+            await browser.close();
+            throw error;
+        }
     }
-    return chromePath;
-}
-exports.executablePathForChannel = executablePathForChannel;
-/**
- * @internal
- */
-function resolveExecutablePath(launcher) {
-    const { product, _isPuppeteerCore, _projectRoot, _preferredRevision } = launcher;
-    let downloadPath;
-    // puppeteer-core doesn't take into account PUPPETEER_* env variables.
-    if (!_isPuppeteerCore) {
-        const executablePath = process.env['PUPPETEER_EXECUTABLE_PATH'] ||
-            process.env['npm_config_puppeteer_executable_path'] ||
-            process.env['npm_package_config_puppeteer_executable_path'];
+    /**
+     * @internal
+     */
+    async createCdpSocketConnection(browserProcess, opts) {
+        const browserWSEndpoint = await browserProcess.waitForLineOutput(browsers_1.CDP_WEBSOCKET_ENDPOINT_REGEX, opts.timeout);
+        const transport = await NodeWebSocketTransport_js_1.NodeWebSocketTransport.create(browserWSEndpoint);
+        return new Connection_js_1.Connection(browserWSEndpoint, transport, opts.slowMo, opts.protocolTimeout);
+    }
+    /**
+     * @internal
+     */
+    async createCdpPipeConnection(browserProcess, opts) {
+        // stdio was assigned during start(), and the 'pipe' option there adds the
+        // 4th and 5th items to stdio array
+        const { 3: pipeWrite, 4: pipeRead } = browserProcess.nodeProcess.stdio;
+        const transport = new PipeTransport_js_1.PipeTransport(pipeWrite, pipeRead);
+        return new Connection_js_1.Connection('', transport, opts.slowMo, opts.protocolTimeout);
+    }
+    /**
+     * @internal
+     */
+    async createBiDiOverCdpBrowser(browserProcess, connection, closeCallback, opts) {
+        // TODO: use other options too.
+        const BiDi = await Promise.resolve().then(() => __importStar(require(/* webpackIgnore: true */ '../bidi/bidi.js')));
+        const bidiConnection = await BiDi.connectBidiOverCdp(connection, {
+            acceptInsecureCerts: opts.ignoreHTTPSErrors ?? false,
+        });
+        return await BiDi.BidiBrowser.create({
+            connection: bidiConnection,
+            closeCallback,
+            process: browserProcess.nodeProcess,
+            defaultViewport: opts.defaultViewport,
+            ignoreHTTPSErrors: opts.ignoreHTTPSErrors,
+        });
+    }
+    /**
+     * @internal
+     */
+    async createBiDiBrowser(browserProcess, closeCallback, opts) {
+        const browserWSEndpoint = (await browserProcess.waitForLineOutput(browsers_1.WEBDRIVER_BIDI_WEBSOCKET_ENDPOINT_REGEX, opts.timeout)) + '/session';
+        const transport = await NodeWebSocketTransport_js_1.NodeWebSocketTransport.create(browserWSEndpoint);
+        const BiDi = await Promise.resolve().then(() => __importStar(require(/* webpackIgnore: true */ '../bidi/bidi.js')));
+        const bidiConnection = new BiDi.BidiConnection(browserWSEndpoint, transport, opts.slowMo, opts.protocolTimeout);
+        // TODO: use other options too.
+        return await BiDi.BidiBrowser.create({
+            connection: bidiConnection,
+            closeCallback,
+            process: browserProcess.nodeProcess,
+            defaultViewport: opts.defaultViewport,
+            ignoreHTTPSErrors: opts.ignoreHTTPSErrors,
+        });
+    }
+    /**
+     * @internal
+     */
+    getProfilePath() {
+        return (0, path_1.join)(this.puppeteer.configuration.temporaryDirectory ?? (0, os_1.tmpdir)(), `puppeteer_dev_${this.product}_profile-`);
+    }
+    /**
+     * @internal
+     */
+    resolveExecutablePath() {
+        let executablePath = this.puppeteer.configuration.executablePath;
         if (executablePath) {
-            const missingText = !(0, fs_1.existsSync)(executablePath)
-                ? 'Tried to use PUPPETEER_EXECUTABLE_PATH env variable to launch browser but did not find any executable at: ' +
-                    executablePath
-                : undefined;
-            return { executablePath, missingText };
+            if (!(0, fs_1.existsSync)(executablePath)) {
+                throw new Error(`Tried to find the browser at the configured path (${executablePath}), but no executable was found.`);
+            }
+            return executablePath;
         }
-        const ubuntuChromiumPath = '/usr/bin/chromium-browser';
-        if (product === 'chrome' &&
-            os_1.default.platform() !== 'darwin' &&
-            os_1.default.arch() === 'arm64' &&
-            (0, fs_1.existsSync)(ubuntuChromiumPath)) {
-            return { executablePath: ubuntuChromiumPath, missingText: undefined };
+        function productToBrowser(product) {
+            switch (product) {
+                case 'chrome':
+                    return browsers_1.Browser.CHROME;
+                case 'firefox':
+                    return browsers_1.Browser.FIREFOX;
+            }
+            return browsers_1.Browser.CHROME;
         }
-        downloadPath =
-            process.env['PUPPETEER_DOWNLOAD_PATH'] ||
-                process.env['npm_config_puppeteer_download_path'] ||
-                process.env['npm_package_config_puppeteer_download_path'];
-    }
-    if (!_projectRoot) {
-        throw new Error('_projectRoot is undefined. Unable to create a BrowserFetcher.');
-    }
-    const browserFetcher = new BrowserFetcher_js_1.BrowserFetcher(_projectRoot, {
-        product: product,
-        path: downloadPath,
-    });
-    if (!_isPuppeteerCore && product === 'chrome') {
-        const revision = process.env['PUPPETEER_CHROMIUM_REVISION'];
-        if (revision) {
-            const revisionInfo = browserFetcher.revisionInfo(revision);
-            const missingText = !revisionInfo.local
-                ? 'Tried to use PUPPETEER_CHROMIUM_REVISION env variable to launch browser but did not find executable at: ' +
-                    revisionInfo.executablePath
-                : undefined;
-            return { executablePath: revisionInfo.executablePath, missingText };
+        executablePath = (0, browsers_1.computeExecutablePath)({
+            cacheDir: this.puppeteer.defaultDownloadPath,
+            browser: productToBrowser(this.product),
+            buildId: this.puppeteer.browserRevision,
+        });
+        if (!(0, fs_1.existsSync)(executablePath)) {
+            if (this.puppeteer.configuration.browserRevision) {
+                throw new Error(`Tried to find the browser at the configured path (${executablePath}) for revision ${this.puppeteer.browserRevision}, but no executable was found.`);
+            }
+            switch (this.product) {
+                case 'chrome':
+                    throw new Error(`Could not find Chrome (ver. ${this.puppeteer.browserRevision}). This can occur if either\n` +
+                        ' 1. you did not perform an installation before running the script (e.g. `npx puppeteer browsers install chrome`) or\n' +
+                        ` 2. your cache path is incorrectly configured (which is: ${this.puppeteer.configuration.cacheDirectory}).\n` +
+                        'For (2), check out our guide on configuring puppeteer at https://pptr.dev/guides/configuration.');
+                case 'firefox':
+                    throw new Error(`Could not find Firefox (rev. ${this.puppeteer.browserRevision}). This can occur if either\n` +
+                        ' 1. you did not perform an installation for Firefox before running the script (e.g. `npx puppeteer browsers install firefox`) or\n' +
+                        ` 2. your cache path is incorrectly configured (which is: ${this.puppeteer.configuration.cacheDirectory}).\n` +
+                        'For (2), check out our guide on configuring puppeteer at https://pptr.dev/guides/configuration.');
+            }
         }
-    }
-    const revisionInfo = browserFetcher.revisionInfo(_preferredRevision);
-    const firefoxHelp = `Run \`PUPPETEER_PRODUCT=firefox npm install\` to download a supported Firefox browser binary.`;
-    const chromeHelp = `Run \`npm install\` to download the correct Chromium revision (${launcher._preferredRevision}).`;
-    const missingText = !revisionInfo.local
-        ? `Could not find expected browser (${product}) locally. ${product === 'chrome' ? chromeHelp : firefoxHelp}`
-        : undefined;
-    return { executablePath: revisionInfo.executablePath, missingText };
-}
-exports.resolveExecutablePath = resolveExecutablePath;
-/**
- * @internal
- */
-function createLauncher(projectRoot, preferredRevision, isPuppeteerCore, product = 'chrome') {
-    switch (product) {
-        case 'firefox':
-            return new FirefoxLauncher_js_1.FirefoxLauncher(projectRoot, preferredRevision, isPuppeteerCore);
-        case 'chrome':
-            return new ChromeLauncher_js_1.ChromeLauncher(projectRoot, preferredRevision, isPuppeteerCore);
+        return executablePath;
     }
 }
-exports.createLauncher = createLauncher;
+exports.ProductLauncher = ProductLauncher;
 //# sourceMappingURL=ProductLauncher.js.map

@@ -9,6 +9,7 @@
 
 #include "src/gpu/ganesh/GrAttachment.h"
 #include "src/gpu/ganesh/GrRenderTarget.h"
+#include "src/gpu/ganesh/GrRenderTargetProxy.h"
 #include "src/gpu/ganesh/GrTextureProxyPriv.h"
 #include "src/gpu/ganesh/GrTextureResolveRenderTask.h"
 
@@ -56,7 +57,7 @@ GrRenderTask::~GrRenderTask() {
 }
 
 bool GrRenderTask::deferredProxiesAreInstantiated() const {
-    for (int i = 0; i < fDeferredProxies.count(); ++i) {
+    for (int i = 0; i < fDeferredProxies.size(); ++i) {
         if (!fDeferredProxies[i]->isInstantiated()) {
             return false;
         }
@@ -79,7 +80,7 @@ void GrRenderTask::makeClosed(GrRecordingContext* rContext) {
             this->target(0)->asRenderTargetProxy()->markMSAADirty(targetUpdateBounds);
         }
         GrTextureProxy* textureProxy = this->target(0)->asTextureProxy();
-        if (textureProxy && GrMipmapped::kYes == textureProxy->mipmapped()) {
+        if (textureProxy && skgpu::Mipmapped::kYes == textureProxy->mipmapped()) {
             textureProxy->markMipmapsDirty();
         }
     }
@@ -94,7 +95,7 @@ void GrRenderTask::makeClosed(GrRecordingContext* rContext) {
 }
 
 void GrRenderTask::prepare(GrOpFlushState* flushState) {
-    for (int i = 0; i < fDeferredProxies.count(); ++i) {
+    for (int i = 0; i < fDeferredProxies.size(); ++i) {
         fDeferredProxies[i]->texPriv().scheduleUpload(flushState);
     }
 
@@ -124,8 +125,9 @@ void GrRenderTask::addDependenciesFromOtherTask(GrRenderTask* otherTask) {
 }
 
 // Convert from a GrSurface-based dependency to a GrRenderTask one
-void GrRenderTask::addDependency(GrDrawingManager* drawingMgr, GrSurfaceProxy* dependedOn,
-                                 GrMipmapped mipmapped,
+void GrRenderTask::addDependency(GrDrawingManager* drawingMgr,
+                                 GrSurfaceProxy* dependedOn,
+                                 skgpu::Mipmapped mipmapped,
                                  GrTextureResolveManager textureResolveManager,
                                  const GrCaps& caps) {
     // If it is still receiving dependencies, this GrRenderTask shouldn't be closed
@@ -136,7 +138,7 @@ void GrRenderTask::addDependency(GrDrawingManager* drawingMgr, GrSurfaceProxy* d
     if (dependedOnTask == this) {
         // self-read - presumably for dst reads. We don't need to do anything in this case. The
         // XferProcessor will detect what is happening and insert a texture barrier.
-        SkASSERT(GrMipmapped::kNo == mipmapped);
+        SkASSERT(skgpu::Mipmapped::kNo == mipmapped);
         // We should never attempt a self-read on a surface that has a separate MSAA renderbuffer.
         SkASSERT(!dependedOn->requiresManualMSAAResolve());
         SkASSERT(!dependedOn->asTextureProxy() ||
@@ -144,12 +146,12 @@ void GrRenderTask::addDependency(GrDrawingManager* drawingMgr, GrSurfaceProxy* d
         return;
     }
 
+    bool alreadyDependent = false;
     if (dependedOnTask) {
         if (this->dependsOn(dependedOnTask) || fTextureResolveTask == dependedOnTask) {
-            return;  // don't add duplicate dependencies
-        }
-
-        if (!dependedOnTask->isSetFlag(kAtlas_Flag)) {
+            alreadyDependent = true;
+            dependedOnTask = nullptr;  // don't add duplicate dependencies
+        } else if (!dependedOnTask->isSetFlag(kAtlas_Flag)) {
             // We are closing 'dependedOnTask' here bc the current contents of it are what 'this'
             // renderTask depends on. We need a break in 'dependedOnTask' so that the usage of
             // that state has a chance to execute.
@@ -168,12 +170,12 @@ void GrRenderTask::addDependency(GrDrawingManager* drawingMgr, GrSurfaceProxy* d
     }
 
     GrTextureProxy* textureProxy = dependedOn->asTextureProxy();
-    if (GrMipmapped::kYes == mipmapped) {
+    if (skgpu::Mipmapped::kYes == mipmapped) {
         SkASSERT(textureProxy);
-        if (GrMipmapped::kYes != textureProxy->mipmapped()) {
+        if (skgpu::Mipmapped::kYes != textureProxy->mipmapped()) {
             // There are some cases where we might be given a non-mipmapped texture with a mipmap
             // filter. See skbug.com/7094.
-            mipmapped = GrMipmapped::kNo;
+            mipmapped = skgpu::Mipmapped::kNo;
         } else if (textureProxy->mipmapsAreDirty()) {
             resolveFlags |= GrSurfaceProxy::ResolveFlags::kMipMaps;
         }
@@ -202,10 +204,12 @@ void GrRenderTask::addDependency(GrDrawingManager* drawingMgr, GrSurfaceProxy* d
 
         // The GrTextureResolveRenderTask factory should have also marked the proxy clean, set the
         // last renderTask on the textureProxy to textureResolveTask, and closed textureResolveTask.
-        if (GrRenderTargetProxy* renderTargetProxy = dependedOn->asRenderTargetProxy()) {
-            SkASSERT(!renderTargetProxy->isMSAADirty());
+        if (resolveFlags & GrSurfaceProxy::ResolveFlags::kMSAA) {
+            if (GrRenderTargetProxy* renderTargetProxy = dependedOn->asRenderTargetProxy()) {
+                SkASSERT(!renderTargetProxy->isMSAADirty());
+            }
         }
-        if (textureProxy) {
+        if (textureProxy && (resolveFlags & GrSurfaceProxy::ResolveFlags::kMipMaps)) {
             SkASSERT(!textureProxy->mipmapsAreDirty());
         }
         SkASSERT(drawingMgr->getLastRenderTask(dependedOn) == fTextureResolveTask);
@@ -214,7 +218,12 @@ void GrRenderTask::addDependency(GrDrawingManager* drawingMgr, GrSurfaceProxy* d
     }
 
     if (textureProxy && textureProxy->texPriv().isDeferred()) {
-        fDeferredProxies.push_back(textureProxy);
+        if (alreadyDependent) {
+            SkASSERT(std::find(fDeferredProxies.begin(), fDeferredProxies.end(), textureProxy) !=
+                     fDeferredProxies.end());
+        } else {
+            fDeferredProxies.push_back(textureProxy);
+        }
     }
 
     if (dependedOnTask) {
@@ -243,7 +252,7 @@ void GrRenderTask::replaceDependent(const GrRenderTask* toReplace, GrRenderTask*
 }
 
 bool GrRenderTask::dependsOn(const GrRenderTask* dependedOn) const {
-    for (int i = 0; i < fDependencies.count(); ++i) {
+    for (int i = 0; i < fDependencies.size(); ++i) {
         if (fDependencies[i] == dependedOn) {
             return true;
         }
@@ -259,7 +268,7 @@ void GrRenderTask::addDependent(GrRenderTask* dependent) {
 
 #ifdef SK_DEBUG
 bool GrRenderTask::isDependent(const GrRenderTask* dependent) const {
-    for (int i = 0; i < fDependents.count(); ++i) {
+    for (int i = 0; i < fDependents.size(); ++i) {
         if (fDependents[i] == dependent) {
             return true;
         }
@@ -271,7 +280,7 @@ bool GrRenderTask::isDependent(const GrRenderTask* dependent) const {
 void GrRenderTask::validate() const {
     // TODO: check for loops and duplicates
 
-    for (int i = 0; i < fDependencies.count(); ++i) {
+    for (int i = 0; i < fDependencies.size(); ++i) {
         SkASSERT(fDependencies[i]->isDependent(this));
     }
 }
@@ -303,7 +312,7 @@ void GrRenderTask::addTarget(GrDrawingManager* drawingMgr, sk_sp<GrSurfaceProxy>
     fTargets.emplace_back(std::move(proxy));
 }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
 void GrRenderTask::dump(const SkString& label,
                         SkString indent,
                         bool printDependencies,
@@ -323,14 +332,14 @@ void GrRenderTask::dump(const SkString& label,
     }
 
     if (printDependencies) {
-        SkDebugf("%sI rely On (%d): ", indent.c_str(), fDependencies.count());
-        for (int i = 0; i < fDependencies.count(); ++i) {
+        SkDebugf("%sI rely On (%d): ", indent.c_str(), fDependencies.size());
+        for (int i = 0; i < fDependencies.size(); ++i) {
             SkDebugf("%d, ", fDependencies[i]->fUniqueID);
         }
         SkDebugf("\n");
 
-        SkDebugf("%s(%d) Rely On Me: ", indent.c_str(), fDependents.count());
-        for (int i = 0; i < fDependents.count(); ++i) {
+        SkDebugf("%s(%d) Rely On Me: ", indent.c_str(), fDependents.size());
+        for (int i = 0; i < fDependents.size(); ++i) {
             SkDebugf("%d, ", fDependents[i]->fUniqueID);
         }
         SkDebugf("\n");

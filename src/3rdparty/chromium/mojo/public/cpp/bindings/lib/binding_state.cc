@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/task/sequenced_task_runner.h"
 #include "mojo/public/cpp/bindings/lib/task_runner_helper.h"
 #include "mojo/public/cpp/bindings/mojo_buildflags.h"
 
@@ -65,7 +66,7 @@ void BindingStateBase::Close() {
 }
 
 void BindingStateBase::CloseWithReason(uint32_t custom_reason,
-                                       base::StringPiece description) {
+                                       std::string_view description) {
   if (endpoint_client_)
     endpoint_client_->CloseWithReason(custom_reason, description);
 
@@ -75,7 +76,7 @@ void BindingStateBase::CloseWithReason(uint32_t custom_reason,
 ReportBadMessageCallback BindingStateBase::GetBadMessageCallback() {
   return base::BindOnce(
       [](ReportBadMessageCallback inner_callback,
-         base::WeakPtr<BindingStateBase> binding, base::StringPiece error) {
+         base::WeakPtr<BindingStateBase> binding, std::string_view error) {
         std::move(inner_callback).Run(error);
         if (binding)
           binding->Close();
@@ -138,7 +139,7 @@ void BindingStateBase::BindInternal(
       base::BindOnce(&MultiplexRouter::SetConnectionGroup, router_));
 
 #if BUILDFLAG(MOJO_RANDOM_DELAYS_ENABLED)
-  MakeBindingRandomlyPaused(base::SequencedTaskRunnerHandle::Get(),
+  MakeBindingRandomlyPaused(base::SequencedTaskRunner::GetCurrentDefault(),
                             weak_ptr_factory_.GetWeakPtr());
 #endif
 }

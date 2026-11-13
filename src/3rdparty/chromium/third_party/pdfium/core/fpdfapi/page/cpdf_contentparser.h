@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,17 @@
 #include <stdint.h>
 
 #include <memory>
-#include <set>
 #include <vector>
 
+#include "core/fpdfapi/page/cpdf_form.h"
 #include "core/fpdfapi/page/cpdf_streamcontentparser.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/fixed_size_data_vector.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
 
 class CPDF_AllStates;
 class CPDF_Array;
-class CPDF_Form;
 class CPDF_Page;
 class CPDF_PageObjectHolder;
 class CPDF_Stream;
@@ -32,11 +31,12 @@ class PauseIndicatorIface;
 class CPDF_ContentParser {
  public:
   explicit CPDF_ContentParser(CPDF_Page* pPage);
-  CPDF_ContentParser(CPDF_Form* pForm,
+  CPDF_ContentParser(RetainPtr<const CPDF_Stream> pStream,
+                     CPDF_PageObjectHolder* pPageObjectHolder,
                      const CPDF_AllStates* pGraphicStates,
                      const CFX_Matrix* pParentMatrix,
                      CPDF_Type3Char* pType3Char,
-                     std::set<const uint8_t*>* pParsedSet);
+                     CPDF_Form::RecursionState* recursion_state);
   ~CPDF_ContentParser();
 
   const CPDF_AllStates* GetCurStates() const {
@@ -54,16 +54,6 @@ class CPDF_ContentParser {
     kComplete,
   };
 
-  // TODO(thestig): Evaluate fxcrt::MaybeOwned usage, and see if that can be
-  // replaced with absl::variant<pdfium::span<const uint8_t>, OwnedData>.
-  struct OwnedData {
-    OwnedData(std::unique_ptr<uint8_t, FxFreeDeleter> buffer, uint32_t size);
-    ~OwnedData();
-
-    std::unique_ptr<uint8_t, FxFreeDeleter> buffer;
-    uint32_t size;
-  };
-
   Stage GetContent();
   Stage PrepareContent();
   Stage Parse();
@@ -73,21 +63,25 @@ class CPDF_ContentParser {
   bool HandlePageContentArray(const CPDF_Array* pArray);
   void HandlePageContentFailure();
 
-  bool is_owned() const { return m_Data.index() == 1; }
+  bool is_owned() const {
+    return absl::holds_alternative<FixedSizeDataVector<uint8_t>>(m_Data);
+  }
   pdfium::span<const uint8_t> GetData() const;
 
   Stage m_CurrentStage;
-  UnownedPtr<CPDF_PageObjectHolder> const m_pObjectHolder;
+  UnownedPtr<CPDF_PageObjectHolder> const m_pPageObjectHolder;
   UnownedPtr<CPDF_Type3Char> m_pType3Char;  // Only used when parsing forms.
   RetainPtr<CPDF_StreamAcc> m_pSingleStream;
   std::vector<RetainPtr<CPDF_StreamAcc>> m_StreamArray;
   std::vector<uint32_t> m_StreamSegmentOffsets;
-  absl::variant<pdfium::span<const uint8_t>, OwnedData> m_Data;
+  absl::variant<pdfium::span<const uint8_t>, FixedSizeDataVector<uint8_t>>
+      m_Data;
   uint32_t m_nStreams = 0;
   uint32_t m_CurrentOffset = 0;
-  std::set<const uint8_t*> m_ParsedSet;  // Only used when parsing pages.
+  // Only used when parsing pages.
+  CPDF_Form::RecursionState m_RecursionState;
 
-  // Must not outlive |m_pParsedSet|.
+  // Must not outlive |m_RecursionState|.
   std::unique_ptr<CPDF_StreamContentParser> m_pParser;
 };
 

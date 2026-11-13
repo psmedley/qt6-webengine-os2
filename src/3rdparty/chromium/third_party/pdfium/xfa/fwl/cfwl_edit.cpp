@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 #include "core/fxge/cfx_renderdevice.h"
 #include "core/fxge/text_char_pos.h"
 #include "third_party/base/check.h"
-#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "v8/include/cppgc/visitor.h"
 #include "xfa/fde/cfde_textout.h"
@@ -583,7 +582,7 @@ CFWL_ScrollBar* CFWL_Edit::UpdateScroll() {
     float fRange =
         std::max(contents_bounds.height - m_EngineRect.height, fStep);
     m_pVertScrollBar->SetRange(0.0f, fRange);
-    float fPos = pdfium::clamp(m_fScrollOffsetY, 0.0f, fRange);
+    float fPos = std::clamp(m_fScrollOffsetY, 0.0f, fRange);
     m_pVertScrollBar->SetPos(fPos);
     m_pVertScrollBar->SetTrackPos(fPos);
     m_pVertScrollBar->SetPageSize(rtScroll.height);

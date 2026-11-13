@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2020-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,14 @@
 
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
 
+// clang-format off
+#include <windows.h>   // These two headers must be defined
+#include <winioctl.h>  // first and in this order, otherwise
+                       // the MSVC compiler emits a warning
+                       // 'CTL_CODE undefined. Include winioctl.h or wdm.h'
+                       // See https://screenshot.googleplex.com/BYB9QnoHT6eP6oc
+// clang-format on
+
 #include <bthdef.h>
 #include <bthioctl.h>
 #include <cfgmgr32.h>
@@ -23,15 +31,16 @@
 #include <setupapi.h>
 #include <stdio.h>
 #include <usbiodef.h>
-#include <windows.h>   // These two headers must be defined
-#include <winioctl.h>  // first and in this order
 
+#include <cstring>
+#include <exception>
+#include <optional>
 #include <string>
 
 #include "absl/strings/str_format.h"
+#include "third_party/json/src/json.hpp"
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Foundation.h"
-#include "internal/platform/implementation/windows/json/json.hpp"
 #include "internal/platform/implementation/windows/utils.h"
 #include "internal/platform/logging.h"
 
@@ -45,7 +54,6 @@ typedef std::basic_string<TCHAR> tstring;
 
 #define BLUETOOTH_RADIO_REGISTRY_NAME_KEY "Local Name"
 
-namespace location {
 namespace nearby {
 namespace windows {
 namespace {
@@ -74,15 +82,24 @@ void from_json(const json &json_input, LocalSettings &local_settings) {
 constexpr uint8_t kAndroidDiscoverableBluetoothNameMaxLength = 37;  // bytes
 
 BluetoothAdapter::BluetoothAdapter() : windows_bluetooth_adapter_(nullptr) {
-  windows_bluetooth_adapter_ =
-      winrt::Windows::Devices::Bluetooth::BluetoothAdapter::GetDefaultAsync()
-          .get();
-  if (windows_bluetooth_adapter_ == nullptr) {
-    NEARBY_LOGS(ERROR) << __func__ << ": No Bluetooth adapter on this device.";
-  } else {
-    // Gets the radio represented by this Bluetooth adapter.
-    // https://docs.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothadapter.getradioasync?view=winrt-20348
-    windows_bluetooth_radio_ = windows_bluetooth_adapter_.GetRadioAsync().get();
+  try {
+    windows_bluetooth_adapter_ =
+        winrt::Windows::Devices::Bluetooth::BluetoothAdapter::GetDefaultAsync()
+            .get();
+    if (windows_bluetooth_adapter_ == nullptr) {
+      NEARBY_LOGS(ERROR) << __func__
+                         << ": No Bluetooth adapter on this device.";
+    } else {
+      // Gets the radio represented by this Bluetooth adapter.
+      // https://docs.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothadapter.getradioasync?view=winrt-20348
+      windows_bluetooth_radio_ =
+          windows_bluetooth_adapter_.GetRadioAsync().get();
+    }
+  } catch (const winrt::hresult_error &error) {
+    NEARBY_LOGS(ERROR) << __func__ << ": WinRT exception: " << error.code()
+                       << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
   }
 }
 
@@ -141,6 +158,9 @@ bool BluetoothAdapter::SetStatus(Status status) {
                        << winrt::to_string(ex.message());
 
     return false;
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
+    return false;
   }
 
   NEARBY_LOGS(INFO) << __func__ << ": Successfully set the radio state to "
@@ -156,9 +176,21 @@ bool BluetoothAdapter::IsEnabled() const {
     NEARBY_LOGS(ERROR) << __func__ << ": No Bluetooth radio on this device.";
     return false;
   }
-  // Gets the current state of the radio represented by this object.
-  // https://docs.microsoft.com/en-us/uwp/api/windows.devices.radios.radio.state?view=winrt-20348
-  return windows_bluetooth_radio_.State() == RadioState::On;
+  try {
+    // Gets the current state of the radio represented by this object.
+    // https://docs.microsoft.com/en-us/uwp/api/windows.devices.radios.radio.state?view=winrt-20348
+    return windows_bluetooth_radio_.State() == RadioState::On;
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << exception.what();
+    return false;
+  } catch (const winrt::hresult_error &ex) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << ex.code() << ": "
+                       << winrt::to_string(ex.message());
+    return false;
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
+    return false;
+  }
 }
 
 // Returns true if the Bluetooth hardware supports Bluetooth 5.0 Extended
@@ -168,9 +200,91 @@ bool BluetoothAdapter::IsExtendedAdvertisingSupported() const {
     NEARBY_LOGS(ERROR) << __func__ << ": No Bluetooth adapter on this device.";
     return false;
   }
-  // Indicates whether the adapter supports the 5.0 Extended Advertising format.
-  // https://docs.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothadapter.isextendedadvertisingsupported?view=winrt-22621
-  return windows_bluetooth_adapter_.IsExtendedAdvertisingSupported();
+  try {
+    // Indicates whether the adapter supports the 5.0 Extended Advertising
+    // format.
+    // https://docs.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothadapter.isextendedadvertisingsupported?view=winrt-22621
+    return windows_bluetooth_adapter_.IsExtendedAdvertisingSupported();
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << exception.what();
+    return false;
+  } catch (const winrt::hresult_error &ex) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << ex.code() << ": "
+                       << winrt::to_string(ex.message());
+    return false;
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
+    return false;
+  }
+}
+
+// Returns true if the Bluetooth hardware supports BLE Central Role
+bool BluetoothAdapter::IsCentralRoleSupported() const {
+  if (windows_bluetooth_adapter_ == nullptr) {
+    NEARBY_LOGS(ERROR) << __func__ << ": No Bluetooth adapter on this device.";
+    return false;
+  }
+  try {
+    // Indicates whether the adapter supports the BLE Central Role
+    // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothadapter.iscentralrolesupported?view=winrt-22621
+    return windows_bluetooth_adapter_.IsCentralRoleSupported();
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << exception.what();
+    return false;
+  } catch (const winrt::hresult_error &ex) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << ex.code() << ": "
+                       << winrt::to_string(ex.message());
+    return false;
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
+    return false;
+  }
+}
+
+// Returns true if the Bluetooth hardware supports BLE Peripheral Role
+bool BluetoothAdapter::IsPeripheralRoleSupported() const {
+  if (windows_bluetooth_adapter_ == nullptr) {
+    NEARBY_LOGS(ERROR) << __func__ << ": No Bluetooth adapter on this device.";
+    return false;
+  }
+  try {
+    // Indicates whether the adapter supports the BLE Peripheral Role
+    // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothadapter.isperipheralrolesupported?view=winrt-22621
+    return windows_bluetooth_adapter_.IsPeripheralRoleSupported();
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << exception.what();
+    return false;
+  } catch (const winrt::hresult_error &ex) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << ex.code() << ": "
+                       << winrt::to_string(ex.message());
+    return false;
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
+    return false;
+  }
+}
+
+// Returns true if the Bluetooth hardware supports BLE
+bool BluetoothAdapter::IsLowEnergySupported() const {
+  if (windows_bluetooth_adapter_ == nullptr) {
+    NEARBY_LOGS(ERROR) << __func__ << ": No Bluetooth adapter on this device.";
+    return false;
+  }
+  try {
+    // Indicates whether the adapter supports BLE
+    // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothadapter.islowenergysupported?view=winrt-22621
+    return windows_bluetooth_adapter_.IsLowEnergySupported();
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << exception.what();
+    return false;
+  } catch (const winrt::hresult_error &ex) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << ex.code() << ": "
+                       << winrt::to_string(ex.message());
+    return false;
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
+    return false;
+  }
 }
 
 // https://developer.android.com/reference/android/bluetooth/BluetoothAdapter.html#getScanMode()
@@ -193,78 +307,103 @@ bool BluetoothAdapter::SetScanMode(ScanMode scan_mode) {
 }
 
 void BluetoothAdapter::RestoreRadioNameIfNecessary() {
-  std::string nearby_radio_name;
-  std::string current_radio_name = GetName();
+  try {
+    std::string nearby_radio_name;
+    std::string current_radio_name = GetName();
 
-  std::string settings_path(kLocalSettingsFileName);
+    std::string settings_path(kLocalSettingsFileName);
 
-  auto full_path =
-      location::nearby::api::ImplementationPlatform::GetAppDataPath(
-          settings_path);
+    auto full_path =
+        nearby::api::ImplementationPlatform::GetAppDataPath(settings_path);
 
-  auto settings_file =
-      location::nearby::api::ImplementationPlatform::CreateInputFile(full_path,
-                                                                     0);
-  if (settings_file == nullptr) {
-    return;
-  }
+    auto settings_file =
+        nearby::api::ImplementationPlatform::CreateInputFile(full_path, 0);
+    if (settings_file == nullptr) {
+      NEARBY_LOGS(ERROR) << __func__ << ": Failed to create input file.";
+      return;
+    }
 
-  auto total_size = settings_file->GetTotalSize();
-  nearby::ExceptionOr<ByteArray> raw_local_settings;
+    auto total_size = settings_file->GetTotalSize();
+    if (total_size == 0) {
+      NEARBY_LOGS(WARNING) << __func__ << ": No data for local settings.";
+      return;
+    }
 
-  raw_local_settings = settings_file->Read(total_size);
-  settings_file->Close();
+    nearby::ExceptionOr<ByteArray> raw_local_settings;
 
-  if (!raw_local_settings.ok()) {
-    return;
-  }
+    raw_local_settings = settings_file->Read(total_size);
+    settings_file->Close();
 
-  auto local_settings =
-      json::parse(raw_local_settings.GetResult().data(), nullptr, false);
+    if (!raw_local_settings.ok()) {
+      NEARBY_LOGS(ERROR) << __func__ << ": Failed to read data file.";
+      return;
+    }
 
-  if (local_settings.is_discarded()) {
-    return;
-  }
+    auto local_settings =
+        json::parse(raw_local_settings.GetResult().data(), nullptr, false);
 
-  LocalSettings settings = local_settings.get<LocalSettings>();
+    if (local_settings.is_discarded()) {
+      NEARBY_LOGS(ERROR) << __func__ << ": Invalid local settings data.";
+      return;
+    }
 
-  if (current_radio_name == settings.nearby_radio_name) {
-    SetName(settings.original_radio_name,
-            /* persist= */ true);
+    NEARBY_LOGS(VERBOSE) << __func__
+                         << ": loaded settings: " << local_settings.dump();
+
+    LocalSettings settings = local_settings.get<LocalSettings>();
+
+    if (current_radio_name == settings.nearby_radio_name) {
+      SetName(settings.original_radio_name,
+              /* persist= */ true);
+    }
+  } catch (const winrt::hresult_error &ex) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << ex.code() << ": "
+                       << winrt::to_string(ex.message());
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
   }
 }
 
 void BluetoothAdapter::StoreRadioNames(absl::string_view original_radio_name,
                                        absl::string_view nearby_radio_name) {
-  if (original_radio_name == nullptr || original_radio_name.size() == 0) {
-    return;
+  try {
+    if (original_radio_name.empty() || nearby_radio_name.empty()) {
+      NEARBY_LOGS(ERROR)
+          << __func__
+          << ":Failed to save radio names due to invalid parameters.";
+      return;
+    }
+
+    std::string settings_path(kLocalSettingsFileName);
+    auto full_path =
+        nearby::api::ImplementationPlatform::GetAppDataPath(settings_path);
+
+    auto settings_file =
+        nearby::api::ImplementationPlatform::CreateOutputFile(full_path);
+
+    if (settings_file == nullptr) {
+      NEARBY_LOGS(ERROR) << __func__ << ": Failed to create output file.";
+      return;
+    }
+
+    LocalSettings local_settings = {std::string(original_radio_name),
+                                    std::string(nearby_radio_name)};
+
+    json encoded_local_settings;
+    to_json(encoded_local_settings, local_settings);
+    NEARBY_LOGS(VERBOSE) << __func__ << ": saved settings: "
+                         << encoded_local_settings.dump();
+
+    ByteArray data(encoded_local_settings.dump());
+
+    settings_file->Write(data);
+    settings_file->Close();
+  } catch (const winrt::hresult_error &ex) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << ex.code() << ": "
+                       << winrt::to_string(ex.message());
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
   }
-  if (nearby_radio_name == nullptr || nearby_radio_name.size() == 0) {
-    return;
-  }
-
-  std::string settings_path(kLocalSettingsFileName);
-  auto full_path =
-      location::nearby::api::ImplementationPlatform::GetAppDataPath(
-          settings_path);
-
-  auto settings_file =
-      location::nearby::api::ImplementationPlatform::CreateOutputFile(
-          full_path);
-
-  if (settings_file == nullptr) {
-    return;
-  }
-
-  LocalSettings local_settings = {std::string(original_radio_name),
-                                  std::string(nearby_radio_name)};
-
-  json encoded_local_settings = local_settings;
-
-  ByteArray data(encoded_local_settings.dump());
-
-  settings_file->Write(data);
-  settings_file->Close();
 }
 
 // https://developer.android.com/reference/android/bluetooth/BluetoothAdapter.html#getName()
@@ -274,14 +413,15 @@ std::string BluetoothAdapter::GetName() const {
     return *device_name_;
   }
 
-  char *_instance_id = GetGenericBluetoothAdapterInstanceID();
-  if (_instance_id == nullptr) {
+  std::optional<std::string> adapter_instance_id =
+      GetGenericBluetoothAdapterInstanceID();
+  if (!adapter_instance_id.has_value()) {
     NEARBY_LOGS(ERROR)
         << __func__ << ": Failed to get Generic Bluetooth Adapter InstanceID";
     return std::string();
   }
 
-  std::string instance_id(_instance_id);
+  std::string instance_id = *adapter_instance_id;
 
   // Change radio module local name in registry
   HKEY hKey;
@@ -367,13 +507,16 @@ bool BluetoothAdapter::SetName(absl::string_view name, bool persist) {
     return true;
   }
 
-  std::string instance_id(GetGenericBluetoothAdapterInstanceID());
+  std::optional<std::string> adapter_instance_id =
+      GetGenericBluetoothAdapterInstanceID();
 
-  if (instance_id.empty()) {
+  if (!adapter_instance_id.has_value()) {
     NEARBY_LOGS(ERROR)
         << __func__ << ": Failed to get Generic Bluetooth Adapter InstanceID";
     return false;
   }
+
+  std::string instance_id = *adapter_instance_id;
   // defined in usbiodef.h
   const GUID guid = GUID_DEVINTERFACE_USB_DEVICE;
 
@@ -629,7 +772,8 @@ void BluetoothAdapter::find_and_replace(char *source, const char *strFind,
   memcpy(source, s.c_str(), s.size());
 }
 
-char *BluetoothAdapter::GetGenericBluetoothAdapterInstanceID(void) const {
+std::optional<std::string>
+BluetoothAdapter::GetGenericBluetoothAdapterInstanceID() const {
   unsigned i;
   CONFIGRET r;
   HDEVINFO hDevInfo;
@@ -647,7 +791,7 @@ char *BluetoothAdapter::GetGenericBluetoothAdapterInstanceID(void) const {
   if (hDevInfo == INVALID_HANDLE_VALUE) {
     NEARBY_LOGS(ERROR) << __func__
                        << ": Could not find BluetoothDevice on this machine";
-    return NULL;
+    return std::nullopt;
   }
 
   // Get first Generic Bluetooth Adapter InstanceID
@@ -673,14 +817,15 @@ char *BluetoothAdapter::GetGenericBluetoothAdapterInstanceID(void) const {
     // computer's USB ports.
     // https://docs.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-host-radio-support
     if (strncmp("USB", deviceInstanceID, 3) == 0) {
-      return deviceInstanceID;
+      SetupDiDestroyDeviceInfoList(hDevInfo);
+      return std::string(deviceInstanceID);
     }
   }
 
   NEARBY_LOGS(ERROR) << __func__
                      << ": Failed to get the generic bluetooth adapter id";
-
-  return NULL;
+  SetupDiDestroyDeviceInfoList(hDevInfo);
+  return std::nullopt;
 }
 
 // Returns BT MAC address assigned to this adapter.
@@ -689,8 +834,20 @@ std::string BluetoothAdapter::GetMacAddress() const {
     NEARBY_LOGS(ERROR) << __func__ << ": No Bluetooth adapter on this device.";
     return "";
   }
-  return uint64_to_mac_address_string(
-      windows_bluetooth_adapter_.BluetoothAddress());
+  try {
+    return uint64_to_mac_address_string(
+        windows_bluetooth_adapter_.BluetoothAddress());
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << exception.what();
+    return "";
+  } catch (const winrt::hresult_error &ex) {
+    NEARBY_LOGS(ERROR) << __func__ << ": exception:" << ex.code() << ": "
+                       << winrt::to_string(ex.message());
+    return "";
+  } catch (...) {
+    NEARBY_LOGS(ERROR) << __func__ << ": unknown error.";
+    return "";
+  }
 }
 
 std::string BluetoothAdapter::GetNameFromRegistry(PHKEY hKey) const {
@@ -760,4 +917,3 @@ std::string BluetoothAdapter::GetNameFromComputerName() const {
 
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location

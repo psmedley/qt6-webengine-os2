@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "services/shape_detection/text_detection_impl.h"
@@ -18,7 +18,6 @@
 #endif
 
 #if BUILDFLAG(IS_MAC)
-#include "base/mac/mac_util.h"
 #include "services/shape_detection/barcode_detection_provider_mac.h"
 #elif BUILDFLAG(IS_ANDROID)
 // No C++ code, barcode detection comes from Java.

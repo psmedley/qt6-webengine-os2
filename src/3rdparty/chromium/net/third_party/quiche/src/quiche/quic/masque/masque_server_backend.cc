@@ -4,8 +4,27 @@
 
 #include "quiche/quic/masque/masque_server_backend.h"
 
-#include "absl/strings/str_cat.h"
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "absl/strings/escaping.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
+#include "openssl/curve25519.h"
+#include "quiche/quic/core/quic_connection_id.h"
+#include "quiche/quic/masque/masque_utils.h"
+#include "quiche/quic/platform/api/quic_bug_tracker.h"
+#include "quiche/quic/platform/api/quic_ip_address.h"
+#include "quiche/quic/platform/api/quic_logging.h"
+#include "quiche/quic/tools/quic_backend_response.h"
+#include "quiche/quic/tools/quic_memory_cache_backend.h"
+#include "quiche/quic/tools/quic_simple_server_backend.h"
+#include "quiche/common/quiche_text_utils.h"
+#include "quiche/spdy/core/http2_header_block.h"
 
 namespace quic {
 
@@ -13,6 +32,12 @@ MasqueServerBackend::MasqueServerBackend(MasqueMode masque_mode,
                                          const std::string& server_authority,
                                          const std::string& cache_directory)
     : masque_mode_(masque_mode), server_authority_(server_authority) {
+  // Start with client IP 10.1.1.2.
+  connect_ip_next_client_ip_[0] = 10;
+  connect_ip_next_client_ip_[1] = 1;
+  connect_ip_next_client_ip_[2] = 1;
+  connect_ip_next_client_ip_[3] = 2;
+
   if (!cache_directory.empty()) {
     QuicMemoryCacheBackend::InitializeBackend(cache_directory);
   }
@@ -30,9 +55,13 @@ bool MasqueServerBackend::MaybeHandleMasqueRequest(
   std::string masque_path = "";
   auto protocol_pair = request_headers.find(":protocol");
   if (method != "CONNECT" || protocol_pair == request_headers.end() ||
-      protocol_pair->second != "connect-udp") {
+      (protocol_pair->second != "connect-udp" &&
+       protocol_pair->second != "connect-ip" &&
+       protocol_pair->second != "connect-ethernet")) {
     // This is not a MASQUE request.
-    return false;
+    if (!signature_auth_on_all_requests_) {
+      return false;
+    }
   }
 
   if (!server_authority_.empty()) {
@@ -120,6 +149,67 @@ void MasqueServerBackend::RegisterBackendClient(QuicConnectionId connection_id,
 void MasqueServerBackend::RemoveBackendClient(QuicConnectionId connection_id) {
   QUIC_DLOG(INFO) << "Removing backend client for " << connection_id;
   backend_client_states_.erase(connection_id);
+}
+
+QuicIpAddress MasqueServerBackend::GetNextClientIpAddress() {
+  // Makes sure all addresses are in 10.(1-254).(1-254).(2-254)
+  QuicIpAddress address;
+  address.FromPackedString(
+      reinterpret_cast<char*>(&connect_ip_next_client_ip_[0]),
+      sizeof(connect_ip_next_client_ip_));
+  connect_ip_next_client_ip_[3]++;
+  if (connect_ip_next_client_ip_[3] >= 255) {
+    connect_ip_next_client_ip_[3] = 2;
+    connect_ip_next_client_ip_[2]++;
+    if (connect_ip_next_client_ip_[2] >= 255) {
+      connect_ip_next_client_ip_[2] = 1;
+      connect_ip_next_client_ip_[1]++;
+      if (connect_ip_next_client_ip_[1] >= 255) {
+        QUIC_LOG(FATAL) << "Ran out of IP addresses, restarting process.";
+      }
+    }
+  }
+  return address;
+}
+
+void MasqueServerBackend::SetSignatureAuth(absl::string_view signature_auth) {
+  signature_auth_credentials_.clear();
+  if (signature_auth.empty()) {
+    return;
+  }
+  for (absl::string_view sp : absl::StrSplit(signature_auth, ';')) {
+    quiche::QuicheTextUtils::RemoveLeadingAndTrailingWhitespace(&sp);
+    if (sp.empty()) {
+      continue;
+    }
+    std::vector<absl::string_view> kv =
+        absl::StrSplit(sp, absl::MaxSplits(':', 1));
+    quiche::QuicheTextUtils::RemoveLeadingAndTrailingWhitespace(&kv[0]);
+    quiche::QuicheTextUtils::RemoveLeadingAndTrailingWhitespace(&kv[1]);
+    SignatureAuthCredential credential;
+    credential.key_id = std::string(kv[0]);
+    std::string public_key = absl::HexStringToBytes(kv[1]);
+    if (public_key.size() != sizeof(credential.public_key)) {
+      QUIC_LOG(FATAL) << "Invalid signature auth public key length "
+                      << public_key.size();
+    }
+    memcpy(credential.public_key, public_key.data(),
+           sizeof(credential.public_key));
+    signature_auth_credentials_.push_back(credential);
+  }
+}
+
+bool MasqueServerBackend::GetSignatureAuthKeyForId(
+    absl::string_view key_id,
+    uint8_t out_public_key[ED25519_PUBLIC_KEY_LEN]) const {
+  for (const auto& credential : signature_auth_credentials_) {
+    if (credential.key_id == key_id) {
+      memcpy(out_public_key, credential.public_key,
+             sizeof(credential.public_key));
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace quic

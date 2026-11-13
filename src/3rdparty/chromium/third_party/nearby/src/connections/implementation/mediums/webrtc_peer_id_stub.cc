@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifdef NO_WEBRTC
+
 #include "connections/implementation/mediums/webrtc_peer_id_stub.h"
 
 #include <sstream>
@@ -20,7 +22,6 @@
 #include "absl/strings/escaping.h"
 #include "connections/implementation/mediums/utils.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace mediums {
@@ -34,4 +35,5 @@ bool WebrtcPeerId::IsValid() const { return false; }
 }  // namespace mediums
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
+
+#endif

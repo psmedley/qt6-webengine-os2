@@ -32,8 +32,8 @@ namespace {
 // TestAXTreeSourceViews provides a root with a default tree ID.
 class TestAXTreeSourceViews : public AXTreeSourceViews {
  public:
-  TestAXTreeSourceViews(AXAuraObjWrapper* root, AXAuraObjCache* cache)
-      : AXTreeSourceViews(root, ui::AXTreeID::CreateNewAXTreeID(), cache) {}
+  TestAXTreeSourceViews(ui::AXNodeID root_id, AXAuraObjCache* cache)
+      : AXTreeSourceViews(root_id, ui::AXTreeID::CreateNewAXTreeID(), cache) {}
   TestAXTreeSourceViews(const TestAXTreeSourceViews&) = delete;
   TestAXTreeSourceViews& operator=(const TestAXTreeSourceViews&) = delete;
   ~TestAXTreeSourceViews() override = default;
@@ -70,14 +70,17 @@ class AXTreeSourceViewsTest : public ViewsTestBase {
   }
 
   void TearDown() override {
+    label1_ = nullptr;
+    label2_ = nullptr;
+    textfield_ = nullptr;
     widget_.reset();
     ViewsTestBase::TearDown();
   }
 
   UniqueWidgetPtr widget_;
-  raw_ptr<Label> label1_ = nullptr;         // Owned by views hierarchy.
-  raw_ptr<Label> label2_ = nullptr;         // Owned by views hierarchy.
-  raw_ptr<Textfield> textfield_ = nullptr;  // Owned by views hierarchy.
+  raw_ptr<Label> label1_ = nullptr;
+  raw_ptr<Label> label2_ = nullptr;
+  raw_ptr<Textfield> textfield_ = nullptr;
 };
 
 TEST_F(AXTreeSourceViewsTest, Basics) {
@@ -85,21 +88,20 @@ TEST_F(AXTreeSourceViewsTest, Basics) {
 
   // Start the tree at the Widget's contents view.
   AXAuraObjWrapper* root = cache.GetOrCreate(widget_->GetContentsView());
-  TestAXTreeSourceViews tree(root, &cache);
+  TestAXTreeSourceViews tree(root->GetUniqueId(), &cache);
   EXPECT_EQ(root, tree.GetRoot());
 
   // The root has no parent.
   EXPECT_FALSE(tree.GetParent(root));
 
   // The root has the right children.
-  std::vector<AXAuraObjWrapper*> children;
-  tree.GetChildren(root, &children);
-  ASSERT_EQ(3u, children.size());
+  tree.CacheChildrenIfNeeded(root);
+  ASSERT_EQ(3u, tree.GetChildCount(root));
 
   // The labels are the children.
-  AXAuraObjWrapper* label1 = children[0];
-  AXAuraObjWrapper* label2 = children[1];
-  AXAuraObjWrapper* textfield = children[2];
+  AXAuraObjWrapper* label1 = tree.ChildAt(root, 0);
+  AXAuraObjWrapper* label2 = tree.ChildAt(root, 1);
+  AXAuraObjWrapper* textfield = tree.ChildAt(root, 2);
   EXPECT_EQ(label1, cache.GetOrCreate(label1_));
   EXPECT_EQ(label2, cache.GetOrCreate(label2_));
   EXPECT_EQ(textfield, cache.GetOrCreate(textfield_));
@@ -122,8 +124,7 @@ TEST_F(AXTreeSourceViewsTest, Basics) {
   EXPECT_EQ(textfield, tree.GetFromId(textfield->GetUniqueId()));
 
   // Validity.
-  EXPECT_TRUE(tree.IsValid(root));
-  EXPECT_FALSE(tree.IsValid(nullptr));
+  EXPECT_TRUE(root != nullptr);
 
   // Comparisons.
   EXPECT_TRUE(tree.IsEqual(label1, label1));
@@ -137,7 +138,8 @@ TEST_F(AXTreeSourceViewsTest, Basics) {
 
 TEST_F(AXTreeSourceViewsTest, GetTreeDataWithFocus) {
   AXAuraObjCache cache;
-  TestAXTreeSourceViews tree(cache.GetOrCreate(widget_.get()), &cache);
+  TestAXTreeSourceViews tree(cache.GetOrCreate(widget_.get())->GetUniqueId(),
+                             &cache);
   textfield_->RequestFocus();
 
   ui::AXTreeData tree_data;
@@ -152,8 +154,9 @@ TEST_F(AXTreeSourceViewsTest, IgnoredView) {
   widget_->GetContentsView()->AddChildView(ignored_view);
 
   AXAuraObjCache cache;
-  TestAXTreeSourceViews tree(cache.GetOrCreate(widget_.get()), &cache);
-  EXPECT_TRUE(tree.IsValid(cache.GetOrCreate(ignored_view)));
+  TestAXTreeSourceViews tree(cache.GetOrCreate(widget_.get())->GetUniqueId(),
+                             &cache);
+  EXPECT_TRUE(cache.GetOrCreate(ignored_view) != nullptr);
 }
 
 TEST_F(AXTreeSourceViewsTest, ViewWithChildTreeHasNoChildren) {
@@ -162,12 +165,12 @@ TEST_F(AXTreeSourceViewsTest, ViewWithChildTreeHasNoChildren) {
       ui::AXTreeID::CreateNewAXTreeID());
 
   AXAuraObjCache cache;
-  TestAXTreeSourceViews tree(cache.GetOrCreate(widget_.get()), &cache);
+  TestAXTreeSourceViews tree(cache.GetOrCreate(widget_.get())->GetUniqueId(),
+                             &cache);
   auto* ax_obj = cache.GetOrCreate(contents_view);
-  EXPECT_TRUE(tree.IsValid(ax_obj));
-  std::vector<AXAuraObjWrapper*> children;
-  ax_obj->GetChildren(&children);
-  EXPECT_TRUE(children.empty());
+  EXPECT_TRUE(ax_obj != nullptr);
+  tree.CacheChildrenIfNeeded(ax_obj);
+  EXPECT_EQ(0u, tree.GetChildCount(ax_obj));
   EXPECT_EQ(nullptr, cache.GetOrCreate(textfield_)->GetParent());
 }
 

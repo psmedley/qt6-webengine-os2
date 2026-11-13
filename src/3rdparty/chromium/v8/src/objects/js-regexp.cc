@@ -26,7 +26,7 @@ Handle<JSRegExpResultIndices> JSRegExpResultIndices::BuildIndices(
   indices->set_length(Smi::zero());
 
   // Build indices array from RegExpMatchInfo.
-  int num_indices = match_info->NumberOfCaptureRegisters();
+  int num_indices = match_info->number_of_capture_registers();
   int num_results = num_indices >> 1;
   Handle<FixedArray> indices_array =
       isolate->factory()->NewFixedArray(num_results);
@@ -34,8 +34,8 @@ Handle<JSRegExpResultIndices> JSRegExpResultIndices::BuildIndices(
 
   for (int i = 0; i < num_results; i++) {
     int base_offset = i * 2;
-    int start_offset = match_info->Capture(base_offset);
-    int end_offset = match_info->Capture(base_offset + 1);
+    int start_offset = match_info->capture(base_offset);
+    int end_offset = match_info->capture(base_offset + 1);
 
     // Any unmatched captures are set to undefined, otherwise we set them to a
     // subarray of the indices.
@@ -56,7 +56,7 @@ Handle<JSRegExpResultIndices> JSRegExpResultIndices::BuildIndices(
   // If there are no capture groups, set the groups property to undefined.
   FieldIndex groups_index = FieldIndex::ForDescriptor(
       indices->map(), InternalIndex(kGroupsDescriptorIndex));
-  if (maybe_names->IsUndefined(isolate)) {
+  if (IsUndefined(*maybe_names, isolate)) {
     indices->FastPropertyAtPut(groups_index,
                                ReadOnlyRoots(isolate).undefined_value());
     return indices;
@@ -77,10 +77,10 @@ Handle<JSRegExpResultIndices> JSRegExpResultIndices::BuildIndices(
     int name_offset = base_offset;
     int index_offset = base_offset + 1;
     Handle<String> name(String::cast(names->get(name_offset)), isolate);
-    Handle<Smi> smi_index(Smi::cast(names->get(index_offset)), isolate);
-    Handle<Object> capture_indices(indices_array->get(smi_index->value()),
+    Tagged<Smi> smi_index = Smi::cast(names->get(index_offset));
+    Handle<Object> capture_indices(indices_array->get(smi_index.value()),
                                    isolate);
-    if (!capture_indices->IsUndefined(isolate)) {
+    if (!IsUndefined(*capture_indices, isolate)) {
       capture_indices = Handle<JSArray>::cast(capture_indices);
     }
     if (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
@@ -150,18 +150,28 @@ MaybeHandle<JSRegExp> JSRegExp::New(Isolate* isolate, Handle<String> pattern,
   return JSRegExp::Initialize(regexp, pattern, flags, backtrack_limit);
 }
 
-Object JSRegExp::code(bool is_latin1) const {
+Tagged<Object> JSRegExp::code(IsolateForSandbox isolate, bool is_latin1) const {
   DCHECK_EQ(type_tag(), JSRegExp::IRREGEXP);
-  Object value = DataAt(code_index(is_latin1));
-  DCHECK_IMPLIES(V8_EXTERNAL_CODE_SPACE_BOOL, value.IsSmi() || value.IsCodeT());
+  Tagged<Object> value = DataAt(code_index(is_latin1));
+  DCHECK(IsSmi(value) || IsCodeWrapper(value));
+  // TODO(saelo): it would be nice if we could directly use a code pointer to
+  // reference our Code rather than use the CodeWrapper object. However, this
+  // is currently not possible since we use essentially a FixedArray to store
+  // all our fields, and a code pointer isn't a tagged pointer. Instead, we
+  // should consider adding a trusted pointer field that references either the
+  // bytecode or the native code in a sandbox-compatible way.
+  if (IsCodeWrapper(value)) {
+    value = CodeWrapper::cast(value)->code(isolate);
+  }
+  DCHECK(IsSmi(value) || IsCode(value));
   return value;
 }
 
 void JSRegExp::set_code(bool is_latin1, Handle<Code> code) {
-  SetDataAt(code_index(is_latin1), ToCodeT(*code));
+  SetDataAt(code_index(is_latin1), code->wrapper());
 }
 
-Object JSRegExp::bytecode(bool is_latin1) const {
+Tagged<Object> JSRegExp::bytecode(bool is_latin1) const {
   DCHECK(type_tag() == JSRegExp::IRREGEXP ||
          type_tag() == JSRegExp::EXPERIMENTAL);
   return DataAt(bytecode_index(is_latin1));
@@ -172,10 +182,9 @@ void JSRegExp::set_bytecode_and_trampoline(Isolate* isolate,
   SetDataAt(kIrregexpLatin1BytecodeIndex, *bytecode);
   SetDataAt(kIrregexpUC16BytecodeIndex, *bytecode);
 
-  Handle<CodeT> trampoline =
-      BUILTIN_CODE(isolate, RegExpExperimentalTrampoline);
-  SetDataAt(JSRegExp::kIrregexpLatin1CodeIndex, *trampoline);
-  SetDataAt(JSRegExp::kIrregexpUC16CodeIndex, *trampoline);
+  Handle<Code> trampoline = BUILTIN_CODE(isolate, RegExpExperimentalTrampoline);
+  SetDataAt(JSRegExp::kIrregexpLatin1CodeIndex, trampoline->wrapper());
+  SetDataAt(JSRegExp::kIrregexpUC16CodeIndex, trampoline->wrapper());
 }
 
 bool JSRegExp::ShouldProduceBytecode() {
@@ -191,7 +200,7 @@ bool JSRegExp::CanTierUp() {
 // An irregexp is considered to be marked for tier up if the tier-up ticks
 // value reaches zero.
 bool JSRegExp::MarkedForTierUp() {
-  DCHECK(data().IsFixedArray());
+  DCHECK(IsFixedArray(data()));
 
   if (!CanTierUp()) {
     return false;
@@ -204,8 +213,8 @@ void JSRegExp::ResetLastTierUpTick() {
   DCHECK(v8_flags.regexp_tier_up);
   DCHECK_EQ(type_tag(), JSRegExp::IRREGEXP);
   int tier_up_ticks = Smi::ToInt(DataAt(kIrregexpTicksUntilTierUpIndex)) + 1;
-  FixedArray::cast(data()).set(JSRegExp::kIrregexpTicksUntilTierUpIndex,
-                               Smi::FromInt(tier_up_ticks));
+  FixedArray::cast(data())->set(JSRegExp::kIrregexpTicksUntilTierUpIndex,
+                                Smi::FromInt(tier_up_ticks));
 }
 
 void JSRegExp::TierUpTick() {
@@ -215,15 +224,15 @@ void JSRegExp::TierUpTick() {
   if (tier_up_ticks == 0) {
     return;
   }
-  FixedArray::cast(data()).set(JSRegExp::kIrregexpTicksUntilTierUpIndex,
-                               Smi::FromInt(tier_up_ticks - 1));
+  FixedArray::cast(data())->set(JSRegExp::kIrregexpTicksUntilTierUpIndex,
+                                Smi::FromInt(tier_up_ticks - 1));
 }
 
 void JSRegExp::MarkTierUpForNextExec() {
   DCHECK(v8_flags.regexp_tier_up);
   DCHECK_EQ(type_tag(), JSRegExp::IRREGEXP);
-  FixedArray::cast(data()).set(JSRegExp::kIrregexpTicksUntilTierUpIndex,
-                               Smi::zero());
+  FixedArray::cast(data())->set(JSRegExp::kIrregexpTicksUntilTierUpIndex,
+                                Smi::zero());
 }
 
 // static
@@ -254,9 +263,13 @@ bool IsLineTerminator(int c) {
 // WriteEscapedRegExpSource into a single function to deduplicate dispatch logic
 // and move related code closer to each other.
 template <typename Char>
-int CountAdditionalEscapeChars(Handle<String> source, bool* needs_escapes_out) {
+uint32_t CountAdditionalEscapeChars(Handle<String> source, bool* needs_escapes_out) {
   DisallowGarbageCollection no_gc;
-  int escapes = 0;
+  uint32_t escapes = 0;
+  // The maximum growth-factor is 5 (for \u2028 and \u2029). Make sure that we
+  // won't overflow |escapes| given the current constraints on string length.
+  static_assert(uint64_t{String::kMaxLength} * 5 <
+                std::numeric_limits<decltype(escapes)>::max());
   bool needs_escapes = false;
   bool in_character_class = false;
   base::Vector<const Char> src = source->GetCharVector<Char>(no_gc);
@@ -295,14 +308,14 @@ int CountAdditionalEscapeChars(Handle<String> source, bool* needs_escapes_out) {
     }
   }
   DCHECK(!in_character_class);
-  DCHECK_GE(escapes, 0);
   DCHECK_IMPLIES(escapes != 0, needs_escapes);
   *needs_escapes_out = needs_escapes;
   return escapes;
 }
 
 template <typename Char>
-void WriteStringToCharVector(base::Vector<Char> v, int* d, const char* string) {
+void WriteStringToCharVector(base::Vector<Char> v, uint32_t* d,
+                             const char* string) {
   int s = 0;
   while (string[s] != '\0') v[(*d)++] = string[s++];
 }
@@ -313,13 +326,13 @@ Handle<StringType> WriteEscapedRegExpSource(Handle<String> source,
   DisallowGarbageCollection no_gc;
   base::Vector<const Char> src = source->GetCharVector<Char>(no_gc);
   base::Vector<Char> dst(result->GetChars(no_gc), result->length());
-  int s = 0;
-  int d = 0;
+  uint32_t s = 0;
+  uint32_t d = 0;
   bool in_character_class = false;
-  while (s < src.length()) {
+  while (s < src.size()) {
     const Char c = src[s];
     if (c == '\\') {
-      if (s + 1 < src.length() && IsLineTerminator(src[s + 1])) {
+      if (s + 1 < src.size() && IsLineTerminator(src[s + 1])) {
         // This '\' is ignored since the next character itself will be escaped.
         s++;
         continue;
@@ -327,7 +340,7 @@ Handle<StringType> WriteEscapedRegExpSource(Handle<String> source,
         // Escape. Copy this and next character.
         dst[d++] = src[s++];
       }
-      if (s == src.length()) break;
+      if (s == src.size()) break;
     } else if (c == '/' && !in_character_class) {
       // Not escaped forward-slash needs escape.
       dst[d++] = '\\';
@@ -367,11 +380,13 @@ MaybeHandle<String> EscapeRegExpSource(Isolate* isolate,
   if (source->length() == 0) return isolate->factory()->query_colon_string();
   bool one_byte = String::IsOneByteRepresentationUnderneath(*source);
   bool needs_escapes = false;
-  int additional_escape_chars =
+  uint32_t additional_escape_chars =
       one_byte ? CountAdditionalEscapeChars<uint8_t>(source, &needs_escapes)
                : CountAdditionalEscapeChars<base::uc16>(source, &needs_escapes);
   if (!needs_escapes) return source;
-  int length = source->length() + additional_escape_chars;
+  DCHECK_LE(static_cast<uint64_t>(source->length()) + additional_escape_chars,
+            std::numeric_limits<uint32_t>::max());
+  uint32_t length = source->length() + additional_escape_chars;
   if (one_byte) {
     Handle<SeqOneByteString> result;
     ASSIGN_RETURN_ON_EXCEPTION(isolate, result,
@@ -414,10 +429,10 @@ MaybeHandle<JSRegExp> JSRegExp::Initialize(Handle<JSRegExp> regexp,
   regexp->set_source(*escaped_source);
   regexp->set_flags(Smi::FromInt(flags));
 
-  Map map = regexp->map();
-  Object constructor = map.GetConstructor();
-  if (constructor.IsJSFunction() &&
-      JSFunction::cast(constructor).initial_map() == map) {
+  Tagged<Map> map = regexp->map();
+  Tagged<Object> constructor = map->GetConstructor();
+  if (IsJSFunction(constructor) &&
+      JSFunction::cast(constructor)->initial_map() == map) {
     // If we still have the original map, set in-object properties directly.
     regexp->InObjectPropertyAtPut(JSRegExp::kLastIndexFieldIndex,
                                   Smi::FromInt(kInitialLastIndexValue),

@@ -13,16 +13,19 @@
 #
 # gen_builtin_symbols.py:
 #  Code generation for the built-in symbol tables.
+import sys
+
+# Conditional import enables getting inputs/outputs with python3 instead of vpython3
+if len(sys.argv) < 2:
+    from perfect_hash import generate_hash, Hash2
 
 from collections import OrderedDict
-from perfect_hash import generate_hash, Hash2
 import argparse
 import copy
 import hashlib
 import json
 import re
 import os
-import sys
 import random
 
 template_immutablestring_cpp = """// GENERATED FILE - DO NOT EDIT.
@@ -1456,7 +1459,13 @@ def get_op(name, function_props, group_op_suffix):
 
 def get_known_to_not_have_side_effects(function_props):
     if 'hasSideEffects' in function_props:
-        return 'false'
+        has_side_effects = function_props['hasSideEffects']
+        if isinstance(has_side_effects, str):
+            assert has_side_effects in ['true',
+                                        'false'], 'Bad side effects value: ' + has_side_effects
+            has_side_effects = has_side_effects == 'true'
+        assert isinstance(has_side_effects, bool)
+        return 'false' if has_side_effects else 'true'
     else:
         for param in get_parameters(function_props):
             if 'qualifier' in param.data and (param.data['qualifier'] == 'ParamOut' or

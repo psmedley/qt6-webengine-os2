@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
 #include "third_party/base/containers/contains.h"
+#include "third_party/base/containers/span.h"
 #include "v8/include/v8-forward.h"
 #include "v8/include/v8-object.h"
 #include "v8/include/v8-primitive.h"
@@ -158,15 +159,14 @@ bool CJX_Object::HasMethod(const WideString& func) const {
   return pdfium::Contains(method_specs_, func.ToUTF8());
 }
 
-CJS_Result CJX_Object::RunMethod(
-    const WideString& func,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJX_Object::RunMethod(CFXJSE_Engine* pScriptContext,
+                                 const WideString& func,
+                                 pdfium::span<v8::Local<v8::Value>> params) {
   auto it = method_specs_.find(func.ToUTF8());
   if (it == method_specs_.end())
     return CJS_Result::Failure(JSMessage::kUnknownMethod);
 
-  return it->second(this, GetXFAObject()->GetDocument()->GetScriptContext(),
-                    params);
+  return it->second(this, pScriptContext, params);
 }
 
 void CJX_Object::ThrowTooManyOccurrencesException(v8::Isolate* pIsolate,
@@ -241,8 +241,6 @@ void CJX_Object::SetAttributeByEnum(XFA_Attribute eAttr,
     case XFA_AttributeType::Measure:
       SetMeasure(eAttr, CXFA_Measurement(wsValue.AsStringView()), bNotify);
       break;
-    default:
-      break;
   }
 }
 
@@ -301,8 +299,6 @@ absl::optional<WideString> CJX_Object::TryAttribute(XFA_Attribute eAttr,
         return absl::nullopt;
       return value->ToString();
     }
-    default:
-      break;
   }
   return absl::nullopt;
 }
@@ -464,13 +460,15 @@ void CJX_Object::SetCDataImpl(XFA_Attribute eAttr,
     return;
   }
 
+  CFX_XMLElement* elem = ToXMLElement(xfaObj->GetXMLMappingNode());
+  if (!elem) {
+    return;
+  }
+
   WideString wsAttrName = WideString::FromASCII(XFA_AttributeToName(eAttr));
   if (eAttr == XFA_Attribute::ContentType)
     wsAttrName = L"xfa:" + wsAttrName;
-
-  CFX_XMLElement* elem = ToXMLElement(xfaObj->GetXMLMappingNode());
   elem->SetAttribute(wsAttrName, wsValue);
-  return;
 }
 
 void CJX_Object::SetAttributeValue(const WideString& wsValue,

@@ -13,6 +13,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/platform/wtf/text/code_point_iterator.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_impl.h"
 
 #if DCHECK_IS_ON()
@@ -22,6 +23,7 @@
 namespace WTF {
 
 class AtomicString;
+class CodePointIterator;
 class String;
 
 enum UTF8ConversionMode {
@@ -196,6 +198,10 @@ class WTF_EXPORT StringView {
     return {static_cast<const UChar*>(bytes_), length_};
   }
 
+  // Returns the Unicode code point starting at the specified offset of this
+  // string. If the offset points an unpaired surrogate, this function returns
+  // the surrogate code unit as is. If you'd like to check such surroagtes,
+  // use U_IS_SURROGATE() defined in unicode/utf.h.
   UChar32 CodepointAt(unsigned i) const;
 
   // Returns i+2 if a pair of [i] and [i+1] is a valid surrogate pair.
@@ -232,6 +238,21 @@ class WTF_EXPORT StringView {
   template <bool isSpecialCharacter(UChar)>
   bool IsAllSpecialCharacters() const;
 
+  // Iterator support
+  //
+  // begin() and end() return iterators for UChar32, neither UChar nor LChar.
+  // If you'd like to iterate code units, just use [] and length().
+  //
+  // * Iterate code units
+  //    for (unsigned i = 0; i < view.length(); ++i) {
+  //      UChar code_unit = view[i];
+  //      ...
+  // * Iterate code points
+  //    for (UChar32 code_point : view) {
+  //      ...
+  CodePointIterator begin() const;
+  CodePointIterator end() const;
+
  private:
   void Set(const StringImpl&, unsigned offset, unsigned length);
 
@@ -251,7 +272,8 @@ inline StringView::StringView(const StringView& view,
                               unsigned offset,
                               unsigned length)
     : impl_(view.impl_), length_(length) {
-  SECURITY_DCHECK(offset + length <= view.length());
+  SECURITY_DCHECK(offset <= view.length());
+  SECURITY_DCHECK(length <= view.length() - offset);
   if (Is8Bit())
     bytes_ = view.Characters8() + offset;
   else
@@ -297,7 +319,8 @@ inline void StringView::Clear() {
 inline void StringView::Set(const StringImpl& impl,
                             unsigned offset,
                             unsigned length) {
-  SECURITY_DCHECK(offset + length <= impl.length());
+  SECURITY_DCHECK(offset <= impl.length());
+  SECURITY_DCHECK(length <= impl.length() - offset);
   length_ = length;
   impl_ = const_cast<StringImpl*>(&impl);
   if (impl.Is8Bit())

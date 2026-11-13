@@ -39,6 +39,11 @@ parser.add_option(
     metavar="OUT_DIR",
     help="Output directory for linux perf profile files")
 parser.add_option("--timeout", type=float, help="Stop d8 after N seconds")
+parser.add_option(
+    "--skip-pprof",
+    action="store_true",
+    default=False,
+    help="Skip pprof upload (relevant for Googlers only)")
 
 d8_options = optparse.OptionGroup(
     parser, "d8-forwarded Options",
@@ -232,14 +237,14 @@ def inject_v8_symbols(perf_dat_file):
 result = inject_v8_symbols(perf_data_file)
 if result is None:
   print("No perf files were successfully processed"
-        " Check for errors or partial results in '{options.perf_data_dir}'")
+        f" Check for errors or partial results in '{options.perf_data_dir}'")
   exit(1)
 log(f"RESULTS in '{options.perf_data_dir}'")
 BYTES_TO_MIB = 1 / 1024 / 1024
 print(f"{result.name:67}{(result.stat().st_size*BYTES_TO_MIB):10.2f}MiB")
 
 # ==============================================================================
-if not shutil.which('gcertstatus'):
+if not shutil.which('gcertstatus') or options.skip_pprof:
   log("ANALYSIS")
   print(f"perf report --input='{result}'")
   print(f"pprof '{result}'")
@@ -253,7 +258,8 @@ try:
   has_gcert = True
 
   cmd = [
-      "pprof", "-flame", f"-add_comment={shlex.join(sys.argv)}",
+      "pprof", "-symbolize=local", "-flame",
+      f"-add_comment={shlex.join(sys.argv)}",
       str(result.absolute())
   ]
   print("# Processing and uploading to pprofresult")
@@ -263,6 +269,6 @@ except subprocess.CalledProcessError as e:
   if has_gcert:
     raise Exception("Could not generate pprof results") from e
   print("# Please run `gcert` for generating pprof results")
-  print(f"pprof -flame {result}")
+  print(f"pprof -symbolize=local -flame {result}")
 except KeyboardInterrupt:
   exit(1)

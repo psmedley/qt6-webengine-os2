@@ -12,8 +12,9 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
-#include "base/memory/ref_counted.h"
+#include "base/functional/callback_forward.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "services/device/public/mojom/usb_device.mojom.h"
 
 namespace device {
@@ -27,8 +28,8 @@ struct CombinedInterfaceInfo {
 
   bool IsValid() const;
 
-  const mojom::UsbInterfaceInfo* interface = nullptr;
-  const mojom::UsbAlternateInterfaceInfo* alternate = nullptr;
+  raw_ptr<const mojom::UsbInterfaceInfo> interface = nullptr;
+  raw_ptr<const mojom::UsbAlternateInterfaceInfo> alternate = nullptr;
 };
 
 struct UsbDeviceDescriptor {

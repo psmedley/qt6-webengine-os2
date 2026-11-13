@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/string_util.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -159,7 +160,7 @@ AXAuraObjWrapper* AXAuraObjCache::Get(int32_t id) {
 }
 
 void AXAuraObjCache::GetTopLevelWindows(
-    std::vector<AXAuraObjWrapper*>* children) {
+    std::vector<raw_ptr<AXAuraObjWrapper, VectorExperimental>>* children) {
   for (aura::Window* root : root_windows_)
     children->push_back(GetOrCreate(root));
 }
@@ -291,8 +292,7 @@ void AXAuraObjCache::OnRootWindowObjCreated(aura::Window* window) {
     GetFocusClient(window)->AddObserver(this);
 
   // Do not allow duplicate entries.
-  if (std::find(root_windows_.begin(), root_windows_.end(), window) ==
-      root_windows_.end()) {
+  if (!base::Contains(root_windows_, window)) {
     root_windows_.push_back(window);
   }
 }

@@ -659,7 +659,11 @@ static int mf_encv_output_adjust(AVCodecContext *avctx, IMFMediaType *type)
         framerate = avctx->framerate;
     } else {
         framerate = av_inv_q(avctx->time_base);
+#if FF_API_TICKS_PER_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
         framerate.den *= avctx->ticks_per_frame;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
     }
 
     ff_MFSetAttributeRatio((IMFAttributes *)type, &MF_MT_FRAME_RATE, framerate.num, framerate.den);
@@ -668,10 +672,10 @@ static int mf_encv_output_adjust(AVCodecContext *avctx, IMFMediaType *type)
     if (avctx->codec_id == AV_CODEC_ID_H264) {
         UINT32 profile = ff_eAVEncH264VProfile_Base;
         switch (avctx->profile) {
-        case FF_PROFILE_H264_MAIN:
+        case AV_PROFILE_H264_MAIN:
             profile = ff_eAVEncH264VProfile_Main;
             break;
-        case FF_PROFILE_H264_HIGH:
+        case AV_PROFILE_H264_HIGH:
             profile = ff_eAVEncH264VProfile_High;
             break;
         }
@@ -1214,7 +1218,6 @@ static int mf_init(AVCodecContext *avctx)
                 return 0;
         }
     }
-    mf_close(avctx);
     return ret;
 }
 

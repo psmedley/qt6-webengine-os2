@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import type * as SDK from '../../core/sdk/sdk.js';
+import {PanelUtils} from '../utils/utils.js';
 
 import {type StylePropertiesSection} from './StylePropertiesSection.js';
 import {StylePropertyTreeElement} from './StylePropertyTreeElement.js';
@@ -26,35 +27,69 @@ export class StylePropertyHighlighter {
       }
     }
 
-    const {treeElement, section} = this.findTreeElementAndSection(treeElement => treeElement.property === cssProperty);
+    const section =
+        this.styleSidebarPane.allSections().find(section => section.style().leadingProperties().includes(cssProperty));
+    if (!section) {
+      return;
+    }
+    section.showAllItems();
+
+    const treeElement = this.findTreeElementFromSection(treeElement => treeElement.property === cssProperty, section);
     if (treeElement) {
       treeElement.parent && treeElement.parent.expand();
       this.scrollAndHighlightTreeElement(treeElement);
-      if (section) {
-        section.element.focus();
-      }
+      section.element.focus();
     }
+  }
+
+  findAndHighlightSectionBlock(sectionBlockName: string): void {
+    const block = this.styleSidebarPane.getSectionBlockByName(sectionBlockName);
+    if (!block || block.sections.length === 0) {
+      return;
+    }
+    const [section] = block.sections;
+    section.showAllItems();
+    PanelUtils.highlightElement(block.titleElement() as HTMLElement);
+  }
+
+  findAndHighlightSection(sectionName: string, blockName: string): void {
+    const block = this.styleSidebarPane.getSectionBlockByName(blockName);
+    const section = block?.sections.find(section => section.headerText() === sectionName);
+    if (!section || !block) {
+      return;
+    }
+    block.expand(true);
+    section.showAllItems();
+    PanelUtils.highlightElement(section.element);
   }
 
   /**
    * Find the first non-overridden property that matches the provided name, scroll to it and highlight it.
    */
-  findAndHighlightPropertyName(propertyName: string): void {
-    for (const section of this.styleSidebarPane.allSections()) {
+  findAndHighlightPropertyName(propertyName: string, sectionName?: string, blockName?: string): boolean {
+    const block = blockName ? this.styleSidebarPane.getSectionBlockByName(blockName) : undefined;
+    const sections = block?.sections ?? this.styleSidebarPane.allSections();
+    if (!sections) {
+      return false;
+    }
+    for (const section of sections) {
+      if (sectionName && section.headerText() !== sectionName) {
+        continue;
+      }
       if (!section.style().hasActiveProperty(propertyName)) {
         continue;
       }
+      block?.expand(true);
       section.showAllItems();
       const treeElement = this.findTreeElementFromSection(
           treeElement => treeElement.property.name === propertyName && !treeElement.overloaded(), section);
       if (treeElement) {
         this.scrollAndHighlightTreeElement(treeElement);
-        if (section) {
-          section.element.focus();
-        }
-        return;
+        section.element.focus();
+        return true;
       }
     }
+    return false;
   }
 
   /**
@@ -88,13 +123,6 @@ export class StylePropertyHighlighter {
   }
 
   private scrollAndHighlightTreeElement(treeElement: StylePropertyTreeElement): void {
-    treeElement.listItemElement.scrollIntoViewIfNeeded();
-    treeElement.listItemElement.animate(
-        [
-          {offset: 0, backgroundColor: 'rgba(255, 255, 0, 0.2)'},
-          {offset: 0.1, backgroundColor: 'rgba(255, 255, 0, 0.7)'},
-          {offset: 1, backgroundColor: 'transparent'},
-        ],
-        {duration: 2000, easing: 'cubic-bezier(0, 0, 0.2, 1)'});
+    PanelUtils.highlightElement(treeElement.listItemElement);
   }
 }

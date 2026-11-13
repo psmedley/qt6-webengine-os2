@@ -26,7 +26,10 @@ cc_library(
         "session_description_wrapper.h",
         "signaling_frames.h",
     ],
-    copts = ["-DCORE_ADAPTER_DLL"],
+    copts = [
+        "-DCORE_ADAPTER_DLL",
+        "-DNO_WEBRTC",
+    ],
     visibility = [
         "//connections/implementation:__subpackages__",
     ],
@@ -36,11 +39,10 @@ cc_library(
         "//connections/implementation/mediums:utils",
         "//internal/platform:base",
         "//internal/platform:comm",
-        "//internal/platform:logging",
         "//internal/platform:types",
         "//proto/mediums:web_rtc_signaling_frames_cc_proto",
-        "//third_party/webrtc/files/stable/webrtc/api:libjingle_peerconnection_api",
-        "//third_party/webrtc/files/stable/webrtc/pc:peerconnection",
+        # TODO: Support WebRTC
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/time",
     ],
@@ -54,7 +56,10 @@ cc_library(
     hdrs = [
         "webrtc_socket_impl.h",
     ],
-    copts = ["-DCORE_ADAPTER_DLL"],
+    copts = [
+        "-DCORE_ADAPTER_DLL",
+        "-DNO_WEBRTC",
+    ],
     visibility = [
         "//connections/implementation:__subpackages__",
     ],
@@ -62,7 +67,7 @@ cc_library(
         "//connections:core_types",
         "//internal/platform:base",
         "//internal/platform:types",
-        "//third_party/webrtc/files/stable/webrtc/api:libjingle_peerconnection_api",
+        # TODO: Support WebRTC
     ],
 )
 
@@ -87,12 +92,12 @@ cc_test(
         "//internal/platform:test_util",
         "//internal/platform:types",
         "//internal/platform/implementation/g3",  # buildcleaner: keep
+        "//third_party/protobuf",
         "//third_party/webrtc/files/stable/webrtc/api:libjingle_peerconnection_api",
         "//third_party/webrtc/files/stable/webrtc/api:rtc_error",
         "//third_party/webrtc/files/stable/webrtc/api:scoped_refptr",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
-        "@com_google_protobuf//:protobuf",
     ],
 )

@@ -10,7 +10,8 @@
 
 #include "include/core/SkStream.h"
 #include "include/docs/SkPDFDocument.h"
-#include "include/private/SkTo.h"
+#include "include/private/base/SkTo.h"
+#include "src/base/SkUTF.h"
 #include "src/pdf/SkPDFDevice.h"
 #include "src/pdf/SkPDFFont.h"
 #include "src/pdf/SkPDFGradientShader.h"
@@ -18,7 +19,6 @@
 #include "src/pdf/SkPDFShader.h"
 #include "src/pdf/SkPDFTag.h"
 #include "src/pdf/SkPDFUtils.h"
-#include "src/utils/SkUTF.h"
 
 #include <utility>
 
@@ -132,7 +132,7 @@ static void serialize_footer(const SkPDFOffsetMap& offsetMap,
     trailerDict.emitObject(wStream);
     wStream->writeText("\nstartxref\n");
     wStream->writeBigDecAsText(xRefFileOffset);
-    wStream->writeText("\n%%EOF");
+    wStream->writeText("\n%%EOF\n");
 }
 
 static SkPDFIndirectReference generate_page_tree(
@@ -217,7 +217,7 @@ SkPDFDocument::SkPDFDocument(SkWStream* stream,
         fRasterScale        = fMetadata.fRasterDPI / kDpiForRasterScaleOne;
     }
     if (fMetadata.fStructureElementTreeRoot) {
-        fTagTree.init(fMetadata.fStructureElementTreeRoot);
+        fTagTree.init(fMetadata.fStructureElementTreeRoot, fMetadata.fOutline);
     }
     fExecutor = fMetadata.fExecutor;
 }
@@ -237,11 +237,11 @@ SkPDFIndirectReference SkPDFDocument::emit(const SkPDFObject& object, SkPDFIndir
 SkWStream* SkPDFDocument::beginObject(SkPDFIndirectReference ref) SK_REQUIRES(fMutex) {
     begin_indirect_object(&fOffsetMap, ref, this->getStream());
     return this->getStream();
-};
+}
 
 void SkPDFDocument::endObject() SK_REQUIRES(fMutex) {
     end_indirect_object(this->getStream());
-};
+}
 
 static SkSize operator*(SkISize u, SkScalar s) { return SkSize{u.width() * s, u.height() * s}; }
 static SkSize operator*(SkSize u, SkScalar s) { return SkSize{u.width() * s, u.height() * s}; }
@@ -501,7 +501,8 @@ static SkPDFIndirectReference make_srgb_color_profile(SkPDFDocument* doc) {
     std::unique_ptr<SkPDFDict> dict = SkPDFMakeDict();
     dict->insertInt("N", 3);
     dict->insertObject("Range", SkPDFMakeArray(0, 1, 0, 1, 0, 1));
-    return SkPDFStreamOut(std::move(dict), SkMemoryStream::Make(SkSrgbIcm()), doc, true);
+    return SkPDFStreamOut(std::move(dict), SkMemoryStream::Make(SkSrgbIcm()),
+                          doc, SkPDFSteamCompressionEnabled::Yes);
 }
 
 static std::unique_ptr<SkPDFArray> make_srgb_output_intents(SkPDFDocument* doc) {
@@ -523,14 +524,32 @@ SkPDFIndirectReference SkPDFDocument::getPage(size_t pageIndex) const {
 }
 
 const SkMatrix& SkPDFDocument::currentPageTransform() const {
+    static constexpr const SkMatrix gIdentity;
+    // If not on a page (like when emitting a Type3 glyph) return identity.
+    if (!this->hasCurrentPage()) {
+        return gIdentity;
+    }
     return fPageDevice->initialTransform();
 }
 
-int SkPDFDocument::createMarkIdForNodeId(int nodeId) {
-    return fTagTree.createMarkIdForNodeId(nodeId, SkToUInt(this->currentPageIndex()));
+SkPDFTagTree::Mark SkPDFDocument::createMarkIdForNodeId(int nodeId, SkPoint p) {
+    // If the mark isn't on a page (like when emitting a Type3 glyph)
+    // return a temporary mark not attached to the tag tree, node id, or page.
+    if (!this->hasCurrentPage()) {
+        return SkPDFTagTree::Mark();
+    }
+    return fTagTree.createMarkIdForNodeId(nodeId, SkToUInt(this->currentPageIndex()), p);
+}
+
+void SkPDFDocument::addNodeTitle(int nodeId, SkSpan<const char> title) {
+    fTagTree.addNodeTitle(nodeId, std::move(title));
 }
 
 int SkPDFDocument::createStructParentKeyForNodeId(int nodeId) {
+    // Structure elements are tied to pages, so don't emit one if not on a page.
+    if (!this->hasCurrentPage()) {
+        return -1;
+    }
     return fTagTree.createStructParentKeyForNodeId(nodeId, SkToUInt(this->currentPageIndex()));
 }
 
@@ -555,7 +574,7 @@ SkString SkPDFDocument::nextFontSubsetTag() {
     fNextFontSubsetTag = (fNextFontSubsetTag + 1u) % 308915776u;
 
     SkString subsetTag(7);
-    char* subsetTagData = subsetTag.writable_str();
+    char* subsetTagData = subsetTag.data();
     for (size_t i = 0; i < 6; ++i) {
         subsetTagData[i] = 'A' + (thisFontSubsetTag % 26);
         thisFontSubsetTag /= 26;
@@ -593,6 +612,18 @@ void SkPDFDocument::onClose(SkWStream* stream) {
         markInfo->insertBool("Marked", true);
         docCatalog->insertObject("MarkInfo", std::move(markInfo));
         docCatalog->insertRef("StructTreeRoot", root);
+
+        if (SkPDFIndirectReference outline = fTagTree.makeOutline(this)) {
+            docCatalog->insertRef("Outlines", outline);
+        }
+    }
+
+    SkString lang = fMetadata.fLang;
+    if (lang.isEmpty()) {
+        lang = fTagTree.getRootLanguage();
+    }
+    if (!lang.isEmpty()) {
+        docCatalog->insertTextString("Lang", lang);
     }
 
     auto docCatalogRef = this->emit(*docCatalog);
@@ -637,4 +668,20 @@ sk_sp<SkDocument> SkPDF::MakeDocument(SkWStream* stream, const SkPDF::Metadata& 
         meta.fEncodingQuality = 0;
     }
     return stream ? sk_make_sp<SkPDFDocument>(stream, std::move(meta)) : nullptr;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void SkPDF::DateTime::toISO8601(SkString* dst) const {
+    if (dst) {
+        int timeZoneMinutes = SkToInt(fTimeZoneMinutes);
+        char timezoneSign = timeZoneMinutes >= 0 ? '+' : '-';
+        int timeZoneHours = SkTAbs(timeZoneMinutes) / 60;
+        timeZoneMinutes = SkTAbs(timeZoneMinutes) % 60;
+        dst->printf("%04u-%02u-%02uT%02u:%02u:%02u%c%02d:%02d",
+                    static_cast<unsigned>(fYear), static_cast<unsigned>(fMonth),
+                    static_cast<unsigned>(fDay), static_cast<unsigned>(fHour),
+                    static_cast<unsigned>(fMinute),
+                    static_cast<unsigned>(fSecond), timezoneSign, timeZoneHours,
+                    timeZoneMinutes);
+    }
 }

@@ -6,24 +6,22 @@
  */
 
 #include "src/core/SkBlendModeBlender.h"
+
+#include "include/core/SkBlendMode.h"
+#include "include/core/SkBlender.h"
+#include "include/core/SkRefCnt.h"
+#include "include/private/base/SkAssert.h"
+#include "src/base/SkNoDestructor.h"
+#include "src/core/SkBlendModePriv.h"
+#include "src/core/SkEffectPriv.h"
 #include "src/core/SkReadBuffer.h"
 #include "src/core/SkWriteBuffer.h"
 
-#if SK_SUPPORT_GPU
-#include "src/gpu/ganesh/GrFragmentProcessor.h"
-#include "src/gpu/ganesh/effects/GrBlendFragmentProcessor.h"
-#endif
-
-#ifdef SK_ENABLE_SKSL
-#include "src/core/SkKeyHelpers.h"
-#include "src/core/SkPaintParamsKey.h"
-#endif
-
 sk_sp<SkBlender> SkBlender::Mode(SkBlendMode mode) {
-#define RETURN_SINGLETON_BLENDER(m)                        \
-    case m: {                                              \
-        static auto* sBlender = new SkBlendModeBlender{m}; \
-        return sk_ref_sp(sBlender);                        \
+#define RETURN_SINGLETON_BLENDER(m)                            \
+    case m: {                                                  \
+        static SkNoDestructor<SkBlendModeBlender> sBlender(m); \
+        return sk_ref_sp(sBlender.get());                      \
     }
 
     switch (mode) {
@@ -64,28 +62,6 @@ sk_sp<SkBlender> SkBlender::Mode(SkBlendMode mode) {
 #undef RETURN_SINGLETON_BLENDER
 }
 
-#ifdef SK_ENABLE_SKSL
-void SkBlenderBase::addToKey(const SkKeyContext& keyContext,
-                             SkPaintParamsKeyBuilder* builder,
-                             SkPipelineDataGatherer* gatherer,
-                             bool primitiveColorBlender) const {
-
-    std::optional<SkBlendMode> bm = as_BB(this)->asBlendMode();
-    // If there is no primitive blender, do not default to any type of blending - just ignore it
-    // entirely.
-    if (primitiveColorBlender && !bm.has_value()) { return; }
-
-    if (primitiveColorBlender) {
-        PrimitiveBlendModeBlock::BeginBlock(keyContext, builder, gatherer, bm.value());
-    } else if (bm.has_value()) {
-        BlendModeBlock::BeginBlock(keyContext, builder, gatherer, bm.value());
-    } else {
-        BlendModeBlock::BeginBlock(keyContext, builder, gatherer, SkBlendMode::kSrcOver);
-    }
-    builder->endBlock();
-}
-#endif
-
 sk_sp<SkFlattenable> SkBlendModeBlender::CreateProc(SkReadBuffer& buffer) {
     SkBlendMode mode = buffer.read32LE(SkBlendMode::kLastMode);
     return SkBlender::Mode(mode);
@@ -95,17 +71,27 @@ void SkBlendModeBlender::flatten(SkWriteBuffer& buffer) const {
     buffer.writeInt((int)fMode);
 }
 
-#if SK_SUPPORT_GPU
-std::unique_ptr<GrFragmentProcessor> SkBlendModeBlender::asFragmentProcessor(
-        std::unique_ptr<GrFragmentProcessor> srcFP,
-        std::unique_ptr<GrFragmentProcessor> dstFP,
-        const GrFPArgs& fpArgs) const {
-    return GrBlendFragmentProcessor::Make(std::move(srcFP), std::move(dstFP), fMode);
+bool SkBlendModeBlender::onAppendStages(const SkStageRec& rec) const {
+    SkBlendMode_AppendStages(fMode, rec.fPipeline);
+    return true;
 }
-#endif
 
-skvm::Color SkBlendModeBlender::onProgram(skvm::Builder* p, skvm::Color src, skvm::Color dst,
-                                          const SkColorInfo& colorInfo, skvm::Uniforms* uniforms,
-                                          SkArenaAlloc* alloc) const {
-    return p->blend(fMode, src, dst);
+bool SkBlenderBase::affectsTransparentBlack() const {
+    if (auto blendMode = this->asBlendMode()) {
+        SkBlendModeCoeff src, dst;
+        if (SkBlendMode_AsCoeff(*blendMode, &src, &dst)) {
+            // If the source is (0,0,0,0), then dst is preserved as long as its coefficient
+            // evaluates to 1.0. This is true for kOne, kISA, and kISC. Anything else means the
+            // blend mode affects transparent black.
+            return dst != SkBlendModeCoeff::kOne &&
+                   dst != SkBlendModeCoeff::kISA &&
+                   dst != SkBlendModeCoeff::kISC;
+        } else {
+            // An advanced blend mode, which do not affect transparent black
+            return false;
+        }
+    } else {
+        // Blenders that aren't blend modes are assumed to modify transparent black.
+       return true;
+    }
 }

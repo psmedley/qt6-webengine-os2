@@ -39,8 +39,8 @@ using RTVArray = std::array<ID3D11RenderTargetView *, gl::IMPLEMENTATION_MAX_DRA
 namespace gl_d3d11
 {
 
-D3D11_BLEND ConvertBlendFunc(GLenum glBlend, bool isAlpha);
-D3D11_BLEND_OP ConvertBlendOp(GLenum glBlendOp);
+D3D11_BLEND ConvertBlendFunc(gl::BlendFactorType glBlend, bool isAlpha);
+D3D11_BLEND_OP ConvertBlendOp(gl::BlendEquationType glBlendOp);
 UINT8 ConvertColorMask(bool maskRed, bool maskGreen, bool maskBlue, bool maskAlpha);
 
 D3D11_CULL_MODE ConvertCullMode(bool cullEnabled, gl::CullFaceMode cullMode);
@@ -79,7 +79,8 @@ void GenerateCaps(ID3D11Device *device,
                   gl::Caps *caps,
                   gl::TextureCapsMap *textureCapsMap,
                   gl::Extensions *extensions,
-                  gl::Limitations *limitations);
+                  gl::Limitations *limitations,
+                  ShPixelLocalStorageOptions *);
 
 D3D_FEATURE_LEVEL GetMinimumFeatureLevelForES31();
 
@@ -185,21 +186,6 @@ outType *DynamicCastComObject(IUnknown *object)
     else
     {
         SafeRelease(outObject);
-        return nullptr;
-    }
-}
-
-template <typename outType>
-angle::ComPtr<outType> DynamicCastComObjectToComPtr(IUnknown *object)
-{
-    angle::ComPtr<outType> outObject;
-    const HRESULT hr = object->QueryInterface(IID_PPV_ARGS(&outObject));
-    if (SUCCEEDED(hr))
-    {
-        return outObject;
-    }
-    else
-    {
         return nullptr;
     }
 }

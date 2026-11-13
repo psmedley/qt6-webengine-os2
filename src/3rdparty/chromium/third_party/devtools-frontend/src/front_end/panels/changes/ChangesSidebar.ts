@@ -7,6 +7,7 @@ import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
 import * as Workspace from '../../models/workspace/workspace.js';
 import * as WorkspaceDiff from '../../models/workspace_diff/workspace_diff.js';
+import * as IconButton from '../../ui/components/icon_button/icon_button.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as Snippets from '../snippets/snippets.js';
 
@@ -14,9 +15,9 @@ import changesSidebarStyles from './changesSidebar.css.js';
 
 const UIStrings = {
   /**
-  *@description Name of an item from source map
-  *@example {compile.html} PH1
-  */
+   *@description Name of an item from source map
+   *@example {compile.html} PH1
+   */
   sFromSourceMap: '{PH1} (from source map)',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/changes/ChangesSidebar.ts', UIStrings);
@@ -101,7 +102,7 @@ export class ChangesSidebar extends Common.ObjectWrapper.eventMixin<EventTypes, 
       treeElement.select(true);
     }
   }
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.treeoutline.registerCSSFiles([changesSidebarStyles]);
   }
@@ -124,11 +125,11 @@ export class UISourceCodeTreeElement extends UI.TreeOutline.TreeElement {
     this.listItemElement.classList.add('navigator-' + uiSourceCode.contentType().name() + '-tree-item');
     UI.ARIAUtils.markAsTab(this.listItemElement);
 
-    let iconType: 'largeicon-navigator-snippet'|'largeicon-navigator-file' = 'largeicon-navigator-file';
+    let iconName: 'document'|'snippet' = 'document';
     if (Snippets.ScriptSnippetFileSystem.isSnippetsUISourceCode(this.uiSourceCode)) {
-      iconType = 'largeicon-navigator-snippet';
+      iconName = 'snippet';
     }
-    const defaultIcon = UI.Icon.Icon.create(iconType, 'icon');
+    const defaultIcon = IconButton.Icon.create(iconName);
     this.setLeadingIcons([defaultIcon]);
 
     this.eventListeners = [

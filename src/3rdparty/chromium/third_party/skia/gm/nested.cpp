@@ -16,7 +16,7 @@
 #include "include/core/SkSize.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
-#include "include/utils/SkRandom.h"
+#include "src/base/SkRandom.h"
 
 namespace skiagm {
 
@@ -28,8 +28,7 @@ public:
     }
 
 protected:
-
-    SkString onShortName() override {
+    SkString getName() const override {
         SkString name("nested");
         if (fFlipped) {
             name.append("_flipY");
@@ -42,9 +41,7 @@ protected:
         return name;
     }
 
-    SkISize onISize() override {
-        return SkISize::Make(kImageWidth, kImageHeight);
-    }
+    SkISize getISize() override { return SkISize::Make(kImageWidth, kImageHeight); }
 
     enum Shapes {
         kRect_Shape = 0,

@@ -9,11 +9,14 @@
 #include <stdint.h>
 
 #include <memory>
+#include <tuple>
 #include <vector>
 
+#include "v8-callbacks.h"     // NOLINT(build/include_directory)
 #include "v8-data.h"          // NOLINT(build/include_directory)
 #include "v8-local-handle.h"  // NOLINT(build/include_directory)
 #include "v8-maybe.h"         // NOLINT(build/include_directory)
+#include "v8-memory-span.h"   // NOLINT(build/include_directory)
 #include "v8-message.h"       // NOLINT(build/include_directory)
 #include "v8config.h"         // NOLINT(build/include_directory)
 
@@ -54,7 +57,7 @@ class V8_EXPORT ScriptOrModule {
 /**
  * A compiled JavaScript script, not yet tied to a Context.
  */
-class V8_EXPORT UnboundScript {
+class V8_EXPORT UnboundScript : public Data {
  public:
   /**
    * Binds the script to the currently entered context.
@@ -141,10 +144,9 @@ class V8_EXPORT ModuleRequest : public Data {
    *
    * All assertions present in the module request will be supplied in this
    * list, regardless of whether they are supported by the host. Per
-   * https://tc39.es/proposal-import-assertions/#sec-hostgetsupportedimportassertions,
-   * hosts are expected to ignore assertions that they do not support (as
-   * opposed to, for example, triggering an error if an unsupported assertion is
-   * present).
+   * https://tc39.es/proposal-import-attributes/#sec-hostgetsupportedimportattributes,
+   * hosts are expected to throw for assertions that they do not support (as
+   * opposed to, for example, ignoring them).
    */
   Local<FixedArray> GetImportAssertions() const;
 
@@ -284,9 +286,14 @@ class V8_EXPORT Module : public Data {
    * module_name is used solely for logging/debugging and doesn't affect module
    * behavior.
    */
+  V8_DEPRECATED("Please use the version that takes a MemorySpan")
   static Local<Module> CreateSyntheticModule(
       Isolate* isolate, Local<String> module_name,
       const std::vector<Local<String>>& export_names,
+      SyntheticModuleEvaluationSteps evaluation_steps);
+  static Local<Module> CreateSyntheticModule(
+      Isolate* isolate, Local<String> module_name,
+      const MemorySpan<const Local<String>>& export_names,
       SyntheticModuleEvaluationSteps evaluation_steps);
 
   /**
@@ -306,8 +313,19 @@ class V8_EXPORT Module : public Data {
    * with the pending top-level await.
    * An embedder may call this before exiting to improve error messages.
    */
+  V8_DEPRECATED("Please use GetStalledTopLevelAwaitMessages")
   std::vector<std::tuple<Local<Module>, Local<Message>>>
   GetStalledTopLevelAwaitMessage(Isolate* isolate);
+
+  /**
+   * Search the modules requested directly or indirectly by the module for
+   * any top-level await that has not yet resolved. If there is any, the
+   * returned pair of vectors (of equal size) contain the unresolved module
+   * and corresponding message with the pending top-level await.
+   * An embedder may call this before exiting to improve error messages.
+   */
+  std::pair<LocalVector<Module>, LocalVector<Message>>
+  GetStalledTopLevelAwaitMessages(Isolate* isolate);
 
   V8_INLINE static Module* Cast(Data* data);
 
@@ -319,7 +337,7 @@ class V8_EXPORT Module : public Data {
  * A compiled JavaScript script, tied to a Context which was active when the
  * script was compiled.
  */
-class V8_EXPORT Script {
+class V8_EXPORT Script : public Data {
  public:
   /**
    * A shorthand for ScriptCompiler::Compile().
@@ -347,6 +365,12 @@ class V8_EXPORT Script {
    * ScriptOrigin. This can be either a v8::String or v8::Undefined.
    */
   Local<Value> GetResourceName();
+
+  /**
+   * If the script was compiled, returns the positions of lazy functions which
+   * were eventually compiled and executed.
+   */
+  std::vector<int> GetProducedCompileHints() const;
 };
 
 enum class ScriptType { kClassic, kModule };
@@ -381,6 +405,27 @@ class V8_EXPORT ScriptCompiler {
     CachedData(const uint8_t* data, int length,
                BufferPolicy buffer_policy = BufferNotOwned);
     ~CachedData();
+
+    enum CompatibilityCheckResult {
+      // Don't change order/existing values of this enum since it keys into the
+      // `code_cache_reject_reason` histogram. Append-only!
+      kSuccess = 0,
+      kMagicNumberMismatch = 1,
+      kVersionMismatch = 2,
+      kSourceMismatch = 3,
+      kFlagsMismatch = 5,
+      kChecksumMismatch = 6,
+      kInvalidHeader = 7,
+      kLengthMismatch = 8,
+      kReadOnlySnapshotChecksumMismatch = 9,
+
+      // This should always point at the last real enum value.
+      kLast = kReadOnlySnapshotChecksumMismatch
+    };
+
+    // Check if the CachedData can be loaded in the given isolate.
+    CompatibilityCheckResult CompatibilityCheck(Isolate* isolate);
+
     // TODO(marja): Async compilation; add constructors which take a callback
     // which will be called when V8 no longer needs the data.
     const uint8_t* data;
@@ -391,6 +436,33 @@ class V8_EXPORT ScriptCompiler {
     // Prevent copying.
     CachedData(const CachedData&) = delete;
     CachedData& operator=(const CachedData&) = delete;
+  };
+
+  enum class InMemoryCacheResult {
+    // V8 did not attempt to find this script in its in-memory cache.
+    kNotAttempted,
+
+    // V8 found a previously compiled copy of this script in its in-memory
+    // cache. Any data generated by a streaming compilation or background
+    // deserialization was abandoned.
+    kHit,
+
+    // V8 didn't have any previously compiled data for this script.
+    kMiss,
+
+    // V8 had some previously compiled data for an identical script, but the
+    // data was incomplete.
+    kPartial,
+  };
+
+  // Details about what happened during a compilation.
+  struct CompilationDetails {
+    InMemoryCacheResult in_memory_cache_result =
+        InMemoryCacheResult::kNotAttempted;
+
+    static constexpr int64_t kTimeNotMeasured = -1;
+    int64_t foreground_time_in_microseconds = kTimeNotMeasured;
+    int64_t background_time_in_microseconds = kTimeNotMeasured;
   };
 
   /**
@@ -407,6 +479,8 @@ class V8_EXPORT ScriptCompiler {
     V8_INLINE explicit Source(
         Local<String> source_string, CachedData* cached_data = nullptr,
         ConsumeCodeCacheTask* consume_cache_task = nullptr);
+    V8_INLINE Source(Local<String> source_string, const ScriptOrigin& origin,
+                     CompileHintCallback callback, void* callback_data);
     V8_INLINE ~Source() = default;
 
     // Ownership of the CachedData or its buffers is *not* transferred to the
@@ -416,6 +490,8 @@ class V8_EXPORT ScriptCompiler {
 
     V8_INLINE const ScriptOriginOptions& GetResourceOptions() const;
 
+    V8_INLINE const CompilationDetails& GetCompilationDetails() const;
+
    private:
     friend class ScriptCompiler;
 
@@ -423,8 +499,8 @@ class V8_EXPORT ScriptCompiler {
 
     // Origin information
     Local<Value> resource_name;
-    int resource_line_offset;
-    int resource_column_offset;
+    int resource_line_offset = -1;
+    int resource_column_offset = -1;
     ScriptOriginOptions resource_options;
     Local<Value> source_map_url;
     Local<Data> host_defined_options;
@@ -434,6 +510,14 @@ class V8_EXPORT ScriptCompiler {
     // set when calling a compile method.
     std::unique_ptr<CachedData> cached_data;
     std::unique_ptr<ConsumeCodeCacheTask> consume_cache_task;
+
+    // For requesting compile hints from the embedder.
+    CompileHintCallback compile_hint_callback = nullptr;
+    void* compile_hint_callback_data = nullptr;
+
+    // V8 writes this data and never reads it. It exists only to be informative
+    // to the embedder.
+    CompilationDetails compilation_details;
   };
 
   /**
@@ -488,8 +572,14 @@ class V8_EXPORT ScriptCompiler {
     StreamedSource(const StreamedSource&) = delete;
     StreamedSource& operator=(const StreamedSource&) = delete;
 
+    CompilationDetails& compilation_details() { return compilation_details_; }
+
    private:
     std::unique_ptr<internal::ScriptStreamingData> impl_;
+
+    // V8 writes this data and never reads it. It exists only to be informative
+    // to the embedder.
+    CompilationDetails compilation_details_;
   };
 
   /**
@@ -562,7 +652,9 @@ class V8_EXPORT ScriptCompiler {
   enum CompileOptions {
     kNoCompileOptions = 0,
     kConsumeCodeCache,
-    kEagerCompile
+    kEagerCompile,
+    kProduceCompileHints,
+    kConsumeCompileHints
   };
 
   /**
@@ -635,7 +727,9 @@ class V8_EXPORT ScriptCompiler {
   static ScriptStreamingTask* StartStreaming(
       Isolate* isolate, StreamedSource* source,
       ScriptType type = ScriptType::kClassic,
-      CompileOptions options = kNoCompileOptions);
+      CompileOptions options = kNoCompileOptions,
+      CompileHintCallback compile_hint_callback = nullptr,
+      void* compile_hint_callback_data = nullptr);
 
   static ConsumeCodeCacheTask* StartConsumingCodeCache(
       Isolate* isolate, std::unique_ptr<CachedData> source);
@@ -775,6 +869,19 @@ ScriptCompiler::Source::Source(Local<String> string, CachedData* data,
       cached_data(data),
       consume_cache_task(consume_cache_task) {}
 
+ScriptCompiler::Source::Source(Local<String> string, const ScriptOrigin& origin,
+                               CompileHintCallback callback,
+                               void* callback_data)
+    : source_string(string),
+      resource_name(origin.ResourceName()),
+      resource_line_offset(origin.LineOffset()),
+      resource_column_offset(origin.ColumnOffset()),
+      resource_options(origin.Options()),
+      source_map_url(origin.SourceMapUrl()),
+      host_defined_options(origin.GetHostDefinedOptions()),
+      compile_hint_callback(callback),
+      compile_hint_callback_data(callback_data) {}
+
 const ScriptCompiler::CachedData* ScriptCompiler::Source::GetCachedData()
     const {
   return cached_data.get();
@@ -782,6 +889,11 @@ const ScriptCompiler::CachedData* ScriptCompiler::Source::GetCachedData()
 
 const ScriptOriginOptions& ScriptCompiler::Source::GetResourceOptions() const {
   return resource_options;
+}
+
+const ScriptCompiler::CompilationDetails&
+ScriptCompiler::Source::GetCompilationDetails() const {
+  return compilation_details;
 }
 
 ModuleRequest* ModuleRequest::Cast(Data* data) {

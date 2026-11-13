@@ -49,7 +49,7 @@ ScriptPromise SerialPortUnderlyingSource::Pull(
   // we allow the stream to be canceled before that data is received. pull()
   // will not be called again until a chunk is enqueued or if an error has been
   // signaled to the controller.
-  return ScriptPromise::CastUndefined(script_state_);
+  return ScriptPromise::CastUndefined(script_state_.Get());
 }
 
 ScriptPromise SerialPortUnderlyingSource::Cancel(
@@ -62,7 +62,7 @@ ScriptPromise SerialPortUnderlyingSource::Cancel(
   // don't need to do it here.
   if (serial_port_->IsClosing()) {
     serial_port_->UnderlyingSourceClosed();
-    return ScriptPromise::CastUndefined(script_state_);
+    return ScriptPromise::CastUndefined(script_state_.Get());
   }
 
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state_);
@@ -80,7 +80,7 @@ ScriptPromise SerialPortUnderlyingSource::Cancel(
 }
 
 ScriptState* SerialPortUnderlyingSource::GetScriptState() {
-  return script_state_;
+  return script_state_.Get();
 }
 
 void SerialPortUnderlyingSource::ContextDestroyed() {
@@ -182,7 +182,8 @@ void SerialPortUnderlyingSource::ReadDataOrArmWatcher() {
       watcher_.ArmOrNotify();
       break;
     default:
-      NOTREACHED();
+      invalid_data_pipe_read_result_ = result;
+      NOTREACHED() << "Invalid data pipe read result: " << result;
       break;
   }
 }
@@ -222,6 +223,12 @@ void SerialPortUnderlyingSource::PipeClosed() {
 void SerialPortUnderlyingSource::Close() {
   watcher_.Cancel();
   data_pipe_.reset();
+}
+
+void SerialPortUnderlyingSource::Dispose() {
+  // Ensure that `watcher_` is disarmed so that `OnHandleReady()` is not called
+  // after this object becomes garbage.
+  Close();
 }
 
 }  // namespace blink

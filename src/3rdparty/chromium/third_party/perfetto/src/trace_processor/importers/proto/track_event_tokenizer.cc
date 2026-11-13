@@ -19,14 +19,15 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
+#include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/proto/packet_sequence_state.h"
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
 #include "src/trace_processor/importers/proto/track_event_tracker.h"
+#include "src/trace_processor/sorter/trace_sorter.h"
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
-#include "src/trace_processor/trace_sorter.h"
 
 #include "protos/perfetto/common/builtin_clock.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
@@ -34,6 +35,7 @@
 #include "protos/perfetto/trace/track_event/chrome_thread_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/counter_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/process_descriptor.pbzero.h"
+#include "protos/perfetto/trace/track_event/range_of_interest.pbzero.h"
 #include "protos/perfetto/trace/track_event/thread_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/track_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/track_event.pbzero.h"
@@ -53,6 +55,23 @@ TrackEventTokenizer::TrackEventTokenizer(TraceProcessorContext* context,
           context_->storage->InternString("thread_time")),
       counter_name_thread_instruction_count_id_(
           context_->storage->InternString("thread_instruction_count")) {}
+
+ModuleResult TrackEventTokenizer::TokenizeRangeOfInterestPacket(
+    PacketSequenceState* /*state*/,
+    const protos::pbzero::TracePacket::Decoder& packet,
+    int64_t /*packet_timestamp*/) {
+  protos::pbzero::TrackEventRangeOfInterest::Decoder range_of_interest(
+      packet.track_event_range_of_interest());
+  if (!range_of_interest.has_start_us()) {
+    context_->storage->IncrementStats(stats::track_event_tokenizer_errors);
+    return ModuleResult::Handled();
+  }
+  track_event_tracker_->SetRangeOfInterestStartUs(range_of_interest.start_us());
+  context_->metadata_tracker->SetMetadata(
+      metadata::range_of_interest_start_us,
+      Variadic::Integer(range_of_interest.start_us()));
+  return ModuleResult::Handled();
+}
 
 ModuleResult TrackEventTokenizer::TokenizeTrackDescriptorPacket(
     PacketSequenceState* state,
@@ -95,7 +114,8 @@ ModuleResult TrackEventTokenizer::TokenizeTrackDescriptorPacket(
     track_event_tracker_->ReserveDescriptorThreadTrack(
         track.uuid(), track.parent_uuid(), name_id,
         static_cast<uint32_t>(thread.pid()),
-        static_cast<uint32_t>(thread.tid()), packet_timestamp);
+        static_cast<uint32_t>(thread.tid()), packet_timestamp,
+        track.disallow_merging_with_system_tracks());
   } else if (track.has_process()) {
     protos::pbzero::ProcessDescriptor::Decoder process(track.process());
 
@@ -232,9 +252,9 @@ void TrackEventTokenizer::TokenizeTrackEventPacket(
 
     // Legacy TrackEvent timestamp fields are in MONOTONIC domain. Adjust to
     // trace time if we have a clock snapshot.
-    auto trace_ts = context_->clock_tracker->ToTraceTime(
+    base::StatusOr<int64_t> trace_ts = context_->clock_tracker->ToTraceTime(
         protos::pbzero::BUILTIN_CLOCK_MONOTONIC, timestamp);
-    if (trace_ts.has_value())
+    if (trace_ts.ok())
       timestamp = trace_ts.value();
   } else if (int64_t ts_absolute_us = event.timestamp_absolute_us()) {
     // One-off absolute timestamps don't affect delta computation.
@@ -242,9 +262,9 @@ void TrackEventTokenizer::TokenizeTrackEventPacket(
 
     // Legacy TrackEvent timestamp fields are in MONOTONIC domain. Adjust to
     // trace time if we have a clock snapshot.
-    auto trace_ts = context_->clock_tracker->ToTraceTime(
+    base::StatusOr<int64_t> trace_ts = context_->clock_tracker->ToTraceTime(
         protos::pbzero::BUILTIN_CLOCK_MONOTONIC, timestamp);
-    if (trace_ts.has_value())
+    if (trace_ts.ok())
       timestamp = trace_ts.value();
   } else if (packet.has_timestamp()) {
     timestamp = packet_timestamp;
@@ -307,7 +327,7 @@ void TrackEventTokenizer::TokenizeTrackEventPacket(
       return;
     }
 
-    base::Optional<double> value;
+    std::optional<double> value;
     if (event.has_counter_value()) {
       value = track_event_tracker_->ConvertToAbsoluteCounterValue(
           track_uuid, packet.trusted_packet_sequence_id(),
@@ -388,7 +408,7 @@ base::Status TrackEventTokenizer::AddExtraCounterValues(
           "Ignoring TrackEvent with more extra_{double_,}counter_values than "
           "TrackEventData::kMaxNumExtraCounters");
     }
-    base::Optional<double> abs_value =
+    std::optional<double> abs_value =
         track_event_tracker_->ConvertToAbsoluteCounterValue(
             *track_uuid_it, trusted_packet_sequence_id,
             static_cast<double>(*value_it));

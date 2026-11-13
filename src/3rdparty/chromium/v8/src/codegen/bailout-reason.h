@@ -23,8 +23,11 @@ namespace internal {
   V(kExpectedOptimizationSentinel,                                             \
     "Expected optimized code cell or optimization sentinel")                   \
   V(kExpectedUndefinedOrCell, "Expected undefined or cell in register")        \
+  V(kExpectedFeedbackCell, "Expected feedback cell")                           \
   V(kExpectedFeedbackVector, "Expected feedback vector")                       \
   V(kExpectedBaselineData, "Expected baseline data")                           \
+  V(kFloat64IsNotAInt32,                                                       \
+    "Float64 cannot be converted to Int32 without loss of precision")          \
   V(kFunctionDataShouldBeBytecodeArrayOnInterpreterEntry,                      \
     "The function_data field should be a BytecodeArray on interpreter entry")  \
   V(kInputStringTooLong, "Input string too long")                              \
@@ -35,6 +38,7 @@ namespace internal {
   V(kInvalidJumpTableIndex, "Invalid jump table index")                        \
   V(kInvalidParametersAndRegistersInGenerator,                                 \
     "invalid parameters and registers in generator")                           \
+  V(kMaglevGraphBuildingFailed, "Maglev optimized graph construction failed")  \
   V(kMissingBytecodeArray, "Missing bytecode array from function")             \
   V(kObjectNotTagged, "The object is not tagged")                              \
   V(kObjectTagged, "The object is tagged")                                     \
@@ -54,8 +58,10 @@ namespace internal {
   V(kOperandIsNotAFunction, "Operand is not a function")                       \
   V(kOperandIsNotACallableFunction, "Operand is not a callable function")      \
   V(kOperandIsNotAGeneratorObject, "Operand is not a generator object")        \
-  V(kOperandIsNotACodeT, "Operand is not a CodeT")                             \
+  V(kOperandIsNotACode, "Operand is not a Code object")                        \
+  V(kOperandIsNotAMap, "Operand is not a Map object")                          \
   V(kOperandIsNotASmi, "Operand is not a smi")                                 \
+  V(kMaglevOsrTodo, "OSR into maglev is not implemented yet")                  \
   V(kPromiseAlreadySettled, "Promise already settled")                         \
   V(kReceivedInvalidReturnAddress, "Received invalid return address")          \
   V(kRegisterDidNotMatchExpectedRoot, "Register did not match expected root")  \
@@ -63,7 +69,10 @@ namespace internal {
   V(kShouldNotDirectlyEnterOsrFunction,                                        \
     "Should not directly enter OSR-compiled function")                         \
   V(kStackAccessBelowStackPointer, "Stack access below stack pointer")         \
+  V(kOsrUnexpectedStackSize, "Unexpected stack size on OSR entry")             \
   V(kStackFrameTypesMustMatch, "Stack frame types must match")                 \
+  V(kUint32IsNotAInt32,                                                        \
+    "Uint32 cannot be converted to Int32 without loss of precision")           \
   V(kUnalignedCellInWriteBarrier, "Unaligned cell in write barrier")           \
   V(kUnexpectedAdditionalPopValue, "Unexpected additional pop value")          \
   V(kUnexpectedElementsKindInArrayConstructor,                                 \
@@ -92,7 +101,11 @@ namespace internal {
   V(kWrongFunctionCodeStart, "Wrong value in code start register passed")      \
   V(kWrongFunctionContext, "Wrong context passed to function")                 \
   V(kUnexpectedThreadInWasmSet, "thread_in_wasm flag was already set")         \
-  V(kUnexpectedThreadInWasmUnset, "thread_in_wasm flag was not set")
+  V(kUnexpectedThreadInWasmUnset, "thread_in_wasm flag was not set")           \
+  V(kInvalidReceiver, "Expected JS object or primitive object")                \
+  V(kUnexpectedInstanceType, "Unexpected instance type encountered")           \
+  V(kTurboshaftTypeAssertionFailed,                                            \
+    "A type assertion failed in Turboshaft-generated code")
 
 #define BAILOUT_MESSAGES_LIST(V)                                             \
   V(kNoReason, "no reason")                                                  \
@@ -108,6 +121,7 @@ namespace internal {
   V(kNativeFunctionLiteral, "Native function literal")                       \
   V(kOptimizationDisabled, "Optimization disabled")                          \
   V(kHigherTierAvailable, "A higher tier is already available")              \
+  V(kDetachedNativeContext, "The native context is detached")                \
   V(kNeverOptimize, "Optimization is always disabled")
 
 #define ERROR_MESSAGES_CONSTANTS(C, T) C,

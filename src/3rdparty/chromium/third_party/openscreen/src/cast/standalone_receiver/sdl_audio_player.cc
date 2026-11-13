@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,14 @@
 #include <sstream>
 #include <utility>
 
-#include "absl/types/span.h"
 #include "cast/standalone_receiver/avcodec_glue.h"
+#include "platform/base/span.h"
 #include "util/big_endian.h"
 #include "util/chrono_helpers.h"
 #include "util/osp_logging.h"
 #include "util/trace_logging.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 namespace {
 
@@ -53,7 +52,7 @@ void InterleaveAudioSamples(const uint8_t* const planes[],
 }  // namespace
 
 SDLAudioPlayer::SDLAudioPlayer(ClockNowFunctionPtr now_function,
-                               TaskRunner* task_runner,
+                               TaskRunner& task_runner,
                                Receiver* receiver,
                                AudioCodec codec,
                                std::function<void()> error_callback)
@@ -90,14 +89,21 @@ ErrorOr<Clock::time_point> SDLAudioPlayer::RenderNextFrame(
 
   // Punt if the number of channels is not supported by SDL.
   constexpr int kSdlSupportedChannelCounts[] = {1, 2, 4, 6};
+  int frame_channels =
+#if _LIBAVUTIL_OLD_CHANNEL_LAYOUT
+      frame.channels;
+#else
+      frame.ch_layout.nb_channels;
+#endif  // _LIBAVUTIL_OLD_CHANNEL_LAYOUT
+
   if (std::find(std::begin(kSdlSupportedChannelCounts),
                 std::end(kSdlSupportedChannelCounts),
-                frame.channels) == std::end(kSdlSupportedChannelCounts)) {
+                frame_channels) == std::end(kSdlSupportedChannelCounts)) {
     std::ostringstream error;
-    error << "SDL does not support " << frame.channels << " audio channels.";
+    error << "SDL does not support " << frame_channels << " audio channels.";
     return Error(Error::Code::kUnknownError, error.str());
   }
-  pending_audio_spec_.channels = frame.channels;
+  pending_audio_spec_.channels = frame_channels;
 
   // If |device_spec_| is different from what is required, re-compute the sample
   // buffer size and the amount of time that represents. The |device_spec_| will
@@ -122,35 +128,35 @@ ErrorOr<Clock::time_point> SDLAudioPlayer::RenderNextFrame(
 
   // If the decoded audio is in planar format, interleave it for SDL.
   const int bytes_per_sample = av_get_bytes_per_sample(frame_format);
-  const int byte_count = frame.nb_samples * frame.channels * bytes_per_sample;
+  const int byte_count = frame.nb_samples * frame_channels * bytes_per_sample;
   if (av_sample_fmt_is_planar(frame_format)) {
     interleaved_audio_buffer_.resize(byte_count);
     switch (bytes_per_sample) {
       case 1:
-        InterleaveAudioSamples<uint8_t>(frame.data, frame.channels,
+        InterleaveAudioSamples<uint8_t>(frame.data, frame_channels,
                                         frame.nb_samples,
                                         &interleaved_audio_buffer_[0]);
         break;
       case 2:
-        InterleaveAudioSamples<uint16_t>(frame.data, frame.channels,
+        InterleaveAudioSamples<uint16_t>(frame.data, frame_channels,
                                          frame.nb_samples,
                                          &interleaved_audio_buffer_[0]);
         break;
       case 4:
-        InterleaveAudioSamples<uint32_t>(frame.data, frame.channels,
+        InterleaveAudioSamples<uint32_t>(frame.data, frame_channels,
                                          frame.nb_samples,
                                          &interleaved_audio_buffer_[0]);
         break;
       default:
         OSP_NOTREACHED();
     }
-    pending_audio_ = absl::Span<const uint8_t>(interleaved_audio_buffer_);
+    pending_audio_ = ByteView(interleaved_audio_buffer_);
   } else {
     if (!interleaved_audio_buffer_.empty()) {
       interleaved_audio_buffer_.clear();
       interleaved_audio_buffer_.shrink_to_fit();
     }
-    pending_audio_ = absl::Span<const uint8_t>(frame.data[0], byte_count);
+    pending_audio_ = ByteView(frame.data[0], byte_count);
   }
 
   // SDL provides no way to query the actual lead time before audio samples will
@@ -229,5 +235,4 @@ SDL_AudioFormat SDLAudioPlayer::GetSDLAudioFormat(AVSampleFormat format) {
   return kSDLAudioFormatUnknown;
 }
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

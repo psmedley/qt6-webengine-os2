@@ -51,7 +51,7 @@ GrMtlBuffer::GrMtlBuffer(GrMtlGpu* gpu, size_t size, GrGpuBufferType intendedTyp
         : INHERITED(gpu, size, intendedType, accessPattern, label)
         , fIsDynamic(accessPattern != kStatic_GrAccessPattern) {
     NSUInteger options = 0;
-    if (@available(macOS 10.11, iOS 9.0, *)) {
+    if (@available(macOS 10.11, iOS 9.0, tvOS 9.0, *)) {
         if (fIsDynamic) {
 #ifdef SK_BUILD_FOR_MAC
             if (gpu->mtlCaps().isMac()) {
@@ -74,7 +74,7 @@ GrMtlBuffer::GrMtlBuffer(GrMtlGpu* gpu, size_t size, GrGpuBufferType intendedTyp
 #ifdef SK_ENABLE_MTL_DEBUG_INFO
     fMtlBuffer.label = kBufferTypeNames[(int)intendedType];
 #endif
-    this->registerWithCache(SkBudgeted::kYes);
+    this->registerWithCache(skgpu::Budgeted::kYes);
     VALIDATE();
 }
 

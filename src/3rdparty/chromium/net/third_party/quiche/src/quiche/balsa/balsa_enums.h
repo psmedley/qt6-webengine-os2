@@ -9,7 +9,7 @@
 
 namespace quiche {
 
-struct QUICHE_EXPORT_PRIVATE BalsaFrameEnums {
+struct QUICHE_EXPORT BalsaFrameEnums {
   enum ParseState : int {
     ERROR,
     READING_HEADER_AND_FIRSTLINE,
@@ -106,13 +106,17 @@ struct QUICHE_EXPORT_PRIVATE BalsaFrameEnums {
     INVALID_HEADER_NAME_CHARACTER,
     INVALID_TRAILER_NAME_CHARACTER,
 
+    // The client request included 'Expect: 100-continue' header on a protocol
+    // that doesn't support it.
+    UNSUPPORTED_100_CONTINUE,
+
     NUM_ERROR_CODES
   };
   static const char* ParseStateToString(ParseState error_code);
   static const char* ErrorCodeToString(ErrorCode error_code);
 };
 
-struct QUICHE_EXPORT_PRIVATE BalsaHeadersEnums {
+struct QUICHE_EXPORT BalsaHeadersEnums {
   enum ContentLengthStatus : int {
     INVALID_CONTENT_LENGTH,
     CONTENT_LENGTH_OVERFLOW,

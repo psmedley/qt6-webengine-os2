@@ -9,27 +9,40 @@
 #define QUICHE_QUIC_CORE_QUIC_DISPATCHER_H_
 
 #include <cstddef>
+#include <cstdint>
+#include <list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 #include "quiche/quic/core/connection_id_generator.h"
 #include "quiche/quic/core/crypto/quic_compressed_certs_cache.h"
-#include "quiche/quic/core/crypto/quic_random.h"
+#include "quiche/quic/core/frames/quic_rst_stream_frame.h"
+#include "quiche/quic/core/frames/quic_stop_sending_frame.h"
+#include "quiche/quic/core/quic_alarm.h"
+#include "quiche/quic/core/quic_alarm_factory.h"
 #include "quiche/quic/core/quic_blocked_writer_interface.h"
 #include "quiche/quic/core/quic_buffered_packet_store.h"
 #include "quiche/quic/core/quic_connection.h"
 #include "quiche/quic/core/quic_connection_id.h"
 #include "quiche/quic/core/quic_crypto_server_stream_base.h"
+#include "quiche/quic/core/quic_error_codes.h"
+#include "quiche/quic/core/quic_packet_writer.h"
 #include "quiche/quic/core/quic_packets.h"
 #include "quiche/quic/core/quic_process_packet_interface.h"
 #include "quiche/quic/core/quic_session.h"
 #include "quiche/quic/core/quic_time_wait_list_manager.h"
+#include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/core/quic_version_manager.h"
+#include "quiche/quic/core/quic_versions.h"
+#include "quiche/quic/platform/api/quic_export.h"
 #include "quiche/quic/platform/api/quic_socket_address.h"
-#include "quiche/common/platform/api/quiche_reference_counted.h"
+#include "quiche/common/platform/api/quiche_logging.h"
+#include "quiche/common/quiche_callbacks.h"
 #include "quiche/common/quiche_linked_hash_map.h"
 
 namespace quic {
@@ -40,7 +53,7 @@ class QuicDispatcherPeer;
 class QuicConfig;
 class QuicCryptoServerConfig;
 
-class QUIC_NO_EXPORT QuicDispatcher
+class QUICHE_EXPORT QuicDispatcher
     : public QuicTimeWaitListManager::Visitor,
       public ProcessPacketInterface,
       public QuicBufferedPacketStore::VisitorInterface {
@@ -116,6 +129,11 @@ class QUIC_NO_EXPORT QuicDispatcher
   void OnConnectionIdRetired(
       const QuicConnectionId& server_connection_id) override;
 
+  void OnServerPreferredAddressAvailable(
+      const QuicSocketAddress& /*server_preferred_address*/) override {
+    QUICHE_DCHECK(false);
+  }
+
   // QuicTimeWaitListManager::Visitor interface implementation
   // Called whenever the time wait list manager adds a new connection to the
   // time-wait list.
@@ -158,12 +176,14 @@ class QUIC_NO_EXPORT QuicDispatcher
 
   // Apply an operation for each session.
   void PerformActionOnActiveSessions(
-      std::function<void(QuicSession*)> operation) const;
+      quiche::UnretainedCallback<void(QuicSession*)> operation) const;
 
   // Get a snapshot of all sessions.
   std::vector<std::shared_ptr<QuicSession>> GetSessionsSnapshot() const;
 
   bool accept_new_connections() const { return accept_new_connections_; }
+
+  uint64_t num_packets_received() const { return num_packets_received_; }
 
  protected:
   // Creates a QUIC session based on the given information.
@@ -172,39 +192,14 @@ class QUIC_NO_EXPORT QuicDispatcher
       QuicConnectionId server_connection_id,
       const QuicSocketAddress& self_address,
       const QuicSocketAddress& peer_address, absl::string_view alpn,
-      const ParsedQuicVersion& version,
-      const ParsedClientHello& parsed_chlo) = 0;
+      const ParsedQuicVersion& version, const ParsedClientHello& parsed_chlo,
+      ConnectionIdGeneratorInterface& connection_id_generator) = 0;
 
   // Tries to validate and dispatch packet based on available information.
   // Returns true if packet is dropped or successfully dispatched (e.g.,
   // processed by existing session, processed by time wait list, etc.),
   // otherwise, returns false and the packet needs further processing.
   virtual bool MaybeDispatchPacket(const ReceivedPacketInfo& packet_info);
-
-  // Generate a connection ID with a length that is expected by the dispatcher.
-  // Called only when |server_connection_id| is shorter than
-  // |expected_connection_id_length|.
-  // Note that this MUST produce a deterministic result (calling this method
-  // with two connection IDs that are equal must produce the same result).
-  // Note that this is not used in general operation because our default
-  // |expected_server_connection_id_length| is 8, and the IETF specification
-  // requires clients to use an initial length of at least 8. However, we
-  // allow disabling that requirement via
-  // |allow_short_initial_server_connection_ids_|.
-  virtual QuicConnectionId ReplaceShortServerConnectionId(
-      const ParsedQuicVersion& version,
-      const QuicConnectionId& server_connection_id,
-      uint8_t expected_server_connection_id_length) const;
-
-  // Generate a connection ID with a length that is expected by the dispatcher.
-  // Called only when |server_connection_id| is longer than
-  // |expected_connection_id_length|.
-  // Note that this MUST produce a deterministic result (calling this method
-  // with two connection IDs that are equal must produce the same result).
-  virtual QuicConnectionId ReplaceLongServerConnectionId(
-      const ParsedQuicVersion& version,
-      const QuicConnectionId& server_connection_id,
-      uint8_t expected_server_connection_id_length) const;
 
   // Values to be returned by ValidityChecks() to indicate what should be done
   // with a packet. Fates with greater values are considered to be higher
@@ -276,9 +271,9 @@ class QUIC_NO_EXPORT QuicDispatcher
   QuicPacketWriter* writer() { return writer_.get(); }
 
   // Returns true if a session should be created for a connection with an
-  // unknown version identified by |version_label|.
+  // unknown version.
   virtual bool ShouldCreateSessionForUnknownVersion(
-      QuicVersionLabel version_label);
+      const ReceivedPacketInfo& packet_info);
 
   void SetLastError(QuicErrorCode error);
 
@@ -306,7 +301,11 @@ class QUIC_NO_EXPORT QuicDispatcher
   // 1) send connection close with |error_code| and |error_details| and add
   // connection to time wait list or 2) directly add connection to time wait
   // list with |action|.
+  // |self_address| and |peer_address| are passed to
+  // |OnStatelessConnectionCloseSent| when a connection close is sent.
   void StatelesslyTerminateConnection(
+      const QuicSocketAddress& self_address,
+      const QuicSocketAddress& peer_address,
       QuicConnectionId server_connection_id, PacketHeaderFormat format,
       bool version_flag, bool use_length_prefix, ParsedQuicVersion version,
       QuicErrorCode error_code, const std::string& error_details,
@@ -336,23 +335,30 @@ class QUIC_NO_EXPORT QuicDispatcher
   // Called if a packet from an unseen connection is reset or rejected.
   virtual void OnNewConnectionRejected() {}
 
+  // Called by |StatelesslyTerminateConnection| when a connection close packet
+  // is generated.
+  virtual void OnStatelessConnectionCloseGenerated(
+      const QuicSocketAddress& /*self_address*/,
+      const QuicSocketAddress& /*peer_address*/,
+      QuicConnectionId /*connection_id*/, ParsedQuicVersion /*version*/,
+      QuicErrorCode /*error_code*/, const std::string& /*error_details*/) {}
+
   // Selects the preferred ALPN from a vector of ALPNs.
   // This runs through the list of ALPNs provided by the client and picks the
   // first one it supports. If no supported versions are found, the first
   // element of the vector is returned.
   std::string SelectAlpn(const std::vector<std::string>& alpns);
 
-  // Check if the client-generated server connection ID needs to be replaced.
-  absl::optional<QuicConnectionId> MaybeReplaceServerConnectionId(
-      const QuicConnectionId& server_connection_id,
-      const ParsedQuicVersion& version);
-
   // Sends public/stateless reset packets with no version and unknown
   // connection ID according to the packet's size.
   virtual void MaybeResetPacketsWithNoVersion(
       const quic::ReceivedPacketInfo& packet_info);
 
-  ConnectionIdGeneratorInterface& connection_id_generator() {
+  // Called on packets with unsupported versions.
+  virtual void MaybeSendVersionNegotiationPacket(
+      const ReceivedPacketInfo& packet_info);
+
+  virtual ConnectionIdGeneratorInterface& ConnectionIdGenerator() {
     return connection_id_generator_;
   }
 
@@ -365,10 +371,10 @@ class QUIC_NO_EXPORT QuicDispatcher
 
   struct ExtractChloResult {
     // If set, a full client hello has been successfully parsed.
-    absl::optional<ParsedClientHello> parsed_chlo;
+    std::optional<ParsedClientHello> parsed_chlo;
     // If set, the TLS alert that will cause a connection close.
     // Always empty for Google QUIC.
-    absl::optional<uint8_t> tls_alert;
+    std::optional<uint8_t> tls_alert;
   };
 
   // Try to extract information(sni, alpns, ...) if the full Client Hello has
@@ -393,12 +399,16 @@ class QUIC_NO_EXPORT QuicDispatcher
   // Returns true if |version| is a supported protocol version.
   bool IsSupportedVersion(const ParsedQuicVersion version);
 
+  // Returns true if a server connection ID length is below all the minima
+  // required by various parameters.
+  bool IsServerConnectionIdTooShort(QuicConnectionId connection_id) const;
+
   // Core CHLO processing logic.
   std::shared_ptr<QuicSession> CreateSessionFromChlo(
-      const QuicConnectionId original_connection_id,
-      const ParsedClientHello& parsed_chlo, const ParsedQuicVersion version,
-      const QuicSocketAddress self_address,
-      const QuicSocketAddress peer_address);
+      QuicConnectionId original_connection_id,
+      const ParsedClientHello& parsed_chlo, ParsedQuicVersion version,
+      QuicSocketAddress self_address, QuicSocketAddress peer_address,
+      ConnectionIdGeneratorInterface* connection_id_generator);
 
   const QuicConfig* config_;
 
@@ -446,6 +456,9 @@ class QUIC_NO_EXPORT QuicDispatcher
 
   // Number of unique session in session map.
   size_t num_sessions_in_session_map_ = 0;
+
+  // Total number of packets received.
+  uint64_t num_packets_received_ = 0;
 
   // A backward counter of how many new sessions can be create within current
   // event loop. When reaches 0, it means can't create sessions for now.

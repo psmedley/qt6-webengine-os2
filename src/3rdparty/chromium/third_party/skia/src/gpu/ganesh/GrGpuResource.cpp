@@ -26,10 +26,10 @@ GrGpuResource::GrGpuResource(GrGpu* gpu, std::string_view label)
     SkDEBUGCODE(fCacheArrayIndex = -1);
 }
 
-void GrGpuResource::registerWithCache(SkBudgeted budgeted) {
+void GrGpuResource::registerWithCache(skgpu::Budgeted budgeted) {
     SkASSERT(fBudgetedType == GrBudgetedType::kUnbudgetedUncacheable);
-    fBudgetedType = budgeted == SkBudgeted::kYes ? GrBudgetedType::kBudgeted
-                                                 : GrBudgetedType::kUnbudgetedUncacheable;
+    fBudgetedType = budgeted == skgpu::Budgeted::kYes ? GrBudgetedType::kBudgeted
+                                                      : GrBudgetedType::kUnbudgetedUncacheable;
     this->computeScratchKey(&fScratchKey);
     get_resource_cache(fGpu)->resourceAccess().insertResource(this);
 }
@@ -86,6 +86,7 @@ void GrGpuResource::dumpMemoryStatisticsPriv(SkTraceMemoryDump* traceMemoryDump,
 
     traceMemoryDump->dumpNumericValue(resourceName.c_str(), "size", "bytes", size);
     traceMemoryDump->dumpStringValue(resourceName.c_str(), "type", type);
+    traceMemoryDump->dumpStringValue(resourceName.c_str(), "label", this->getLabel().c_str());
     traceMemoryDump->dumpStringValue(resourceName.c_str(), "category", tag);
     if (this->isPurgeable()) {
         traceMemoryDump->dumpNumericValue(resourceName.c_str(), "purgeable_size", "bytes", size);

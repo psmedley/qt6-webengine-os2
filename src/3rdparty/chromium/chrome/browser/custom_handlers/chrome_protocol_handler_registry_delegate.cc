@@ -6,9 +6,8 @@
 
 #include <utility>
 
-#include "base/bind.h"
 #include "base/check_op.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/functional/bind.h"
 #include "build/build_config.h"
 #ifndef TOOLKIT_QT
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -59,7 +58,7 @@ void ChromeProtocolHandlerRegistryDelegate::RegisterWithOSAsDefaultClient(
   // The worker pointer is reference counted. While it is running, the
   // sequence it runs on will hold references it will be automatically freed
   // once all its tasks have finished.
-  base::MakeRefCounted<shell_integration::DefaultProtocolClientWorker>(protocol)
+  base::MakeRefCounted<shell_integration::DefaultSchemeClientWorker>(protocol)
       ->StartSetAsDefault(
           GetDefaultWebClientCallback(protocol, std::move(callback)));
 }
@@ -70,7 +69,7 @@ void ChromeProtocolHandlerRegistryDelegate::CheckDefaultClientWithOS(
   // The worker pointer is reference counted. While it is running, the
   // sequence it runs on will hold references it will be automatically freed
   // once all its tasks have finished.
-  base::MakeRefCounted<shell_integration::DefaultProtocolClientWorker>(protocol)
+  base::MakeRefCounted<shell_integration::DefaultSchemeClientWorker>(protocol)
       ->StartCheckIsDefault(
           GetDefaultWebClientCallback(protocol, std::move(callback)));
 }
@@ -85,13 +84,13 @@ bool ChromeProtocolHandlerRegistryDelegate::ShouldRemoveHandlersNotInOS() {
   // difference (http://crbug.com/88255).
   return false;
 #else
-  return shell_integration::GetDefaultWebClientSetPermission() !=
+  return shell_integration::GetDefaultSchemeClientSetPermission() !=
          shell_integration::SET_DEFAULT_NOT_ALLOWED;
 #endif
 }
 
 void ChromeProtocolHandlerRegistryDelegate::
-    OnSetAsDefaultProtocolClientFinished(
+    OnSetAsDefaultClientForSchemeFinished(
         const std::string& protocol,
         DefaultClientCallback callback,
         shell_integration::DefaultWebClientState state) {
@@ -105,7 +104,7 @@ ChromeProtocolHandlerRegistryDelegate::GetDefaultWebClientCallback(
     const std::string& protocol,
     DefaultClientCallback callback) {
   return base::BindOnce(&ChromeProtocolHandlerRegistryDelegate::
-                            OnSetAsDefaultProtocolClientFinished,
+                            OnSetAsDefaultClientForSchemeFinished,
                         weak_ptr_factory_.GetWeakPtr(), protocol,
                         std::move(callback));
 }

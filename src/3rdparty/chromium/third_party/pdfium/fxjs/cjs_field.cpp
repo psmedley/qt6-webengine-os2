@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,7 @@
 #include "fxjs/js_resources.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
+#include "third_party/base/containers/span.h"
 #include "third_party/base/notreached.h"
 #include "v8/include/v8-container.h"
 
@@ -235,7 +236,7 @@ void SetBorderStyle(CPDFSDK_FormFillEnvironment* pFormFillEnv,
                     const ByteString& bsString) {
   DCHECK(pFormFillEnv);
 
-  BorderStyle nBorderStyle = BorderStyle::kSolid;
+  BorderStyle nBorderStyle;
   if (bsString == "solid")
     nBorderStyle = BorderStyle::kSolid;
   else if (bsString == "beveled")
@@ -2022,8 +2023,10 @@ CJS_Result CJS_Field::get_type(CJS_Runtime* pRuntime) {
       return CJS_Result::Success(pRuntime->NewString("text"));
     case FormFieldType::kSignature:
       return CJS_Result::Success(pRuntime->NewString("signature"));
+#ifdef PDF_ENABLE_XFA
     default:
       return CJS_Result::Success(pRuntime->NewString("unknown"));
+#endif
   }
 }
 
@@ -2174,7 +2177,7 @@ CJS_Result CJS_Field::set_value_as_string(CJS_Runtime* pRuntime,
 
 CJS_Result CJS_Field::browseForFileToSubmit(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   CPDF_FormField* pFormField = GetFirstFormField();
   if (!pFormField)
     return CJS_Result::Failure(JSMessage::kBadObjectError);
@@ -2193,7 +2196,7 @@ CJS_Result CJS_Field::browseForFileToSubmit(
 
 CJS_Result CJS_Field::buttonGetCaption(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   int nface = 0;
   if (params.size() >= 1)
     nface = pRuntime->ToInt32(params[0]);
@@ -2224,9 +2227,8 @@ CJS_Result CJS_Field::buttonGetCaption(
   return CJS_Result::Failure(JSMessage::kValueError);
 }
 
-CJS_Result CJS_Field::buttonGetIcon(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::buttonGetIcon(CJS_Runtime* pRuntime,
+                                    pdfium::span<v8::Local<v8::Value>> params) {
   if (params.size() >= 1) {
     int nFace = pRuntime->ToInt32(params[0]);
     if (nFace < 0 || nFace > 2)
@@ -2257,25 +2259,23 @@ CJS_Result CJS_Field::buttonGetIcon(
 
 CJS_Result CJS_Field::buttonImportIcon(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
 CJS_Result CJS_Field::buttonSetCaption(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
-CJS_Result CJS_Field::buttonSetIcon(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::buttonSetIcon(CJS_Runtime* pRuntime,
+                                    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
-CJS_Result CJS_Field::checkThisBox(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::checkThisBox(CJS_Runtime* pRuntime,
+                                   pdfium::span<v8::Local<v8::Value>> params) {
   const size_t nSize = params.size();
   if (nSize == 0)
     return CJS_Result::Failure(JSMessage::kParamError);
@@ -2305,15 +2305,14 @@ CJS_Result CJS_Field::checkThisBox(
   return CJS_Result::Success();
 }
 
-CJS_Result CJS_Field::clearItems(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::clearItems(CJS_Runtime* pRuntime,
+                                 pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
 CJS_Result CJS_Field::defaultIsChecked(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   if (!m_bCanSet)
     return CJS_Result::Failure(JSMessage::kReadOnlyError);
 
@@ -2332,15 +2331,13 @@ CJS_Result CJS_Field::defaultIsChecked(
       pRuntime->NewBoolean(IsCheckBoxOrRadioButton(pFormField)));
 }
 
-CJS_Result CJS_Field::deleteItemAt(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::deleteItemAt(CJS_Runtime* pRuntime,
+                                   pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
-CJS_Result CJS_Field::getArray(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::getArray(CJS_Runtime* pRuntime,
+                               pdfium::span<v8::Local<v8::Value>> params) {
   std::vector<CPDF_FormField*> FieldArray = GetFormFields();
   if (FieldArray.empty())
     return CJS_Result::Failure(JSMessage::kBadObjectError);
@@ -2373,9 +2370,8 @@ CJS_Result CJS_Field::getArray(
   return CJS_Result::Success(FormFieldArray);
 }
 
-CJS_Result CJS_Field::getItemAt(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::getItemAt(CJS_Runtime* pRuntime,
+                                pdfium::span<v8::Local<v8::Value>> params) {
   const size_t nSize = params.size();
   int nIdx = -1;
   if (nSize >= 1)
@@ -2408,19 +2404,17 @@ CJS_Result CJS_Field::getItemAt(
 }
 
 CJS_Result CJS_Field::getLock(CJS_Runtime* pRuntime,
-                              const std::vector<v8::Local<v8::Value>>& params) {
+                              pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
-CJS_Result CJS_Field::insertItemAt(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::insertItemAt(CJS_Runtime* pRuntime,
+                                   pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
-CJS_Result CJS_Field::isBoxChecked(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::isBoxChecked(CJS_Runtime* pRuntime,
+                                   pdfium::span<v8::Local<v8::Value>> params) {
   int nIndex = -1;
   if (params.size() >= 1)
     nIndex = pRuntime->ToInt32(params[0]);
@@ -2439,7 +2433,7 @@ CJS_Result CJS_Field::isBoxChecked(
 
 CJS_Result CJS_Field::isDefaultChecked(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   int nIndex = -1;
   if (params.size() >= 1)
     nIndex = pRuntime->ToInt32(params[0]);
@@ -2456,15 +2450,13 @@ CJS_Result CJS_Field::isDefaultChecked(
        pFormField->GetControl(nIndex)->IsDefaultChecked() != 0)));
 }
 
-CJS_Result CJS_Field::setAction(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::setAction(CJS_Runtime* pRuntime,
+                                pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
-CJS_Result CJS_Field::setFocus(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::setFocus(CJS_Runtime* pRuntime,
+                               pdfium::span<v8::Local<v8::Value>> params) {
   CPDF_FormField* pFormField = GetFirstFormField();
   if (!pFormField)
     return CJS_Result::Failure(JSMessage::kBadObjectError);
@@ -2501,50 +2493,47 @@ CJS_Result CJS_Field::setFocus(
   return CJS_Result::Success();
 }
 
-CJS_Result CJS_Field::setItems(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::setItems(CJS_Runtime* pRuntime,
+                               pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Success();
 }
 
 CJS_Result CJS_Field::setLock(CJS_Runtime* pRuntime,
-                              const std::vector<v8::Local<v8::Value>>& params) {
+                              pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
 CJS_Result CJS_Field::signatureGetModifications(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
 CJS_Result CJS_Field::signatureGetSeedValue(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
-CJS_Result CJS_Field::signatureInfo(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::signatureInfo(CJS_Runtime* pRuntime,
+                                    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
 CJS_Result CJS_Field::signatureSetSeedValue(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
-CJS_Result CJS_Field::signatureSign(
-    CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+CJS_Result CJS_Field::signatureSign(CJS_Runtime* pRuntime,
+                                    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
 CJS_Result CJS_Field::signatureValidate(
     CJS_Runtime* pRuntime,
-    const std::vector<v8::Local<v8::Value>>& params) {
+    pdfium::span<v8::Local<v8::Value>> params) {
   return CJS_Result::Failure(JSMessage::kNotSupportedError);
 }
 
@@ -2633,7 +2622,5 @@ void CJS_Field::DoDelay(CPDFSDK_FormFillEnvironment* pFormFillEnv,
       SetFieldValue(pFormFillEnv, pData->sFieldName, pData->nControlIndex,
                     pData->widestringarray);
       break;
-    default:
-      NOTREACHED();
   }
 }

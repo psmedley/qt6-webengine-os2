@@ -66,17 +66,16 @@ class TestRunnerTest(unittest.TestCase):
       self.assertFalse(mock_download.called)
 
   @parameterized.expand([
-      'browser_tests',
-      'components_browsertests',
-      'content_browsertests',
+      'browser_tests', 'components_browsertests', 'content_browsertests',
       'lacros_chrome_browsertests',
+      'browser_tests --enable-pixel-output-in-tests'
   ])
   @mock.patch.object(os,
                      'listdir',
                      return_value=['wayland-exo', 'wayland-exo.lock'])
   @mock.patch.object(tempfile,
                      'mkdtemp',
-                     side_effect=['/tmp/xdg', '/tmp/ash-data'])
+                     side_effect=['/tmp/xdg', '/tmp/ash-data', '/tmp/unique'])
   @mock.patch.object(os.environ, 'copy', side_effect=[{}, {}])
   @mock.patch.object(os.path, 'exists', return_value=True)
   @mock.patch.object(os.path, 'isfile', return_value=True)
@@ -89,7 +88,9 @@ class TestRunnerTest(unittest.TestCase):
   # Tests that the test runner downloads and spawns ash-chrome if ash-chrome is
   # required.
   def test_require_ash_chrome(self, command, mock_popen, mock_download, *_):
-    args = ['script_name', 'test', command]
+    command_parts = command.split()
+    args = ['script_name', 'test']
+    args.extend(command_parts)
     with mock.patch.object(sys, 'argv', args):
       test_runner.Main()
       mock_download.assert_called_with('793554')
@@ -102,12 +103,17 @@ class TestRunnerTest(unittest.TestCase):
           '--user-data-dir=/tmp/ash-data',
           '--enable-wayland-server',
           '--no-startup-window',
+          '--disable-input-event-activation-protection',
           '--disable-lacros-keep-alive',
           '--disable-login-lacros-opening',
+          '--enable-field-trial-config',
+          '--enable-logging=stderr',
           '--enable-features=LacrosSupport,LacrosPrimary,LacrosOnly',
           '--ash-ready-file-path=/tmp/ash-data/ash_ready.txt',
           '--wayland-server-socket=wayland-exo',
       ]
+      if '--enable-pixel-output-in-tests' not in command_parts:
+        expected_ash_chrome_args.append('--disable-gl-drawing-for-tests')
       if command == 'lacros_chrome_browsertests':
         expected_ash_chrome_args.append(
             '--lacros-mojo-socket-for-testing=/tmp/ash-data/lacros.sock')
@@ -118,12 +124,13 @@ class TestRunnerTest(unittest.TestCase):
       test_args = mock_popen.call_args_list[1][0][0]
       if command == 'lacros_chrome_browsertests':
         self.assertListEqual([
-            command,
-            '--test-launcher-filter-file=/a/b/filter',
+            command, '--test-launcher-filter-file=/a/b/filter',
             '--lacros-mojo-socket-for-testing=/tmp/ash-data/lacros.sock',
+            '--ash-chrome-path=' + ash_chrome_args[0],
+            '--unique-ash-dir=/tmp/unique'
         ], test_args)
       else:
-        self.assertListEqual([command], [test_args[0]])
+        self.assertListEqual(test_args[:len(command_parts)], command_parts)
 
       test_env = mock_popen.call_args_list[1][1].get('env', {})
       self.assertDictEqual(
@@ -219,7 +226,7 @@ class TestRunnerTest(unittest.TestCase):
                      return_value=['wayland-exo', 'wayland-exo.lock'])
   @mock.patch.object(tempfile,
                      'mkdtemp',
-                     side_effect=['/tmp/xdg', '/tmp/ash-data'])
+                     side_effect=['/tmp/xdg', '/tmp/ash-data', '/tmp/unique'])
   @mock.patch.object(os.environ, 'copy', side_effect=[{}, {}])
   @mock.patch.object(os.path, 'exists', return_value=True)
   @mock.patch.object(os.path, 'isfile', return_value=True)

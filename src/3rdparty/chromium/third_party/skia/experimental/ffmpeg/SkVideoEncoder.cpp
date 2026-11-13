@@ -8,7 +8,7 @@
 #include "experimental/ffmpeg/SkVideoEncoder.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
-#include "include/private/SkTDArray.h"
+#include "include/private/base/SkTDArray.h"
 
 extern "C" {
 #include "libswscale/swscale.h"
@@ -303,7 +303,7 @@ bool SkVideoEncoder::sendFrame(AVFrame* frame) {
 
 SkCanvas* SkVideoEncoder::beginFrame() {
     if (!fSurface) {
-        fSurface = SkSurface::MakeRaster(fInfo);
+        fSurface = SkSurfaces::Raster(fInfo);
         if (!fSurface) {
             return nullptr;
         }

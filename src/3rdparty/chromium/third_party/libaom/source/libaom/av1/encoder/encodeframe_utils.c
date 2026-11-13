@@ -22,7 +22,7 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
                          const int mi_col, int *const rdmult) {
   const AV1_COMMON *const cm = &cpi->common;
 
-  const int bsize_base = BLOCK_16X16;
+  const BLOCK_SIZE bsize_base = BLOCK_16X16;
   const int num_mi_w = mi_size_wide[bsize_base];
   const int num_mi_h = mi_size_high[bsize_base];
   const int num_cols = (cm->mi_params.mi_cols + num_mi_w - 1) / num_mi_w;
@@ -31,8 +31,19 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
   const int num_brows = (mi_size_high[bsize] + num_mi_h - 1) / num_mi_h;
   int row, col;
   double num_of_mi = 0.0;
-  double geom_mean_of_scale = 0.0;
+  double geom_mean_of_scale = 1.0;
 
+  // To avoid overflow of 'geom_mean_of_scale', bsize_base must be at least
+  // BLOCK_8X8.
+  //
+  // For bsize=BLOCK_128X128 and bsize_base=BLOCK_8X8, the loop below would
+  // iterate 256 times. Considering the maximum value of
+  // cpi->ssim_rdmult_scaling_factors (see av1_set_mb_ssim_rdmult_scaling()),
+  // geom_mean_of_scale can go up to 4.8323^256, which is within DBL_MAX
+  // (maximum value a double data type can hold). If bsize_base is modified to
+  // BLOCK_4X4 (minimum possible block size), geom_mean_of_scale can go up
+  // to 4.8323^1024 and exceed DBL_MAX, resulting in data overflow.
+  assert(bsize_base >= BLOCK_8X8);
   assert(cpi->oxcf.tune_cfg.tuning == AOM_TUNE_SSIM);
 
   for (row = mi_row / num_mi_w;
@@ -41,27 +52,38 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
          col < num_cols && col < mi_col / num_mi_h + num_bcols; ++col) {
       const int index = row * num_cols + col;
       assert(cpi->ssim_rdmult_scaling_factors[index] != 0.0);
-      geom_mean_of_scale += log(cpi->ssim_rdmult_scaling_factors[index]);
+      geom_mean_of_scale *= cpi->ssim_rdmult_scaling_factors[index];
       num_of_mi += 1.0;
     }
   }
-  geom_mean_of_scale = exp(geom_mean_of_scale / num_of_mi);
+  geom_mean_of_scale = pow(geom_mean_of_scale, (1.0 / num_of_mi));
 
   *rdmult = (int)((double)(*rdmult) * geom_mean_of_scale + 0.5);
   *rdmult = AOMMAX(*rdmult, 0);
   av1_set_error_per_bit(errorperbit, *rdmult);
 }
 
+#if CONFIG_SALIENCY_MAP
+void av1_set_saliency_map_vmaf_rdmult(const AV1_COMP *const cpi,
+                                      int *errorperbit, const BLOCK_SIZE bsize,
+                                      const int mi_row, const int mi_col,
+                                      int *const rdmult) {
+  const AV1_COMMON *const cm = &cpi->common;
+  const int num_mi_w = mi_size_wide[bsize];
+  const int num_mi_h = mi_size_high[bsize];
+  const int num_cols = (cm->mi_params.mi_cols + num_mi_w - 1) / num_mi_w;
+
+  *rdmult =
+      (int)(*rdmult * cpi->sm_scaling_factor[(mi_row / num_mi_h) * num_cols +
+                                             (mi_col / num_mi_w)]);
+
+  *rdmult = AOMMAX(*rdmult, 0);
+  av1_set_error_per_bit(errorperbit, *rdmult);
+}
+#endif
+
 // TODO(angiebird): Move these function to tpl_model.c
 #if !CONFIG_REALTIME_ONLY
-static AOM_INLINE int set_deltaq_rdmult(const AV1_COMP *const cpi,
-                                        const MACROBLOCK *const x) {
-  const AV1_COMMON *const cm = &cpi->common;
-  const CommonQuantParams *quant_params = &cm->quant_params;
-  return av1_compute_rd_mult(cpi, quant_params->base_qindex + x->delta_qindex +
-                                      quant_params->y_dc_delta_q);
-}
-
 // Return the end column for the current superblock, in unit of TPL blocks.
 static int get_superblock_tpl_column_end(const AV1_COMMON *const cm, int mi_col,
                                          int num_mi_w) {
@@ -89,7 +111,7 @@ int av1_get_cb_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   assert(IMPLIES(cpi->ppi->gf_group.size > 0,
                  cpi->gf_frame_index < cpi->ppi->gf_group.size));
   const int tpl_idx = cpi->gf_frame_index;
-  int deltaq_rdmult = set_deltaq_rdmult(cpi, x);
+  int deltaq_rdmult = set_rdmult(cpi, x, -1);
   if (!av1_tpl_stats_ready(&cpi->ppi->tpl_data, tpl_idx)) return deltaq_rdmult;
   if (cm->superres_scale_denominator != SCALE_NUMERATOR) return deltaq_rdmult;
   if (cpi->oxcf.q_cfg.aq_mode != NO_AQ) return deltaq_rdmult;
@@ -143,7 +165,7 @@ int av1_get_hier_tpl_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   assert(IMPLIES(cpi->ppi->gf_group.size > 0,
                  cpi->gf_frame_index < cpi->ppi->gf_group.size));
   const int tpl_idx = cpi->gf_frame_index;
-  const int deltaq_rdmult = set_deltaq_rdmult(cpi, x);
+  const int deltaq_rdmult = set_rdmult(cpi, x, -1);
   if (!av1_tpl_stats_ready(&cpi->ppi->tpl_data, tpl_idx)) return deltaq_rdmult;
   if (!is_frame_tpl_eligible(gf_group, cpi->gf_frame_index))
     return deltaq_rdmult;
@@ -155,7 +177,7 @@ int av1_get_hier_tpl_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   const int block_mi_width_sr =
       coded_to_superres_mi(mi_size_wide[bsize], cm->superres_scale_denominator);
 
-  const int bsize_base = BLOCK_16X16;
+  const BLOCK_SIZE bsize_base = BLOCK_16X16;
   const int num_mi_w = mi_size_wide[bsize_base];
   const int num_mi_h = mi_size_high[bsize_base];
   const int num_cols = (mi_cols_sr + num_mi_w - 1) / num_mi_w;
@@ -185,7 +207,7 @@ int av1_get_hier_tpl_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   av1_set_error_per_bit(&x->errorperbit, rdmult);
 #if !CONFIG_RD_COMMAND
   if (bsize == cm->seq_params->sb_size) {
-    const int rdmult_sb = set_deltaq_rdmult(cpi, x);
+    const int rdmult_sb = set_rdmult(cpi, x, -1);
     assert(rdmult_sb == rdmult);
     (void)rdmult_sb;
   }
@@ -201,41 +223,11 @@ static AOM_INLINE void update_filter_type_count(FRAME_COUNTS *counts,
   for (dir = 0; dir < 2; ++dir) {
     const int ctx = av1_get_pred_context_switchable_interp(xd, dir);
     InterpFilter filter = av1_extract_interp_filter(mbmi->interp_filters, dir);
+
+    // Only allow the 3 valid SWITCHABLE_FILTERS.
+    assert(filter < SWITCHABLE_FILTERS);
     ++counts->switchable_interp[ctx][filter];
   }
-}
-
-static void reset_tx_size(MACROBLOCK *x, MB_MODE_INFO *mbmi,
-                          const TX_MODE tx_mode) {
-  MACROBLOCKD *const xd = &x->e_mbd;
-  TxfmSearchInfo *txfm_info = &x->txfm_search_info;
-  if (xd->lossless[mbmi->segment_id]) {
-    mbmi->tx_size = TX_4X4;
-  } else if (tx_mode != TX_MODE_SELECT) {
-    mbmi->tx_size = tx_size_from_tx_mode(mbmi->bsize, tx_mode);
-  } else {
-    const BLOCK_SIZE bsize = mbmi->bsize;
-    const TX_SIZE min_tx_size = depth_to_tx_size(MAX_TX_DEPTH, bsize);
-    if (tx_size_wide[min_tx_size] > tx_size_wide[mbmi->tx_size] ||
-        tx_size_high[min_tx_size] > tx_size_high[mbmi->tx_size])
-      mbmi->tx_size = min_tx_size;
-
-    const TX_SIZE max_tx_size = get_vartx_max_txsize(xd, bsize, 0);
-    if (tx_size_wide[max_tx_size] < tx_size_wide[mbmi->tx_size] ||
-        tx_size_high[max_tx_size] < tx_size_high[mbmi->tx_size])
-      mbmi->tx_size = max_tx_size;
-  }
-  if (is_inter_block(mbmi)) {
-    memset(mbmi->inter_tx_size, mbmi->tx_size, sizeof(mbmi->inter_tx_size));
-  }
-  const int stride = xd->tx_type_map_stride;
-  const int bw = mi_size_wide[mbmi->bsize];
-  for (int row = 0; row < mi_size_high[mbmi->bsize]; ++row) {
-    memset(xd->tx_type_map + row * stride, DCT_DCT,
-           bw * sizeof(xd->tx_type_map[0]));
-  }
-  av1_zero(txfm_info->blk_skip);
-  txfm_info->skip_txfm = 0;
 }
 
 // This function will copy the best reference mode information from
@@ -310,7 +302,6 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
           seg->update_map ? cpi->enc_seg.map : cm->last_frame_seg_map;
       mi_addr->segment_id =
           map ? get_segment_id(mi_params, map, bsize, mi_row, mi_col) : 0;
-      reset_tx_size(x, mi_addr, x->txfm_search_params.tx_mode_search_type);
     }
     // Else for cyclic refresh mode update the segment map, set the segment id
     // and then update the quantizer.
@@ -325,10 +316,10 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
 
     if (!dry_run && !mi_addr->skip_txfm) {
       int cdf_num;
-      const int spatial_pred = av1_get_spatial_seg_pred(
+      const uint8_t spatial_pred = av1_get_spatial_seg_pred(
           cm, xd, &cdf_num, cpi->cyclic_refresh->skip_over4x4);
-      const int coded_id = av1_neg_interleave(mi_addr->segment_id, spatial_pred,
-                                              seg->last_active_segid + 1);
+      const uint8_t coded_id = av1_neg_interleave(
+          mi_addr->segment_id, spatial_pred, seg->last_active_segid + 1);
       int64_t spatial_cost = x->mode_costs.spatial_pred_cost[cdf_num][coded_id];
       td->rd_counts.seg_tmp_pred_cost[0] += spatial_cost;
 
@@ -338,7 +329,7 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
                                mi_col)
               : 0;
       const int use_tmp_pred = pred_segment_id == mi_addr->segment_id;
-      const int tmp_pred_ctx = av1_get_pred_context_seg_id(xd);
+      const uint8_t tmp_pred_ctx = av1_get_pred_context_seg_id(xd);
       td->rd_counts.seg_tmp_pred_cost[1] +=
           x->mode_costs.tmp_pred_cost[tmp_pred_ctx][use_tmp_pred];
       if (!use_tmp_pred) {
@@ -348,8 +339,7 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
   }
 
   // Count zero motion vector.
-  if (!dry_run && cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ &&
-      !frame_is_intra_only(cm)) {
+  if (!dry_run && !frame_is_intra_only(cm)) {
     const MV mv = mi->mv[0].as_mv;
     if (is_inter_block(mi) && mi->ref_frame[0] == LAST_FRAME &&
         abs(mv.row) < 8 && abs(mv.col) < 8) {
@@ -411,9 +401,12 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
   }
 #endif
   if (!frame_is_intra_only(cm)) {
-    if (cm->features.interp_filter == SWITCHABLE &&
-        mi_addr->motion_mode != WARPED_CAUSAL &&
-        !is_nontrans_global_motion(xd, xd->mi[0])) {
+    if (is_inter_block(mi) && cm->features.interp_filter == SWITCHABLE) {
+      // When the frame interp filter is SWITCHABLE, several cases that always
+      // use the default type (EIGHTTAP_REGULAR) are described in
+      // av1_is_interp_needed(). Here, we should keep the counts for all
+      // applicable blocks, so the frame filter resetting decision in
+      // fix_interp_filter() is made correctly.
       update_filter_type_count(td->counts, xd, mi_addr);
     }
   }
@@ -595,13 +588,13 @@ void av1_sum_intra_stats(const AV1_COMMON *const cm, FRAME_COUNTS *counts,
       update_cdf(cdf_v, CFL_IDX_V(idx), CFL_ALPHABET_SIZE);
     }
   }
-  if (av1_is_directional_mode(get_uv_mode(uv_mode)) &&
-      av1_use_angle_delta(bsize)) {
+  const PREDICTION_MODE intra_mode = get_uv_mode(uv_mode);
+  if (av1_is_directional_mode(intra_mode) && av1_use_angle_delta(bsize)) {
 #if CONFIG_ENTROPY_STATS
-    ++counts->angle_delta[uv_mode - UV_V_PRED]
+    ++counts->angle_delta[intra_mode - V_PRED]
                          [mbmi->angle_delta[PLANE_TYPE_UV] + MAX_ANGLE_DELTA];
 #endif
-    update_cdf(fc->angle_delta_cdf[uv_mode - UV_V_PRED],
+    update_cdf(fc->angle_delta_cdf[intra_mode - V_PRED],
                mbmi->angle_delta[PLANE_TYPE_UV] + MAX_ANGLE_DELTA,
                2 * MAX_ANGLE_DELTA + 1);
   }
@@ -1387,6 +1380,9 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
   if (cpi->last_source->y_width != cpi->source->y_width ||
       cpi->last_source->y_height != cpi->source->y_height)
     return;
+#if CONFIG_AV1_HIGHBITDEPTH
+  if (x->e_mbd.cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) return;
+#endif
 
   unsigned int tmp_sse;
   unsigned int tmp_variance;
@@ -1402,11 +1398,12 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
                                                36000 };  // ~3*3*(64*64)
 
   uint64_t avg_source_sse_threshold_high = 1000000;  // ~15*15*(64*64)
+  if (cpi->sf.rt_sf.increase_source_sad_thresh) {
+    avg_source_sse_threshold_high = avg_source_sse_threshold_high << 1;
+    avg_source_sse_threshold_low[0] = avg_source_sse_threshold_low[0] << 1;
+    avg_source_sse_threshold_verylow = avg_source_sse_threshold_verylow << 1;
+  }
   uint64_t sum_sq_thresh = 10000;  // sum = sqrt(thresh / 64*64)) ~1.5
-#if CONFIG_AV1_HIGHBITDEPTH
-  MACROBLOCKD *xd = &x->e_mbd;
-  if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) return;
-#endif
   src_y += src_offset;
   last_src_y += last_src_offset;
   tmp_variance = cpi->ppi->fn_ptr[bsize].vf(src_y, src_ystride, last_src_y,
@@ -1416,9 +1413,11 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
     x->content_state_sb.source_sad_rd = kLowSad;
 
   // nonrd thresholds
-  if (tmp_sse == 0)
+  if (tmp_sse == 0) {
     x->content_state_sb.source_sad_nonrd = kZeroSad;
-  else if (tmp_sse < avg_source_sse_threshold_verylow)
+    return;
+  }
+  if (tmp_sse < avg_source_sse_threshold_verylow)
     x->content_state_sb.source_sad_nonrd = kVeryLowSad;
   else if (tmp_sse < avg_source_sse_threshold_low[0])
     x->content_state_sb.source_sad_nonrd = kLowSad;
@@ -1427,16 +1426,13 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, TileDataEnc *tile_data,
 
   // Detect large lighting change.
   // Note: tmp_sse - tmp_variance = ((sum * sum) >> 12)
-  if (tmp_sse > 0) {
-    if (tmp_variance < (tmp_sse >> 1) &&
-        (tmp_sse - tmp_variance) > sum_sq_thresh)
-      x->content_state_sb.lighting_change = 1;
-    if ((tmp_sse - tmp_variance) < (sum_sq_thresh >> 1))
-      x->content_state_sb.low_sumdiff = 1;
-  }
+  if (tmp_variance < (tmp_sse >> 1) && (tmp_sse - tmp_variance) > sum_sq_thresh)
+    x->content_state_sb.lighting_change = 1;
+  if ((tmp_sse - tmp_variance) < (sum_sq_thresh >> 1))
+    x->content_state_sb.low_sumdiff = 1;
 
-  if (!cpi->sf.rt_sf.use_rtc_tf || tmp_sse == 0 || cpi->rc.high_source_sad ||
-      cpi->rc.frame_source_sad > 20000)
+  if (!cpi->sf.rt_sf.use_rtc_tf || cpi->rc.high_source_sad ||
+      cpi->rc.frame_source_sad > 20000 || cpi->svc.number_spatial_layers > 1)
     return;
 
   // In-place temporal filter. If psnr calculation is enabled, we store the
@@ -1555,8 +1551,12 @@ void av1_backup_sb_state(SB_FIRST_PASS_STATS *sb_fp_stats, const AV1_COMP *cpi,
 
   sb_fp_stats->fc = *td->counts;
 
-  memcpy(sb_fp_stats->inter_mode_rd_models, tile_data->inter_mode_rd_models,
-         sizeof(sb_fp_stats->inter_mode_rd_models));
+  // Don't copy in row_mt case, otherwise run into data race. No behavior change
+  // in row_mt case.
+  if (cpi->sf.inter_sf.inter_mode_rd_model_estimation == 1) {
+    memcpy(sb_fp_stats->inter_mode_rd_models, tile_data->inter_mode_rd_models,
+           sizeof(sb_fp_stats->inter_mode_rd_models));
+  }
 
   memcpy(sb_fp_stats->thresh_freq_fact, x->thresh_freq_fact,
          sizeof(sb_fp_stats->thresh_freq_fact));
@@ -1588,8 +1588,11 @@ void av1_restore_sb_state(const SB_FIRST_PASS_STATS *sb_fp_stats, AV1_COMP *cpi,
 
   *td->counts = sb_fp_stats->fc;
 
-  memcpy(tile_data->inter_mode_rd_models, sb_fp_stats->inter_mode_rd_models,
-         sizeof(sb_fp_stats->inter_mode_rd_models));
+  if (cpi->sf.inter_sf.inter_mode_rd_model_estimation == 1) {
+    memcpy(tile_data->inter_mode_rd_models, sb_fp_stats->inter_mode_rd_models,
+           sizeof(sb_fp_stats->inter_mode_rd_models));
+  }
+
   memcpy(x->thresh_freq_fact, sb_fp_stats->thresh_freq_fact,
          sizeof(sb_fp_stats->thresh_freq_fact));
 
@@ -1743,5 +1746,30 @@ void av1_set_cost_upd_freq(AV1_COMP *cpi, ThreadData *td,
       av1_fill_dv_costs(&xd->tile_ctx->ndvc, x->dv_costs);
       break;
     default: assert(0);
+  }
+}
+
+void av1_dealloc_src_diff_buf(struct macroblock *mb, int num_planes) {
+  for (int plane = 0; plane < num_planes; ++plane) {
+    aom_free(mb->plane[plane].src_diff);
+    mb->plane[plane].src_diff = NULL;
+  }
+}
+
+void av1_alloc_src_diff_buf(const struct AV1Common *cm, struct macroblock *mb) {
+  const int num_planes = av1_num_planes(cm);
+#ifndef NDEBUG
+  for (int plane = 0; plane < num_planes; ++plane) {
+    assert(!mb->plane[plane].src_diff);
+  }
+#endif
+  for (int plane = 0; plane < num_planes; ++plane) {
+    const int subsampling_xy =
+        plane ? cm->seq_params->subsampling_x + cm->seq_params->subsampling_y
+              : 0;
+    const int sb_size = MAX_SB_SQUARE >> subsampling_xy;
+    CHECK_MEM_ERROR(cm, mb->plane[plane].src_diff,
+                    (int16_t *)aom_memalign(
+                        32, sizeof(*mb->plane[plane].src_diff) * sb_size));
   }
 }

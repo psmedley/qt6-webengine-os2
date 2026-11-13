@@ -1,24 +1,39 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_ATTACHMENTSTATE_H_
 #define SRC_DAWN_NATIVE_ATTACHMENTSTATE_H_
 
 #include <array>
 #include <bitset>
+#include <vector>
 
 #include "dawn/common/Constants.h"
+#include "dawn/common/ContentLessObjectCacheable.h"
 #include "dawn/common/ityp_array.h"
 #include "dawn/common/ityp_bitset.h"
 #include "dawn/native/CachedObject.h"
@@ -31,50 +46,49 @@ namespace dawn::native {
 
 class DeviceBase;
 
-// AttachmentStateBlueprint and AttachmentState are separated so the AttachmentState
-// can be constructed by copying the blueprint state instead of traversing descriptors.
-// Also, AttachmentStateBlueprint does not need a refcount like AttachmentState.
-class AttachmentStateBlueprint {
+class AttachmentState final : public ObjectBase,
+                              public CachedObject,
+                              public ContentLessObjectCacheable<AttachmentState> {
   public:
     // Note: Descriptors must be validated before the AttachmentState is constructed.
-    explicit AttachmentStateBlueprint(const RenderBundleEncoderDescriptor* descriptor);
-    explicit AttachmentStateBlueprint(const RenderPipelineDescriptor* descriptor);
-    explicit AttachmentStateBlueprint(const RenderPassDescriptor* descriptor);
+    explicit AttachmentState(DeviceBase* device, const RenderBundleEncoderDescriptor* descriptor);
+    explicit AttachmentState(DeviceBase* device,
+                             const UnpackedPtr<RenderPipelineDescriptor>& descriptor,
+                             const PipelineLayoutBase* layout);
+    explicit AttachmentState(DeviceBase* device,
+                             const UnpackedPtr<RenderPassDescriptor>& descriptor);
 
-    AttachmentStateBlueprint(const AttachmentStateBlueprint& rhs);
+    // Constructor used to avoid re-parsing descriptors when we already parsed them for cache keys.
+    AttachmentState(const AttachmentState& blueprint);
 
-    // Functors necessary for the unordered_set<AttachmentState*>-based cache.
-    struct HashFunc {
-        size_t operator()(const AttachmentStateBlueprint* attachmentState) const;
-    };
-    struct EqualityFunc {
-        bool operator()(const AttachmentStateBlueprint* a, const AttachmentStateBlueprint* b) const;
-    };
-
-  protected:
-    ityp::bitset<ColorAttachmentIndex, kMaxColorAttachments> mColorAttachmentsSet;
-    ityp::array<ColorAttachmentIndex, wgpu::TextureFormat, kMaxColorAttachments> mColorFormats;
-    // Default (texture format Undefined) indicates there is no depth stencil attachment.
-    wgpu::TextureFormat mDepthStencilFormat = wgpu::TextureFormat::Undefined;
-    uint32_t mSampleCount = 0;
-};
-
-class AttachmentState final : public AttachmentStateBlueprint,
-                              public ObjectBase,
-                              public CachedObject {
-  public:
-    AttachmentState(DeviceBase* device, const AttachmentStateBlueprint& blueprint);
-
-    ityp::bitset<ColorAttachmentIndex, kMaxColorAttachments> GetColorAttachmentsMask() const;
+    ColorAttachmentMask GetColorAttachmentsMask() const;
     wgpu::TextureFormat GetColorAttachmentFormat(ColorAttachmentIndex index) const;
     bool HasDepthStencilAttachment() const;
     wgpu::TextureFormat GetDepthStencilFormat() const;
     uint32_t GetSampleCount() const;
+    bool IsMSAARenderToSingleSampledEnabled() const;
+    bool HasPixelLocalStorage() const;
+    const std::vector<wgpu::TextureFormat>& GetStorageAttachmentSlots() const;
+    std::vector<ColorAttachmentIndex> ComputeStorageAttachmentPackingInColorAttachments() const;
 
+    struct EqualityFunc {
+        bool operator()(const AttachmentState* a, const AttachmentState* b) const;
+    };
     size_t ComputeContentHash() override;
 
+  protected:
+    void DeleteThis() override;
+
   private:
-    ~AttachmentState() override;
+    ColorAttachmentMask mColorAttachmentsSet;
+    PerColorAttachment<wgpu::TextureFormat> mColorFormats;
+    // Default (texture format Undefined) indicates there is no depth stencil attachment.
+    wgpu::TextureFormat mDepthStencilFormat = wgpu::TextureFormat::Undefined;
+    uint32_t mSampleCount = 0;
+
+    bool mIsMSAARenderToSingleSampledEnabled = false;
+    bool mHasPLS = false;
+    std::vector<wgpu::TextureFormat> mStorageAttachmentSlots;
 };
 
 }  // namespace dawn::native

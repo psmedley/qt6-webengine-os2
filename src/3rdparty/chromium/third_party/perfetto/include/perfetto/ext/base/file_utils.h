@@ -27,7 +27,6 @@
 #include "perfetto/base/export.h"
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/scoped_file.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/utils.h"
 
 namespace perfetto {
@@ -64,6 +63,7 @@ ssize_t WriteAllHandle(PlatformHandle, const void* buf, size_t count);
 ScopedFile OpenFile(const std::string& path,
                     int flags,
                     FileOpenMode = kFileModeInvalid);
+ScopedFstream OpenFstream(const char* path, const char* mode);
 
 // This is an alias for close(). It's to avoid leaking Windows.h in headers.
 // Exported because ScopedFile is used in the /include/ext API by Chromium
@@ -93,9 +93,11 @@ std::string GetFileExtension(const std::string& filename);
 base::Status ListFilesRecursive(const std::string& dir_path,
                                 std::vector<std::string>& output);
 
-// Returns the size of the file at `path` or nullopt in case of error.
-Optional<size_t> GetFileSize(const std::string& path);
-
+// Sets |path|'s owner group to |group_name| and permission mode bits to
+// |mode_bits|.
+base::Status SetFilePermissions(const std::string& path,
+                                const std::string& group_name,
+                                const std::string& mode_bits);
 }  // namespace base
 }  // namespace perfetto
 

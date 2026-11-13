@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
-#include "absl/types/optional.h"
 #include "platform/api/task_runner.h"
 #include "platform/api/time.h"
 #include "platform/base/error.h"
@@ -124,9 +123,9 @@ class TaskRunnerImpl final : public TaskRunner {
   // notifying the run loop to wake up when it is waiting for a task to be added
   // to the queue in |run_loop_wakeup_|.
   std::mutex task_mutex_;
-  std::vector<TaskWithMetadata> tasks_ GUARDED_BY(task_mutex_);
+  std::vector<TaskWithMetadata> tasks_ ABSL_GUARDED_BY(task_mutex_);
   std::multimap<Clock::time_point, TaskWithMetadata> delayed_tasks_
-      GUARDED_BY(task_mutex_);
+      ABSL_GUARDED_BY(task_mutex_);
 
   // When |task_waiter_| is nullptr, |run_loop_wakeup_| is used for sleeping the
   // task runner.  Otherwise, |run_loop_wakeup_| isn't used and |task_waiter_|

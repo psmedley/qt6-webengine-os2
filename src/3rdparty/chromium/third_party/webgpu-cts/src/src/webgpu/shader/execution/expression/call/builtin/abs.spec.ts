@@ -18,12 +18,19 @@ Component-wise when T is a vector.
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
 import { kBit } from '../../../../../util/constants.js';
-import { i32Bits, TypeF32, TypeI32, TypeU32, u32Bits } from '../../../../../util/conversion.js';
-import { absInterval } from '../../../../../util/f32_interval.js';
-import { fullF32Range } from '../../../../../util/math.js';
-import { allInputSources, Case, makeUnaryToF32IntervalCase, run } from '../../expression.js';
+import {
+  i32Bits,
+  TypeF32,
+  TypeF16,
+  TypeI32,
+  TypeU32,
+  u32Bits,
+  TypeAbstractFloat,
+} from '../../../../../util/conversion.js';
+import { allInputSources, onlyConstInputSource, run } from '../../expression.js';
 
-import { builtin } from './builtin.js';
+import { d } from './abs.cache.js';
+import { abstractBuiltin, builtin } from './builtin.js';
 
 export const g = makeTestGroup(GPUTest);
 
@@ -136,9 +143,14 @@ g.test('abstract_float')
   .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
   .desc(`abstract float tests`)
   .params(u =>
-    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
+    u
+      .combine('inputSource', onlyConstInputSource)
+      .combine('vectorize', [undefined, 2, 3, 4] as const)
   )
-  .unimplemented();
+  .fn(async t => {
+    const cases = await d.get('abstract');
+    await run(t, abstractBuiltin('abs'), [TypeAbstractFloat], TypeAbstractFloat, t.params, cases);
+  });
 
 g.test('f32')
   .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
@@ -147,16 +159,7 @@ g.test('f32')
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    const makeCase = (x: number): Case => {
-      return makeUnaryToF32IntervalCase(x, absInterval);
-    };
-
-    const cases: Array<Case> = [
-      Number.NEGATIVE_INFINITY,
-      ...fullF32Range(),
-      Number.POSITIVE_INFINITY,
-    ].map(x => makeCase(x));
-
+    const cases = await d.get('f32');
     await run(t, builtin('abs'), [TypeF32], TypeF32, t.params, cases);
   });
 
@@ -166,4 +169,10 @@ g.test('f16')
   .params(u =>
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
-  .unimplemented();
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get('f16');
+    await run(t, builtin('abs'), [TypeF16], TypeF16, t.params, cases);
+  });

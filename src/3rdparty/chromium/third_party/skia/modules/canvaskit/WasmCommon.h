@@ -12,7 +12,7 @@
 #include <emscripten/bind.h>
 #include "include/core/SkColor.h"
 #include "include/core/SkSpan.h"
-#include "include/private/SkMalloc.h"
+#include "include/private/base/SkMalloc.h"
 
 using namespace emscripten;
 
@@ -69,6 +69,8 @@ template <typename T> TypedArray MakeTypedArray(int count, const T src[]) {
     jarray.call<void>("set", val(typed_memory_view(count, src)));
     return jarray;
 }
+
+SkColor4f ptrToSkColor4f(WASMPointerF32);
 
 /**
  *  Gives read access to a JSArray

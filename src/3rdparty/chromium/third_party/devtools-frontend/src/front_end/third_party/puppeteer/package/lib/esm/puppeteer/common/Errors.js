@@ -1,26 +1,26 @@
 /**
- * Copyright 2018 Google Inc. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * @license
+ * Copyright 2018 Google Inc.
+ * SPDX-License-Identifier: Apache-2.0
  */
 /**
+ * @deprecated Do not use.
+ *
  * @public
  */
 export class CustomError extends Error {
+    /**
+     * @internal
+     */
     constructor(message) {
         super(message);
         this.name = this.constructor.name;
-        Error.captureStackTrace(this, this.constructor);
+    }
+    /**
+     * @internal
+     */
+    get [Symbol.toStringTag]() {
+        return this.constructor.name;
     }
 }
 /**
@@ -41,12 +41,45 @@ export class TimeoutError extends CustomError {
  * @public
  */
 export class ProtocolError extends CustomError {
-    constructor() {
-        super(...arguments);
-        this.originalMessage = '';
+    #code;
+    #originalMessage = '';
+    set code(code) {
+        this.#code = code;
+    }
+    /**
+     * @readonly
+     * @public
+     */
+    get code() {
+        return this.#code;
+    }
+    set originalMessage(originalMessage) {
+        this.#originalMessage = originalMessage;
+    }
+    /**
+     * @readonly
+     * @public
+     */
+    get originalMessage() {
+        return this.#originalMessage;
     }
 }
 /**
+ * Puppeteer will throw this error if a method is not
+ * supported by the currently used protocol
+ *
+ * @public
+ */
+export class UnsupportedOperation extends CustomError {
+}
+/**
+ * @internal
+ */
+export class TargetCloseError extends ProtocolError {
+}
+/**
+ * @deprecated Import error classes directly.
+ *
  * Puppeteer methods might throw errors if they are unable to fulfill a request.
  * For example, `page.waitForSelector(selector[, options])` might fail if the
  * selector doesn't match any nodes during the given timeframe.
@@ -61,7 +94,7 @@ export class ProtocolError extends CustomError {
  * try {
  *   await page.waitForSelector('.foo');
  * } catch (e) {
- *   if (e instanceof puppeteer.errors.TimeoutError) {
+ *   if (e instanceof TimeoutError) {
  *     // Do something if this is a timeout.
  *   }
  * }

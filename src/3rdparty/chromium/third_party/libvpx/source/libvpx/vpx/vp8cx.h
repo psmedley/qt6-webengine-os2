@@ -166,6 +166,7 @@ enum vp8e_enc_control_id {
    *
    * \note Valid range for VP8: -16..16
    * \note Valid range for VP9: -9..9
+   * \note A negative value (-n) is treated as its absolute value (n) in VP9.
    *
    * Supported in codecs: VP8, VP9
    */
@@ -302,7 +303,7 @@ enum vp8e_enc_control_id {
    * the feature is off, i.e., no golden frame boost in CBR mode and
    * average bitrate target is used.
    *
-   * For example, to allow 100% more bits, i.e, 2X, in a golden frame
+   * For example, to allow 100% more bits, i.e., 2X, in a golden frame
    * than average frame, set this to 100.
    *
    * Supported in codecs: VP9
@@ -598,7 +599,7 @@ enum vp8e_enc_control_id {
    * the feature is off, i.e., no golden frame boost in CBR mode and
    * average bitrate target is used.
    *
-   * For example, to allow 100% more bits, i.e, 2X, in a golden frame
+   * For example, to allow 100% more bits, i.e., 2X, in a golden frame
    * than average frame, set this to 100.
    *
    * Supported in codecs: VP8
@@ -757,6 +758,26 @@ enum vp8e_enc_control_id {
    * Supported in codecs: VP8
    */
   VP8E_SET_RTC_EXTERNAL_RATECTRL,
+
+  /*!\brief Codec control to set quantizer for the next frame.
+   *
+   * This will turn off cyclic refresh. Only applicable to 1-pass without
+   * spatial layers.
+   *
+   * Supported in codecs: VP9
+   *
+   */
+  VP9E_SET_QUANTIZER_ONE_PASS,
+
+  /*!\brief Codec control to use external RC to control TPL.
+   *
+   * This will use external RC to control the QP and GOP structure for TPL.
+   * (rc_type & VPX_RC_QP) in vpx_rc_funcs_t must be non zero.
+   * get_encodeframe_decision callback in vpx_rc_funcs_t also needs to be set.
+   *
+   * Supported in codecs: VP9
+   */
+  VP9E_ENABLE_EXTERNAL_RC_TPL,
 };
 
 /*!\brief vpx 1-D scaling mode
@@ -1085,6 +1106,10 @@ VPX_CTRL_USE_TYPE(VP9E_GET_LAST_QUANTIZER_SVC_LAYERS, int *)
 #define VPX_CTRL_VP9E_GET_LAST_QUANTIZER_SVC_LAYERS
 VPX_CTRL_USE_TYPE(VP8E_SET_RTC_EXTERNAL_RATECTRL, int)
 #define VPX_CTRL_VP8E_SET_RTC_EXTERNAL_RATECTRL
+VPX_CTRL_USE_TYPE(VP9E_SET_QUANTIZER_ONE_PASS, int)
+#define VPX_CTRL_VP9E_SET_QUANTIZER_ONE_PASS
+VPX_CTRL_USE_TYPE(VP9E_ENABLE_EXTERNAL_RC_TPL, int)
+#define VPX_CTRL_VP9E_ENABLE_EXTERNAL_RC_TPL
 
 /*!\endcond */
 /*! @} - end defgroup vp8_encoder */

@@ -20,8 +20,8 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "absl/synchronization/mutex.h"
 
-namespace location {
 namespace nearby {
 
 enum class TestMode {
@@ -50,9 +50,11 @@ TEST(PrngTest, NextInt32GeneratesDifferentValues) {
 }
 
 TEST(PrngTest, NextInt32AcrossThreads) {
+  absl::Mutex mutex;
   Prng prng;
   std::set<int32_t> values;
-  auto func = [&prng, &values]() {
+  auto func = [&prng, &values, &mutex]() {
+    absl::MutexLock lock(&mutex);
     auto value = prng.NextInt32();
     EXPECT_LE(value, std::numeric_limits<std::int32_t>::max());
     EXPECT_GE(value, std::numeric_limits<std::int32_t>::min());
@@ -145,4 +147,3 @@ TEST(PrngTest, ValidateInt32) { ValidateRandom(TestMode::kInt32); }
 TEST(PrngTest, ValidateUint32) { ValidateRandom(TestMode::kUint32); }
 
 }  // namespace nearby
-}  // namespace location

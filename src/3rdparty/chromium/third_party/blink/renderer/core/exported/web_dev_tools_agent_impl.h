@@ -67,11 +67,14 @@ class CORE_EXPORT WebDevToolsAgentImpl final
 
   WebDevToolsAgentImpl(WebLocalFrameImpl*, bool include_view_agents);
   ~WebDevToolsAgentImpl() override;
-  virtual void Trace(Visitor*) const;
+  void Trace(Visitor*) const override;
   DevToolsAgent* GetDevToolsAgent() const { return agent_.Get(); }
 
   void WillBeDestroyed();
   void FlushProtocolNotifications();
+
+  void MainThreadDebuggerPaused();
+  void MainThreadDebuggerResumed();
 
   bool HasOverlays() const { return !overlay_agents_.empty(); }
   void UpdateOverlaysPrePaint();
@@ -106,6 +109,7 @@ class CORE_EXPORT WebDevToolsAgentImpl final
   // InspectorPageAgent::Client implementation.
   void PageLayoutInvalidated(bool resized) override;
   void WaitForDebugger() override;
+  bool IsPausedForNewWindow() override;
 
   // InspectorLayerTreeAgent::Client implementation.
   bool IsInspectorLayer(const cc::Layer*) override;
@@ -128,6 +132,7 @@ class CORE_EXPORT WebDevToolsAgentImpl final
   Member<Node> node_to_inspect_;
   bool include_view_agents_;
   bool wait_for_debugger_when_shown_ = false;
+  bool is_paused_for_new_window_shown_ = false;
 };
 
 }  // namespace blink

@@ -1,5 +1,5 @@
 // Copyright (C) 2017 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 #include "httpreqrep.h"
 
 HttpReqRep::HttpReqRep(QTcpSocket *socket, QObject *parent)
@@ -55,6 +55,11 @@ QByteArray HttpReqRep::requestHeader(const QByteArray &key) const
     if (it != m_requestHeaders.end())
         return it->second;
     return {};
+}
+
+bool HttpReqRep::hasRequestHeader(const QByteArray &key) const
+{
+    return m_requestHeaders.find(key.toLower()) != m_requestHeaders.end();
 }
 
 void HttpReqRep::handleReadyRead()

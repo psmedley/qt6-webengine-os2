@@ -5,8 +5,8 @@
 #ifndef QUICHE_SPDY_CORE_HPACK_HPACK_OUTPUT_STREAM_H_
 #define QUICHE_SPDY_CORE_HPACK_HPACK_OUTPUT_STREAM_H_
 
+#include <cstddef>
 #include <cstdint>
-#include <map>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -20,7 +20,7 @@ namespace spdy {
 
 // An HpackOutputStream handles all the low-level details of encoding
 // header fields.
-class QUICHE_EXPORT_PRIVATE HpackOutputStream {
+class QUICHE_EXPORT HpackOutputStream {
  public:
   HpackOutputStream();
   HpackOutputStream(const HpackOutputStream&) = delete;

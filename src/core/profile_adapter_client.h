@@ -27,7 +27,7 @@ class WebContentsAdapterClient;
 class WebEngineSettings;
 class UserNotificationController;
 
-class Q_WEBENGINECORE_PRIVATE_EXPORT ProfileAdapterClient
+class Q_WEBENGINECORE_EXPORT ProfileAdapterClient
 {
 public:
     // Keep in sync with content::DownloadItem::DownloadState
@@ -82,19 +82,19 @@ public:
     };
 
     struct DownloadItemInfo {
-        const quint32 id;
-        const QUrl url;
-        const int state;
-        const qint64 totalBytes;
-        const qint64 receivedBytes;
-        const QString mimeType;
-
+        quint32 id;
+        QUrl url;
+        int state;
+        qint64 totalBytes;
+        qint64 receivedBytes;
+        QString mimeType;
         QString path;
         int savePageFormat;
         bool accepted;
         bool paused;
         bool done;
         bool isSavePageDownload;
+        bool useDownloadTargetCallback;
         int downloadInterruptReason;
         WebContentsAdapterClient *page;
         QString suggestedFileName;
@@ -103,13 +103,15 @@ public:
 
     virtual ~ProfileAdapterClient() { }
 
-    virtual void downloadRequested(DownloadItemInfo &info) = 0;
+    virtual void downloadRequested(const DownloadItemInfo &info) = 0;
     virtual void downloadUpdated(const DownloadItemInfo &info) = 0;
     virtual void showNotification(QSharedPointer<UserNotificationController> &) { }
 
     virtual void addWebContentsAdapterClient(WebContentsAdapterClient *adapter) = 0;
     virtual void removeWebContentsAdapterClient(WebContentsAdapterClient *adapter) = 0;
     virtual WebEngineSettings *coreSettings() const = 0;
+    virtual void clearHttpCacheCompleted() = 0;
+
     static QString downloadInterruptReasonToString(DownloadInterruptReason reason);
 };
 

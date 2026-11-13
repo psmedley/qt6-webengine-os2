@@ -5,18 +5,27 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PROCESSING_LABEL_PROCESSING_UTIL_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PROCESSING_LABEL_PROCESSING_UTIL_H_
 
+#include <optional>
+#include <string>
 #include <vector>
+
+#include "build/build_config.h"
 #include "base/strings/string_piece.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+
+#if BUILDFLAG(IS_MAC_13)
+namespace std {
+typedef ::std::basic_string<char16_t> u16string;
+}
+#endif
 
 namespace autofill {
 
 // If parseable labels can be derived from |labels|, a vector of
 // |std::u16string| is return that is aligned with |labels|.
 // Parseable labels can be derived by splitting one label between multiple
-// adjacent fields. If there aren't any changes to the labels, |absl::nullopt|
+// adjacent fields. If there aren't any changes to the labels, |std::nullopt|
 // is returned.
-absl::optional<std::vector<std::u16string>> GetParseableLabels(
+std::optional<std::vector<std::u16string>> GetParseableLabels(
     const std::vector<base::StringPiece16>& labels);
 
 }  // namespace autofill

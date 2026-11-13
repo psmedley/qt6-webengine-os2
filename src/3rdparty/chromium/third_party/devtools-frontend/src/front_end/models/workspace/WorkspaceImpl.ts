@@ -33,15 +33,7 @@ import type * as Platform from '../../core/platform/platform.js';
 import type * as TextUtils from '../text_utils/text_utils.js';
 
 import {UISourceCode, type UISourceCodeMetadata} from './UISourceCode.js';
-
-export interface ProjectSearchConfig {
-  query(): string;
-  ignoreCase(): boolean;
-  isRegex(): boolean;
-  queries(): string[];
-  filePathMatchesFileQuery(filePath: Platform.DevToolsPath.RawPathString|
-                           Platform.DevToolsPath.EncodedPathString|Platform.DevToolsPath.UrlString): boolean;
-}
+import {type SearchConfig} from './SearchConfig.js';
 
 export interface Project {
   workspace(): WorkspaceImpl;
@@ -67,19 +59,29 @@ export interface Project {
       Promise<UISourceCode|null>;
   canCreateFile(): boolean;
   deleteFile(uiSourceCode: UISourceCode): void;
+  deleteDirectoryRecursively(path: Platform.DevToolsPath.EncodedPathString): Promise<boolean>;
   remove(): void;
+  removeUISourceCode(url: Platform.DevToolsPath.UrlString): void;
   searchInFileContent(uiSourceCode: UISourceCode, query: string, caseSensitive: boolean, isRegex: boolean):
       Promise<TextUtils.ContentProvider.SearchMatch[]>;
   findFilesMatchingSearchRequest(
-      searchConfig: ProjectSearchConfig, filesMatchingFileQuery: Platform.DevToolsPath.UrlString[],
-      progress: Common.Progress.Progress): Promise<string[]>;
+      searchConfig: SearchConfig, filesMatchingFileQuery: UISourceCode[],
+      progress: Common.Progress.Progress): Promise<Map<UISourceCode, TextUtils.ContentProvider.SearchMatch[]|null>>;
   indexContent(progress: Common.Progress.Progress): void;
   uiSourceCodeForURL(url: Platform.DevToolsPath.UrlString): UISourceCode|null;
-  uiSourceCodes(): UISourceCode[];
+
+  /**
+   * Returns an iterator for the currently registered {@link UISourceCode}s for this project. When
+   * new {@link UISourceCode}s are added while iterating, they might show up already. When removing
+   * {@link UISourceCode}s while iterating, these will no longer show up, and will have no effect
+   * on the other entries.
+   *
+   * @return an iterator for the sources provided by this project.
+   */
+  uiSourceCodes(): Iterable<UISourceCode>;
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum, @typescript-eslint/naming-convention
+// eslint-disable-next-line @typescript-eslint/naming-convention
 export enum projectTypes {
   Debugger = 'debugger',
   Formatter = 'formatter',
@@ -94,20 +96,14 @@ export abstract class ProjectStore implements Project {
   private readonly idInternal: string;
   private readonly typeInternal: projectTypes;
   private readonly displayNameInternal: string;
-  private uiSourceCodesMap: Map<Platform.DevToolsPath.UrlString, {
-    uiSourceCode: UISourceCode,
-    index: number,
-  }>;
-  private uiSourceCodesList: UISourceCode[];
+  readonly #uiSourceCodes: Map<Platform.DevToolsPath.UrlString, UISourceCode>;
 
   constructor(workspace: WorkspaceImpl, id: string, type: projectTypes, displayName: string) {
     this.workspaceInternal = workspace;
     this.idInternal = id;
     this.typeInternal = type;
     this.displayNameInternal = displayName;
-
-    this.uiSourceCodesMap = new Map();
-    this.uiSourceCodesList = [];
+    this.#uiSourceCodes = new Map();
   }
 
   id(): string {
@@ -136,46 +132,31 @@ export abstract class ProjectStore implements Project {
     if (this.uiSourceCodeForURL(url)) {
       return false;
     }
-    this.uiSourceCodesMap.set(url, {uiSourceCode: uiSourceCode, index: this.uiSourceCodesList.length});
-    this.uiSourceCodesList.push(uiSourceCode);
+    this.#uiSourceCodes.set(url, uiSourceCode);
     this.workspaceInternal.dispatchEventToListeners(Events.UISourceCodeAdded, uiSourceCode);
     return true;
   }
 
   removeUISourceCode(url: Platform.DevToolsPath.UrlString): void {
-    const uiSourceCode = this.uiSourceCodeForURL(url);
-    if (!uiSourceCode) {
+    const uiSourceCode = this.#uiSourceCodes.get(url);
+    if (uiSourceCode === undefined) {
       return;
     }
-
-    const entry = this.uiSourceCodesMap.get(url);
-    if (!entry) {
-      return;
-    }
-    const movedUISourceCode = this.uiSourceCodesList[this.uiSourceCodesList.length - 1];
-    this.uiSourceCodesList[entry.index] = movedUISourceCode;
-    const movedEntry = this.uiSourceCodesMap.get(movedUISourceCode.url());
-    if (movedEntry) {
-      movedEntry.index = entry.index;
-    }
-    this.uiSourceCodesList.splice(this.uiSourceCodesList.length - 1, 1);
-    this.uiSourceCodesMap.delete(url);
-    this.workspaceInternal.dispatchEventToListeners(Events.UISourceCodeRemoved, entry.uiSourceCode);
+    this.#uiSourceCodes.delete(url);
+    this.workspaceInternal.dispatchEventToListeners(Events.UISourceCodeRemoved, uiSourceCode);
   }
 
   removeProject(): void {
     this.workspaceInternal.removeProject(this);
-    this.uiSourceCodesMap = new Map();
-    this.uiSourceCodesList = [];
+    this.#uiSourceCodes.clear();
   }
 
   uiSourceCodeForURL(url: Platform.DevToolsPath.UrlString): UISourceCode|null {
-    const entry = this.uiSourceCodesMap.get(url);
-    return entry ? entry.uiSourceCode : null;
+    return this.#uiSourceCodes.get(url) ?? null;
   }
 
-  uiSourceCodes(): UISourceCode[] {
-    return this.uiSourceCodesList;
+  uiSourceCodes(): Iterable<UISourceCode> {
+    return this.#uiSourceCodes.values();
   }
 
   renameUISourceCode(uiSourceCode: UISourceCode, newName: string): void {
@@ -183,12 +164,8 @@ export abstract class ProjectStore implements Project {
     const newPath = uiSourceCode.parentURL() ?
         Common.ParsedURL.ParsedURL.urlFromParentUrlAndName(uiSourceCode.parentURL(), newName) :
         Common.ParsedURL.ParsedURL.preEncodeSpecialCharactersInPath(newName) as Platform.DevToolsPath.UrlString;
-    const value = this.uiSourceCodesMap.get(oldPath) as {
-      uiSourceCode: UISourceCode,
-      index: number,
-    };
-    this.uiSourceCodesMap.set(newPath, value);
-    this.uiSourceCodesMap.delete(oldPath);
+    this.#uiSourceCodes.set(newPath, uiSourceCode);
+    this.#uiSourceCodes.delete(oldPath);
   }
 
   // No-op implementation for a handfull of interface methods.
@@ -202,6 +179,9 @@ export abstract class ProjectStore implements Project {
   excludeFolder(_path: Platform.DevToolsPath.UrlString): void {
   }
   deleteFile(_uiSourceCode: UISourceCode): void {
+  }
+  deleteDirectoryRecursively(_path: Platform.DevToolsPath.EncodedPathString): Promise<boolean> {
+    return Promise.resolve(false);
   }
   remove(): void {
   }
@@ -224,8 +204,8 @@ export abstract class ProjectStore implements Project {
   abstract searchInFileContent(uiSourceCode: UISourceCode, query: string, caseSensitive: boolean, isRegex: boolean):
       Promise<TextUtils.ContentProvider.SearchMatch[]>;
   abstract findFilesMatchingSearchRequest(
-      searchConfig: ProjectSearchConfig, filesMatchingFileQuery: Platform.DevToolsPath.UrlString[],
-      progress: Common.Progress.Progress): Promise<string[]>;
+      searchConfig: SearchConfig, filesMatchingFileQuery: UISourceCode[],
+      progress: Common.Progress.Progress): Promise<Map<UISourceCode, TextUtils.ContentProvider.SearchMatch[]|null>>;
 }
 
 let workspaceInstance: WorkspaceImpl|undefined;
@@ -258,46 +238,39 @@ export class WorkspaceImpl extends Common.ObjectWrapper.ObjectWrapper<EventTypes
     return project ? project.uiSourceCodeForURL(url) : null;
   }
 
-  // This method explicitly awaits the UISourceCode if not yet
-  // available.
-  uiSourceCodeForURLPromise(url: Platform.DevToolsPath.UrlString, type?: projectTypes): Promise<UISourceCode> {
-    const uiSourceCode = this.uiSourceCodeForURL(url, type);
-    if (uiSourceCode) {
-      return Promise.resolve(uiSourceCode);
-    }
-    return new Promise(resolve => {
-      const descriptor = this.addEventListener(Events.UISourceCodeAdded, event => {
-        const uiSourceCode = event.data;
-        if (uiSourceCode.url() === url) {
-          if (!type || type === uiSourceCode.project().type()) {
-            this.removeEventListener(Events.UISourceCodeAdded, descriptor.listener);
-            resolve(uiSourceCode);
-          }
-        }
-      });
-    });
-  }
-
-  uiSourceCodeForURL(url: Platform.DevToolsPath.UrlString, type?: projectTypes): UISourceCode|null {
+  uiSourceCodeForURL(url: Platform.DevToolsPath.UrlString): UISourceCode|null {
     for (const project of this.projectsInternal.values()) {
-      // For snippets, we may get two different UISourceCodes for the same url (one belonging to
-      // the file system project, one belonging to the network project). Allow selecting the UISourceCode
-      // for a specific project type.
-      if (!type || project.type() === type) {
-        const uiSourceCode = project.uiSourceCodeForURL(url);
-        if (uiSourceCode) {
-          return uiSourceCode;
-        }
+      const uiSourceCode = project.uiSourceCodeForURL(url);
+      if (uiSourceCode) {
+        return uiSourceCode;
       }
     }
     return null;
+  }
+
+  findCompatibleUISourceCodes(uiSourceCode: UISourceCode): UISourceCode[] {
+    const url = uiSourceCode.url();
+    const contentType = uiSourceCode.contentType();
+    const result: UISourceCode[] = [];
+    for (const project of this.projectsInternal.values()) {
+      if (uiSourceCode.project().type() !== project.type()) {
+        continue;
+      }
+      const candidate = project.uiSourceCodeForURL(url);
+      if (candidate && candidate.url() === url && candidate.contentType() === contentType) {
+        result.push(candidate);
+      }
+    }
+    return result;
   }
 
   uiSourceCodesForProjectType(type: projectTypes): UISourceCode[] {
     const result: UISourceCode[] = [];
     for (const project of this.projectsInternal.values()) {
       if (project.type() === type) {
-        result.push(...project.uiSourceCodes());
+        for (const uiSourceCode of project.uiSourceCodes()) {
+          result.push(uiSourceCode);
+        }
       }
     }
     return result;
@@ -332,7 +305,9 @@ export class WorkspaceImpl extends Common.ObjectWrapper.ObjectWrapper<EventTypes
   uiSourceCodes(): UISourceCode[] {
     const result: UISourceCode[] = [];
     for (const project of this.projectsInternal.values()) {
-      result.push(...project.uiSourceCodes());
+      for (const uiSourceCode of project.uiSourceCodes()) {
+        result.push(uiSourceCode);
+      }
     }
     return result;
   }
@@ -346,8 +321,6 @@ export class WorkspaceImpl extends Common.ObjectWrapper.ObjectWrapper<EventTypes
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
 export enum Events {
   UISourceCodeAdded = 'UISourceCodeAdded',
   UISourceCodeRemoved = 'UISourceCodeRemoved',

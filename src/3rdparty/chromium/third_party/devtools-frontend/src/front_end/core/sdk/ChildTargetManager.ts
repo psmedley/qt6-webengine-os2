@@ -2,17 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as i18n from '../../core/i18n/i18n.js';
+import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
+import type * as Protocol from '../../generated/protocol.js';
 import * as Common from '../common/common.js';
 import * as Host from '../host/host.js';
 import type * as ProtocolClient from '../protocol_client/protocol_client.js';
-import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
-import type * as Protocol from '../../generated/protocol.js';
 
 import {ParallelConnection} from './Connections.js';
-
-import {Capability, Type, type Target} from './Target.js';
+import {PrimaryPageChangeType, ResourceTreeModel} from './ResourceTreeModel.js';
 import {SDKModel} from './SDKModel.js';
+import {Capability, type Target, Type} from './Target.js';
 import {Events as TargetManagerEvents, TargetManager} from './TargetManager.js';
+
+const UIStrings = {
+  /**
+   * @description Text that refers to the main target. The main target is the primary webpage that
+   * DevTools is connected to. This text is used in various places in the UI as a label/name to inform
+   * the user which target/webpage they are currently connected to, as DevTools may connect to multiple
+   * targets at the same time in some scenarios.
+   */
+  main: 'Main',
+};
+const str_ = i18n.i18n.registerUIStrings('core/sdk/ChildTargetManager.ts', UIStrings);
+const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
 export class ChildTargetManager extends SDKModel<EventTypes> implements ProtocolProxyApi.TargetDispatcher {
   readonly #targetManager: TargetManager;
@@ -58,15 +71,15 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
     return Array.from(this.#childTargetsBySessionId.values());
   }
 
-  async suspendModel(): Promise<void> {
+  override async suspendModel(): Promise<void> {
     await this.#targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: false, flatten: true});
   }
 
-  async resumeModel(): Promise<void> {
+  override async resumeModel(): Promise<void> {
     await this.#targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true, flatten: true});
   }
 
-  dispose(): void {
+  override dispose(): void {
     for (const sessionId of this.#childTargetsBySessionId.keys()) {
       this.detachedFromTarget({sessionId, targetId: undefined});
     }
@@ -82,7 +95,16 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
     this.#targetInfosInternal.set(targetInfo.targetId, targetInfo);
     const target = this.#childTargetsById.get(targetInfo.targetId);
     if (target) {
-      target.updateTargetInfo(targetInfo);
+      if (target.targetInfo()?.subtype === 'prerender' && !targetInfo.subtype) {
+        const resourceTreeModel = target.model(ResourceTreeModel);
+        target.updateTargetInfo(targetInfo);
+        if (resourceTreeModel && resourceTreeModel.mainFrame) {
+          resourceTreeModel.primaryPageChanged(resourceTreeModel.mainFrame, PrimaryPageChangeType.Activation);
+        }
+        target.setName(i18nString(UIStrings.main));
+      } else {
+        target.updateTargetInfo(targetInfo);
+      }
     }
     this.fireAvailableTargetsChanged();
     this.dispatchEventToListeners(Events.TargetInfoChanged, targetInfo);
@@ -110,22 +132,40 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
     return this.#parentTargetId;
   }
 
+  async getTargetInfo(): Promise<Protocol.Target.TargetInfo> {
+    return (await this.#parentTarget.targetAgent().invoke_getTargetInfo({})).targetInfo;
+  }
+
   async attachedToTarget({sessionId, targetInfo, waitingForDebugger}: Protocol.Target.AttachedToTargetEvent):
       Promise<void> {
     if (this.#parentTargetId === targetInfo.targetId) {
       return;
     }
+    let type = Type.Browser;
     let targetName = '';
     if (targetInfo.type === 'worker' && targetInfo.title && targetInfo.title !== targetInfo.url) {
       targetName = targetInfo.title;
-    } else if (targetInfo.type !== 'iframe' && targetInfo.type !== 'webview') {
-      const parsedURL = Common.ParsedURL.ParsedURL.fromString(targetInfo.url);
-      targetName =
-          parsedURL ? parsedURL.lastPathComponentWithFragment() : '#' + (++ChildTargetManager.lastAnonymousTargetId);
+    } else if (!['page', 'iframe', 'webview'].includes(targetInfo.type)) {
+      const KNOWN_FRAME_PATTERNS = [
+        '^chrome://print/$',
+        '^chrome://file-manager/',
+        '^chrome://feedback/',
+        '^chrome://.*\\.top-chrome/$',
+        '^chrome://view-cert/$',
+        '^devtools://',
+      ];
+      if (KNOWN_FRAME_PATTERNS.some(p => targetInfo.url.match(p))) {
+        type = Type.Frame;
+      } else {
+        const parsedURL = Common.ParsedURL.ParsedURL.fromString(targetInfo.url);
+        targetName =
+            parsedURL ? parsedURL.lastPathComponentWithFragment() : '#' + (++ChildTargetManager.lastAnonymousTargetId);
+      }
     }
 
-    let type = Type.Browser;
     if (targetInfo.type === 'iframe' || targetInfo.type === 'webview') {
+      type = Type.Frame;
+    } else if (targetInfo.type === 'background_page' || targetInfo.type === 'app' || targetInfo.type === 'popup_page') {
       type = Type.Frame;
     }
     // TODO(lfg): ensure proper capabilities for child pages (e.g. portals).
@@ -135,6 +175,8 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
       type = Type.Worker;
     } else if (targetInfo.type === 'shared_worker') {
       type = Type.SharedWorker;
+    } else if (targetInfo.type === 'shared_storage_worklet') {
+      type = Type.SharedStorageWorklet;
     } else if (targetInfo.type === 'service_worker') {
       type = Type.ServiceWorker;
     } else if (targetInfo.type === 'auction_worklet') {
@@ -148,7 +190,12 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
     if (ChildTargetManager.attachCallback) {
       await ChildTargetManager.attachCallback({target, waitingForDebugger});
     }
-    void target.runtimeAgent().invoke_runIfWaitingForDebugger();
+
+    // [crbug/1423096] Invoking this on a worker session that is not waiting for the debugger can force the worker
+    // to resume even if there is another session waiting for the debugger.
+    if (waitingForDebugger) {
+      void target.runtimeAgent().invoke_runIfWaitingForDebugger();
+    }
   }
 
   detachedFromTarget({sessionId}: Protocol.Target.DetachedFromTargetEvent): void {
@@ -209,9 +256,7 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
                                    }) => Promise<void>);
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   TargetCreated = 'TargetCreated',
   TargetDestroyed = 'TargetDestroyed',
   TargetInfoChanged = 'TargetInfoChanged',

@@ -1,4 +1,4 @@
-// Copyright 2015 PDFium Authors. All rights reserved.
+// Copyright 2015 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,10 @@
 #include "testing/utils/hash.h"
 #include "testing/utils/path_service.h"
 #include "third_party/base/check.h"
+#include "third_party/base/check_op.h"
 #include "third_party/base/containers/contains.h"
 #include "third_party/base/notreached.h"
+#include "third_party/base/numerics/checked_math.h"
 #include "third_party/base/numerics/safe_conversions.h"
 
 namespace {
@@ -326,20 +328,22 @@ bool EmbedderTest::OpenDocumentWithOptions(const std::string& filename,
                                            const char* password,
                                            LinearizeOption linearize_option,
                                            JavaScriptOption javascript_option) {
-  std::string file_path;
-  if (!PathService::GetTestFilePath(filename, &file_path))
+  std::string file_path = PathService::GetTestFilePath(filename);
+  if (file_path.empty()) {
     return false;
+  }
 
-  file_contents_ = GetFileContents(file_path.c_str(), &file_length_);
-  if (!file_contents_)
+  file_contents_ = GetFileContents(file_path.c_str());
+  if (file_contents_.empty()) {
     return false;
+  }
 
   EXPECT_TRUE(!loader_);
-  loader_ = std::make_unique<TestLoader>(
-      pdfium::make_span(file_contents_.get(), file_length_));
+  loader_ = std::make_unique<TestLoader>(file_contents_);
 
   memset(&file_access_, 0, sizeof(file_access_));
-  file_access_.m_FileLen = static_cast<unsigned long>(file_length_);
+  file_access_.m_FileLen =
+      pdfium::base::checked_cast<unsigned long>(file_contents_.size());
   file_access_.m_GetBlock = TestLoader::GetBlock;
   file_access_.m_Param = loader_.get();
 
@@ -413,7 +417,6 @@ bool EmbedderTest::OpenDocumentHelper(const char* password,
   if (doc_type == FORMTYPE_XFA_FULL || doc_type == FORMTYPE_XFA_FOREGROUND)
     FPDF_LoadXFA(document_ptr);
 
-  (void)FPDF_GetDocPermissions(document_ptr);
   return true;
 }
 
@@ -425,7 +428,7 @@ void EmbedderTest::CloseDocument() {
   fake_file_access_.reset();
   memset(&file_access_, 0, sizeof(file_access_));
   loader_.reset();
-  file_contents_.reset();
+  file_contents_ = {};
 }
 
 FPDF_FORMHANDLE EmbedderTest::SetupFormFillEnvironment(
@@ -540,10 +543,8 @@ void EmbedderTest::UnloadPageNoEvents(FPDF_PAGE page) {
 void EmbedderTest::UnloadPageCommon(FPDF_PAGE page, bool do_events) {
   DCHECK(form_handle());
   int page_number = GetPageNumberForLoadedPage(page);
-  if (page_number < 0) {
-    NOTREACHED();
-    return;
-  }
+  CHECK_GE(page_number, 0);
+
   if (do_events) {
     FORM_DoPageAAction(page, form_handle(), FPDFPAGE_AACTION_CLOSE);
     FORM_OnBeforeClosePage(page, form_handle());
@@ -563,10 +564,8 @@ ScopedFPDFBitmap EmbedderTest::RenderLoadedPage(FPDF_PAGE page) {
 
 ScopedFPDFBitmap EmbedderTest::RenderLoadedPageWithFlags(FPDF_PAGE page,
                                                          int flags) {
-  if (GetPageNumberForLoadedPage(page) < 0) {
-    NOTREACHED();
-    return nullptr;
-  }
+  int page_number = GetPageNumberForLoadedPage(page);
+  CHECK_GE(page_number, 0);
   return RenderPageWithFlags(page, form_handle(), flags);
 }
 
@@ -576,10 +575,8 @@ ScopedFPDFBitmap EmbedderTest::RenderSavedPage(FPDF_PAGE page) {
 
 ScopedFPDFBitmap EmbedderTest::RenderSavedPageWithFlags(FPDF_PAGE page,
                                                         int flags) {
-  if (GetPageNumberForSavedPage(page) < 0) {
-    NOTREACHED();
-    return nullptr;
-  }
+  int page_number = GetPageNumberForSavedPage(page);
+  CHECK_GE(page_number, 0);
   return RenderPageWithFlags(page, saved_form_handle(), flags);
 }
 
@@ -681,8 +678,7 @@ int EmbedderTest::BytesPerPixelForFormat(int format) {
     case FPDFBitmap_BGRA:
       return 4;
     default:
-      NOTREACHED();
-      return 0;
+      NOTREACHED_NORETURN();
   }
 }
 
@@ -733,10 +729,7 @@ void EmbedderTest::CloseSavedPage(FPDF_PAGE page) {
   DCHECK(saved_form_handle());
 
   int page_number = GetPageNumberForSavedPage(page);
-  if (page_number < 0) {
-    NOTREACHED();
-    return;
-  }
+  CHECK_GE(page_number, 0);
 
   FORM_DoPageAAction(page, saved_form_handle(), FPDFPAGE_AACTION_CLOSE);
   FORM_OnBeforeClosePage(page, saved_form_handle());
@@ -792,8 +785,9 @@ std::string EmbedderTest::HashBitmap(FPDF_BITMAP bitmap) {
   int usable_bytes_per_row =
       GetBitmapBytesPerPixel(bitmap) * FPDFBitmap_GetWidth(bitmap);
   int height = FPDFBitmap_GetHeight(bitmap);
-  auto span = pdfium::make_span(
-      static_cast<uint8_t*>(FPDFBitmap_GetBuffer(bitmap)), stride * height);
+  auto span =
+      pdfium::make_span(static_cast<uint8_t*>(FPDFBitmap_GetBuffer(bitmap)),
+                        static_cast<size_t>(stride) * height);
 
   CRYPT_md5_context context = CRYPT_MD5Start();
   for (int i = 0; i < height; ++i)
@@ -853,15 +847,11 @@ int EmbedderTest::GetBlockFromString(void* param,
                                      unsigned char* buf,
                                      unsigned long size) {
   std::string* new_file = static_cast<std::string*>(param);
-  if (!new_file || pos + size < pos) {
-    NOTREACHED();
-    return 0;
-  }
+  CHECK(new_file);
 
-  if (pos + size > new_file->size()) {
-    NOTREACHED();
-    return 0;
-  }
+  pdfium::base::CheckedNumeric<size_t> end = pos;
+  end += size;
+  CHECK_LE(end.ValueOrDie(), new_file->size());
 
   memcpy(buf, new_file->data() + pos, size);
   return 1;

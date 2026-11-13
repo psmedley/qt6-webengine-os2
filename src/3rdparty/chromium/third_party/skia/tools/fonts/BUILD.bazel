@@ -1,23 +1,27 @@
-load("//bazel:macros.bzl", "exports_files_legacy", "skia_cc_library")
+load("//bazel:skia_rules.bzl", "exports_files_legacy", "skia_cc_library", "skia_filegroup")
 
 licenses(["notice"])
 
 exports_files_legacy()
 
-filegroup(
+skia_filegroup(
     name = "test_font_manager_srcs",
     testonly = True,
     srcs = [
+        "FontToolUtils.cpp",
+        "FontToolUtils.h",
         "TestFontMgr.cpp",
         "TestFontMgr.h",
         "TestTypeface.cpp",
         "TestTypeface.h",
-        "ToolUtilsFont.cpp",
     ],
-    visibility = ["//tools:__subpackages__"],
+    visibility = [
+        "//tests:__pkg__",
+        "//tools:__subpackages__",
+    ],
 )
 
-filegroup(
+skia_filegroup(
     name = "test_fonts",
     testonly = True,
     srcs = [
@@ -26,10 +30,13 @@ filegroup(
         "test_font_sans_serif.inc",
         "test_font_serif.inc",
     ],
-    visibility = ["//tools:__subpackages__"],
+    visibility = [
+        "//tests:__pkg__",
+        "//tools:__subpackages__",
+    ],
 )
 
-filegroup(
+skia_filegroup(
     name = "test_empty_typeface",
     testonly = True,
     srcs = ["TestEmptyTypeface.h"],

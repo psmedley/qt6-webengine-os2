@@ -92,7 +92,7 @@ source_set("client_api_without_backends") {
     "../../include/perfetto/tracing/core",
     "../../protos/perfetto/common:zero",
     "../../protos/perfetto/config:cpp",
-    "../../protos/perfetto/config/interceptors:zero",
+    "../../protos/perfetto/config/interceptors:cpp",
     "../../protos/perfetto/config/track_event:cpp",
     "../base",
     "core",
@@ -133,6 +133,21 @@ source_set("client_api_without_backends") {
       "ipc/common",
     ]
   }
+}
+
+# Separate target because the embedder might not want this.
+source_set("integrationtests") {
+  testonly = true
+  deps = [
+    "../../gn:default_deps",
+    "../../gn:gtest_and_gmock",
+    "../../include/perfetto/ext/tracing/ipc",
+    "../../include/perfetto/tracing",
+    "../../protos/perfetto/trace:cpp",
+    "../base",
+    "../base:test_support",
+  ]
+  sources = [ "internal/tracing_muxer_impl_integrationtest.cc" ]
 }
 
 perfetto_unittest_source_set("unittests") {
@@ -210,6 +225,7 @@ source_set("in_process_backend") {
     "../../gn:default_deps",
     "../../include/perfetto/tracing/core",
     "../base",
+    "core",
     "core:service",
   ]
   sources = [ "internal/in_process_tracing_backend.cc" ]

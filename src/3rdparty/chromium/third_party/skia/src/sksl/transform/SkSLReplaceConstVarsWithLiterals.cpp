@@ -6,14 +6,14 @@
  */
 
 #include "include/core/SkTypes.h"
-#include "include/private/SkSLModifiers.h"
-#include "include/private/SkSLProgramElement.h"
-#include "include/private/SkTHash.h"
+#include "src/core/SkTHash.h"
 #include "src/sksl/SkSLCompiler.h"
 #include "src/sksl/SkSLConstantFolder.h"
 #include "src/sksl/analysis/SkSLProgramUsage.h"
 #include "src/sksl/ir/SkSLExpression.h"
 #include "src/sksl/ir/SkSLFunctionDefinition.h"
+#include "src/sksl/ir/SkSLModifierFlags.h"
+#include "src/sksl/ir/SkSLProgramElement.h"
 #include "src/sksl/ir/SkSLVariable.h"
 #include "src/sksl/ir/SkSLVariableReference.h"
 #include "src/sksl/transform/SkSLProgramWriter.h"
@@ -23,12 +23,13 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <vector>
+
+using namespace skia_private;
 
 namespace SkSL {
 
-void Transform::ReplaceConstVarsWithLiterals(LoadedModule& module, ProgramUsage* usage) {
+void Transform::ReplaceConstVarsWithLiterals(Module& module, ProgramUsage* usage) {
     class ConstVarReplacer : public ProgramWriter {
     public:
         ConstVarReplacer(ProgramUsage* usage) : fUsage(usage) {}
@@ -42,8 +43,7 @@ void Transform::ReplaceConstVarsWithLiterals(LoadedModule& module, ProgramUsage*
                 // ... and it's a candidate for size reduction...
                 if (fCandidates.contains(var.variable())) {
                     // ... get its constant value...
-                    const Expression* value = ConstantFolder::GetConstantValueForVariable(var);
-                    if (value != expr.get()) {
+                    if (const Expression* value = ConstantFolder::GetConstantValueOrNull(var)) {
                         // ... and replace it with that value.
                         fUsage->remove(expr.get());
                         expr = value->clone();
@@ -56,7 +56,7 @@ void Transform::ReplaceConstVarsWithLiterals(LoadedModule& module, ProgramUsage*
         }
 
         ProgramUsage* fUsage;
-        SkTHashSet<const Variable*> fCandidates;
+        THashSet<const Variable*> fCandidates;
 
         using INHERITED = ProgramWriter;
     };
@@ -68,7 +68,7 @@ void Transform::ReplaceConstVarsWithLiterals(LoadedModule& module, ProgramUsage*
         if (!count.fVarExists || count.fWrite != 1) {
             continue;
         }
-        if (!(var->modifiers().fFlags & Modifiers::kConst_Flag)) {
+        if (!var->modifierFlags().isConst()) {
             continue;
         }
         if (!var->initialValue()) {

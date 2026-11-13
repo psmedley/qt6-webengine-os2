@@ -32,12 +32,10 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
   }>();
 
   readonly #framesForTarget = new Map<Protocol.Target.TargetID|'main', Set<Protocol.Page.FrameId>>();
-  #topFrame: ResourceTreeFrame|null = null;
+  #outermostFrame: ResourceTreeFrame|null = null;
   #transferringFramesDataCache = new Map<string, {
     creationStackTrace?: Protocol.Runtime.StackTrace,
     creationStackTraceTarget?: Target,
-    adScriptId?: Protocol.Runtime.ScriptId,
-    debuggerId?: Protocol.Runtime.UniqueDebuggerId,
   }>();
   #awaitedFrames: Map<string, {notInTarget?: Target, resolve: (frame: ResourceTreeFrame) => void}[]> = new Map();
 
@@ -94,8 +92,6 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
       // In order to not lose the following attributes of a frame during
       // an OOPIF transfer we need to copy them to the new frame
       frame.setCreationStackTrace(frameData.frame.getCreationStackTraceData());
-      frame.setAdScriptId(frameData.frame.getAdScriptId());
-      frame.setDebuggerId(frameData.frame.getDebuggerId());
       this.#frames.set(frame.id, {frame, count: frameData.count + 1});
     } else {
       // If the transferring frame's detached event is received before its frame added
@@ -107,16 +103,10 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
           creationStackTraceTarget: cachedFrameAttributes.creationStackTraceTarget,
         });
       }
-      if (cachedFrameAttributes?.adScriptId) {
-        frame.setAdScriptId(cachedFrameAttributes.adScriptId);
-      }
-      if (cachedFrameAttributes?.debuggerId) {
-        frame.setDebuggerId(cachedFrameAttributes.debuggerId);
-      }
       this.#frames.set(frame.id, {frame, count: 1});
       this.#transferringFramesDataCache.delete(frame.id);
     }
-    this.resetTopFrame();
+    this.resetOutermostFrame();
 
     // Add the frameId to the the targetId's set of frameIds.
     const frameSet = this.#framesForTarget.get(frame.resourceTreeModel().target().id());
@@ -138,13 +128,9 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
     // so that later on the frame added event in the new target they can be reassigned.
     if (isSwap && !this.#frames.get(frame.id)) {
       const traceData = frame.getCreationStackTraceData();
-      const adScriptId = frame.getAdScriptId();
-      const debuggerId = frame.getDebuggerId();
       const cachedFrameAttributes = {
         ...(traceData.creationStackTrace && {creationStackTrace: traceData.creationStackTrace}),
         ...(traceData.creationStackTrace && {creationStackTraceTarget: traceData.creationStackTraceTarget}),
-        ...(adScriptId && {adScriptId}),
-        ...(debuggerId && {debuggerId}),
       };
       this.#transferringFramesDataCache.set(frame.id, cachedFrameAttributes);
     }
@@ -159,8 +145,8 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
   private frameNavigated(event: Common.EventTarget.EventTargetEvent<ResourceTreeFrame>): void {
     const frame = event.data;
     this.dispatchEventToListeners(Events.FrameNavigated, {frame});
-    if (frame.isTopFrame()) {
-      this.dispatchEventToListeners(Events.TopFrameNavigated, {frame});
+    if (frame.isOutermostFrame()) {
+      this.dispatchEventToListeners(Events.OutermostFrameNavigated, {frame});
     }
   }
 
@@ -173,7 +159,7 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
     if (frameData) {
       if (frameData.count === 1) {
         this.#frames.delete(frameId);
-        this.resetTopFrame();
+        this.resetOutermostFrame();
         this.dispatchEventToListeners(Events.FrameRemoved, {frameId});
       } else {
         frameData.count--;
@@ -182,13 +168,13 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
   }
 
   /**
-   * Looks for the top frame in `#frames` and sets `#topFrame` accordingly.
+   * Looks for the outermost frame in `#frames` and sets `#outermostFrame` accordingly.
    *
    * Important: This method needs to be called everytime `#frames` is updated.
    */
-  private resetTopFrame(): void {
-    const topFrames = this.getAllFrames().filter(frame => frame.isTopFrame());
-    this.#topFrame = topFrames.length > 0 ? topFrames[0] : null;
+  private resetOutermostFrame(): void {
+    const outermostFrames = this.getAllFrames().filter(frame => frame.isOutermostFrame());
+    this.#outermostFrame = outermostFrames.length > 0 ? outermostFrames[0] : null;
   }
 
   /**
@@ -210,8 +196,8 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
     return Array.from(this.#frames.values(), frameData => frameData.frame);
   }
 
-  getTopFrame(): ResourceTreeFrame|null {
-    return this.#topFrame;
+  getOutermostFrame(): ResourceTreeFrame|null {
+    return this.#outermostFrame;
   }
 
   async getOrWaitForFrame(frameId: Protocol.Page.FrameId, notInTarget?: Target): Promise<ResourceTreeFrame> {
@@ -249,9 +235,7 @@ export class FrameManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   // The FrameAddedToTarget event is sent whenever a frame is added to a target.
   // This means that for OOPIFs it is sent twice: once when it's added to a
   // parent target and a second time when it's added to its own target.
@@ -261,7 +245,7 @@ export enum Events {
   // all targets.
   FrameRemoved = 'FrameRemoved',
   ResourceAdded = 'ResourceAdded',
-  TopFrameNavigated = 'TopFrameNavigated',
+  OutermostFrameNavigated = 'OutermostFrameNavigated',
 }
 
 export type EventTypes = {
@@ -269,5 +253,5 @@ export type EventTypes = {
   [Events.FrameNavigated]: {frame: ResourceTreeFrame},
   [Events.FrameRemoved]: {frameId: Protocol.Page.FrameId},
   [Events.ResourceAdded]: {resource: Resource},
-  [Events.TopFrameNavigated]: {frame: ResourceTreeFrame},
+  [Events.OutermostFrameNavigated]: {frame: ResourceTreeFrame},
 };

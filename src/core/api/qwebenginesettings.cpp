@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qwebenginesettings.h"
 #include "web_engine_settings.h"
@@ -101,6 +102,21 @@ void QWebEngineSettings::setUnknownUrlSchemePolicy(
 void QWebEngineSettings::setParentSettings(QWebEngineSettings *parentSettings)
 {
     d_ptr->setParentSettings(parentSettings->d_ptr.data());
+}
+
+void QWebEngineSettings::setImageAnimationPolicy(QWebEngineSettings::ImageAnimationPolicy policy)
+{
+    d_ptr->setImageAnimationPolicy(policy);
+}
+
+QWebEngineSettings::ImageAnimationPolicy QWebEngineSettings::imageAnimationPolicy() const
+{
+    return d_ptr->imageAnimationPolicy();
+}
+
+void QWebEngineSettings::resetImageAnimationPolicy()
+{
+    d_ptr->setImageAnimationPolicy(QWebEngineSettings::ImageAnimationPolicy::Inherited);
 }
 
 QT_END_NAMESPACE

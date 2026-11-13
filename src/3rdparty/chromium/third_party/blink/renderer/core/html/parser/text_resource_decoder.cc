@@ -25,6 +25,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/core/dom/dom_implementation.h"
 #include "third_party/blink/renderer/core/html/parser/html_meta_charset_parser.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/text_encoding_detector.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_codec.h"
@@ -387,6 +388,11 @@ void TextResourceDecoder::AutoDetectEncodingIfAllowed(const char* data,
   WTF::TextEncoding detected_encoding;
   if (DetectTextEncoding(data, len, options_.HintEncoding(), options_.HintURL(),
                          options_.HintLanguage(), &detected_encoding))
+    if (base::EqualsCaseInsensitiveASCII(detected_encoding.GetName(), "ISO-2022-JP") &&
+          RuntimeEnabledFeatures::
+              RemoveCharsetAutoDetectionForISO2022JPEnabled()) {
+      return;
+    }
     SetEncoding(detected_encoding, kEncodingFromContentSniffing);
   if (detected_encoding != WTF::UnknownEncoding())
     detection_completed_ = true;
@@ -489,9 +495,9 @@ String TextResourceDecoder::Flush() {
 
 WebEncodingData TextResourceDecoder::GetEncodingData() const {
   return WebEncodingData{
-      /*.encoding =*/ String(encoding_.GetName()),
-      /*.was_detected_heuristically =*/ EncodingWasDetectedHeuristically(),
-      /*.saw_decoding_error =*/ SawError()};
+      .encoding = String(encoding_.GetName()),
+      .was_detected_heuristically = EncodingWasDetectedHeuristically(),
+      .saw_decoding_error = SawError()};
 }
 
 }  // namespace blink

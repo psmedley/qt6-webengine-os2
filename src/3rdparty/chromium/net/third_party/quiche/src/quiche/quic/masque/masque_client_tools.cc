@@ -4,21 +4,70 @@
 
 #include "quiche/quic/masque/masque_client_tools.h"
 
+#include <memory>
+#include <optional>
+#include <ostream>
+#include <string>
+#include <utility>
+
+#include "absl/strings/str_cat.h"
+#include "quiche/quic/core/crypto/proof_verifier.h"
+#include "quiche/quic/core/io/quic_event_loop.h"
+#include "quiche/quic/core/quic_error_codes.h"
+#include "quiche/quic/masque/masque_client.h"
+#include "quiche/quic/masque/masque_client_session.h"
 #include "quiche/quic/masque/masque_encapsulated_client.h"
 #include "quiche/quic/masque/masque_utils.h"
 #include "quiche/quic/platform/api/quic_default_proof_providers.h"
+#include "quiche/quic/platform/api/quic_logging.h"
+#include "quiche/quic/platform/api/quic_socket_address.h"
 #include "quiche/quic/tools/fake_proof_verifier.h"
 #include "quiche/quic/tools/quic_name_lookup.h"
 #include "quiche/quic/tools/quic_url.h"
+#include "quiche/common/platform/api/quiche_logging.h"
+#include "quiche/common/quiche_ip_address.h"
 #include "quiche/spdy/core/http2_header_block.h"
 
 namespace quic {
 namespace tools {
 
+namespace {
+
+// Helper class to ensure a fake address gets properly removed when this goes
+// out of scope.
+class FakeAddressRemover {
+ public:
+  FakeAddressRemover() = default;
+  void IngestFakeAddress(const quiche::QuicheIpAddress& fake_address,
+                         MasqueClientSession* masque_client_session) {
+    QUICHE_CHECK(masque_client_session != nullptr);
+    QUICHE_CHECK(!fake_address_.has_value());
+    fake_address_ = fake_address;
+    masque_client_session_ = masque_client_session;
+  }
+  ~FakeAddressRemover() {
+    if (fake_address_.has_value()) {
+      masque_client_session_->RemoveFakeAddress(*fake_address_);
+    }
+  }
+
+ private:
+  std::optional<quiche::QuicheIpAddress> fake_address_;
+  MasqueClientSession* masque_client_session_ = nullptr;
+};
+
+}  // namespace
+
 bool SendEncapsulatedMasqueRequest(MasqueClient* masque_client,
                                    QuicEventLoop* event_loop,
                                    std::string url_string,
-                                   bool disable_certificate_verification) {
+                                   bool disable_certificate_verification,
+                                   int address_family_for_lookup,
+                                   bool dns_on_client) {
+  if (!masque_client->masque_client_session()->SupportsH3Datagram()) {
+    QUIC_LOG(ERROR) << "Refusing to use MASQUE without datagram support";
+    return false;
+  }
   const QuicUrl url(url_string, "https");
   std::unique_ptr<ProofVerifier> proof_verifier;
   if (disable_certificate_verification) {
@@ -28,11 +77,22 @@ bool SendEncapsulatedMasqueRequest(MasqueClient* masque_client,
   }
 
   // Build the client, and try to connect.
-  const QuicSocketAddress addr =
-      LookupAddress(url.host(), absl::StrCat(url.port()));
-  if (!addr.IsInitialized()) {
-    QUIC_LOG(ERROR) << "Unable to resolve address: " << url.host();
-    return false;
+  QuicSocketAddress addr;
+  FakeAddressRemover fake_address_remover;
+  if (dns_on_client) {
+    addr = LookupAddress(address_family_for_lookup, url.host(),
+                         absl::StrCat(url.port()));
+    if (!addr.IsInitialized()) {
+      QUIC_LOG(ERROR) << "Unable to resolve address: " << url.host();
+      return false;
+    }
+  } else {
+    quiche::QuicheIpAddress fake_address =
+        masque_client->masque_client_session()->GetFakeAddress(url.host());
+    fake_address_remover.IngestFakeAddress(
+        fake_address, masque_client->masque_client_session());
+    addr = QuicSocketAddress(fake_address, url.port());
+    QUICHE_CHECK(addr.IsInitialized());
   }
   const QuicServerId server_id(url.host(), url.port());
   auto client = std::make_unique<MasqueEncapsulatedClient>(

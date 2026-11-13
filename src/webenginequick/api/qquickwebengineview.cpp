@@ -10,7 +10,6 @@
 #include "qquickwebengineprofile.h"
 #include "qquickwebengineprofile_p.h"
 #include "qquickwebenginescriptcollection_p.h"
-#include "qquickwebenginescriptcollection_p_p.h"
 #include "qquickwebenginesettings_p.h"
 #include "qquickwebenginetouchhandleprovider_p_p.h"
 #include "qquickwebenginetouchhandle_p.h"
@@ -25,24 +24,31 @@
 #include "find_text_helper.h"
 #include "javascript_dialog_controller.h"
 #include "render_widget_host_view_qt_delegate_item.h"
-#include "render_widget_host_view_qt_delegate_quickwindow.h"
+#include "render_widget_host_view_qt_delegate_quickwindow_p.h"
 #include "touch_selection_menu_controller.h"
-#include "ui_delegates_manager.h"
+#include "ui_delegates_manager_p.h"
 #include "web_contents_adapter.h"
 
 #include <QtWebEngineCore/qwebenginecertificateerror.h>
+#include <QtWebEngineCore/qwebenginedesktopmediarequest.h>
 #include <QtWebEngineCore/qwebenginefilesystemaccessrequest.h>
 #include <QtWebEngineCore/qwebenginefindtextresult.h>
 #include <QtWebEngineCore/qwebenginefullscreenrequest.h>
 #include <QtWebEngineCore/qwebengineloadinginfo.h>
 #include <QtWebEngineCore/qwebenginenavigationrequest.h>
+#include <QtWebEngineCore/qwebenginepage.h>
 #include <QtWebEngineCore/qwebengineregisterprotocolhandlerrequest.h>
 #include <QtWebEngineCore/qwebenginescriptcollection.h>
+#include <QtWebEngineCore/qwebenginewebauthuxrequest.h>
+#include <QtWebEngineCore/qwebenginepermission.h>
 #include <QtWebEngineCore/private/qwebenginecontextmenurequest_p.h>
+#include <QtWebEngineCore/private/qwebenginedesktopmediarequest_p.h>
 #include <QtWebEngineCore/private/qwebenginehistory_p.h>
 #include <QtWebEngineCore/private/qwebenginenewwindowrequest_p.h>
 #include <QtWebEngineCore/private/qwebenginescriptcollection_p.h>
+#include <QtWebEngineCore/private/qwebenginepage_p.h>
 #include <QtWebEngineCore/private/qtwebenginecoreglobal_p.h>
+#include <QtWebEngineCore/private/qwebenginepermission_p.h>
 
 #include <QtCore/qloggingcategory.h>
 #include <QtCore/qmimedata.h>
@@ -58,7 +64,7 @@
 #include <QtQml/qqmlproperty.h>
 
 #if QT_CONFIG(accessibility)
-#include "qquickwebengine_accessible.h"
+#include "qquickwebengine_accessible_p.h"
 
 #include <QtGui/qaccessible.h>
 #endif
@@ -71,12 +77,13 @@
 #endif
 
 #if QT_CONFIG(webengine_webchannel)
-#include <QtWebChannel/qqmlwebchannel.h>
+#include <QtWebChannelQuick/qqmlwebchannel.h>
 #endif
 
 QT_BEGIN_NAMESPACE
 using namespace QtWebEngineCore;
 
+Q_STATIC_ASSERT(int(QQuickWebEngineView::WebActionCount) == int(QWebEnginePage::WebActionCount));
 using LoadStatus = QWebEngineLoadingInfo::LoadStatus;
 using ErrorDomain = QWebEngineLoadingInfo::ErrorDomain;
 #if QT_DEPRECATED_SINCE(6, 2)
@@ -108,6 +115,134 @@ Q_STATIC_ASSERT(static_cast<int>(QQuickWebEngineView::LoadSucceededStatus) == st
 QT_WARNING_POP
 #endif
 
+#if QT_CONFIG(webengine_printing_and_pdf)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Letter, QQuickWebEngineView::PrintedPageSizeId::Letter)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Legal, QQuickWebEngineView::PrintedPageSizeId::Legal)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Executive, QQuickWebEngineView::PrintedPageSizeId::Executive)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A0, QQuickWebEngineView::PrintedPageSizeId::A0)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A1, QQuickWebEngineView::PrintedPageSizeId::A1)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A2, QQuickWebEngineView::PrintedPageSizeId::A2)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A3, QQuickWebEngineView::PrintedPageSizeId::A3)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A4, QQuickWebEngineView::PrintedPageSizeId::A4)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A5, QQuickWebEngineView::PrintedPageSizeId::A5)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A6, QQuickWebEngineView::PrintedPageSizeId::A6)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A7, QQuickWebEngineView::PrintedPageSizeId::A7)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A8, QQuickWebEngineView::PrintedPageSizeId::A8)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A9, QQuickWebEngineView::PrintedPageSizeId::A9)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A10, QQuickWebEngineView::PrintedPageSizeId::A10)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B0, QQuickWebEngineView::PrintedPageSizeId::B0)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B1, QQuickWebEngineView::PrintedPageSizeId::B1)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B2, QQuickWebEngineView::PrintedPageSizeId::B2)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B3, QQuickWebEngineView::PrintedPageSizeId::B3)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B4, QQuickWebEngineView::PrintedPageSizeId::B4)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B5, QQuickWebEngineView::PrintedPageSizeId::B5)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B6, QQuickWebEngineView::PrintedPageSizeId::B6)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B7, QQuickWebEngineView::PrintedPageSizeId::B7)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B8, QQuickWebEngineView::PrintedPageSizeId::B8)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B9, QQuickWebEngineView::PrintedPageSizeId::B9)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B10, QQuickWebEngineView::PrintedPageSizeId::B10)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::C5E, QQuickWebEngineView::PrintedPageSizeId::C5E)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Comm10E, QQuickWebEngineView::PrintedPageSizeId::Comm10E)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::DLE, QQuickWebEngineView::PrintedPageSizeId::DLE)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Folio, QQuickWebEngineView::PrintedPageSizeId::Folio)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Ledger, QQuickWebEngineView::PrintedPageSizeId::Ledger)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Tabloid, QQuickWebEngineView::PrintedPageSizeId::Tabloid)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Custom, QQuickWebEngineView::PrintedPageSizeId::Custom)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A3Extra, QQuickWebEngineView::PrintedPageSizeId::A3Extra)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A4Extra, QQuickWebEngineView::PrintedPageSizeId::A4Extra)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A4Plus, QQuickWebEngineView::PrintedPageSizeId::A4Plus)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A4Small, QQuickWebEngineView::PrintedPageSizeId::A4Small)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::A5Extra, QQuickWebEngineView::PrintedPageSizeId::A5Extra)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::B5Extra, QQuickWebEngineView::PrintedPageSizeId::B5Extra)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB0, QQuickWebEngineView::PrintedPageSizeId::JisB0)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB1, QQuickWebEngineView::PrintedPageSizeId::JisB1)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB2, QQuickWebEngineView::PrintedPageSizeId::JisB2)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB3, QQuickWebEngineView::PrintedPageSizeId::JisB3)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB4, QQuickWebEngineView::PrintedPageSizeId::JisB4)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB5, QQuickWebEngineView::PrintedPageSizeId::JisB5)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB6, QQuickWebEngineView::PrintedPageSizeId::JisB6)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB7, QQuickWebEngineView::PrintedPageSizeId::JisB7)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB8, QQuickWebEngineView::PrintedPageSizeId::JisB8)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB9, QQuickWebEngineView::PrintedPageSizeId::JisB9)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::JisB10, QQuickWebEngineView::PrintedPageSizeId::JisB10)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::AnsiC, QQuickWebEngineView::PrintedPageSizeId::AnsiC)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::AnsiD, QQuickWebEngineView::PrintedPageSizeId::AnsiD)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::AnsiE, QQuickWebEngineView::PrintedPageSizeId::AnsiE)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::LegalExtra, QQuickWebEngineView::PrintedPageSizeId::LegalExtra)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::LetterExtra, QQuickWebEngineView::PrintedPageSizeId::LetterExtra)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::LetterPlus, QQuickWebEngineView::PrintedPageSizeId::LetterPlus)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::LetterSmall, QQuickWebEngineView::PrintedPageSizeId::LetterSmall)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::TabloidExtra, QQuickWebEngineView::PrintedPageSizeId::TabloidExtra)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::ArchA, QQuickWebEngineView::PrintedPageSizeId::ArchA)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::ArchB, QQuickWebEngineView::PrintedPageSizeId::ArchB)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::ArchC, QQuickWebEngineView::PrintedPageSizeId::ArchC)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::ArchD, QQuickWebEngineView::PrintedPageSizeId::ArchD)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::ArchE, QQuickWebEngineView::PrintedPageSizeId::ArchE)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial7x9, QQuickWebEngineView::PrintedPageSizeId::Imperial7x9)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial8x10, QQuickWebEngineView::PrintedPageSizeId::Imperial8x10)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial9x11, QQuickWebEngineView::PrintedPageSizeId::Imperial9x11)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial9x12, QQuickWebEngineView::PrintedPageSizeId::Imperial9x12)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial10x11, QQuickWebEngineView::PrintedPageSizeId::Imperial10x11)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial10x13, QQuickWebEngineView::PrintedPageSizeId::Imperial10x13)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial10x14, QQuickWebEngineView::PrintedPageSizeId::Imperial10x14)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial12x11, QQuickWebEngineView::PrintedPageSizeId::Imperial12x11)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Imperial15x11, QQuickWebEngineView::PrintedPageSizeId::Imperial15x11)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::ExecutiveStandard, QQuickWebEngineView::PrintedPageSizeId::ExecutiveStandard)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Note, QQuickWebEngineView::PrintedPageSizeId::Note)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Quarto, QQuickWebEngineView::PrintedPageSizeId::Quarto)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Statement, QQuickWebEngineView::PrintedPageSizeId::Statement)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::SuperA, QQuickWebEngineView::PrintedPageSizeId::SuperA)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::SuperB, QQuickWebEngineView::PrintedPageSizeId::SuperB)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Postcard, QQuickWebEngineView::PrintedPageSizeId::Postcard)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::DoublePostcard, QQuickWebEngineView::PrintedPageSizeId::DoublePostcard)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Prc16K, QQuickWebEngineView::PrintedPageSizeId::Prc16K)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Prc32K, QQuickWebEngineView::PrintedPageSizeId::Prc32K)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Prc32KBig, QQuickWebEngineView::PrintedPageSizeId::Prc32KBig)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::FanFoldUS, QQuickWebEngineView::PrintedPageSizeId::FanFoldUS)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::FanFoldGerman, QQuickWebEngineView::PrintedPageSizeId::FanFoldGerman)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::FanFoldGermanLegal, QQuickWebEngineView::PrintedPageSizeId::FanFoldGermanLegal)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeB4, QQuickWebEngineView::PrintedPageSizeId::EnvelopeB4)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeB5, QQuickWebEngineView::PrintedPageSizeId::EnvelopeB5)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeB6, QQuickWebEngineView::PrintedPageSizeId::EnvelopeB6)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC0, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC0)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC1, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC1)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC2, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC2)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC3, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC3)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC4, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC4)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC6, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC6)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC65, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC65)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC7, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC7)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Envelope9, QQuickWebEngineView::PrintedPageSizeId::Envelope9)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Envelope11, QQuickWebEngineView::PrintedPageSizeId::Envelope11)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Envelope12, QQuickWebEngineView::PrintedPageSizeId::Envelope12)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Envelope14, QQuickWebEngineView::PrintedPageSizeId::Envelope14)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeMonarch, QQuickWebEngineView::PrintedPageSizeId::EnvelopeMonarch)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePersonal, QQuickWebEngineView::PrintedPageSizeId::EnvelopePersonal)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeChou3, QQuickWebEngineView::PrintedPageSizeId::EnvelopeChou3)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeChou4, QQuickWebEngineView::PrintedPageSizeId::EnvelopeChou4)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeInvite, QQuickWebEngineView::PrintedPageSizeId::EnvelopeInvite)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeItalian, QQuickWebEngineView::PrintedPageSizeId::EnvelopeItalian)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeKaku2, QQuickWebEngineView::PrintedPageSizeId::EnvelopeKaku2)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeKaku3, QQuickWebEngineView::PrintedPageSizeId::EnvelopeKaku3)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc1, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc1)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc2, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc2)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc3, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc3)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc4, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc4)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc5, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc5)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc6, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc6)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc7, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc7)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc8, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc8)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc9, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc9)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopePrc10, QQuickWebEngineView::PrintedPageSizeId::EnvelopePrc10)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeYou4, QQuickWebEngineView::PrintedPageSizeId::EnvelopeYou4)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::LastPageSize, QQuickWebEngineView::PrintedPageSizeId::LastPageSize)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::AnsiA, QQuickWebEngineView::PrintedPageSizeId::AnsiA)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::AnsiB, QQuickWebEngineView::PrintedPageSizeId::AnsiB)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeC5, QQuickWebEngineView::PrintedPageSizeId::EnvelopeC5)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::EnvelopeDL, QQuickWebEngineView::PrintedPageSizeId::EnvelopeDL)
+ASSERT_ENUMS_MATCH(QPageSize::PageSizeId::Envelope10, QQuickWebEngineView::PrintedPageSizeId::Envelope10)
+#endif
+
 class WebEngineQuickWidgetDelegate : public QtWebEngineCore::WidgetDelegate
 {
 public:
@@ -125,8 +260,9 @@ public:
 
     void InitAsPopup(const QRect &screenRect) override
     {
-        Q_UNUSED(screenRect);
-        Q_UNREACHABLE();
+        // note this is called when there is no windowing system
+        // otherwsie see RenderWidgetHostViewQtDelegateQuickWindow
+        m_contentItem->setPosition(screenRect.topLeft());
     }
 
     void Bind(WebContentsAdapterClient *client) override
@@ -198,8 +334,7 @@ QQuickWebEngineViewPrivate::~QQuickWebEngineViewPrivate()
 {
     Q_ASSERT(m_profileInitialized);
     m_profile->d_ptr->removeWebContentsAdapterClient(this);
-    if (m_faviconProvider)
-        m_faviconProvider->detach(q_ptr);
+    FaviconProviderHelper::instance()->detach(q_ptr);
     bindViewAndDelegateItem(this, nullptr);
 }
 
@@ -209,13 +344,8 @@ void QQuickWebEngineViewPrivate::initializeProfile()
         Q_ASSERT(!adapter->isInitialized());
         m_profileInitialized = true;
 
-        if (!m_profile) {
+        if (!m_profile)
             m_profile = QQuickWebEngineProfile::defaultProfile();
-
-            // MEMO first ever call to default profile will create one without context
-            // it needs something to get qml engine from (and view is created in qml land)
-            m_profile->ensureQmlContext(q_ptr);
-        }
 
         m_profile->d_ptr->addWebContentsAdapterClient(this);
         m_settings.reset(new QQuickWebEngineSettings(m_profile->settings()));
@@ -312,10 +442,10 @@ void QQuickWebEngineViewPrivate::contextMenuRequested(QWebEngineContextMenuReque
     ui()->showMenu(menu);
 }
 
-void QQuickWebEngineViewPrivate::navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame)
+void QQuickWebEngineViewPrivate::navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame, bool hasFrameData)
 {
     Q_Q(QQuickWebEngineView);
-    auto request = new QWebEngineNavigationRequest(url, static_cast<QWebEngineNavigationRequest::NavigationType>(navigationType), isMainFrame);
+    auto request = new QWebEngineNavigationRequest(url, static_cast<QWebEngineNavigationRequest::NavigationType>(navigationType), isMainFrame, hasFrameData);
     qmlEngine(q)->newQObject(request);
     Q_EMIT q->navigationRequested(request);
 
@@ -351,25 +481,57 @@ void QQuickWebEngineViewPrivate::selectClientCert(
     Q_EMIT q->selectClientCertificate(certSelection);
 }
 
-static QQuickWebEngineView::Feature toFeature(QtWebEngineCore::ProfileAdapter::PermissionType type)
+#if QT_DEPRECATED_SINCE(6, 8)
+QT_WARNING_PUSH
+QT_WARNING_DISABLE_DEPRECATED
+static QQuickWebEngineView::Feature toDeprecatedFeature(QWebEnginePermission::PermissionType permissionType)
 {
-    switch (type) {
-    case QtWebEngineCore::ProfileAdapter::NotificationPermission:
+    switch (permissionType) {
+    case QWebEnginePermission::PermissionType::Notifications:
         return QQuickWebEngineView::Notifications;
-    case QtWebEngineCore::ProfileAdapter::GeolocationPermission:
+    case QWebEnginePermission::PermissionType::Geolocation:
         return QQuickWebEngineView::Geolocation;
-    default:
+    case QWebEnginePermission::PermissionType::ClipboardReadWrite:
+        return QQuickWebEngineView::ClipboardReadWrite;
+    case QWebEnginePermission::PermissionType::LocalFontsAccess:
+        return QQuickWebEngineView::LocalFontsAccess;
+    case QWebEnginePermission::PermissionType::MediaAudioCapture:
+        return QQuickWebEngineView::MediaAudioCapture;
+    case QWebEnginePermission::PermissionType::MediaVideoCapture:
+        return QQuickWebEngineView::MediaVideoCapture;
+    case QWebEnginePermission::PermissionType::MediaAudioVideoCapture:
+        return QQuickWebEngineView::MediaAudioVideoCapture;
+    case QWebEnginePermission::PermissionType::DesktopVideoCapture:
+        return QQuickWebEngineView::DesktopVideoCapture;
+    case QWebEnginePermission::PermissionType::DesktopAudioVideoCapture:
+        return QQuickWebEngineView::DesktopAudioVideoCapture;
+    case QWebEnginePermission::PermissionType::MouseLock:
+    case QWebEnginePermission::PermissionType::Unsupported:
         break;
     }
+
     Q_UNREACHABLE();
     return QQuickWebEngineView::Feature(-1);
 }
+QT_WARNING_POP
+#endif // QT_DEPRECATED_SINCE(6, 8)
 
-
-void QQuickWebEngineViewPrivate::runFeaturePermissionRequest(QtWebEngineCore::ProfileAdapter::PermissionType permission, const QUrl &url)
+void QQuickWebEngineViewPrivate::runFeaturePermissionRequest(QWebEnginePermission::PermissionType permissionType, const QUrl &securityOrigin)
 {
     Q_Q(QQuickWebEngineView);
-    Q_EMIT q->featurePermissionRequested(url, toFeature(permission));
+
+    if (QWebEnginePermission::isPersistent(permissionType)) {
+        Q_EMIT q->permissionRequested(createFeaturePermissionObject(securityOrigin, permissionType));
+#if QT_DEPRECATED_SINCE(6, 8)
+        QT_WARNING_PUSH
+        QT_WARNING_DISABLE_DEPRECATED
+        Q_EMIT q->featurePermissionRequested(securityOrigin, toDeprecatedFeature(permissionType));
+        QT_WARNING_POP
+#endif // QT_DEPRECATED_SINCE(6, 8)
+        return;
+    }
+
+    Q_UNREACHABLE();
 }
 
 void QQuickWebEngineViewPrivate::showColorDialog(QSharedPointer<ColorChooserController> controller)
@@ -433,6 +595,12 @@ void QQuickWebEngineViewPrivate::iconChanged(const QUrl &url)
     iconUrl = QQuickWebEngineFaviconProvider::faviconProviderUrl(url);
     m_history->reset();
     QTimer::singleShot(0, q, &QQuickWebEngineView::iconChanged);
+}
+
+void QQuickWebEngineViewPrivate::zoomFactorChanged(qreal factor)
+{
+    Q_Q(QQuickWebEngineView);
+    Q_EMIT q->zoomFactorChanged(factor);
 }
 
 void QQuickWebEngineViewPrivate::loadProgressChanged(int progress)
@@ -576,6 +744,15 @@ void QQuickWebEngineViewPrivate::windowCloseRejected()
         QMetaObject::invokeMethod(q, "windowCloseRejected");
 }
 
+void QQuickWebEngineViewPrivate::desktopMediaRequested(
+        QtWebEngineCore::DesktopMediaController *controller)
+{
+    Q_Q(QQuickWebEngineView);
+    QTimer::singleShot(0, q, [q, controller]() {
+        Q_EMIT q->desktopMediaRequested(QWebEngineDesktopMediaRequest(controller));
+    });
+}
+
 void QQuickWebEngineViewPrivate::requestFullScreenMode(const QUrl &origin, bool fullscreen)
 {
     Q_Q(QQuickWebEngineView);
@@ -591,7 +768,7 @@ bool QQuickWebEngineViewPrivate::isFullScreenMode() const
 void QQuickWebEngineViewPrivate::javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString& message, int lineNumber, const QString& sourceID)
 {
     Q_Q(QQuickWebEngineView);
-    if (q->receivers(SIGNAL(javaScriptConsoleMessage(JavaScriptConsoleMessageLevel,QString,int,QString))) > 0) {
+    if (q->receivers(SIGNAL(javaScriptConsoleMessage(QQuickWebEngineView::JavaScriptConsoleMessageLevel,QString,int,QString))) > 0) {
         Q_EMIT q->javaScriptConsoleMessage(static_cast<QQuickWebEngineView::JavaScriptConsoleMessageLevel>(level), message, lineNumber, sourceID);
         return;
     }
@@ -632,19 +809,41 @@ void QQuickWebEngineViewPrivate::runMediaAccessPermissionRequest(const QUrl &sec
     Q_Q(QQuickWebEngineView);
     if (!requestFlags)
         return;
-    QQuickWebEngineView::Feature feature;
+    QWebEnginePermission::PermissionType permissionType;
     if (requestFlags.testFlag(WebContentsAdapterClient::MediaAudioCapture) && requestFlags.testFlag(WebContentsAdapterClient::MediaVideoCapture))
-        feature = QQuickWebEngineView::MediaAudioVideoCapture;
+        permissionType = QWebEnginePermission::PermissionType::MediaAudioVideoCapture;
     else if (requestFlags.testFlag(WebContentsAdapterClient::MediaAudioCapture))
-        feature = QQuickWebEngineView::MediaAudioCapture;
+        permissionType = QWebEnginePermission::PermissionType::MediaAudioCapture;
     else if (requestFlags.testFlag(WebContentsAdapterClient::MediaVideoCapture))
-        feature = QQuickWebEngineView::MediaVideoCapture;
+        permissionType = QWebEnginePermission::PermissionType::MediaVideoCapture;
     else if (requestFlags.testFlag(WebContentsAdapterClient::MediaDesktopAudioCapture) &&
              requestFlags.testFlag(WebContentsAdapterClient::MediaDesktopVideoCapture))
-        feature = QQuickWebEngineView::DesktopAudioVideoCapture;
+        permissionType = QWebEnginePermission::PermissionType::DesktopAudioVideoCapture;
     else // if (requestFlags.testFlag(WebContentsAdapterClient::MediaDesktopVideoCapture))
-        feature = QQuickWebEngineView::DesktopVideoCapture;
-    Q_EMIT q->featurePermissionRequested(securityOrigin, feature);
+        permissionType = QWebEnginePermission::PermissionType::DesktopVideoCapture;
+    Q_EMIT q->permissionRequested(createFeaturePermissionObject(securityOrigin, permissionType));
+
+#if QT_DEPRECATED_SINCE(6, 8)
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_DEPRECATED
+    QQuickWebEngineView::Feature deprecatedFeature;
+
+    if (requestFlags.testFlag(WebContentsAdapterClient::MediaAudioCapture)
+            && requestFlags.testFlag(WebContentsAdapterClient::MediaVideoCapture))
+        deprecatedFeature = QQuickWebEngineView::MediaAudioVideoCapture;
+    else if (requestFlags.testFlag(WebContentsAdapterClient::MediaAudioCapture))
+        deprecatedFeature = QQuickWebEngineView::MediaAudioCapture;
+    else if (requestFlags.testFlag(WebContentsAdapterClient::MediaVideoCapture))
+        deprecatedFeature = QQuickWebEngineView::MediaVideoCapture;
+    else if (requestFlags.testFlag(WebContentsAdapterClient::MediaDesktopAudioCapture)
+            && requestFlags.testFlag(WebContentsAdapterClient::MediaDesktopVideoCapture))
+        deprecatedFeature = QQuickWebEngineView::DesktopAudioVideoCapture;
+    else // if (requestFlags.testFlag(WebContentsAdapterClient::MediaDesktopVideoCapture))
+        deprecatedFeature = QQuickWebEngineView::DesktopVideoCapture;
+
+    Q_EMIT q->featurePermissionRequested(securityOrigin, deprecatedFeature);
+    QT_WARNING_POP
+#endif // QT_DEPRECATED_SINCE(6, 8)
 }
 
 void QQuickWebEngineViewPrivate::runMouseLockPermissionRequest(const QUrl &securityOrigin)
@@ -687,6 +886,14 @@ void QQuickWebEngineViewPrivate::printRequested()
     Q_Q(QQuickWebEngineView);
     QTimer::singleShot(0, q, [q]() {
         Q_EMIT q->printRequested();
+    });
+}
+
+void QQuickWebEngineViewPrivate::printRequestedByFrame(quint64 frameId)
+{
+    Q_Q(QQuickWebEngineView);
+    QTimer::singleShot(0, q, [this, q, frameId]() {
+        Q_EMIT q->printRequestedByFrame(QWebEngineFrame(this->adapter, frameId));
     });
 }
 
@@ -788,6 +995,8 @@ QQuickWebEngineView::QQuickWebEngineView(QQuickItem *parent)
 
 QQuickWebEngineView::~QQuickWebEngineView()
 {
+    if (hasFocus())
+        setFocus(false);
 }
 
 void QQuickWebEngineViewPrivate::ensureContentsAdapter()
@@ -802,16 +1011,7 @@ void QQuickWebEngineViewPrivate::ensureContentsAdapter()
             adapter->loadDefault();
     }
 
-    if (!m_faviconProvider) {
-        QQmlEngine *engine = qmlEngine(q_ptr);
-        // TODO: this is a workaround for QTBUG-65044
-        if (!engine)
-            return;
-        m_faviconProvider = static_cast<QQuickWebEngineFaviconProvider *>(
-                engine->imageProvider(QQuickWebEngineFaviconProvider::identifier()));
-        m_faviconProvider->attach(q_ptr);
-        Q_ASSERT(m_faviconProvider);
-    }
+    FaviconProviderHelper::instance()->attach(q_ptr);
 }
 
 void QQuickWebEngineViewPrivate::initializationFinished()
@@ -995,16 +1195,12 @@ void QQuickWebEngineViewPrivate::updateEditActions()
 
 QQuickWebEngineScriptCollection *QQuickWebEngineViewPrivate::getUserScripts()
 {
-    Q_Q(QQuickWebEngineView);
     if (!m_scriptCollection)
         m_scriptCollection.reset(
             new QQuickWebEngineScriptCollection(
-                new QQuickWebEngineScriptCollectionPrivate(
+                new QWebEngineScriptCollection(
                     new QWebEngineScriptCollectionPrivate(
                         profileAdapter()->userResourceController(), adapter))));
-
-    if (!m_scriptCollection->qmlEngine())
-        m_scriptCollection->setQmlEngine(qmlEngine(q));
 
     return m_scriptCollection.data();
 }
@@ -1086,7 +1282,6 @@ void QQuickWebEngineView::setZoomFactor(qreal arg)
         d->adapter->setZoomFactor(arg);
         // MEMO: should reset if factor was not applied due to being invalid
         d->m_zoomFactor = zoomFactor();
-        emit zoomFactorChanged(d->m_zoomFactor);
     } else {
         d->m_zoomFactor = arg;
     }
@@ -1157,22 +1352,26 @@ bool QQuickWebEngineView::activeFocusOnPress() const
     return d->m_activeFocusOnPress;
 }
 
-void QQuickWebEngineViewPrivate::didRunJavaScript(quint64 requestId, const QVariant &result)
+void QQuickWebEngineViewPrivate::runJavaScript(
+        const QString &script, quint32 worldId, quint64 frameId,
+        const std::function<void(const QVariant &)> &callback)
 {
-    Q_Q(QQuickWebEngineView);
-    QJSValue callback = m_callbacks.take(requestId);
-    QJSValueList args;
-    args.append(qmlEngine(q)->toScriptValue(result));
-    callback.call(args);
+    ensureContentsAdapter();
+    adapter->runJavaScript(script, worldId, frameId, callback);
 }
 
-void QQuickWebEngineViewPrivate::didPrintPage(quint64 requestId, QSharedPointer<QByteArray> result)
+void QQuickWebEngineViewPrivate::printToPdf(const QString &filePath, const QPageLayout &layout,
+                                            const QPageRanges &ranges, quint64 frameId)
 {
-    Q_Q(QQuickWebEngineView);
-    QJSValue callback = m_callbacks.take(requestId);
-    QJSValueList args;
-    args.append(qmlEngine(q)->toScriptValue(*(result.data())));
-    callback.call(args);
+    adapter->printToPDF(layout, ranges, filePath, frameId);
+}
+
+void QQuickWebEngineViewPrivate::printToPdf(
+        std::function<void(QSharedPointer<QByteArray>)> &&callback, const QPageLayout &layout,
+        const QPageRanges &ranges, quint64 frameId)
+{
+    adapter->printToPDFCallbackResult(std::move(callback), layout, ranges, /*colorMode*/ true,
+                                      /*useCustomMargins*/ true, frameId);
 }
 
 void QQuickWebEngineViewPrivate::didPrintPageToPdf(const QString &filePath, bool success)
@@ -1241,8 +1440,9 @@ QQuickWebEngineViewPrivate::createTouchHandleDelegate(const QMap<int, QImage> &i
 {
     Q_Q(QQuickWebEngineView);
     // lifecycle managed by Chromium's TouchHandleDrawable
-    QQuickWebEngineTouchHandle *handle = new QQuickWebEngineTouchHandle();
+    QQuickWebEngineTouchHandle *handle(nullptr);
     if (m_touchHandleDelegate) {
+        handle = new QQuickWebEngineTouchHandle();
         QQmlContext *qmlContext = QQmlEngine::contextForObject(q);
         QQmlContext *context = new QQmlContext(qmlContext, handle);
         context->setContextObject(handle);
@@ -1253,7 +1453,9 @@ QQuickWebEngineViewPrivate::createTouchHandleDelegate(const QMap<int, QImage> &i
         handle->setItem(item, false);
     } else {
         QQuickItem *item = ui()->createTouchHandle();
-        Q_ASSERT(item);
+        if (!item) {
+            return nullptr;
+        }
         QQmlEngine *engine = qmlEngine(item);
         Q_ASSERT(engine);
         QQuickWebEngineTouchHandleProvider *touchHandleProvider =
@@ -1261,6 +1463,7 @@ QQuickWebEngineViewPrivate::createTouchHandleDelegate(const QMap<int, QImage> &i
                         engine->imageProvider(QQuickWebEngineTouchHandleProvider::identifier()));
         Q_ASSERT(touchHandleProvider);
         touchHandleProvider->init(images);
+        handle = new QQuickWebEngineTouchHandle();
         handle->setItem(item, true);
     }
     return handle;
@@ -1304,6 +1507,18 @@ void QQuickWebEngineViewPrivate::hideTouchSelectionMenu()
     ui()->hideTouchSelectionMenu();
 }
 
+void QQuickWebEngineViewPrivate::showWebAuthDialog(QWebEngineWebAuthUxRequest *request)
+{
+    Q_Q(QQuickWebEngineView);
+    Q_EMIT q->webAuthUxRequested(request);
+}
+
+QWebEnginePermission QQuickWebEngineViewPrivate::createFeaturePermissionObject(const QUrl &securityOrigin, QWebEnginePermission::PermissionType permissionType)
+{
+    auto *returnPrivate = new QWebEnginePermissionPrivate(securityOrigin, permissionType, adapter, profileAdapter());
+    return QWebEnginePermission(returnPrivate);
+}
+
 bool QQuickWebEngineView::isLoading() const
 {
     Q_D(const QQuickWebEngineView);
@@ -1342,16 +1557,15 @@ void QQuickWebEngineView::runJavaScript(const QString &script, const QJSValue &c
 void QQuickWebEngineView::runJavaScript(const QString &script, quint32 worldId, const QJSValue &callback)
 {
     Q_D(QQuickWebEngineView);
-    d->ensureContentsAdapter();
+    std::function<void(const QVariant &)> wrappedCallback;
     if (!callback.isUndefined()) {
-        quint64 requestId = d_ptr->adapter->runJavaScriptCallbackResult(script, worldId);
-        if (requestId) {
-            d->m_callbacks.insert(requestId, callback);
-        } else {
-            callback.call();
-        }
-    } else
-        d->adapter->runJavaScript(script, worldId);
+        wrappedCallback = [this, callback](const QVariant &result) {
+            QJSValueList args;
+            args.append(qmlEngine(this)->toScriptValue(result));
+            callback.call(args);
+        };
+    }
+    d->runJavaScript(script, worldId, WebContentsAdapter::kUseMainFrameId, wrappedCallback);
 }
 
 qreal QQuickWebEngineView::zoomFactor() const
@@ -1426,7 +1640,7 @@ void QQuickWebEngineView::printToPdf(const QString& filePath, PrintedPageSizeId 
     QPageLayout pageLayout(layoutSize, layoutOrientation, QMarginsF(0.0, 0.0, 0.0, 0.0));
     QPageRanges ranges;
     d->ensureContentsAdapter();
-    d->adapter->printToPDF(pageLayout, ranges, filePath);
+    d->printToPdf(filePath, pageLayout, ranges, WebContentsAdapter::kUseMainFrameId);
 #else
     Q_UNUSED(filePath);
     Q_UNUSED(pageSizeId);
@@ -1447,8 +1661,14 @@ void QQuickWebEngineView::printToPdf(const QJSValue &callback, PrintedPageSizeId
         return;
 
     d->ensureContentsAdapter();
-    quint64 requestId = d->adapter->printToPDFCallbackResult(pageLayout, ranges);
-    d->m_callbacks.insert(requestId, callback);
+    std::function wrappedCallback = [this, callback](QSharedPointer<QByteArray> result) {
+        QJSValueList args;
+        args.append(qmlEngine(this)->toScriptValue(*result));
+        callback.call(args);
+    };
+
+    d->printToPdf(std::move(wrappedCallback), pageLayout, ranges,
+                  WebContentsAdapter::kUseMainFrameId);
 #else
     Q_UNUSED(pageSizeId);
     Q_UNUSED(orientation);
@@ -1566,6 +1786,12 @@ QQuickWebEngineView *QQuickWebEngineView::devToolsView() const
     return d->devToolsView;
 }
 
+QString QQuickWebEngineView::devToolsId()
+{
+    Q_D(QQuickWebEngineView);
+    d->ensureContentsAdapter();
+    return d->adapter->devToolsId();
+}
 
 void QQuickWebEngineView::setDevToolsView(QQuickWebEngineView *devToolsView)
 {
@@ -1588,46 +1814,50 @@ void QQuickWebEngineView::setDevToolsView(QQuickWebEngineView *devToolsView)
     Q_EMIT devToolsViewChanged();
 }
 
+#if QT_DEPRECATED_SINCE(6, 8)
+QT_WARNING_PUSH QT_WARNING_DISABLE_DEPRECATED
 void QQuickWebEngineView::grantFeaturePermission(const QUrl &securityOrigin, QQuickWebEngineView::Feature feature, bool granted)
 {
-    if (!granted && ((feature >= MediaAudioCapture && feature <= MediaAudioVideoCapture) ||
-                     (feature >= DesktopVideoCapture && feature <= DesktopAudioVideoCapture))) {
-         d_ptr->adapter->grantMediaAccessPermission(securityOrigin, WebContentsAdapterClient::MediaNone);
-         return;
-    }
+    Q_D(QQuickWebEngineView);
+    QWebEnginePermission::PermissionType permissionType;
 
     switch (feature) {
-    case MediaAudioCapture:
-        d_ptr->adapter->grantMediaAccessPermission(securityOrigin, WebContentsAdapterClient::MediaAudioCapture);
+    case QQuickWebEngineView::Notifications:
+        permissionType = QWebEnginePermission::PermissionType::Notifications;
         break;
-    case MediaVideoCapture:
-        d_ptr->adapter->grantMediaAccessPermission(securityOrigin, WebContentsAdapterClient::MediaVideoCapture);
+    case QQuickWebEngineView::Geolocation:
+        permissionType = QWebEnginePermission::PermissionType::Geolocation;
         break;
-    case MediaAudioVideoCapture:
-        d_ptr->adapter->grantMediaAccessPermission(securityOrigin, WebContentsAdapterClient::MediaRequestFlags(WebContentsAdapterClient::MediaAudioCapture                                                                                                               | WebContentsAdapterClient::MediaVideoCapture));
+    case QQuickWebEngineView::MediaAudioCapture:
+        permissionType = QWebEnginePermission::PermissionType::MediaAudioCapture;
         break;
-    case DesktopVideoCapture:
-        d_ptr->adapter->grantMediaAccessPermission(securityOrigin, WebContentsAdapterClient::MediaDesktopVideoCapture);
+    case QQuickWebEngineView::MediaVideoCapture:
+        permissionType = QWebEnginePermission::PermissionType::MediaVideoCapture;
         break;
-    case DesktopAudioVideoCapture:
-        d_ptr->adapter->grantMediaAccessPermission(
-            securityOrigin,
-            WebContentsAdapterClient::MediaRequestFlags(
-                WebContentsAdapterClient::MediaDesktopAudioCapture |
-                WebContentsAdapterClient::MediaDesktopVideoCapture));
+    case QQuickWebEngineView::MediaAudioVideoCapture:
+        permissionType = QWebEnginePermission::PermissionType::MediaAudioVideoCapture;
         break;
-    case Geolocation:
-        d_ptr->adapter->grantFeaturePermission(securityOrigin, ProfileAdapter::GeolocationPermission,
-                                               granted ? ProfileAdapter::AllowedPermission : ProfileAdapter::DeniedPermission);
+    case QQuickWebEngineView::DesktopVideoCapture:
+        permissionType = QWebEnginePermission::PermissionType::DesktopVideoCapture;
         break;
-    case Notifications:
-        d_ptr->adapter->grantFeaturePermission(securityOrigin, ProfileAdapter::NotificationPermission,
-                                               granted ? ProfileAdapter::AllowedPermission : ProfileAdapter::DeniedPermission);
+    case QQuickWebEngineView::DesktopAudioVideoCapture:
+        permissionType = QWebEnginePermission::PermissionType::DesktopAudioVideoCapture;
+        break;
+    case QQuickWebEngineView::ClipboardReadWrite:
+        permissionType = QWebEnginePermission::PermissionType::ClipboardReadWrite;
+        break;
+    case QQuickWebEngineView::LocalFontsAccess:
+        permissionType = QWebEnginePermission::PermissionType::LocalFontsAccess;
         break;
     default:
         Q_UNREACHABLE();
     }
+
+    d->adapter->setPermission(securityOrigin, permissionType,
+        granted ? QWebEnginePermission::State::Granted : QWebEnginePermission::State::Denied);
 }
+QT_WARNING_POP
+#endif // QT_DEPRECATED_SINCE(6, 8)
 
 void QQuickWebEngineView::setActiveFocusOnPress(bool arg)
 {
@@ -1972,8 +2202,15 @@ void QQuickWebEngineView::triggerWebAction(WebAction action)
     case InsertUnorderedList:
         runJavaScript(QStringLiteral("document.execCommand('insertUnorderedList');"), QWebEngineScript::ApplicationWorld);
         break;
+    case ChangeTextDirectionLTR:
+        d->adapter->changeTextDirection(true /*left to right*/);
+        break;
+    case ChangeTextDirectionRTL:
+        d->adapter->changeTextDirection(false /*left to right*/);
+        break;
     default:
-        Q_UNREACHABLE();
+        // Reachable when a spell checker replacement word has been selected
+        break;
     }
 }
 
@@ -1987,165 +2224,113 @@ QQuickWebEngineAction *QQuickWebEngineView::action(WebAction action)
         return d->actions[action];
     }
 
-    QString text;
+    const QString text = QWebEnginePagePrivate::actionText(action);
     QString iconName;
 
     switch (action) {
     case Back:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::Back);
         iconName = QStringLiteral("go-previous");
         break;
     case Forward:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::Forward);
         iconName = QStringLiteral("go-next");
         break;
     case Stop:
-        text = tr("Stop");
         iconName = QStringLiteral("process-stop");
         break;
     case Reload:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::Reload);
         iconName = QStringLiteral("view-refresh");
         break;
     case ReloadAndBypassCache:
-        text = tr("Reload and Bypass Cache");
         iconName = QStringLiteral("view-refresh");
         break;
     case Cut:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::Cut);
         iconName = QStringLiteral("edit-cut");
         break;
     case Copy:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::Copy);
         iconName = QStringLiteral("edit-copy");
         break;
     case Paste:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::Paste);
         iconName = QStringLiteral("edit-paste");
         break;
     case Undo:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::Undo);
         iconName = QStringLiteral("edit-undo");
         break;
     case Redo:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::Redo);
         iconName = QStringLiteral("edit-redo");
         break;
     case SelectAll:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::SelectAll);
         iconName = QStringLiteral("edit-select-all");
         break;
     case PasteAndMatchStyle:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::PasteAndMatchStyle);
         iconName = QStringLiteral("edit-paste");
         break;
     case OpenLinkInThisWindow:
-        text = tr("Open link in this window");
-        break;
     case OpenLinkInNewWindow:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::OpenLinkInNewWindow);
-        break;
     case OpenLinkInNewTab:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::OpenLinkInNewTab);
-        break;
     case CopyLinkToClipboard:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::CopyLinkToClipboard);
-        break;
     case DownloadLinkToDisk:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::DownloadLinkToDisk);
-        break;
     case CopyImageToClipboard:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::CopyImageToClipboard);
-        break;
     case CopyImageUrlToClipboard:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::CopyImageUrlToClipboard);
-        break;
     case DownloadImageToDisk:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::DownloadImageToDisk);
-        break;
     case CopyMediaUrlToClipboard:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::CopyMediaUrlToClipboard);
-        break;
     case ToggleMediaControls:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::ToggleMediaControls);
-        break;
     case ToggleMediaLoop:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::ToggleMediaLoop);
         break;
     case ToggleMediaPlayPause:
-        text = tr("Toggle Play/Pause");
         iconName = QStringLiteral("media-playback-start");
         break;
     case ToggleMediaMute:
-        text = tr("Toggle Mute");
         iconName = QStringLiteral("audio-volume-muted");
         break;
     case DownloadMediaToDisk:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::DownloadMediaToDisk);
-        break;
     case InspectElement:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::InspectElement);
         break;
     case ExitFullScreen:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::ExitFullScreen);
         iconName = QStringLiteral("view-fullscreen");
         break;
     case RequestClose:
-        text = tr("Close Page");
         iconName = QStringLiteral("window-close");
         break;
     case Unselect:
-        text = tr("Unselect");
         iconName = QStringLiteral("edit-select-none");
         break;
     case SavePage:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::SavePage);
         iconName = QStringLiteral("document-save");
         break;
+    case OpenLinkInNewBackgroundTab:
+        break;
     case ViewSource:
-        text = RenderViewContextMenuQt::getMenuItemName(RenderViewContextMenuQt::ContextMenuItem::ViewSource);
         break;
     case ToggleBold:
-        text = tr("&Bold");
         iconName = QStringLiteral("format-text-bold");
         break;
     case ToggleItalic:
-        text = tr("&Italic");
         iconName = QStringLiteral("format-text-italic");
         break;
     case ToggleUnderline:
-        text = tr("&Underline");
         iconName = QStringLiteral("format-text-underline");
         break;
     case ToggleStrikethrough:
-        text = tr("&Strikethrough");
         iconName = QStringLiteral("format-text-strikethrough");
         break;
     case AlignLeft:
-        text = tr("Align &Left");
         break;
     case AlignCenter:
-        text = tr("Align &Center");
         break;
     case AlignRight:
-        text = tr("Align &Right");
         break;
     case AlignJustified:
-        text = tr("Align &Justified");
         break;
     case Indent:
-        text = tr("&Indent");
         iconName = QStringLiteral("format-indent-more");
         break;
     case Outdent:
-        text = tr("&Outdent");
         iconName = QStringLiteral("format-indent-less");
         break;
     case InsertOrderedList:
-        text = tr("Insert &Ordered List");
-        break;
     case InsertUnorderedList:
-        text = tr("Insert &Unordered List");
+    case ChangeTextDirectionLTR:
+    case ChangeTextDirectionRTL:
         break;
     case NoWebAction:
     case WebActionCount:
@@ -2328,6 +2513,8 @@ void QQuickContextMenuBuilder::addMenuItem(ContextMenuItem menuItem)
             action = new QQuickWebEngineAction(m_menu);
             QString replacement = m_contextData->spellCheckerSuggestions().at(i);
             QObject::connect(action, &QQuickWebEngineAction::triggered, [thisRef, replacement] { thisRef->replaceMisspelledWord(replacement); });
+            action->d_ptr->m_text = replacement;
+            action->d_ptr->m_enabled = true;
             m_view->d_ptr->ui()->addMenuItem(action, m_menu);
         }
         return;
@@ -2400,6 +2587,26 @@ void QQuickWebEngineView::setTouchHandleDelegate(QQmlComponent *delegate)
 QQmlComponent *QQuickWebEngineView::touchHandleDelegate() const
 {
     return d_ptr->m_touchHandleDelegate;
+}
+
+QWebEngineFrame QQuickWebEngineView::mainFrame()
+{
+    Q_D(QQuickWebEngineView);
+    return QWebEngineFrame(d->adapter, d->adapter->mainFrameId());
+}
+
+QWebEngineFrame QQuickWebEngineView::findFrameByName(const QString &name)
+{
+    Q_D(QQuickWebEngineView);
+    auto maybeId = d->adapter->findFrameIdByName(name);
+    return QWebEngineFrame(d->adapter, maybeId.value_or(WebContentsAdapter::kInvalidFrameId));
+}
+
+void QQuickWebEngineView::save(const QString &filePath,
+                               QWebEngineDownloadRequest::SavePageFormat format) const
+{
+    Q_D(const QQuickWebEngineView);
+    d->adapter->save(filePath, format);
 }
 
 QT_END_NAMESPACE

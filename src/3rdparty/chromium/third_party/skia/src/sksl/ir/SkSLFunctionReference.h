@@ -8,6 +8,7 @@
 #ifndef SKSL_FUNCTIONREFERENCE
 #define SKSL_FUNCTIONREFERENCE
 
+#include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLContext.h"
 #include "src/sksl/ir/SkSLExpression.h"
 #include "src/sksl/ir/SkSLFunctionDeclaration.h"
@@ -20,11 +21,11 @@ namespace SkSL {
  */
 class FunctionReference final : public Expression {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kFunctionReference;
+    inline static constexpr Kind kIRNodeKind = Kind::kFunctionReference;
 
     FunctionReference(const Context& context, Position pos,
                       const FunctionDeclaration* overloadChain)
-        : INHERITED(pos, kExpressionKind, context.fTypes.fInvalid.get())
+        : INHERITED(pos, kIRNodeKind, context.fTypes.fInvalid.get())
         , fOverloadChain(overloadChain) {}
 
     const FunctionDeclaration* overloadChain() const {
@@ -42,7 +43,7 @@ public:
 
 private:
     FunctionReference(Position pos, const FunctionDeclaration* overloadChain, const Type* type)
-            : INHERITED(pos, kExpressionKind, type)
+            : INHERITED(pos, kIRNodeKind, type)
             , fOverloadChain(overloadChain) {}
 
     const FunctionDeclaration* fOverloadChain;

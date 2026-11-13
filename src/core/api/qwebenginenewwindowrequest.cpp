@@ -1,5 +1,6 @@
 // Copyright (C) 2021 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qwebenginenewwindowrequest.h"
 #include "qwebenginenewwindowrequest_p.h"
@@ -24,7 +25,7 @@ QT_BEGIN_NAMESPACE
 
 /*!
     \qmltype WebEngineNewWindowRequest
-    \instantiates QWebEngineNewWindowRequest
+    \nativetype QWebEngineNewWindowRequest
     \inqmlmodule QtWebEngine
     \since QtWebEngine 1.12
 
@@ -98,7 +99,7 @@ QWebEngineNewWindowRequest::DestinationType QWebEngineNewWindowRequest::destinat
     \brief The URL that is requested for the new page.
 */
 /*!
-    \qmlproperty QUrl WebEngineNewWindowRequest::requestedUrl
+    \qmlproperty url WebEngineNewWindowRequest::requestedUrl
     \brief The URL that is requested for the new page.
     \since QtWebEngine 1.5
  */
@@ -112,7 +113,7 @@ QUrl QWebEngineNewWindowRequest::requestedUrl() const
     \brief The size that is requested for the new page.
 */
 /*!
-    \qmlproperty QRect WebEngineNewWindowRequest::requestedGeometry
+    \qmlproperty rect WebEngineNewWindowRequest::requestedGeometry
     \brief The size that is requested for the new page.
     \since QtWebEngine 2.0
  */

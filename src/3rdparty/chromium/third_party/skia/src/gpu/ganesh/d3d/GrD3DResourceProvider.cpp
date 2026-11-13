@@ -9,7 +9,6 @@
 
 #include "include/gpu/GrContextOptions.h"
 #include "include/gpu/GrDirectContext.h"
-#include "include/private/SkOpts_spi.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/d3d/GrD3DBuffer.h"
 #include "src/gpu/ganesh/d3d/GrD3DCommandList.h"
@@ -34,7 +33,7 @@ void GrD3DResourceProvider::destroyResources() {
 }
 
 std::unique_ptr<GrD3DDirectCommandList> GrD3DResourceProvider::findOrCreateDirectCommandList() {
-    if (fAvailableDirectCommandLists.count()) {
+    if (fAvailableDirectCommandLists.size()) {
         std::unique_ptr<GrD3DDirectCommandList> list =
                 std::move(fAvailableDirectCommandLists.back());
         fAvailableDirectCommandLists.pop_back();
@@ -51,7 +50,7 @@ void GrD3DResourceProvider::recycleDirectCommandList(
 
 sk_sp<GrD3DRootSignature> GrD3DResourceProvider::findOrCreateRootSignature(int numTextureSamplers,
                                                                            int numUAVs) {
-    for (int i = 0; i < fRootSignatures.count(); ++i) {
+    for (int i = 0; i < fRootSignatures.size(); ++i) {
         if (fRootSignatures[i]->isCompatible(numTextureSamplers, numUAVs)) {
             return fRootSignatures[i];
         }
@@ -67,7 +66,7 @@ sk_sp<GrD3DRootSignature> GrD3DResourceProvider::findOrCreateRootSignature(int n
 
 sk_sp<GrD3DCommandSignature> GrD3DResourceProvider::findOrCreateCommandSignature(
         GrD3DCommandSignature::ForIndexed indexed, unsigned int slot) {
-    for (int i = 0; i < fCommandSignatures.count(); ++i) {
+    for (int i = 0; i < fCommandSignatures.size(); ++i) {
         if (fCommandSignatures[i]->isCompatible(indexed, slot)) {
             return fCommandSignatures[i];
         }
@@ -170,8 +169,8 @@ D3D12_CPU_DESCRIPTOR_HANDLE GrD3DResourceProvider::findOrCreateCompatibleSampler
 
     D3D12_FILTER filter = d3d_filter(params);
     // We disable MIP filtering using maxLOD. Otherwise, we want the max LOD to be unbounded.
-    float maxLOD = params.mipmapped() == GrMipmapped::kYes ? std::numeric_limits<float>::max()
-                                                           : 0.f;
+    float maxLOD =
+            params.mipmapped() == skgpu::Mipmapped::kYes ? std::numeric_limits<float>::max() : 0.f;
     D3D12_TEXTURE_ADDRESS_MODE addressModeU = wrap_mode_to_d3d_address_mode(params.wrapModeX());
     D3D12_TEXTURE_ADDRESS_MODE addressModeV = wrap_mode_to_d3d_address_mode(params.wrapModeY());
     unsigned int maxAnisotropy = params.maxAniso();

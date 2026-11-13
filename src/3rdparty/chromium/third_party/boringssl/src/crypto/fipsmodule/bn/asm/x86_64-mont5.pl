@@ -79,6 +79,7 @@ $code=<<___;
 .align	64
 bn_mul_mont_gather5:
 .cfi_startproc
+	_CET_ENDBR
 	mov	${num}d,${num}d
 	mov	%rsp,%rax
 .cfi_def_cfa_register	%rax
@@ -158,8 +159,12 @@ $code.=<<___;
 	movdqa	%xmm1,%xmm2
 ___
 ########################################################################
-# calculate mask by comparing 0..31 to index and save result to stack
+# Calculate masks by comparing 0..31 to $idx and save result to stack.
 #
+# We compute sixteen 16-byte masks and store them on the stack. Mask i is stored
+# in `16*i - 128`(%rax) and contains the comparisons for idx == 2*i and
+# idx == 2*i + 1 in its lower and upper halves, respectively. Mask calculations
+# are scheduled in groups of four.
 $code.=<<___;
 	paddd	%xmm0,%xmm1
 	pcmpeqd	%xmm5,%xmm0		# compare to 1,0
@@ -228,7 +233,8 @@ ___
 }
 $code.=<<___;
 	por	%xmm1,%xmm0
-	pshufd	\$0x4e,%xmm0,%xmm1
+	# Combine the upper and lower halves of %xmm0.
+	pshufd	\$0x4e,%xmm0,%xmm1	# Swap upper and lower halves.
 	por	%xmm1,%xmm0
 	lea	$STRIDE($bp),$bp
 	movq	%xmm0,$m0		# m0=bp[0]
@@ -321,7 +327,8 @@ ___
 }
 $code.=<<___;
 	por	%xmm5,%xmm4
-	pshufd	\$0x4e,%xmm4,%xmm0
+	# Combine the upper and lower halves of %xmm4 as %xmm0.
+	pshufd	\$0x4e,%xmm4,%xmm0	# Swap upper and lower halves.
 	por	%xmm4,%xmm0
 	lea	$STRIDE($bp),$bp
 
@@ -575,7 +582,6 @@ mul4x_internal:
 ___
 		$bp="%r12";
 		$STRIDE=2**5*8;		# 5 is "window size"
-		$N=$STRIDE/4;		# should match cache line size
 		$tp=$i;
 $code.=<<___;
 	movdqa	0(%rax),%xmm0		# 00000001000000010000000000000000
@@ -589,8 +595,12 @@ $code.=<<___;
 	movdqa	%xmm1,%xmm2
 ___
 ########################################################################
-# calculate mask by comparing 0..31 to index and save result to stack
+# Calculate masks by comparing 0..31 to $idx and save result to stack.
 #
+# We compute sixteen 16-byte masks and store them on the stack. Mask i is stored
+# in `16*i - 128`(%rax) and contains the comparisons for idx == 2*i and
+# idx == 2*i + 1 in its lower and upper halves, respectively. Mask calculations
+# are scheduled in groups of four.
 $code.=<<___;
 	paddd	%xmm0,%xmm1
 	pcmpeqd	%xmm5,%xmm0		# compare to 1,0
@@ -659,7 +669,8 @@ ___
 }
 $code.=<<___;
 	por	%xmm1,%xmm0
-	pshufd	\$0x4e,%xmm0,%xmm1
+	# Combine the upper and lower halves of %xmm0.
+	pshufd	\$0x4e,%xmm0,%xmm1	# Swap upper and lower halves.
 	por	%xmm1,%xmm0
 	lea	$STRIDE($bp),$bp
 	movq	%xmm0,$m0		# m0=bp[0]
@@ -836,7 +847,8 @@ ___
 }
 $code.=<<___;
 	por	%xmm5,%xmm4
-	pshufd	\$0x4e,%xmm4,%xmm0
+	# Combine the upper and lower halves of %xmm4 as %xmm0.
+	pshufd	\$0x4e,%xmm4,%xmm0	# Swap upper and lower halves.
 	por	%xmm4,%xmm0
 	lea	$STRIDE($bp),$bp
 	movq	%xmm0,$m0		# m0=bp[i]
@@ -1087,6 +1099,7 @@ $code.=<<___;
 .align	32
 bn_power5:
 .cfi_startproc
+	_CET_ENDBR
 	mov	%rsp,%rax
 .cfi_def_cfa_register	%rax
 ___
@@ -1229,6 +1242,7 @@ $code.=<<___;
 bn_sqr8x_internal:
 __bn_sqr8x_internal:
 .cfi_startproc
+	_CET_ENDBR
 	##############################################################
 	# Squaring part:
 	#
@@ -2227,7 +2241,6 @@ my ($aptr, $bptr, $nptr, $tptr, $mi,  $bi,  $zero, $num)=
    ("%rsi","%rdi","%rcx","%rbx","%r8","%r9","%rbp","%rax");
 my $rptr=$bptr;
 my $STRIDE=2**5*8;		# 5 is "window size"
-my $N=$STRIDE/4;		# should match cache line size
 $code.=<<___;
 	movdqa	0(%rax),%xmm0		# 00000001000000010000000000000000
 	movdqa	16(%rax),%xmm1		# 00000002000000020000000200000002
@@ -2240,8 +2253,12 @@ $code.=<<___;
 	movdqa	%xmm1,%xmm2
 ___
 ########################################################################
-# calculate mask by comparing 0..31 to index and save result to stack
+# Calculate masks by comparing 0..31 to $idx and save result to stack.
 #
+# We compute sixteen 16-byte masks and store them on the stack. Mask i is stored
+# in `16*i - 128`(%rax) and contains the comparisons for idx == 2*i and
+# idx == 2*i + 1 in its lower and upper halves, respectively. Mask calculations
+# are scheduled in groups of four.
 $code.=<<___;
 	.byte	0x67
 	paddd	%xmm0,%xmm1
@@ -2310,7 +2327,8 @@ ___
 }
 $code.=<<___;
 	pxor	%xmm1,%xmm0
-	pshufd	\$0x4e,%xmm0,%xmm1
+	# Combine the upper and lower halves of %xmm0.
+	pshufd	\$0x4e,%xmm0,%xmm1	# Swap upper and lower halves.
 	por	%xmm1,%xmm0
 	lea	$STRIDE($bptr),$bptr
 	movq	%xmm0,%rdx		# bp[0]
@@ -2430,7 +2448,8 @@ ___
 }
 $code.=<<___;
 	por	%xmm5,%xmm4
-	pshufd	\$0x4e,%xmm4,%xmm0
+	# Combine the upper and lower halves of %xmm4 as %xmm0.
+	pshufd	\$0x4e,%xmm4,%xmm0	# Swap upper and lower halves.
 	por	%xmm4,%xmm0
 	lea	$STRIDE($bptr),$bptr
 	movq	%xmm0,%rdx		# m0=bp[i]
@@ -2721,6 +2740,7 @@ bn_powerx5:
 bn_sqrx8x_internal:
 __bn_sqrx8x_internal:
 .cfi_startproc
+	_CET_ENDBR
 	##################################################################
 	# Squaring part:
 	#
@@ -3432,8 +3452,18 @@ $code.=<<___;
 .align	16
 bn_scatter5:
 .cfi_startproc
+	_CET_ENDBR
 	cmp	\$0, $num
 	jz	.Lscatter_epilogue
+
+	# $tbl stores 32 entries, t0 through t31. Each entry has $num words.
+	# They are interleaved in memory as follows:
+	#
+	#  t0[0]      t1[0]      t2[0]      ... t31[0]
+	#  t0[1]      t1[1]      t2[1]      ... t31[1]
+	#  ...
+	#  t0[$num-1] t1[$num-1] t2[$num-1] ... t31[$num-1]
+
 	lea	($tbl,$idx,8),$tbl
 .Lscatter:
 	mov	($inp),%rax
@@ -3453,6 +3483,7 @@ bn_scatter5:
 bn_gather5:
 .cfi_startproc
 .LSEH_begin_bn_gather5:			# Win64 thing, but harmless in other cases
+	_CET_ENDBR
 	# I can't trust assembler to use specific encoding:-(
 	.byte	0x4c,0x8d,0x14,0x24			#lea    (%rsp),%r10
 .cfi_def_cfa_register	%r10
@@ -3471,8 +3502,12 @@ bn_gather5:
 	movdqa	%xmm1,%xmm2
 ___
 ########################################################################
-# calculate mask by comparing 0..31 to $idx and save result to stack
+# Calculate masks by comparing 0..31 to $idx and save result to stack.
 #
+# We compute sixteen 16-byte masks and store them on the stack. Mask i is stored
+# in `16*i - 128`(%rax) and contains the comparisons for idx == 2*i and
+# idx == 2*i + 1 in its lower and upper halves, respectively. Mask calculations
+# are scheduled in groups of four.
 for($i=0;$i<$STRIDE/16;$i+=4) {
 $code.=<<___;
 	paddd	%xmm0,%xmm1
@@ -3510,6 +3545,8 @@ $code.=<<___;
 	pxor	%xmm5,%xmm5
 ___
 for($i=0;$i<$STRIDE/16;$i+=4) {
+# Combine the masks with the corresponding table entries to select the correct
+# entry.
 $code.=<<___;
 	movdqa	`16*($i+0)-128`(%r11),%xmm0
 	movdqa	`16*($i+1)-128`(%r11),%xmm1
@@ -3528,7 +3565,8 @@ ___
 $code.=<<___;
 	por	%xmm5,%xmm4
 	lea	$STRIDE(%r11),%r11
-	pshufd	\$0x4e,%xmm4,%xmm0
+	# Combine the upper and lower halves of %xmm0.
+	pshufd	\$0x4e,%xmm4,%xmm0	# Swap upper and lower halves.
 	por	%xmm4,%xmm0
 	movq	%xmm0,($out)		# m0=bp[0]
 	lea	8($out),$out
@@ -3544,11 +3582,13 @@ $code.=<<___;
 ___
 }
 $code.=<<___;
+.section .rodata
 .align	64
 .Linc:
 	.long	0,0, 1,1
 	.long	2,2, 2,2
 .asciz	"Montgomery Multiplication with scatter/gather for x86_64, CRYPTOGAMS by <appro\@openssl.org>"
+.text
 ___
 
 # EXCEPTION_DISPOSITION handler (EXCEPTION_RECORD *rec,ULONG64 frame,

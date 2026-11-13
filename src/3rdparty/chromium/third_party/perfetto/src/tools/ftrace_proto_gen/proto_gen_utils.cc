@@ -32,12 +32,7 @@ namespace perfetto {
 namespace {
 
 std::string RunClangFmt(const std::string& input) {
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_MAC)
-  const std::string platform = "mac";
-#else
-  const std::string platform = "linux64";
-#endif
-  base::Subprocess clang_fmt({"buildtools/" + platform + "/clang-format"});
+  base::Subprocess clang_fmt({"third_party/clang-format/clang-format"});
   clang_fmt.args.stdout_mode = base::Subprocess::OutputMode::kBuffer;
   clang_fmt.args.stderr_mode = base::Subprocess::OutputMode::kInherit;
   clang_fmt.args.input = input;
@@ -141,38 +136,39 @@ std::string ProtoType::ToString() const {
 }
 
 // static
-ProtoType ProtoType::String() {
-  return {STRING, 0, false};
+ProtoType ProtoType::String(bool is_repeated) {
+  return {STRING, 0, false, is_repeated};
 }
 
 // static
 ProtoType ProtoType::Invalid() {
-  return {INVALID, 0, false};
+  return {INVALID, 0, false, false};
 }
 
 // static
-ProtoType ProtoType::Numeric(uint16_t size, bool is_signed) {
+ProtoType ProtoType::Numeric(uint16_t size, bool is_signed, bool is_repeated) {
   PERFETTO_CHECK(size == 32 || size == 64);
-  return {NUMERIC, size, is_signed};
+  return {NUMERIC, size, is_signed, is_repeated};
 }
 
 // static
 ProtoType ProtoType::FromDescriptor(
-    google::protobuf::FieldDescriptor::Type type) {
+    google::protobuf::FieldDescriptor::Type type,
+    bool is_repeated) {
   if (type == google::protobuf::FieldDescriptor::Type::TYPE_UINT64)
-    return Numeric(64, false);
+    return Numeric(64, false, is_repeated);
 
   if (type == google::protobuf::FieldDescriptor::Type::TYPE_INT64)
-    return Numeric(64, true);
+    return Numeric(64, true, is_repeated);
 
   if (type == google::protobuf::FieldDescriptor::Type::TYPE_UINT32)
-    return Numeric(32, false);
+    return Numeric(32, false, is_repeated);
 
   if (type == google::protobuf::FieldDescriptor::Type::TYPE_INT32)
-    return Numeric(32, true);
+    return Numeric(32, true, is_repeated);
 
   if (type == google::protobuf::FieldDescriptor::Type::TYPE_STRING)
-    return String();
+    return String(is_repeated);
 
   return Invalid();
 }
@@ -181,14 +177,15 @@ ProtoType GetCommon(ProtoType one, ProtoType other) {
   // Always need to prefer the LHS as it is the one already present
   // in the proto.
   if (one.type == ProtoType::STRING)
-    return ProtoType::String();
+    return ProtoType::String(one.is_repeated);
 
   if (one.is_signed || other.is_signed) {
     one = one.GetSigned();
     other = other.GetSigned();
   }
 
-  return ProtoType::Numeric(std::max(one.size, other.size), one.is_signed);
+  return ProtoType::Numeric(std::max(one.size, other.size), one.is_signed,
+                            one.is_repeated || other.is_repeated);
 }
 
 ProtoType InferProtoType(const FtraceEvent::Field& field) {
@@ -217,6 +214,18 @@ ProtoType InferProtoType(const FtraceEvent::Field& field) {
       StartsWith(field.type_and_name, "i_ino ") ||
       StartsWith(field.type_and_name, "dev_t ")) {
     return ProtoType::Numeric(64, /* is_signed= */ false);
+  }
+
+  // Bools should always uint32 even if they are signed.
+  if (StartsWith(field.type_and_name, "bool ")) {
+    return ProtoType::Numeric(32, /* is_signed= */ false);
+  }
+
+  // Fixed size array for syscall args. Similar to ino_t choose the largest
+  // possible size to cover 32bit and 64bit.
+  if (StartsWith(field.type_and_name, "unsigned long args[6]")) {
+    return ProtoType::Numeric(64, /* is_signed= */ false,
+                              /* is_repeated= */ true);
   }
 
   // Ints of various sizes:
@@ -254,25 +263,28 @@ std::string Proto::ToString() {
   std::string s;
   s += "message " + name + " {\n";
   for (const auto field : SortedFields()) {
-    s += "  optional " + field->type.ToString() + " " + field->name + " = " +
+    if (field->type.is_repeated)
+      s += "  repeated ";
+    else
+      s += "  optional ";
+    s += field->type.ToString() + " " + field->name + " = " +
          std::to_string(field->number) + ";\n";
   }
   s += "}\n";
   return s;
 }
 
-void Proto::MergeFrom(const Proto& other) {
-  // Always keep number from the left hand side.
-  PERFETTO_CHECK(name == other.name);
-  for (const auto& p : other.fields) {
-    auto it = fields.find(p.first);
-    if (it == fields.end()) {
-      Proto::Field field = p.second;
-      field.number = ++max_id;
-      AddField(std::move(field));
-    } else {
-      it->second.type = GetCommon(it->second.type, p.second.type);
+void Proto::UnionFields(const std::vector<Proto::Field>& candidate_fields) {
+  for (const auto& candidate : candidate_fields) {
+    auto it = fields.find(candidate.name);
+    if (it != fields.end()) {
+      // potentially expand proto type to cover both cases
+      it->second.type = GetCommon(it->second.type, candidate.type);
+      continue;
     }
+    Proto::Field new_field = candidate;
+    new_field.number = ++max_id;
+    AddField(std::move(new_field));
   }
 }
 

@@ -16,8 +16,8 @@
 #include "include/core/SkShader.h"
 #include "include/core/SkTextBlob.h"
 #include "include/core/SkTypeface.h"
+#include "src/base/SkSafeMath.h"
 #include "src/core/SkPaintPriv.h"
-#include "src/core/SkSafeMath.h"
 
 class SkReadBuffer;
 class SkWriteBuffer;
@@ -182,7 +182,7 @@ private:
  *         .....
  *    }
  */
-class SkTextBlobRunIterator {
+class SK_SPI SkTextBlobRunIterator {
 public:
     SkTextBlobRunIterator(const SkTextBlob* blob);
 
@@ -246,16 +246,7 @@ public:
 private:
     const SkTextBlob::RunRecord* fCurrentRun;
 
-    SkDEBUGCODE(uint8_t* fStorageTop;)
+    SkDEBUGCODE(const uint8_t* fStorageTop;)
 };
-
-inline bool SkTextBlobPriv::HasRSXForm(const SkTextBlob& blob) {
-    for (SkTextBlobRunIterator i{&blob}; !i.done(); i.next()) {
-        if (i.positioning() == SkTextBlobRunIterator::kRSXform_Positioning) {
-            return true;
-        }
-    }
-    return false;
-}
 
 #endif // SkTextBlobPriv_DEFINED

@@ -6,13 +6,13 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/scoped_run_loop_timeout.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/tracing/common/trace_startup_config.h"
 #include "components/tracing/common/tracing_switches.h"
@@ -37,7 +37,7 @@ void CheckForConditionAndWaitMoreIfNeeded(
     std::move(quit_closure).Run();
     return;
   }
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&CheckForConditionAndWaitMoreIfNeeded,
                      std::move(condition), std::move(quit_closure)),
@@ -322,7 +322,13 @@ INSTANTIATE_TEST_SUITE_P(
             OutputLocation::kDirectoryWithDefaultBasename,
             OutputLocation::kDirectoryWithBasenameUpdatedBeforeStop)));
 
-IN_PROC_BROWSER_TEST_P(StartupTracingTest, TestEnableTracing) {
+// TODO(crbug.com/1428925): Re-enable this test.
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
+#define MAYBE_TestEnableTracing DISABLED_TestEnableTracing
+#else
+#define MAYBE_TestEnableTracing TestEnableTracing
+#endif
+IN_PROC_BROWSER_TEST_P(StartupTracingTest, MAYBE_TestEnableTracing) {
   EXPECT_TRUE(NavigateToURL(shell(), GetTestUrl("", "title1.html")));
 
   if (GetOutputLocation() ==
@@ -354,8 +360,8 @@ INSTANTIATE_TEST_SUITE_P(
         testing::Values(OutputType::kJSON, OutputType::kProto),
         testing::Values(OutputLocation::kDirectoryWithDefaultBasename)));
 
-// Flaky; see https://crbug.com/1341341 .
-#if BUILDFLAG(IS_MAC)
+// TODO(crbug.com/1428925): Re-enable this test.
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
 #define MAYBE_StopOnUIThread DISABLED_StopOnUIThread
 #else
 #define MAYBE_StopOnUIThread StopOnUIThread
@@ -367,8 +373,13 @@ IN_PROC_BROWSER_TEST_P(EmergencyStopTracingTest, MAYBE_StopOnUIThread) {
   CheckOutput(GetExpectedPath(), GetOutputType());
 }
 
-// Flaky: crbug.com/1372387
-IN_PROC_BROWSER_TEST_P(EmergencyStopTracingTest, DISABLED_StopOnThreadPool) {
+// TODO(crbug.com/1428925): Re-enable this test.
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
+#define MAYBE_StopOnThreadPool DISABLED_StopOnThreadPool
+#else
+#define MAYBE_StopOnThreadPool StopOnThreadPool
+#endif
+IN_PROC_BROWSER_TEST_P(EmergencyStopTracingTest, MAYBE_StopOnThreadPool) {
   EXPECT_TRUE(NavigateToURL(shell(), GetTestUrl("", "title1.html")));
 
   auto expected_path = GetExpectedPath();
@@ -385,8 +396,13 @@ IN_PROC_BROWSER_TEST_P(EmergencyStopTracingTest, DISABLED_StopOnThreadPool) {
   run_loop.Run();
 }
 
-// Flaky: crbug.com/1372387
-IN_PROC_BROWSER_TEST_P(EmergencyStopTracingTest, DISABLED_StopOnThreadPoolTwice) {
+// TODO(crbug.com/1428925): Re-enable this test.
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
+#define MAYBE_StopOnThreadPoolTwice DISABLED_StopOnThreadPoolTwice
+#else
+#define MAYBE_StopOnThreadPoolTwice StopOnThreadPoolTwice
+#endif
+IN_PROC_BROWSER_TEST_P(EmergencyStopTracingTest, MAYBE_StopOnThreadPoolTwice) {
   EXPECT_TRUE(NavigateToURL(shell(), GetTestUrl("", "title1.html")));
 
   auto expected_path = GetExpectedPath();

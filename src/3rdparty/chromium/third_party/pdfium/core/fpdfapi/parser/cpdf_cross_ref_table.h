@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,29 +17,28 @@ class CPDF_Dictionary;
 
 class CPDF_CrossRefTable {
  public:
+  // See ISO 32000-1:2008 table 18.
   enum class ObjectType : uint8_t {
-    kFree = 0x00,
-    kNormal = 0x01,
-    kNotCompressed = kNormal,
-    kCompressed = 0x02,
-    kObjStream = 0xFF,
-    kNull = kObjStream,
+    kFree = 0,
+    kNormal = 1,
+    kCompressed = 2,
+    kNull = 3,  // Higher values reserved, treat all as the null object.
   };
 
   struct ObjectInfo {
-    ObjectInfo() : pos(0), type(ObjectType::kFree), gennum(0) {}
+    ObjectType type = ObjectType::kFree;
+    bool is_object_stream_flag = false;
+    uint16_t gennum = 0;
     // If `type` is `ObjectType::kCompressed`, `archive` should be used.
-    // If `type` is `ObjectType::kNotCompressed`, `pos` should be used.
+    // If `type` is `ObjectType::kNormal`, `pos` should be used.
     // In other cases, it is unused.
     union {
-      FX_FILESIZE pos;
+      FX_FILESIZE pos = 0;
       struct {
         uint32_t obj_num;
         uint32_t obj_index;
       } archive;
     };
-    ObjectType type;
-    uint16_t gennum;
   };
 
   // Merge cross reference tables.  Apply top on current.
@@ -48,16 +47,22 @@ class CPDF_CrossRefTable {
       std::unique_ptr<CPDF_CrossRefTable> top);
 
   CPDF_CrossRefTable();
-  explicit CPDF_CrossRefTable(RetainPtr<CPDF_Dictionary> trailer);
+  CPDF_CrossRefTable(RetainPtr<CPDF_Dictionary> trailer,
+                     uint32_t trailer_object_number);
   ~CPDF_CrossRefTable();
 
   void AddCompressed(uint32_t obj_num,
                      uint32_t archive_obj_num,
                      uint32_t archive_obj_index);
-  void AddNormal(uint32_t obj_num, uint16_t gen_num, FX_FILESIZE pos);
+  void AddNormal(uint32_t obj_num,
+                 uint16_t gen_num,
+                 bool is_object_stream,
+                 FX_FILESIZE pos);
   void SetFree(uint32_t obj_num);
 
-  void SetTrailer(RetainPtr<CPDF_Dictionary> trailer);
+  void SetTrailer(RetainPtr<CPDF_Dictionary> trailer,
+                  uint32_t trailer_object_number);
+  uint32_t trailer_object_number() const { return trailer_object_number_; }
   const CPDF_Dictionary* trailer() const { return trailer_.Get(); }
   CPDF_Dictionary* GetMutableTrailerForTesting() { return trailer_.Get(); }
 
@@ -69,13 +74,18 @@ class CPDF_CrossRefTable {
 
   void Update(std::unique_ptr<CPDF_CrossRefTable> new_cross_ref);
 
-  void ShrinkObjectMap(uint32_t objnum);
+  // Objects with object number >= `size` will be removed.
+  void SetObjectMapSize(uint32_t size);
 
  private:
-  void UpdateInfo(std::map<uint32_t, ObjectInfo>&& new_objects_info);
+  void UpdateInfo(std::map<uint32_t, ObjectInfo> new_objects_info);
   void UpdateTrailer(RetainPtr<CPDF_Dictionary> new_trailer);
 
   RetainPtr<CPDF_Dictionary> trailer_;
+  // `trailer_` can be the dictionary part of a XRef stream object. Since it is
+  // inline, it has no object number. Store the stream's object number, or 0 if
+  // there is none.
+  uint32_t trailer_object_number_ = 0;
   std::map<uint32_t, ObjectInfo> objects_info_;
 };
 

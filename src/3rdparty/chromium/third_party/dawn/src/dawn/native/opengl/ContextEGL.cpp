@@ -1,40 +1,48 @@
-// Copyright 2022 The Dawn Authors
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/opengl/ContextEGL.h"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "dawn/native/opengl/UtilsEGL.h"
 
-#ifndef EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT
-#define EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT 0x30BF
+#ifndef EGL_DISPLAY_TEXTURE_SHARE_GROUP_ANGLE
+#define EGL_DISPLAY_TEXTURE_SHARE_GROUP_ANGLE 0x33AF
 #endif
 
 namespace dawn::native::opengl {
 
 ResultOrError<std::unique_ptr<ContextEGL>> ContextEGL::Create(const EGLFunctions& egl,
-                                                              EGLenum api) {
-    EGLDisplay display = egl.GetCurrentDisplay();
-
-    if (display == EGL_NO_DISPLAY) {
-        display = egl.GetDisplay(EGL_DEFAULT_DISPLAY);
-    }
-
-    DAWN_INVALID_IF(display == EGL_NO_DISPLAY, "eglGetDisplay");
-
+                                                              EGLenum api,
+                                                              EGLDisplay display,
+                                                              bool useANGLETextureSharing) {
     EGLint renderableType = api == EGL_OPENGL_ES_API ? EGL_OPENGL_ES3_BIT : EGL_OPENGL_BIT;
 
     EGLint major, minor;
@@ -71,17 +79,25 @@ ResultOrError<std::unique_ptr<ContextEGL>> ContextEGL::Create(const EGLFunctions
         return DAWN_INTERNAL_ERROR("EGL_EXT_create_context_robustness must be supported");
     }
 
-    EGLint attrib_list[] = {
+    std::vector<EGLint> attrib_list{
         EGL_CONTEXT_MAJOR_VERSION,
         major,
         EGL_CONTEXT_MINOR_VERSION,
         minor,
-        EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT,
+        EGL_CONTEXT_OPENGL_ROBUST_ACCESS,  // Core in EGL 1.5
         EGL_TRUE,
-        EGL_NONE,
-        EGL_NONE,
     };
-    EGLContext context = egl.CreateContext(display, config, EGL_NO_CONTEXT, attrib_list);
+    if (useANGLETextureSharing) {
+        if (strstr(extensions, "EGL_ANGLE_display_texture_share_group") == nullptr) {
+            return DAWN_INTERNAL_ERROR(
+                "GL_ANGLE_display_texture_share_group must be supported to use GL texture sharing");
+        }
+        attrib_list.push_back(EGL_DISPLAY_TEXTURE_SHARE_GROUP_ANGLE);
+        attrib_list.push_back(EGL_TRUE);
+    }
+    attrib_list.push_back(EGL_NONE);
+
+    EGLContext context = egl.CreateContext(display, config, EGL_NO_CONTEXT, attrib_list.data());
     DAWN_TRY(CheckEGL(egl, context != EGL_NO_CONTEXT, "eglCreateContext"));
 
     return std::unique_ptr<ContextEGL>(new ContextEGL(egl, display, context));

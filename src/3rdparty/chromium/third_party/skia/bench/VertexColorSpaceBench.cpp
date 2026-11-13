@@ -9,9 +9,10 @@
 
 #include "include/core/SkString.h"
 #include "include/gpu/GrDirectContext.h"
-#include "include/private/SkHalf.h"
+#include "src/base/SkHalf.h"
 #include "src/core/SkColorSpacePriv.h"
 #include "src/gpu/KeyBuilder.h"
+#include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrGeometryProcessor.h"
 #include "src/gpu/ganesh/GrMemoryPool.h"
@@ -232,7 +233,7 @@ private:
             };
             SkASSERT(sizeof(V) == vertexStride);
             uint64_t color;
-            SkFloatToHalf_finite_ftz(skvx::float4::Load(&fColor4f)).store(&color);
+            to_half(skvx::float4::Load(&fColor4f)).store(&color);
             V* v = (V*)verts;
             for (int i = 0; i < kVertexCount; i += 2) {
                 v[i + 0].fPos.set(dx * i, 0.0f);
@@ -309,10 +310,14 @@ public:
         const int kDrawsPerLoop = 32;
 
         for (int i = 0; i < loops; ++i) {
-            auto sdc = skgpu::v1::SurfaceDrawContext::Make(context, GrColorType::kRGBA_8888, p3,
-                                                           SkBackingFit::kApprox, {100, 100},
-                                                           SkSurfaceProps(),
-                                                           /*label=*/"DrawVertexColorSpaceBench");
+            auto sdc =
+                    skgpu::ganesh::SurfaceDrawContext::Make(context,
+                                                            GrColorType::kRGBA_8888,
+                                                            p3,
+                                                            SkBackingFit::kApprox,
+                                                            {100, 100},
+                                                            SkSurfaceProps(),
+                                                            /*label=*/"DrawVertexColorSpaceBench");
             SkASSERT(sdc);
 
             for (int j = 0; j < kDrawsPerLoop; ++j) {

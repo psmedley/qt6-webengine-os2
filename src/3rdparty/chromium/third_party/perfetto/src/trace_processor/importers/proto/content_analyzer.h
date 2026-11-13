@@ -17,34 +17,61 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_CONTENT_ANALYZER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_CONTENT_ANALYZER_H_
 
+#include <utility>
+#include <vector>
+
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
-#include "src/trace_processor/importers/proto/proto_importer_module.h"
+#include "src/trace_processor/importers/proto/packet_analyzer.h"
+#include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "src/trace_processor/util/proto_profiler.h"
 
 namespace perfetto {
 namespace trace_processor {
 
-// Computes a trace proto size breakdown by field path, and exports the data to
-// an SQL table.
-class ContentAnalyzerModule : public ProtoImporterModule {
+// Interface for a module that processes track event information.
+class ProtoContentAnalyzer : public PacketAnalyzer {
  public:
-  explicit ContentAnalyzerModule(TraceProcessorContext* context);
+  struct Sample {
+    size_t size;
+    size_t count;
+  };
+  using PathToSamplesMap =
+      base::FlatHashMap<util::SizeProfileComputer::FieldPath,
+                        Sample,
+                        util::SizeProfileComputer::FieldPathHasher>;
+  using SampleAnnotation = PacketAnalyzer::SampleAnnotation;
 
-  ~ContentAnalyzerModule() override = default;
+  struct SampleAnnotationHasher {
+    using argument_type = SampleAnnotation;
+    using result_type = size_t;
 
-  ModuleResult TokenizePacket(const protos::pbzero::TracePacket_Decoder&,
-                              TraceBlobView* packet,
-                              int64_t packet_timestamp,
-                              PacketSequenceState*,
-                              uint32_t field_id) override;
+    result_type operator()(const argument_type& p) const {
+      base::Hasher hash;
+      for (auto v : p) {
+        hash.Update(v.first.raw_id());
+        hash.Update(v.second.raw_id());
+      }
+      return static_cast<size_t>(hash.digest());
+    }
+  };
+  using AnnotatedSamplesMap = base::
+      FlatHashMap<SampleAnnotation, PathToSamplesMap, SampleAnnotationHasher>;
+
+  ProtoContentAnalyzer(TraceProcessorContext* context);
+  ~ProtoContentAnalyzer() override;
+
+  void ProcessPacket(const TraceBlobView& packet,
+                     const SampleAnnotation& annotation) override;
 
   void NotifyEndOfFile() override;
 
  private:
   TraceProcessorContext* context_;
   DescriptorPool pool_;
-  util::SizeProfileComputer::PathToSamplesMap aggregated_samples_;
+  util::SizeProfileComputer computer_;
+  AnnotatedSamplesMap aggregated_samples_;
 };
 
 }  // namespace trace_processor

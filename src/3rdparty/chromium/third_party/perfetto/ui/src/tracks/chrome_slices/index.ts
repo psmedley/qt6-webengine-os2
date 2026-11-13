@@ -12,88 +12,63 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Actions} from '../../common/actions';
-import {cropText, drawIncompleteSlice} from '../../common/canvas_utils';
-import {colorForThreadIdleSlice, hslForSlice} from '../../common/colorizer';
-import {TRACE_MARGIN_TIME_S} from '../../common/constants';
-import {PluginContext} from '../../common/plugin_api';
-import {NUM, NUM_NULL, STR} from '../../common/query_result';
-import {fromNs, toNs} from '../../common/time';
-import {TrackData} from '../../common/track_data';
+import {BigintMath as BIMath} from '../../base/bigint_math';
+import {clamp} from '../../base/math_utils';
+import {Duration, duration, time} from '../../base/time';
 import {
-  TrackController,
-} from '../../controller/track_controller';
-import {checkerboardExcept} from '../../frontend/checkerboard';
-import {globals} from '../../frontend/globals';
-import {cachedHsluvToHex} from '../../frontend/hsluv_cache';
-import {NewTrackArgs, SliceRect, Track} from '../../frontend/track';
+  NAMED_ROW,
+  NamedSliceTrack,
+  NamedSliceTrackTypes,
+} from '../../frontend/named_slice_track';
+import {SLICE_LAYOUT_FIT_CONTENT_DEFAULTS} from '../../frontend/slice_layout';
+import {
+  SliceData,
+  SliceTrackLEGACY,
+} from '../../frontend/slice_track';
+import {NewTrackArgs} from '../../frontend/track';
+import {
+  EngineProxy,
+  Plugin,
+  PluginContext,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
+import {getTrackName} from '../../public/utils';
+import {
+  LONG,
+  LONG_NULL,
+  NUM,
+  NUM_NULL,
+  STR,
+  STR_NULL,
+} from '../../trace_processor/query_result';
 
 export const SLICE_TRACK_KIND = 'ChromeSliceTrack';
-const SLICE_HEIGHT = 18;
-const TRACK_PADDING = 4;
-const CHEVRON_WIDTH_PX = 10;
-const HALF_CHEVRON_WIDTH_PX = CHEVRON_WIDTH_PX / 2;
-const INNER_CHEVRON_OFFSET = -3;
-const INNER_CHEVRON_SCALE =
-    (SLICE_HEIGHT - 2 * INNER_CHEVRON_OFFSET) / SLICE_HEIGHT;
-// the lowest bucketNs gets is 2, but add some room in case of fp error
-const MIN_QUANT_NS = 3;
 
-export interface Config {
-  maxDepth: number;
-  namespace: string;
-  trackId: number;
-}
+export class ChromeSliceTrack extends SliceTrackLEGACY {
+  private maxDurNs: duration = 0n;
 
-export interface Data extends TrackData {
-  // Slices are stored in a columnar fashion.
-  strings: string[];
-  sliceIds: Float64Array;
-  starts: Float64Array;
-  ends: Float64Array;
-  depths: Uint16Array;
-  titles: Uint16Array;   // Index into strings.
-  colors?: Uint16Array;  // Index into strings.
-  isInstant: Uint16Array;
-  isIncomplete: Uint16Array;
-  cpuTimeRatio?: Float64Array;
-}
+  constructor(
+      protected engine: EngineProxy, maxDepth: number, trackKey: string,
+      private trackId: number, namespace?: string) {
+    super(maxDepth, trackKey, 'slice', namespace);
+  }
 
-export class ChromeSliceTrackController extends TrackController<Config, Data> {
-  static kind = SLICE_TRACK_KIND;
-  private maxDurNs = 0;
-
-  async onBoundsChange(start: number, end: number, resolution: number):
-      Promise<Data> {
-    const startNs = toNs(start);
-    const endNs = toNs(end);
-
-    const pxSize = this.pxSize();
-
-    // ns per quantization bucket (i.e. ns per pixel). /2 * 2 is to force it to
-    // be an even number, so we can snap in the middle.
-    const bucketNs = Math.max(Math.round(resolution * 1e9 * pxSize / 2) * 2, 1);
-
+  async onBoundsChange(start: time, end: time, resolution: duration):
+      Promise<SliceData> {
     const tableName = this.namespaceTable('slice');
 
-    if (this.maxDurNs === 0) {
+    if (this.maxDurNs === Duration.ZERO) {
       const query = `
           SELECT max(iif(dur = -1, (SELECT end_ts FROM trace_bounds) - ts, dur))
-          AS maxDur FROM ${tableName} WHERE track_id = ${this.config.trackId}`;
-      const queryRes = await this.query(query);
-      this.maxDurNs = queryRes.firstRow({maxDur: NUM_NULL}).maxDur || 0;
-    }
-
-    // Buckets are always even and positive, don't quantize once we zoom to
-    // nanosecond-scale, so that we can see exact sizes.
-    let tsq = `ts`;
-    if (bucketNs > MIN_QUANT_NS) {
-      tsq = `(ts + ${bucketNs / 2}) / ${bucketNs} * ${bucketNs}`;
+          AS maxDur FROM ${tableName} WHERE track_id = ${this.trackId}`;
+      const queryRes = await this.engine.query(query);
+      this.maxDurNs = queryRes.firstRow({maxDur: LONG_NULL}).maxDur ?? 0n;
     }
 
     const query = `
       SELECT
-        ${tsq} as tsq,
+        (ts + ${resolution / 2n}) / ${resolution} * ${resolution} as tsq,
         ts,
         max(iif(dur = -1, (SELECT end_ts FROM trace_bounds) - ts, dur)) as dur,
         depth,
@@ -103,22 +78,22 @@ export class ChromeSliceTrackController extends TrackController<Config, Data> {
         dur = -1 as isIncomplete,
         thread_dur as threadDur
       FROM ${tableName}
-      WHERE track_id = ${this.config.trackId} AND
-        ts >= (${startNs - this.maxDurNs}) AND
-        ts <= ${endNs}
+      WHERE track_id = ${this.trackId} AND
+        ts >= (${start - this.maxDurNs}) AND
+        ts <= ${end}
       GROUP BY depth, tsq`;
-    const queryRes = await this.query(query);
+    const queryRes = await this.engine.query(query);
 
     const numRows = queryRes.numRows();
-    const slices: Data = {
+    const slices: SliceData = {
       start,
       end,
       resolution,
       length: numRows,
       strings: [],
       sliceIds: new Float64Array(numRows),
-      starts: new Float64Array(numRows),
-      ends: new Float64Array(numRows),
+      starts: new BigInt64Array(numRows),
+      ends: new BigInt64Array(numRows),
       depths: new Uint16Array(numRows),
       titles: new Uint16Array(numRows),
       isInstant: new Uint16Array(numRows),
@@ -137,52 +112,39 @@ export class ChromeSliceTrackController extends TrackController<Config, Data> {
     }
 
     const it = queryRes.iter({
-      tsq: NUM,
-      ts: NUM,
-      dur: NUM,
+      tsq: LONG,
+      ts: LONG,
+      dur: LONG,
       depth: NUM,
       sliceId: NUM,
       name: STR,
       isInstant: NUM,
       isIncomplete: NUM,
-      threadDur: NUM_NULL,
+      threadDur: LONG_NULL,
     });
     for (let row = 0; it.valid(); it.next(), row++) {
-      const startNsQ = it.tsq;
-      const startNs = it.ts;
-      const durNs = it.dur;
-      const endNs = startNs + durNs;
+      const startQ = it.tsq;
+      const start = it.ts;
+      const dur = it.dur;
+      const end = start + dur;
+      const minEnd = startQ + resolution;
+      const endQ = BIMath.max(BIMath.quant(end, resolution), minEnd);
 
-      let endNsQ = endNs;
-      if (bucketNs > MIN_QUANT_NS) {
-        endNsQ = Math.floor((endNs + bucketNs / 2 - 1) / bucketNs) * bucketNs;
-        endNsQ = Math.max(endNsQ, startNsQ + bucketNs);
-      }
-
-      let isInstant = it.isInstant;
-      // Floating point rounding with large numbers of nanoseconds can mean
-      // there isn't enough precision to distinguish the start and end of a very
-      // short event so we just display the event as an instant when zoomed in
-      // rather than fail completely if the start and end time are the same.
-      if (startNsQ === endNsQ) {
-        isInstant = 1;
-      }
-
-      slices.starts[row] = fromNs(startNsQ);
-      slices.ends[row] = fromNs(endNsQ);
+      slices.starts[row] = startQ;
+      slices.ends[row] = endQ;
       slices.depths[row] = it.depth;
       slices.sliceIds[row] = it.sliceId;
       slices.titles[row] = internString(it.name);
-      slices.isInstant[row] = isInstant;
+      slices.isInstant[row] = it.isInstant;
       slices.isIncomplete[row] = it.isIncomplete;
 
       let cpuTimeRatio = 1;
-      if (!isInstant && !it.isIncomplete && it.threadDur !== null) {
+      if (!it.isInstant && !it.isIncomplete && it.threadDur !== null) {
         // Rounding the CPU time ratio to two decimal places and ensuring
         // it is less than or equal to one, incase the thread duration exceeds
         // the total duration.
-        cpuTimeRatio =
-            Math.min(Math.round((it.threadDur / it.dur) * 100) / 100, 1);
+        cpuTimeRatio = Math.min(
+            Math.round(BIMath.ratio(it.threadDur, it.dur) * 100) / 100, 1);
       }
       slices.cpuTimeRatio![row] = cpuTimeRatio;
     }
@@ -190,273 +152,150 @@ export class ChromeSliceTrackController extends TrackController<Config, Data> {
   }
 }
 
-export class ChromeSliceTrack extends Track<Config, Data> {
-  static readonly kind: string = SLICE_TRACK_KIND;
-  static create(args: NewTrackArgs): Track {
-    return new ChromeSliceTrack(args);
-  }
+export const CHROME_SLICE_ROW = {
+  // Base columns (tsq, ts, dur, id, depth).
+  ...NAMED_ROW,
 
-  private hoveredTitleId = -1;
+  // Chrome-specific columns.
+  threadDur: LONG_NULL,
+};
+export type ChromeSliceRow = typeof CHROME_SLICE_ROW;
 
-  constructor(args: NewTrackArgs) {
+export interface ChromeSliceTrackTypes extends NamedSliceTrackTypes {
+  row: ChromeSliceRow;
+}
+
+export class ChromeSliceTrackV2 extends NamedSliceTrack<ChromeSliceTrackTypes> {
+  constructor(args: NewTrackArgs, private trackId: number, maxDepth: number) {
     super(args);
-  }
-
-  // Font used to render the slice name on the current track.
-  protected getFont() {
-    return '12px Roboto Condensed';
-  }
-
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
-    // TODO: fonts and colors should come from the CSS and not hardcoded here.
-
-    const {timeScale, visibleWindowTime} = globals.frontendLocalState;
-    const data = this.data();
-
-    if (data === undefined) return;  // Can't possibly draw anything.
-
-    // If the cached trace slices don't fully cover the visible time range,
-    // show a gray rectangle with a "Loading..." label.
-    checkerboardExcept(
-        ctx,
-        this.getHeight(),
-        timeScale.timeToPx(visibleWindowTime.start),
-        timeScale.timeToPx(visibleWindowTime.end),
-        timeScale.timeToPx(data.start),
-        timeScale.timeToPx(data.end),
-    );
-
-    ctx.textAlign = 'center';
-
-    // measuretext is expensive so we only use it once.
-    const charWidth = ctx.measureText('ACBDLqsdfg').width / 10;
-
-    // The draw of the rect on the selected slice must happen after the other
-    // drawings, otherwise it would result under another rect.
-    let drawRectOnSelected = () => {};
-
-    for (let i = 0; i < data.starts.length; i++) {
-      const tStart = data.starts[i];
-      let tEnd = data.ends[i];
-      const depth = data.depths[i];
-      const titleId = data.titles[i];
-      const sliceId = data.sliceIds[i];
-      const isInstant = data.isInstant[i];
-      const isIncomplete = data.isIncomplete[i];
-      const title = data.strings[titleId];
-      const colorOverride = data.colors && data.strings[data.colors[i]];
-      if (isIncomplete) {  // incomplete slice
-        tEnd = visibleWindowTime.end;
-      }
-
-      const rect = this.getSliceRect(tStart, tEnd, depth);
-      if (!rect || !rect.visible) {
-        continue;
-      }
-
-      const currentSelection = globals.state.currentSelection;
-      const isSelected = currentSelection &&
-          currentSelection.kind === 'CHROME_SLICE' &&
-          currentSelection.id !== undefined && currentSelection.id === sliceId;
-
-      const name = title.replace(/( )?\d+/g, '');
-      const highlighted = titleId === this.hoveredTitleId ||
-          globals.state.highlightedSliceId === sliceId;
-
-      const hasFocus = highlighted || isSelected;
-
-      const [hue, saturation, lightness] = hslForSlice(name, hasFocus);
-
-      let color: string;
-      if (colorOverride === undefined) {
-        color = cachedHsluvToHex(hue, saturation, lightness);
-      } else {
-        color = colorOverride;
-      }
-      ctx.fillStyle = color;
-
-      // We draw instant events as upward facing chevrons starting at A:
-      //     A
-      //    ###
-      //   ##C##
-      //  ##   ##
-      // D       B
-      // Then B, C, D and back to A:
-      if (isInstant) {
-        if (isSelected) {
-          drawRectOnSelected = () => {
-            ctx.save();
-            ctx.translate(rect.left, rect.top);
-
-            // Draw outer chevron as dark border
-            ctx.save();
-            ctx.translate(0, INNER_CHEVRON_OFFSET);
-            ctx.scale(INNER_CHEVRON_SCALE, INNER_CHEVRON_SCALE);
-            ctx.fillStyle = cachedHsluvToHex(hue, 100, 10);
-
-            this.drawChevron(ctx);
-            ctx.restore();
-
-            // Draw inner chevron as interior
-            ctx.fillStyle = color;
-            this.drawChevron(ctx);
-
-            ctx.restore();
-          };
-        } else {
-          ctx.save();
-          ctx.translate(rect.left, rect.top);
-          this.drawChevron(ctx);
-          ctx.restore();
-        }
-        continue;
-      }
-
-      if (isIncomplete && rect.width > SLICE_HEIGHT / 4) {
-        drawIncompleteSlice(ctx, rect.left, rect.top, rect.width, SLICE_HEIGHT);
-      } else if (
-          data.cpuTimeRatio !== undefined && data.cpuTimeRatio[i] < 1 - 1e-9) {
-        // We draw two rectangles, representing the ratio between wall time and
-        // time spent on cpu.
-        const cpuTimeRatio = data.cpuTimeRatio![i];
-        const firstPartWidth = rect.width * cpuTimeRatio;
-        const secondPartWidth = rect.width * (1 - cpuTimeRatio);
-        ctx.fillRect(rect.left, rect.top, firstPartWidth, SLICE_HEIGHT);
-        ctx.fillStyle =
-            colorForThreadIdleSlice(hue, saturation, lightness, hasFocus);
-        ctx.fillRect(
-            rect.left + firstPartWidth,
-            rect.top,
-            secondPartWidth,
-            SLICE_HEIGHT);
-      } else {
-        ctx.fillRect(rect.left, rect.top, rect.width, SLICE_HEIGHT);
-      }
-
-      // Selected case
-      if (isSelected) {
-        drawRectOnSelected = () => {
-          ctx.strokeStyle = cachedHsluvToHex(hue, 100, 10);
-          ctx.beginPath();
-          ctx.lineWidth = 3;
-          ctx.strokeRect(
-              rect.left, rect.top - 1.5, rect.width, SLICE_HEIGHT + 3);
-          ctx.closePath();
-        };
-      }
-
-      ctx.fillStyle = lightness > 65 ? '#404040' : 'white';
-      const displayText = cropText(title, charWidth, rect.width);
-      const rectXCenter = rect.left + rect.width / 2;
-      ctx.textBaseline = 'middle';
-      ctx.font = this.getFont();
-      ctx.fillText(displayText, rectXCenter, rect.top + SLICE_HEIGHT / 2);
-    }
-    drawRectOnSelected();
-  }
-
-  drawChevron(ctx: CanvasRenderingContext2D) {
-    // Draw a chevron at a fixed location and size. Should be used with
-    // ctx.translate and ctx.scale to alter location and size.
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(HALF_CHEVRON_WIDTH_PX, SLICE_HEIGHT);
-    ctx.lineTo(0, SLICE_HEIGHT - HALF_CHEVRON_WIDTH_PX);
-    ctx.lineTo(-HALF_CHEVRON_WIDTH_PX, SLICE_HEIGHT);
-    ctx.lineTo(0, 0);
-    ctx.fill();
-  }
-
-  getSliceIndex({x, y}: {x: number, y: number}): number|void {
-    const data = this.data();
-    if (data === undefined) return;
-    const {timeScale} = globals.frontendLocalState;
-    if (y < TRACK_PADDING) return;
-    const instantWidthTime = timeScale.deltaPxToDuration(HALF_CHEVRON_WIDTH_PX);
-    const t = timeScale.pxToTime(x);
-    const depth = Math.floor((y - TRACK_PADDING) / SLICE_HEIGHT);
-    for (let i = 0; i < data.starts.length; i++) {
-      if (depth !== data.depths[i]) {
-        continue;
-      }
-      const tStart = data.starts[i];
-      if (data.isInstant[i]) {
-        if (Math.abs(tStart - t) < instantWidthTime) {
-          return i;
-        }
-      } else {
-        let tEnd = data.ends[i];
-        if (data.isIncomplete[i]) {
-          tEnd = globals.frontendLocalState.visibleWindowTime.end;
-        }
-        if (tStart <= t && t <= tEnd) {
-          return i;
-        }
-      }
-    }
-  }
-
-  onMouseMove({x, y}: {x: number, y: number}) {
-    this.hoveredTitleId = -1;
-    globals.dispatch(Actions.setHighlightedSliceId({sliceId: -1}));
-    const sliceIndex = this.getSliceIndex({x, y});
-    if (sliceIndex === undefined) return;
-    const data = this.data();
-    if (data === undefined) return;
-    this.hoveredTitleId = data.titles[sliceIndex];
-    const sliceId = data.sliceIds[sliceIndex];
-    globals.dispatch(Actions.setHighlightedSliceId({sliceId}));
-  }
-
-  onMouseOut() {
-    this.hoveredTitleId = -1;
-    globals.dispatch(Actions.setHighlightedSliceId({sliceId: -1}));
-  }
-
-  onMouseClick({x, y}: {x: number, y: number}): boolean {
-    const sliceIndex = this.getSliceIndex({x, y});
-    if (sliceIndex === undefined) return false;
-    const data = this.data();
-    if (data === undefined) return false;
-    const sliceId = data.sliceIds[sliceIndex];
-    if (sliceId !== undefined && sliceId !== -1) {
-      globals.makeSelection(Actions.selectChromeSlice({
-        id: sliceId,
-        trackId: this.trackState.id,
-        table: this.config.namespace,
-      }));
-      return true;
-    }
-    return false;
-  }
-
-  getHeight() {
-    return SLICE_HEIGHT * (this.config.maxDepth + 1) + 2 * TRACK_PADDING;
-  }
-
-  getSliceRect(tStart: number, tEnd: number, depth: number): SliceRect
-      |undefined {
-    const {timeScale, visibleWindowTime} = globals.frontendLocalState;
-    const pxEnd = timeScale.timeToPx(visibleWindowTime.end);
-    const left = Math.max(timeScale.timeToPx(tStart), -TRACE_MARGIN_TIME_S);
-    const right = Math.min(timeScale.timeToPx(tEnd), pxEnd);
-    return {
-      left,
-      width: Math.max(right - left, 1),
-      top: TRACK_PADDING + depth * SLICE_HEIGHT,
-      height: SLICE_HEIGHT,
-      visible:
-          !(tEnd <= visibleWindowTime.start || tStart >= visibleWindowTime.end),
+    this.sliceLayout = {
+      ...SLICE_LAYOUT_FIT_CONTENT_DEFAULTS,
+      depthGuess: maxDepth,
     };
   }
+
+  // This is used by the base class to call iter().
+  getRowSpec() {
+    return CHROME_SLICE_ROW;
+  }
+
+  getSqlSource(): string {
+    return `select
+      ts,
+      dur,
+      id,
+      depth,
+      ifnull(name, '') as name,
+      thread_dur as threadDur
+    from slice
+    where track_id = ${this.trackId}`;
+  }
+
+  // Converts a SQL result row to an "Impl" Slice.
+  rowToSlice(row: ChromeSliceTrackTypes['row']):
+      ChromeSliceTrackTypes['slice'] {
+    const namedSlice = super.rowToSlice(row);
+
+    if (row.dur > 0n && row.threadDur !== null) {
+      const fillRatio = clamp(BIMath.ratio(row.threadDur, row.dur), 0, 1);
+      return {...namedSlice, fillRatio};
+    } else {
+      return namedSlice;
+    }
+  }
+
+  onUpdatedSlices(slices: ChromeSliceTrackTypes['slice'][]) {
+    for (const slice of slices) {
+      slice.isHighlighted = (slice === this.hoveredSlice);
+    }
+  }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(ChromeSliceTrackController);
-  ctx.registerTrack(ChromeSliceTrack);
+class ChromeSlicesPlugin implements Plugin {
+  onActivate(_ctx: PluginContext): void {}
+
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    const {engine} = ctx;
+    const result = await engine.query(`
+        select
+          thread_track.utid as utid,
+          thread_track.id as trackId,
+          thread_track.name as trackName,
+          EXTRACT_ARG(thread_track.source_arg_set_id,
+                      'is_root_in_scope') as isDefaultTrackForScope,
+          tid,
+          thread.name as threadName,
+          max(slice.depth) as maxDepth,
+          process.upid as upid
+        from slice
+        join thread_track on slice.track_id = thread_track.id
+        join thread using(utid)
+        left join process using(upid)
+        group by thread_track.id
+  `);
+
+    const it = result.iter({
+      utid: NUM,
+      trackId: NUM,
+      trackName: STR_NULL,
+      isDefaultTrackForScope: NUM_NULL,
+      tid: NUM_NULL,
+      threadName: STR_NULL,
+      maxDepth: NUM,
+      upid: NUM_NULL,
+    });
+
+    for (; it.valid(); it.next()) {
+      const utid = it.utid;
+      const trackId = it.trackId;
+      const trackName = it.trackName;
+      const tid = it.tid;
+      const threadName = it.threadName;
+      const maxDepth = it.maxDepth;
+
+      const displayName = getTrackName({
+        name: trackName,
+        utid,
+        tid,
+        threadName,
+        kind: 'Slices',
+      });
+
+      ctx.registerTrack({
+        uri: `perfetto.ChromeSlices#${trackId}`,
+        displayName,
+        trackIds: [trackId],
+        kind: SLICE_TRACK_KIND,
+        track: ({trackKey}) => {
+          return new ChromeSliceTrack(
+              engine,
+              maxDepth,
+              trackKey,
+              trackId,
+          );
+        },
+      });
+
+      // trackIds can only be registered by one track at a time.
+      // TODO(hjd): Move trackIds to only be on V2.
+      ctx.registerTrack({
+        uri: `perfetto.ChromeSlices#${trackId}.v2`,
+        displayName,
+        trackIds: [trackId],
+        kind: SLICE_TRACK_KIND,
+        track: ({trackKey}) => {
+          const newTrackArgs = {
+            engine: ctx.engine,
+            trackKey,
+          };
+          return new ChromeSliceTrackV2(newTrackArgs, trackId, maxDepth);
+        },
+      });
+    }
+  }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.ChromeSlices',
-  activate,
+  plugin: ChromeSlicesPlugin,
 };

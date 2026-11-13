@@ -12,21 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef NO_WEBRTC
+
 #include "connections/implementation/webrtc_bwu_handler.h"
 
 #include <string>
 #include <utility>
 
 #include "absl/functional/bind_front.h"
+#include "connections/implementation/base_bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/mediums/utils.h"
 #include "connections/implementation/mediums/webrtc_peer_id.h"
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/webrtc_endpoint_channel.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
+using ::location::nearby::connections::LocationHint;
+using ::location::nearby::connections::LocationStandard;
 
 WebrtcBwuHandler::WebrtcIncomingSocket::WebrtcIncomingSocket(
     const std::string& name, mediums::WebRtcSocketWrapper socket)
@@ -36,9 +40,9 @@ void WebrtcBwuHandler::WebrtcIncomingSocket::Close() { socket_.Close(); }
 
 std::string WebrtcBwuHandler::WebrtcIncomingSocket::ToString() { return name_; }
 
-WebrtcBwuHandler::WebrtcBwuHandler(Mediums& mediums,
-                                   BwuNotifications notifications)
-    : BaseBwuHandler(std::move(notifications)),
+WebrtcBwuHandler::WebrtcBwuHandler(
+    Mediums& mediums, IncomingConnectionCallback incoming_connection_callback)
+    : BaseBwuHandler(std::move(incoming_connection_callback)),
       mediums_(mediums) {}
 
 // Called by BWU target. Retrieves a new medium info from incoming message,
@@ -111,11 +115,8 @@ ByteArray WebrtcBwuHandler::HandleInitializeUpgradedMediumForEndpoint(
   if (!webrtc_.IsAcceptingConnections(upgrade_service_id)) {
     if (!webrtc_.StartAcceptingConnections(
             upgrade_service_id, self_id, location_hint,
-            {
-                .accepted_cb = absl::bind_front(
-                    &WebrtcBwuHandler::OnIncomingWebrtcConnection, this,
-                    client),
-            })) {
+            absl::bind_front(&WebrtcBwuHandler::OnIncomingWebrtcConnection,
+                             this, client))) {
       NEARBY_LOG(ERROR,
                  "WebRtcBwuHandler couldn't initiate the WEB_RTC upgrade for "
                  "endpoint %s because it failed to start listening for "
@@ -146,9 +147,10 @@ void WebrtcBwuHandler::OnIncomingWebrtcConnection(
       new IncomingSocketConnection{std::move(webrtc_socket),
                                    std::move(channel)});
 
-  bwu_notifications_.incoming_connection_cb(client, std::move(connection));
+  NotifyOnIncomingConnection(client, std::move(connection));
 }
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
+
+#endif

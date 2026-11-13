@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include <vector>
 
-#include "core/fxcrt/unowned_ptr.h"
+#include "core/fxcrt/unowned_ptr_exclusion.h"
 #include "fxjs/gc/heap.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "v8/include/cppgc/macros.h"
@@ -64,7 +64,7 @@ class CXFA_FMParser {
   ParseArgumentList();
 
   UnownedPtr<cppgc::Heap> const m_heap;
-  UnownedPtr<CXFA_FMLexer> m_lexer;
+  UNOWNED_PTR_EXCLUSION CXFA_FMLexer* const m_lexer;  // Stack allocated.
   CXFA_FMLexer::Token m_token;
   bool m_error = false;
   unsigned long m_parse_depth = 0;

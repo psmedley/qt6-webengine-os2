@@ -7,14 +7,14 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include "gn/c_substitution_type.h"
 #include "gn/err.h"
 #include "gn/substitution_type.h"
-#include "gn/c_substitution_type.h"
 
 const SubstitutionTypes RustSubstitutions = {
-    &kRustSubstitutionCrateName,       &kRustSubstitutionCrateType,
-    &kRustSubstitutionRustDeps,        &kRustSubstitutionRustFlags,
-    &kRustSubstitutionRustEnv,         &kRustSubstitutionExterns,
+    &kRustSubstitutionCrateName, &kRustSubstitutionCrateType,
+    &kRustSubstitutionRustDeps,  &kRustSubstitutionRustFlags,
+    &kRustSubstitutionRustEnv,   &kRustSubstitutionExterns,
     &kRustSubstitutionSources,
 };
 
@@ -42,7 +42,12 @@ bool IsValidRustSubstitution(const Substitution* type) {
          type == &kRustSubstitutionSources;
 }
 
+// Rust substitution types which we also make available to action targets.
+bool IsValidRustScriptArgsSubstitution(const Substitution* type) {
+  return type == &kRustSubstitutionRustEnv ||
+         type == &kRustSubstitutionRustFlags;
+}
+
 bool IsValidRustLinkerSubstitution(const Substitution* type) {
-  return IsValidRustSubstitution(type) ||
-         type == &CSubstitutionLdFlags;
+  return IsValidRustSubstitution(type) || type == &CSubstitutionLdFlags;
 }

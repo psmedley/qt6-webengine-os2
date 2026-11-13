@@ -27,6 +27,7 @@ class Layer;
 
 namespace views {
 class CircleLayerDelegate;
+class InkDropHost;
 class RectangleLayerDelegate;
 
 namespace test {
@@ -53,7 +54,8 @@ class VIEWS_EXPORT SquareInkDropRipple : public InkDropRipple {
   // The shape to use for the ACTIVATED/DEACTIVATED states.
   enum class ActivatedShape { kCircle, kRoundedRect };
 
-  SquareInkDropRipple(const gfx::Size& large_size,
+  SquareInkDropRipple(InkDropHost* ink_drop_host,
+                      const gfx::Size& large_size,
                       int large_corner_radius,
                       const gfx::Size& small_size,
                       int small_corner_radius,
@@ -67,7 +69,6 @@ class VIEWS_EXPORT SquareInkDropRipple : public InkDropRipple {
   void set_activated_shape(ActivatedShape shape) { activated_shape_ = shape; }
 
   // InkDropRipple:
-  void SnapToActivated() override;
   ui::Layer* GetRootLayer() override;
 
  private:
@@ -90,13 +91,14 @@ class VIEWS_EXPORT SquareInkDropRipple : public InkDropRipple {
 
   // Type that contains a gfx::Tansform for each of the layers required by the
   // ink drop.
-  typedef gfx::Transform InkDropTransforms[PAINTED_SHAPE_COUNT];
+  using InkDropTransforms = gfx::Transform[PAINTED_SHAPE_COUNT];
 
   float GetCurrentOpacity() const;
 
   // InkDropRipple:
   void AnimateStateChange(InkDropState old_ink_drop_state,
                           InkDropState new_ink_drop_state) override;
+  void SetStateToActivated() override;
   void SetStateToHidden() override;
   void AbortAllAnimations() override;
 
@@ -149,7 +151,7 @@ class VIEWS_EXPORT SquareInkDropRipple : public InkDropRipple {
   void OnLayerAnimationSequenceScheduled(ui::LayerAnimationSequence* sequence);
 
   // The shape used for the ACTIVATED/DEACTIVATED states.
-  ActivatedShape activated_shape_;
+  ActivatedShape activated_shape_ = ActivatedShape::kRoundedRect;
 
   // Ink drop opacity when it is visible.
   float visible_opacity_;

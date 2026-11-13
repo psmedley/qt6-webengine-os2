@@ -23,28 +23,30 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkScalar.h"
+#include "include/core/SkSerialProcs.h"
 #include "include/core/SkStream.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
 #include "include/core/SkTypes.h"
-#include "include/private/SkFixed.h"
-#include "include/private/SkMalloc.h"
-#include "include/private/SkTo.h"
+#include "include/private/base/SkAlign.h"
+#include "include/private/base/SkFixed.h"
+#include "include/private/base/SkMalloc.h"
+#include "include/private/base/SkTo.h"
 #include "src/core/SkAdvancedTypefaceMetrics.h" // IWYU pragma: keep
+#include "src/core/SkFontDescriptor.h"
 #include "src/core/SkGlyph.h"
 #include "src/core/SkMask.h"
 #include "src/core/SkScalerContext.h"
+#include "src/core/SkStreamPriv.h"
 
-#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
 class SkArenaAlloc;
 class SkDescriptor;
-class SkFontDescriptor;
 
 namespace {
 static inline const constexpr bool kSkShowTextBlitCoverage = false;
@@ -213,12 +215,13 @@ std::unique_ptr<SkAdvancedTypefaceMetrics> SkUserTypeface::onGetAdvancedMetrics(
 }
 
 void SkUserTypeface::onGetFontDescriptor(SkFontDescriptor* desc, bool* isLocal) const {
+    desc->setFactoryId(SkCustomTypefaceBuilder::FactoryId);
     *isLocal = true;
 }
 
-void SkUserTypeface::onCharsToGlyphs(const SkUnichar uni[], int count, SkGlyphID glyphs[]) const {
+void SkUserTypeface::onCharsToGlyphs(const SkUnichar* chars, int count, SkGlyphID glyphs[]) const {
     for (int i = 0; i < count; ++i) {
-        glyphs[i] = uni[i] < this->glyphCount() ? SkTo<SkGlyphID>(uni[i]) : 0;
+        glyphs[i] = chars[i] < this->glyphCount() ? SkTo<SkGlyphID>(chars[i]) : 0;
     }
 }
 
@@ -251,45 +254,33 @@ public:
     }
 
 protected:
-    bool generateAdvance(SkGlyph* glyph) override {
+    GlyphMetrics generateMetrics(const SkGlyph& glyph, SkArenaAlloc*) override {
+        GlyphMetrics mx(glyph.maskFormat());
+
         const SkUserTypeface* tf = this->userTF();
-        auto advance = fMatrix.mapXY(tf->fGlyphRecs[glyph->getGlyphID()].fAdvance, 0);
+        mx.advance = fMatrix.mapXY(tf->fGlyphRecs[glyph.getGlyphID()].fAdvance, 0);
 
-        glyph->fAdvanceX = advance.fX;
-        glyph->fAdvanceY = advance.fY;
-        return true;
-    }
-
-    void generateMetrics(SkGlyph* glyph, SkArenaAlloc* alloc) override {
-        glyph->zeroMetrics();
-        this->generateAdvance(glyph);
-
-        const auto& rec = this->userTF()->fGlyphRecs[glyph->getGlyphID()];
+        const auto& rec = tf->fGlyphRecs[glyph.getGlyphID()];
         if (rec.isDrawable()) {
-            glyph->fMaskFormat = SkMask::kARGB32_Format;
+            mx.maskFormat = SkMask::kARGB32_Format;
 
             SkRect bounds = fMatrix.mapRect(rec.fBounds);
-            bounds.offset(SkFixedToScalar(glyph->getSubXFixed()),
-                          SkFixedToScalar(glyph->getSubYFixed()));
-
-            SkIRect ibounds;
-            bounds.roundOut(&ibounds);
-            glyph->fLeft   = ibounds.fLeft;
-            glyph->fTop    = ibounds.fTop;
-            glyph->fWidth  = ibounds.width();
-            glyph->fHeight = ibounds.height();
+            bounds.offset(SkFixedToScalar(glyph.getSubXFixed()),
+                          SkFixedToScalar(glyph.getSubYFixed()));
+            bounds.roundOut(&mx.bounds);
 
             // These do not have an outline path.
-            glyph->setPath(alloc, nullptr, false);
+            mx.neverRequestPath = true;
         }
+        return mx;
     }
 
-    void generateImage(const SkGlyph& glyph) override {
+    void generateImage(const SkGlyph& glyph, void* imageBuffer) override {
         const auto& rec = this->userTF()->fGlyphRecs[glyph.getGlyphID()];
         SkASSERTF(rec.isDrawable(), "Only drawable-backed glyphs should reach generateImage.");
 
-        auto canvas = SkCanvas::MakeRasterDirectN32(glyph.fWidth, glyph.fHeight,
-                                                    static_cast<SkPMColor*>(glyph.fImage),
+        auto canvas = SkCanvas::MakeRasterDirectN32(glyph.width(), glyph.height(),
+                                                    static_cast<SkPMColor*>(imageBuffer),
                                                     glyph.rowBytes());
         if constexpr (kSkShowTextBlitCoverage) {
             canvas->clear(0x33FF0000);
@@ -297,7 +288,7 @@ protected:
             canvas->clear(SK_ColorTRANSPARENT);
         }
 
-        canvas->translate(-glyph.fLeft, -glyph.fTop);
+        canvas->translate(-glyph.left(), -glyph.top());
         canvas->translate(SkFixedToScalar(glyph.getSubXFixed()),
                           SkFixedToScalar(glyph.getSubYFixed()));
         canvas->drawDrawable(rec.fDrawable.get(), &fMatrix);
@@ -481,12 +472,8 @@ sk_sp<SkTypeface> SkCustomTypefaceBuilder::Deserialize(SkStream* stream) {
 
         // The amount of bytes in the stream must be at least as big as sz, otherwise
         // sz is invalid.
-        if (stream->hasLength() && stream->hasPosition()) {
-            SkASSERT(stream->getLength() >= stream->getPosition());
-            size_t remainingBytes = stream->getLength() - stream->getPosition();
-            if (sz > remainingBytes) {
-                return nullptr;
-            }
+        if (StreamRemainingLengthIsBelow(stream, sz)) {
+            return nullptr;
         }
 
         auto data = SkData::MakeUninitialized(sz);
@@ -496,7 +483,9 @@ sk_sp<SkTypeface> SkCustomTypefaceBuilder::Deserialize(SkStream* stream) {
 
         switch (gtype) {
         case GlyphType::kDrawable: {
-            auto drawable = SkDrawable::Deserialize(data->data(), data->size());
+            SkDeserialProcs procs;
+            procs.fAllowSkSL = false;
+            auto drawable = SkDrawable::Deserialize(data->data(), data->size(), &procs);
             if (!drawable) {
                 return nullptr;
             }
@@ -517,4 +506,9 @@ sk_sp<SkTypeface> SkCustomTypefaceBuilder::Deserialize(SkStream* stream) {
 
     arp.markDone();
     return builder.detach();
+}
+
+sk_sp<SkTypeface> SkCustomTypefaceBuilder::MakeFromStream(std::unique_ptr<SkStreamAsset> stream,
+                                                          const SkFontArguments&) {
+    return Deserialize(stream.get());
 }

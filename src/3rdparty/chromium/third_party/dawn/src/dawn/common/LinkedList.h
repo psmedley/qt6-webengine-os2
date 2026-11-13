@@ -12,6 +12,9 @@
 #define SRC_DAWN_COMMON_LINKEDLIST_H_
 
 #include "dawn/common/Assert.h"
+#include "partition_alloc/pointers/raw_ptr.h"
+
+namespace dawn {
 
 // Simple LinkedList type. (See the Q&A section to understand how this
 // differs from std::list).
@@ -116,6 +119,12 @@ class LinkNode {
         }
     }
 
+    ~LinkNode() {
+        // Remove the node from any list, otherwise there can be outstanding references to the node
+        // even after it has been freed.
+        RemoveFromList();
+    }
+
     // Insert |this| into the linked list, before |e|.
     void InsertBefore(LinkNode<T>* e) {
         this->next_ = e;
@@ -134,7 +143,7 @@ class LinkNode {
 
     // Check if |this| is in a list.
     bool IsInList() const {
-        ASSERT((this->previous_ == nullptr) == (this->next_ == nullptr));
+        DAWN_ASSERT((this->previous_ == nullptr) == (this->next_ == nullptr));
         return this->next_ != nullptr;
     }
 
@@ -163,8 +172,8 @@ class LinkNode {
 
   private:
     friend class LinkedList<T>;
-    LinkNode<T>* previous_;
-    LinkNode<T>* next_;
+    raw_ptr<LinkNode<T>> previous_;
+    raw_ptr<LinkNode<T>> next_;
 };
 
 template <typename T>
@@ -174,13 +183,6 @@ class LinkedList {
     // list (root_.next() will point back to the start of the list,
     // and root_->previous() wraps around to the end of the list).
     LinkedList() : root_(&root_, &root_) {}
-
-    ~LinkedList() {
-        // If any LinkNodes still exist in the LinkedList, there will be outstanding references to
-        // root_ even after it has been freed. We should remove root_ from the list to prevent any
-        // future access.
-        root_.RemoveFromList();
-    }
 
     // Appends |e| to the end of the linked list.
     void Append(LinkNode<T>* e) { e->InsertBefore(&root_); }
@@ -232,8 +234,8 @@ class LinkedListIterator {
     LinkNode<T>* operator*() const { return current_; }
 
   private:
-    LinkNode<T>* current_;
-    LinkNode<T>* next_;
+    raw_ptr<LinkNode<T>> current_;
+    raw_ptr<LinkNode<T>> next_;
 };
 
 template <typename T>
@@ -247,5 +249,7 @@ template <typename T>
 LinkedListIterator<T> end(LinkedList<T>& l) {
     return LinkedListIterator<T>(l.tail()->next());
 }
+
+}  // namespace dawn
 
 #endif  // SRC_DAWN_COMMON_LINKEDLIST_H_

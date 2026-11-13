@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,8 +106,7 @@ int32_t CBC_SymbolInfo::GetHorizontalDataRegions() const {
     case 36:
       return 6;
     default:
-      NOTREACHED();
-      return 0;
+      NOTREACHED_NORETURN();
   }
 }
 
@@ -124,8 +123,7 @@ int32_t CBC_SymbolInfo::GetVerticalDataRegions() const {
     case 36:
       return 6;
     default:
-      NOTREACHED();
-      return 0;
+      NOTREACHED_NORETURN();
   }
 }
 

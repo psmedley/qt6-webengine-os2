@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,17 @@ struct FXJSE_CLASS_DESCRIPTOR;
 
 class CFXJSE_Context {
  public:
+  struct ExecutionResult {
+    ExecutionResult();
+    ExecutionResult(bool sts, std::unique_ptr<CFXJSE_Value> val);
+    ExecutionResult(ExecutionResult&& that) noexcept;
+    ExecutionResult& operator=(ExecutionResult&& that) noexcept;
+    ~ExecutionResult();
+
+    bool status = false;
+    std::unique_ptr<CFXJSE_Value> value;
+  };
+
   static std::unique_ptr<CFXJSE_Context> Create(
       v8::Isolate* pIsolate,
       const FXJSE_CLASS_DESCRIPTOR* pGlobalClass,
@@ -32,7 +43,7 @@ class CFXJSE_Context {
 
   ~CFXJSE_Context();
 
-  v8::Isolate* GetIsolate() const { return m_pIsolate.Get(); }
+  v8::Isolate* GetIsolate() const { return m_pIsolate; }
   v8::Local<v8::Context> GetContext();
   v8::Local<v8::Object> GetGlobalObject();
 
@@ -41,9 +52,8 @@ class CFXJSE_Context {
   void EnableCompatibleMode();
 
   // Note: `pNewThisObject` may be empty.
-  bool ExecuteScript(ByteStringView bsScript,
-                     CFXJSE_Value* pRetValue,
-                     v8::Local<v8::Object> pNewThisObject);
+  ExecutionResult ExecuteScript(ByteStringView bsScript,
+                                v8::Local<v8::Object> pNewThisObject);
 
  private:
   CFXJSE_Context(v8::Isolate* pIsolate, CXFA_ThisProxy* pProxy);

@@ -18,11 +18,11 @@
 #include "libANGLE/renderer/vulkan/DeviceVk.h"
 #include "libANGLE/renderer/vulkan/ImageVk.h"
 #include "libANGLE/renderer/vulkan/RendererVk.h"
+#include "libANGLE/renderer/vulkan/ShareGroupVk.h"
 #include "libANGLE/renderer/vulkan/SurfaceVk.h"
 #include "libANGLE/renderer/vulkan/SyncVk.h"
 #include "libANGLE/renderer/vulkan/TextureVk.h"
 #include "libANGLE/renderer/vulkan/VkImageImageSiblingVk.h"
-#include "libANGLE/trace.h"
 
 namespace rx
 {
@@ -90,20 +90,12 @@ void GetSupportedFormatColorspaces(VkPhysicalDevice physicalDevice,
         *surfaceFormatsOut = std::move(surfaceFormats2);
     }
 }
-
 }  // namespace
-
-// Time interval in seconds that we should try to prune default buffer pools.
-constexpr double kTimeElapsedForPruneDefaultBufferPool = 0.25;
-
-// Set to true will log bufferpool stats into INFO stream
-#define ANGLE_ENABLE_BUFFER_POOL_STATS_LOGGING 0
 
 DisplayVk::DisplayVk(const egl::DisplayState &state)
     : DisplayImpl(state),
       vk::Context(new RendererVk()),
       mScratchBuffer(1000u),
-      mSavedError({VK_SUCCESS, "", "", 0}),
       mSupportedColorspaceFormatsMap{}
 {}
 
@@ -116,7 +108,7 @@ egl::Error DisplayVk::initialize(egl::Display *display)
 {
     ASSERT(mRenderer != nullptr && display != nullptr);
     angle::Result result = mRenderer->initialize(this, display, getWSIExtension(), getWSILayer());
-    ANGLE_TRY(angle::ToEGL(result, this, EGL_NOT_INITIALIZED));
+    ANGLE_TRY(angle::ToEGL(result, EGL_NOT_INITIALIZED));
     // Query and cache supported surface format and colorspace for later use.
     initSupportedSurfaceFormatColorspaces();
     return egl::NoError();
@@ -190,7 +182,7 @@ egl::Error DisplayVk::waitClient(const gl::Context *context)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "DisplayVk::waitClient");
     ContextVk *contextVk = vk::GetImpl(context);
-    return angle::ToEGL(contextVk->finishImpl(RenderPassClosureReason::EGLWaitClient), this,
+    return angle::ToEGL(contextVk->finishImpl(RenderPassClosureReason::EGLWaitClient),
                         EGL_BAD_ACCESS);
 }
 
@@ -244,9 +236,9 @@ ImageImpl *DisplayVk::createImage(const egl::ImageState &state,
     return new ImageVk(state, context);
 }
 
-ShareGroupImpl *DisplayVk::createShareGroup()
+ShareGroupImpl *DisplayVk::createShareGroup(const egl::ShareGroupState &state)
 {
-    return new ShareGroupVk();
+    return new ShareGroupVk(state);
 }
 
 bool DisplayVk::isConfigFormatSupported(VkFormat format) const
@@ -358,9 +350,9 @@ StreamProducerImpl *DisplayVk::createStreamProducerD3DTexture(
     return static_cast<StreamProducerImpl *>(0);
 }
 
-EGLSyncImpl *DisplayVk::createSync(const egl::AttributeMap &attribs)
+EGLSyncImpl *DisplayVk::createSync()
 {
-    return new EGLSyncVk(attribs);
+    return new EGLSyncVk();
 }
 
 gl::Version DisplayVk::getMaxSupportedESVersion() const
@@ -466,7 +458,8 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->imagePixmap           = false;  // ANGLE does not support pixmaps
     outExtensions->glTexture2DImage      = true;
     outExtensions->glTextureCubemapImage = true;
-    outExtensions->glTexture3DImage = getRenderer()->getFeatures().supportsImage2dViewOf3d.enabled;
+    outExtensions->glTexture3DImage =
+        getRenderer()->getFeatures().supportsSampler2dViewOf3d.enabled;
     outExtensions->glRenderbufferImage = true;
     outExtensions->imageNativeBuffer =
         getRenderer()->getFeatures().supportsAndroidHardwareBuffer.enabled;
@@ -492,10 +485,10 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->contextPriority = !getRenderer()->getFeatures().allocateNonZeroMemory.enabled;
     outExtensions->noConfigContext = true;
 
-#if defined(ANGLE_PLATFORM_ANDROID)
+#if defined(ANGLE_PLATFORM_ANDROID) || defined(ANGLE_PLATFORM_LINUX)
     outExtensions->nativeFenceSyncANDROID =
         getRenderer()->getFeatures().supportsAndroidNativeFenceSync.enabled;
-#endif  // defined(ANGLE_PLATFORM_ANDROID)
+#endif  // defined(ANGLE_PLATFORM_ANDROID) || defined(ANGLE_PLATFORM_LINUX)
 
 #if defined(ANGLE_PLATFORM_GGP)
     outExtensions->ggpStreamDescriptor = true;
@@ -543,6 +536,11 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
             isColorspaceSupported(VK_COLOR_SPACE_EXTENDED_SRGB_NONLINEAR_EXT);
         outExtensions->glColorspaceScrgbLinear =
             isColorspaceSupported(VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT);
+        outExtensions->glColorspaceBt2020Linear =
+            isColorspaceSupported(VK_COLOR_SPACE_BT2020_LINEAR_EXT);
+        outExtensions->glColorspaceBt2020Pq =
+            isColorspaceSupported(VK_COLOR_SPACE_HDR10_ST2084_EXT);
+        outExtensions->glColorspaceBt2020Hlg = isColorspaceSupported(VK_COLOR_SPACE_HDR10_HLG_EXT);
     }
 }
 
@@ -575,29 +573,19 @@ void DisplayVk::handleError(VkResult result,
 {
     ASSERT(result != VK_SUCCESS);
 
-    mSavedError.errorCode = result;
-    mSavedError.file      = file;
-    mSavedError.function  = function;
-    mSavedError.line      = line;
+    std::stringstream errorStream;
+    errorStream << "Internal Vulkan error (" << result << "): " << VulkanResultString(result)
+                << ", in " << file << ", " << function << ":" << line << ".";
+    std::string errorString = errorStream.str();
 
     if (result == VK_ERROR_DEVICE_LOST)
     {
-        WARN() << "Internal Vulkan error (" << result << "): " << VulkanResultString(result)
-               << ", in " << file << ", " << function << ":" << line << ".";
+        WARN() << errorString;
         mRenderer->notifyDeviceLost();
     }
-}
 
-// TODO(jmadill): Remove this. http://anglebug.com/3041
-egl::Error DisplayVk::getEGLError(EGLint errorCode)
-{
-    std::stringstream errorStream;
-    errorStream << "Internal Vulkan error (" << mSavedError.errorCode
-                << "): " << VulkanResultString(mSavedError.errorCode) << ", in " << mSavedError.file
-                << ", " << mSavedError.function << ":" << mSavedError.line << ".";
-    std::string errorString = errorStream.str();
-
-    return egl::Error(errorCode, 0, std::move(errorString));
+    // Note: the errorCode will be set later in angle::ToEGL where it's available.
+    *egl::Display::GetCurrentThreadErrorScratchSpace() = egl::Error(0, 0, std::move(errorString));
 }
 
 void DisplayVk::initializeFrontendFeatures(angle::FrontendFeatures *features) const
@@ -608,251 +596,5 @@ void DisplayVk::initializeFrontendFeatures(angle::FrontendFeatures *features) co
 void DisplayVk::populateFeatureList(angle::FeatureList *features)
 {
     mRenderer->getFeatures().populateFeatureList(features);
-}
-
-ShareGroupVk::ShareGroupVk() : mOrphanNonEmptyBufferBlock(false)
-{
-    mLastPruneTime = angle::GetCurrentSystemTime();
-}
-
-void ShareGroupVk::addContext(ContextVk *contextVk)
-{
-    mContexts.insert(contextVk);
-
-    if (contextVk->getState().hasDisplayTextureShareGroup())
-    {
-        mOrphanNonEmptyBufferBlock = true;
-    }
-}
-
-void ShareGroupVk::removeContext(ContextVk *contextVk)
-{
-    mContexts.erase(contextVk);
-}
-
-void ShareGroupVk::onDestroy(const egl::Display *display)
-{
-    RendererVk *renderer = vk::GetImpl(display)->getRenderer();
-
-    for (std::unique_ptr<vk::BufferPool> &pool : mDefaultBufferPools)
-    {
-        if (pool)
-        {
-            pool->destroy(renderer, mOrphanNonEmptyBufferBlock);
-        }
-    }
-
-    if (mSmallBufferPool)
-    {
-        mSmallBufferPool->destroy(renderer, mOrphanNonEmptyBufferBlock);
-    }
-
-    mPipelineLayoutCache.destroy(renderer);
-    mDescriptorSetLayoutCache.destroy(renderer);
-
-    mMetaDescriptorPools[DescriptorSetIndex::UniformsAndXfb].destroy(renderer);
-    mMetaDescriptorPools[DescriptorSetIndex::Texture].destroy(renderer);
-    mMetaDescriptorPools[DescriptorSetIndex::ShaderResource].destroy(renderer);
-
-    mFramebufferCache.destroy(renderer);
-    resetPrevTexture();
-
-    ASSERT(mResourceUseLists.empty());
-}
-
-void ShareGroupVk::releaseResourceUseLists(const Serial &submitSerial)
-{
-    if (!mResourceUseLists.empty())
-    {
-        for (vk::ResourceUseList &it : mResourceUseLists)
-        {
-            it.releaseResourceUsesAndUpdateSerials(submitSerial);
-        }
-        mResourceUseLists.clear();
-    }
-}
-
-angle::Result ShareGroupVk::onMutableTextureUpload(ContextVk *contextVk, TextureVk *newTexture)
-{
-    return mTextureUpload.onMutableTextureUpload(contextVk, newTexture);
-}
-
-void ShareGroupVk::onTextureRelease(TextureVk *textureVk)
-{
-    mTextureUpload.onTextureRelease(textureVk);
-}
-
-angle::Result TextureUpload::onMutableTextureUpload(ContextVk *contextVk, TextureVk *newTexture)
-{
-    // This feature is currently disabled in the case of display-level texture sharing.
-    ASSERT(!contextVk->hasDisplayTextureShareGroup());
-
-    // If the previous texture is null, it should be set to the current texture. We also have to
-    // make sure that the previous texture pointer is still a mutable texture. Otherwise, we skip
-    // the optimization.
-    if (mPrevUploadedMutableTexture == nullptr || mPrevUploadedMutableTexture->isImmutable())
-    {
-        mPrevUploadedMutableTexture = newTexture;
-        return angle::Result::Continue;
-    }
-
-    // Skip the optimization if we have not switched to a new texture yet.
-    if (mPrevUploadedMutableTexture == newTexture)
-    {
-        return angle::Result::Continue;
-    }
-
-    // If the mutable texture is consistently specified, we initialize a full mip chain for it.
-    if (mPrevUploadedMutableTexture->isMutableTextureConsistentlySpecifiedForFlush())
-    {
-        ANGLE_TRY(mPrevUploadedMutableTexture->ensureImageInitialized(
-            contextVk, ImageMipLevels::FullMipChain));
-        contextVk->getPerfCounters().mutableTexturesUploaded++;
-    }
-
-    // Update the mutable texture pointer with the new pointer for the next potential flush.
-    mPrevUploadedMutableTexture = newTexture;
-
-    return angle::Result::Continue;
-}
-
-void TextureUpload::onTextureRelease(TextureVk *textureVk)
-{
-    if (mPrevUploadedMutableTexture == textureVk)
-    {
-        resetPrevTexture();
-    }
-}
-
-vk::BufferPool *ShareGroupVk::getDefaultBufferPool(RendererVk *renderer,
-                                                   VkDeviceSize size,
-                                                   uint32_t memoryTypeIndex)
-{
-    if (size <= kMaxSizeToUseSmallBufferPool &&
-        memoryTypeIndex ==
-            renderer->getVertexConversionBufferMemoryTypeIndex(vk::MemoryHostVisibility::Visible))
-    {
-        if (!mSmallBufferPool)
-        {
-            const vk::Allocator &allocator = renderer->getAllocator();
-            VkBufferUsageFlags usageFlags  = GetDefaultBufferUsageFlags(renderer);
-
-            VkMemoryPropertyFlags memoryPropertyFlags;
-            allocator.getMemoryTypeProperties(memoryTypeIndex, &memoryPropertyFlags);
-
-            std::unique_ptr<vk::BufferPool> pool = std::make_unique<vk::BufferPool>();
-            pool->initWithFlags(renderer, vma::VirtualBlockCreateFlagBits::BUDDY, usageFlags, 0,
-                                memoryTypeIndex, memoryPropertyFlags);
-            mSmallBufferPool = std::move(pool);
-        }
-        return mSmallBufferPool.get();
-    }
-    else if (!mDefaultBufferPools[memoryTypeIndex])
-    {
-        const vk::Allocator &allocator = renderer->getAllocator();
-        VkBufferUsageFlags usageFlags  = GetDefaultBufferUsageFlags(renderer);
-
-        VkMemoryPropertyFlags memoryPropertyFlags;
-        allocator.getMemoryTypeProperties(memoryTypeIndex, &memoryPropertyFlags);
-
-        std::unique_ptr<vk::BufferPool> pool = std::make_unique<vk::BufferPool>();
-        pool->initWithFlags(renderer, vma::VirtualBlockCreateFlagBits::GENERAL, usageFlags, 0,
-                            memoryTypeIndex, memoryPropertyFlags);
-        mDefaultBufferPools[memoryTypeIndex] = std::move(pool);
-    }
-
-    return mDefaultBufferPools[memoryTypeIndex].get();
-}
-
-void ShareGroupVk::pruneDefaultBufferPools(RendererVk *renderer)
-{
-    mLastPruneTime = angle::GetCurrentSystemTime();
-
-    // Bail out if no suballocation have been destroyed since last prune.
-    if (renderer->getSuballocationDestroyedSize() == 0)
-    {
-        return;
-    }
-
-    for (std::unique_ptr<vk::BufferPool> &pool : mDefaultBufferPools)
-    {
-        if (pool)
-        {
-            pool->pruneEmptyBuffers(renderer);
-        }
-    }
-    if (mSmallBufferPool)
-    {
-        mSmallBufferPool->pruneEmptyBuffers(renderer);
-    }
-
-    renderer->onBufferPoolPrune();
-
-#if ANGLE_ENABLE_BUFFER_POOL_STATS_LOGGING
-    logBufferPools();
-#endif
-}
-
-bool ShareGroupVk::isDueForBufferPoolPrune(RendererVk *renderer)
-{
-    // Ensure we periodically prune to maintain the heuristic information
-    double timeElapsed = angle::GetCurrentSystemTime() - mLastPruneTime;
-    if (timeElapsed > kTimeElapsedForPruneDefaultBufferPool)
-    {
-        return true;
-    }
-
-    // If we have destroyed a lot of memory, also prune to ensure memory gets freed as soon as
-    // possible
-    if (renderer->getSuballocationDestroyedSize() >= kMaxTotalEmptyBufferBytes)
-    {
-        return true;
-    }
-
-    return false;
-}
-
-void ShareGroupVk::calculateTotalBufferCount(size_t *bufferCount, VkDeviceSize *totalSize) const
-{
-    *bufferCount = 0;
-    *totalSize   = 0;
-    for (const std::unique_ptr<vk::BufferPool> &pool : mDefaultBufferPools)
-    {
-        if (pool)
-        {
-            *bufferCount += pool->getBufferCount();
-            *totalSize += pool->getMemorySize();
-        }
-    }
-    if (mSmallBufferPool)
-    {
-        *bufferCount += mSmallBufferPool->getBufferCount();
-        *totalSize += mSmallBufferPool->getMemorySize();
-    }
-}
-
-void ShareGroupVk::logBufferPools() const
-{
-    size_t totalBufferCount;
-    VkDeviceSize totalMemorySize;
-    calculateTotalBufferCount(&totalBufferCount, &totalMemorySize);
-
-    INFO() << "BufferBlocks count:" << totalBufferCount << " memorySize:" << totalMemorySize / 1024
-           << " UnusedBytes/memorySize (KBs):";
-    for (const std::unique_ptr<vk::BufferPool> &pool : mDefaultBufferPools)
-    {
-        if (pool && pool->getBufferCount() > 0)
-        {
-            std::ostringstream log;
-            pool->addStats(&log);
-            INFO() << "\t" << log.str();
-        }
-    }
-    if (mSmallBufferPool && mSmallBufferPool->getBufferCount() > 0)
-    {
-        std::ostringstream log;
-        mSmallBufferPool->addStats(&log);
-        INFO() << "\t" << log.str();
-    }
 }
 }  // namespace rx

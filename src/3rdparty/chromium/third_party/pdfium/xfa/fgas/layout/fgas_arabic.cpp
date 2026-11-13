@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -168,8 +168,7 @@ wchar_t GetArabicFromAlefTable(wchar_t alef) {
 
 }  // namespace
 
-namespace pdfium {
-namespace arabic {
+namespace pdfium::arabic {
 
 wchar_t GetFormChar(wchar_t wch, wchar_t prev, wchar_t next) {
   CFGAS_Char c(wch);
@@ -220,5 +219,4 @@ absl::optional<wchar_t> GetArabicFromShaddaTable(wchar_t shadda) {
   return kShaddaTable[shadda - kFirstShaddaTableEntry];
 }
 
-}  // namespace arabic
-}  // namespace pdfium
+}  // namespace pdfium::arabic

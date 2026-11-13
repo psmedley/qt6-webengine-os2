@@ -13,6 +13,7 @@
 #include "src/base/pointer-with-payload.h"
 #include "src/base/threaded-list.h"
 #include "src/codegen/bailout-reason.h"
+#include "src/codegen/handler-table.h"
 #include "src/codegen/label.h"
 #include "src/common/globals.h"
 #include "src/heap/factory.h"
@@ -84,6 +85,7 @@ namespace internal {
   V(BinaryOperation)            \
   V(NaryOperation)              \
   V(Call)                       \
+  V(SuperCallForwardArgs)       \
   V(CallNew)                    \
   V(CallRuntime)                \
   V(ClassLiteral)               \
@@ -799,13 +801,13 @@ class TryCatchStatement final : public TryStatement {
   }
 
   // Indicates whether or not code should be generated to clear the pending
-  // exception. The pending exception is cleared for cases where the exception
+  // exception. The exception is cleared for cases where the exception
   // is not guaranteed to be rethrown, indicated by the value
   // HandlerTable::UNCAUGHT. If both the current and surrounding catch handler's
   // are predicted uncaught, the exception is not cleared.
   //
   // If this handler is not going to simply rethrow the exception, this method
-  // indicates that the isolate's pending exception message should be cleared
+  // indicates that the isolate's exception message should be cleared
   // before executing the catch_block.
   // In the normal use case, this flag is always on because the message object
   // is not needed anymore when entering the catch block and should not be
@@ -820,7 +822,7 @@ class TryCatchStatement final : public TryStatement {
   // For scripts in repl mode there is exactly one catch block with
   // UNCAUGHT_ASYNC_AWAIT prediction. This catch block needs to preserve
   // the exception so it can be re-used later by the inspector.
-  inline bool ShouldClearPendingException(
+  inline bool ShouldClearException(
       HandlerTable::CatchPrediction outer_catch_prediction) const {
     if (catch_prediction_ == HandlerTable::UNCAUGHT_ASYNC_AWAIT) {
       DCHECK_EQ(outer_catch_prediction, HandlerTable::UNCAUGHT);
@@ -952,7 +954,7 @@ class Literal final : public Expression {
     return string_;
   }
 
-  Smi AsSmiLiteral() const {
+  Tagged<Smi> AsSmiLiteral() const {
     DCHECK_EQ(kSmi, type());
     return Smi::FromInt(smi_);
   }
@@ -1621,7 +1623,9 @@ enum AssignType {
   PRIVATE_METHOD,        // obj.#key: #key is a private method
   PRIVATE_GETTER_ONLY,   // obj.#key: #key only has a getter defined
   PRIVATE_SETTER_ONLY,   // obj.#key: #key only has a setter defined
-  PRIVATE_GETTER_AND_SETTER  // obj.#key: #key has both accessors defined
+  PRIVATE_GETTER_AND_SETTER,  // obj.#key: #key has both accessors defined
+  PRIVATE_DEBUG_DYNAMIC,      // obj.#key: #key is private that requries dynamic
+                              // lookup in debug-evaluate.
 };
 
 class Property final : public Expression {
@@ -1658,6 +1662,9 @@ class Property final : public Expression {
           return PRIVATE_SETTER_ONLY;
         case VariableMode::kPrivateGetterAndSetter:
           return PRIVATE_GETTER_AND_SETTER;
+        case VariableMode::kDynamic:
+          // From debug-evaluate.
+          return PRIVATE_DEBUG_DYNAMIC;
         default:
           UNREACHABLE();
       }
@@ -1796,6 +1803,24 @@ class CallNew final : public CallBase {
       : CallBase(zone, kCallNew, expression, arguments, pos, has_spread) {}
 };
 
+// SuperCallForwardArgs is not utterable in JavaScript. It is used to
+// implement the default derived constructor, which forwards all arguments to
+// the super constructor without going through the user-visible spread
+// machinery.
+class SuperCallForwardArgs final : public Expression {
+ public:
+  SuperCallReference* expression() const { return expression_; }
+
+ private:
+  friend class AstNodeFactory;
+  friend Zone;
+
+  SuperCallForwardArgs(Zone* zone, SuperCallReference* expression, int pos)
+      : Expression(pos, kSuperCallForwardArgs), expression_(expression) {}
+
+  SuperCallReference* expression_;
+};
+
 // The CallRuntime class does not represent any official JavaScript
 // language construct. Instead it is used to call a C or JS function
 // with a set of arguments. This is used from the builtins that are
@@ -1867,7 +1892,7 @@ class BinaryOperation final : public Expression {
 
   // Returns true if one side is a Smi literal, returning the other side's
   // sub-expression in |subexpr| and the literal Smi in |literal|.
-  bool IsSmiLiteralOperation(Expression** subexpr, Smi* literal);
+  bool IsSmiLiteralOperation(Expression** subexpr, Tagged<Smi>* literal);
 
  private:
   friend class AstNodeFactory;
@@ -1981,6 +2006,7 @@ class CompareOperation final : public Expression {
   bool IsLiteralStrictCompareBoolean(Expression** expr, Literal** literal);
   bool IsLiteralCompareUndefined(Expression** expr);
   bool IsLiteralCompareNull(Expression** expr);
+  bool IsLiteralCompareEqualVariable(Expression** expr, Literal** literal);
 
  private:
   friend class AstNodeFactory;
@@ -3116,6 +3142,11 @@ class AstNodeFactory final {
     DCHECK_IMPLIES(possibly_eval == Call::IS_POSSIBLY_EVAL, !optional_chain);
     return zone_->New<Call>(zone_, expression, arguments, pos, has_spread,
                             possibly_eval, optional_chain);
+  }
+
+  SuperCallForwardArgs* NewSuperCallForwardArgs(SuperCallReference* expression,
+                                                int pos) {
+    return zone_->New<SuperCallForwardArgs>(zone_, expression, pos);
   }
 
   Call* NewTaggedTemplate(Expression* expression,

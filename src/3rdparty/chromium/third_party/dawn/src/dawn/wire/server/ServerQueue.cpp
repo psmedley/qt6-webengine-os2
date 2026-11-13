@@ -1,16 +1,29 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <limits>
 
@@ -21,72 +34,53 @@ namespace dawn::wire::server {
 
 void Server::OnQueueWorkDone(QueueWorkDoneUserdata* data, WGPUQueueWorkDoneStatus status) {
     ReturnQueueWorkDoneCallbackCmd cmd;
-    cmd.queue = data->queue;
-    cmd.requestSerial = data->requestSerial;
+    cmd.eventManager = data->eventManager;
+    cmd.future = data->future;
     cmd.status = status;
 
     SerializeCommand(cmd);
 }
 
-bool Server::DoQueueOnSubmittedWorkDone(ObjectId queueId,
-                                        uint64_t signalValue,
-                                        uint64_t requestSerial) {
-    auto* queue = QueueObjects().Get(queueId);
-    if (queue == nullptr) {
-        return false;
-    }
-
+WireResult Server::DoQueueOnSubmittedWorkDone(Known<WGPUQueue> queue,
+                                              ObjectHandle eventManager,
+                                              WGPUFuture future) {
     auto userdata = MakeUserdata<QueueWorkDoneUserdata>();
-    userdata->queue = ObjectHandle{queueId, queue->generation};
-    userdata->requestSerial = requestSerial;
+    userdata->queue = queue.AsHandle();
+    userdata->eventManager = eventManager;
+    userdata->future = future;
 
-    mProcs.queueOnSubmittedWorkDone(queue->handle, signalValue,
-                                    ForwardToServer<&Server::OnQueueWorkDone>, userdata.release());
-    return true;
+    mProcs.queueOnSubmittedWorkDone(queue->handle, ForwardToServer<&Server::OnQueueWorkDone>,
+                                    userdata.release());
+    return WireResult::Success;
 }
 
-bool Server::DoQueueWriteBuffer(ObjectId queueId,
-                                ObjectId bufferId,
-                                uint64_t bufferOffset,
-                                const uint8_t* data,
-                                uint64_t size) {
-    // The null object isn't valid as `self` or `buffer` so we can combine the check with the
-    // check that the ID is valid.
-    auto* queue = QueueObjects().Get(queueId);
-    auto* buffer = BufferObjects().Get(bufferId);
-    if (queue == nullptr || buffer == nullptr) {
-        return false;
-    }
-
+WireResult Server::DoQueueWriteBuffer(Known<WGPUQueue> queue,
+                                      Known<WGPUBuffer> buffer,
+                                      uint64_t bufferOffset,
+                                      const uint8_t* data,
+                                      uint64_t size) {
     if (size > std::numeric_limits<size_t>::max()) {
-        return false;
+        return WireResult::FatalError;
     }
 
     mProcs.queueWriteBuffer(queue->handle, buffer->handle, bufferOffset, data,
                             static_cast<size_t>(size));
-    return true;
+    return WireResult::Success;
 }
 
-bool Server::DoQueueWriteTexture(ObjectId queueId,
-                                 const WGPUImageCopyTexture* destination,
-                                 const uint8_t* data,
-                                 uint64_t dataSize,
-                                 const WGPUTextureDataLayout* dataLayout,
-                                 const WGPUExtent3D* writeSize) {
-    // The null object isn't valid as `self` so we can combine the check with the
-    // check that the ID is valid.
-    auto* queue = QueueObjects().Get(queueId);
-    if (queue == nullptr) {
-        return false;
-    }
-
+WireResult Server::DoQueueWriteTexture(Known<WGPUQueue> queue,
+                                       const WGPUImageCopyTexture* destination,
+                                       const uint8_t* data,
+                                       uint64_t dataSize,
+                                       const WGPUTextureDataLayout* dataLayout,
+                                       const WGPUExtent3D* writeSize) {
     if (dataSize > std::numeric_limits<size_t>::max()) {
-        return false;
+        return WireResult::FatalError;
     }
 
     mProcs.queueWriteTexture(queue->handle, destination, data, static_cast<size_t>(dataSize),
                              dataLayout, writeSize);
-    return true;
+    return WireResult::Success;
 }
 
 }  // namespace dawn::wire::server

@@ -40,6 +40,7 @@ public:
     WebContentsDelegateQt *frontendDelegate() const;
 
     static bool IsValidFrontendURL(const GURL &url);
+    static std::string GetId(content::WebContents *inspectedContents);
 
 protected:
     DevToolsFrontendQt(QSharedPointer<WebContentsAdapter> webContentsAdapter,
@@ -75,6 +76,7 @@ private:
     // We shouldn't be keeping it alive
     QWeakPointer<WebContentsAdapter> m_frontendAdapter;
     content::WebContents *m_inspectedContents;
+    content::WebContents *m_outermostContents;
     std::unique_ptr<DevToolsEyeDropper> m_eyeDropper;
     DevToolsUIBindings *m_bindings;
 };

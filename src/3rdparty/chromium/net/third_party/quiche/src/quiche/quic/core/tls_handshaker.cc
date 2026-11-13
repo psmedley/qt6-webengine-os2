@@ -10,7 +10,6 @@
 #include "openssl/crypto.h"
 #include "openssl/ssl.h"
 #include "quiche/quic/core/quic_crypto_stream.h"
-#include "quiche/quic/core/tls_client_handshaker.h"
 #include "quiche/quic/platform/api/quic_bug_tracker.h"
 #include "quiche/quic/platform/api/quic_stack_trace.h"
 
@@ -99,6 +98,7 @@ void TlsHandshaker::AdvanceHandshake() {
       << "is_server:" << SSL_is_server(ssl());
 
   QUIC_VLOG(1) << ENDPOINT << "Continuing handshake";
+  last_tls_alert_.reset();
   int rv = SSL_do_handshake(ssl());
 
   if (is_connection_closed()) {
@@ -152,7 +152,20 @@ void TlsHandshaker::AdvanceHandshake() {
     QUIC_VLOG(1) << "SSL_do_handshake failed; SSL_get_error returns "
                  << ssl_error;
     ERR_print_errors_fp(stderr);
-    CloseConnection(QUIC_HANDSHAKE_FAILED, "TLS handshake failed");
+    if (last_tls_alert_.has_value()) {
+      std::string error_details =
+          absl::StrCat("TLS handshake failure (",
+                       EncryptionLevelToString(last_tls_alert_->level), ") ",
+                       static_cast<int>(last_tls_alert_->desc), ": ",
+                       SSL_alert_desc_string_long(last_tls_alert_->desc));
+      QUIC_DLOG(ERROR) << error_details;
+      CloseConnection(TlsAlertToQuicErrorCode(last_tls_alert_->desc),
+                      static_cast<QuicIetfTransportErrorCodes>(
+                          CRYPTO_ERROR_FIRST + last_tls_alert_->desc),
+                      error_details);
+    } else {
+      CloseConnection(QUIC_HANDSHAKE_FAILED, "TLS handshake failed");
+    }
   }
 }
 
@@ -190,7 +203,11 @@ ssl_early_data_reason_t TlsHandshaker::EarlyDataReason() const {
 }
 
 const EVP_MD* TlsHandshaker::Prf(const SSL_CIPHER* cipher) {
+#if BORINGSSL_API_VERSION >= 23
+  return SSL_CIPHER_get_handshake_digest(cipher);
+#else
   return EVP_get_digestbynid(SSL_CIPHER_get_prf_nid(cipher));
+#endif
 }
 
 enum ssl_verify_result_t TlsHandshaker::VerifyCert(uint8_t* out_alert) {
@@ -271,7 +288,13 @@ void TlsHandshaker::SetWriteSecret(EncryptionLevel level,
 bool TlsHandshaker::SetReadSecret(EncryptionLevel level,
                                   const SSL_CIPHER* cipher,
                                   absl::Span<const uint8_t> read_secret) {
-  QUIC_DVLOG(1) << ENDPOINT << "SetReadSecret level=" << level;
+  QUIC_DVLOG(1) << ENDPOINT << "SetReadSecret level=" << level
+                << ", connection_closed=" << is_connection_closed();
+
+  if (is_connection_closed()) {
+    return false;
+  }
+
   std::unique_ptr<QuicDecrypter> decrypter =
       QuicDecrypter::CreateFromCipherSuite(SSL_CIPHER_get_id(cipher));
   const EVP_MD* prf = Prf(cipher);
@@ -368,14 +391,30 @@ void TlsHandshaker::WriteMessage(EncryptionLevel level,
 void TlsHandshaker::FlushFlight() {}
 
 void TlsHandshaker::SendAlert(EncryptionLevel level, uint8_t desc) {
-  std::string error_details = absl::StrCat(
-      "TLS handshake failure (", EncryptionLevelToString(level), ") ",
-      static_cast<int>(desc), ": ", SSL_alert_desc_string_long(desc));
-  QUIC_DLOG(ERROR) << error_details;
-  CloseConnection(
-      TlsAlertToQuicErrorCode(desc),
-      static_cast<QuicIetfTransportErrorCodes>(CRYPTO_ERROR_FIRST + desc),
-      error_details);
+  TlsAlert tls_alert;
+  tls_alert.level = level;
+  tls_alert.desc = desc;
+  last_tls_alert_ = tls_alert;
+}
+
+void TlsHandshaker::MessageCallback(bool is_write, int /*version*/,
+                                    int content_type, absl::string_view data) {
+#if BORINGSSL_API_VERSION >= 17
+  if (content_type == SSL3_RT_CLIENT_HELLO_INNER) {
+    // Notify QuicConnectionDebugVisitor. Most TLS messages can be seen in
+    // CRYPTO frames, but, with ECH enabled, the ClientHelloInner is encrypted
+    // separately.
+    if (is_write) {
+      handshaker_delegate_->OnEncryptedClientHelloSent(data);
+    } else {
+      handshaker_delegate_->OnEncryptedClientHelloReceived(data);
+    }
+  }
+#else   // BORINGSSL_API_VERSION
+  (void)is_write;
+  (void)content_type;
+  (void)data;
+#endif  // BORINGSSL_API_VERSION
 }
 
 }  // namespace quic

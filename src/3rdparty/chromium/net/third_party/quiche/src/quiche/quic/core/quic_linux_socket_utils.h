@@ -24,6 +24,7 @@
 #include "quiche/quic/platform/api/quic_ip_address.h"
 #include "quiche/quic/platform/api/quic_logging.h"
 #include "quiche/quic/platform/api/quic_socket_address.h"
+#include "quiche/common/quiche_callbacks.h"
 
 #ifndef SOL_UDP
 #define SOL_UDP 17
@@ -56,6 +57,8 @@ const int kCmsgSpaceForTxTime = CMSG_SPACE(sizeof(uint64_t));
 
 const int kCmsgSpaceForTTL = CMSG_SPACE(sizeof(int));
 
+const int kCmsgSpaceForTOS = CMSG_SPACE(sizeof(int));
+
 // QuicMsgHdr is used to build msghdr objects that can be used send packets via
 // ::sendmsg.
 //
@@ -72,7 +75,7 @@ const int kCmsgSpaceForTTL = CMSG_SPACE(sizeof(int));
 //   *hdr.GetNextCmsgData<uint16_t>(SOL_UDP, UDP_SEGMENT) = 1200;
 //
 //   QuicLinuxSocketUtils::WritePacket(fd, hdr);
-class QUIC_EXPORT_PRIVATE QuicMsgHdr {
+class QUICHE_EXPORT QuicMsgHdr {
  public:
   QuicMsgHdr(const char* buffer, size_t buf_len,
              const QuicSocketAddress& peer_address, char* cbuf,
@@ -103,24 +106,25 @@ class QUIC_EXPORT_PRIVATE QuicMsgHdr {
 };
 
 // BufferedWrite holds all information needed to send a packet.
-struct QUIC_EXPORT_PRIVATE BufferedWrite {
+struct QUICHE_EXPORT BufferedWrite {
   BufferedWrite(const char* buffer, size_t buf_len,
                 const QuicIpAddress& self_address,
                 const QuicSocketAddress& peer_address)
       : BufferedWrite(buffer, buf_len, self_address, peer_address,
                       std::unique_ptr<PerPacketOptions>(),
-                      /*release_time=*/0) {}
+                      QuicPacketWriterParams(), /*release_time=*/0) {}
 
   BufferedWrite(const char* buffer, size_t buf_len,
                 const QuicIpAddress& self_address,
                 const QuicSocketAddress& peer_address,
                 std::unique_ptr<PerPacketOptions> options,
-                uint64_t release_time)
+                const QuicPacketWriterParams& params, uint64_t release_time)
       : buffer(buffer),
         buf_len(buf_len),
         self_address(self_address),
         peer_address(peer_address),
         options(std::move(options)),
+        params(params),
         release_time(release_time) {}
 
   const char* buffer;  // Not owned.
@@ -128,6 +132,7 @@ struct QUIC_EXPORT_PRIVATE BufferedWrite {
   QuicIpAddress self_address;
   QuicSocketAddress peer_address;
   std::unique_ptr<PerPacketOptions> options;
+  QuicPacketWriterParams params;
 
   // The release time according to the owning packet writer's clock, which is
   // often not a QuicClock. Calculated from packet writer's Now() and the
@@ -152,13 +157,15 @@ struct QUIC_EXPORT_PRIVATE BufferedWrite {
 //
 //   int num_packets_sent;
 //   QuicSocketUtils::WriteMultiplePackets(fd, &mhdr, &num_packets_sent);
-class QUIC_EXPORT_PRIVATE QuicMMsgHdr {
+class QUICHE_EXPORT QuicMMsgHdr {
  public:
-  using ControlBufferInitializer = std::function<void(
+  using ControlBufferInitializer = quiche::UnretainedCallback<void(
       QuicMMsgHdr* mhdr, int i, const BufferedWrite& buffered_write)>;
   template <typename IteratorT>
-  QuicMMsgHdr(const IteratorT& first, const IteratorT& last, size_t cbuf_size,
-              ControlBufferInitializer cbuf_initializer)
+  QuicMMsgHdr(
+      const IteratorT& first, const IteratorT& last, size_t cbuf_size,
+      ControlBufferInitializer cbuf_initializer =
+          +[](quic::QuicMMsgHdr*, int, const quic::BufferedWrite&) {})
       : num_msgs_(std::distance(first, last)), cbuf_size_(cbuf_size) {
     static_assert(
         std::is_same<typename std::iterator_traits<IteratorT>::value_type,
@@ -178,9 +185,7 @@ class QUIC_EXPORT_PRIVATE QuicMMsgHdr {
       ++i;
 
       InitOneHeader(i, *it);
-      if (cbuf_initializer) {
-        cbuf_initializer(this, i, *it);
-      }
+      cbuf_initializer(this, i, *it);
     }
   }
 
@@ -248,7 +253,7 @@ class QUIC_EXPORT_PRIVATE QuicMMsgHdr {
   std::unique_ptr<char[]> storage_;
 };
 
-class QUIC_EXPORT_PRIVATE QuicLinuxSocketUtils {
+class QUICHE_EXPORT QuicLinuxSocketUtils {
  public:
   // Return the UDP segment size of |fd|, 0 means segment size has not been set
   // on this socket. If GSO is not supported, return -1.

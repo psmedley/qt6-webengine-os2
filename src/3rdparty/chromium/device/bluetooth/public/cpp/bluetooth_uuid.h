@@ -10,12 +10,13 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/span.h"
 #include "build/build_config.h"
 
 #if BUILDFLAG(IS_WIN)
-#include <rpc.h>
+#include <string_view>
 
-#include "base/strings/string_piece_forward.h"
+#include "base/win/windows_types.h"
 #endif  // BUILDFLAG(IS_WIN)
 
 namespace device {
@@ -46,6 +47,10 @@ class BluetoothUUID {
   // after construction.
   explicit BluetoothUUID(const std::string& uuid);
 
+  // Single argument constructor. |uuid_in_bytes| is a vector of 16 bytes
+  // represented as a 128 bit UUID.
+  explicit BluetoothUUID(base::span<const uint8_t> uuid_in_bytes);
+
 #if BUILDFLAG(IS_WIN)
   // Windows exclusive constructor converting a GUID structure to a
   // BluetoothUUID. This will always result in a 128 bit Format.
@@ -61,7 +66,7 @@ class BluetoothUUID {
 
 #if BUILDFLAG(IS_WIN)
   // The canonical UUID string format is device::BluetoothUUID.value().
-  static GUID GetCanonicalValueAsGUID(base::StringPiece uuid);
+  static GUID GetCanonicalValueAsGUID(std::string_view uuid);
 #endif  // BUILDFLAG(IS_WIN)
 
   // Returns true, if the UUID is in a valid canonical format.

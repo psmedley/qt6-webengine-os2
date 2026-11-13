@@ -8,25 +8,25 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/clang_profiling_buildflags.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/run_loop.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "gpu/ipc/common/surface_handle.h"
-#include "gpu/ipc/host/gpu_memory_buffer_support.h"
 #include "media/media_buildflags.h"
 #include "services/viz/privileged/mojom/gl/gpu_service.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/client_native_pixmap_factory.h"
 
-#if defined(USE_OZONE)
+#if BUILDFLAG(IS_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
@@ -39,12 +39,12 @@ namespace viz {
 namespace {
 
 bool MustSignalGmbConfigReadyForTest() {
-#if defined(USE_OZONE)
-    // Some Ozone platforms (Ozone/X11) require GPU process initialization to
-    // determine GMB support.
-    return ui::OzonePlatform::GetInstance()
-        ->GetPlatformProperties()
-        .fetch_buffer_formats_for_gmb_on_gpu;
+#if BUILDFLAG(IS_OZONE)
+  // Some Ozone platforms (Ozone/X11) require GPU process initialization to
+  // determine GMB support.
+  return ui::OzonePlatform::GetInstance()
+      ->GetPlatformProperties()
+      .fetch_buffer_formats_for_gmb_on_gpu;
 #else
   return false;
 #endif
@@ -151,6 +151,12 @@ class TestGpuService : public mojom::GpuService {
           jea_receiver) override {}
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
+#if !BUILDFLAG(IS_CHROMEOS)
+  void BindWebNNContextProvider(
+      mojo::PendingReceiver<webnn::mojom::WebNNContextProvider> receiver,
+      int32_t client_id) override {}
+#endif  // !BUILDFLAG(IS_CHROMEOS)
+
 #if BUILDFLAG(IS_WIN)
   void RegisterDCOMPSurfaceHandle(
       mojo::PlatformHandle surface_handle,
@@ -174,8 +180,7 @@ class TestGpuService : public mojom::GpuService {
   }
 
   void DestroyGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
-                              int client_id,
-                              const gpu::SyncToken& sync_token) override {
+                              int client_id) override {
     destruction_requests_.push_back({id, client_id});
   }
 
@@ -184,6 +189,10 @@ class TestGpuService : public mojom::GpuService {
                            CopyGpuMemoryBufferCallback callback) override {
     std::move(callback).Run(false);
   }
+
+  void BindClientGmbInterface(
+      mojo::PendingReceiver<gpu::mojom::ClientGmbInterface> receiver,
+      int client_id) override {}
 
   void GetVideoMemoryUsageStats(
       GetVideoMemoryUsageStatsCallback callback) override {}
@@ -235,7 +244,8 @@ class TestGpuService : public mojom::GpuService {
       WriteClangProfilingProfileCallback callback) override {}
 #endif
 
-  void GetDawnInfo(GetDawnInfoCallback callback) override {}
+  void GetDawnInfo(bool collect_metrics,
+                   GetDawnInfoCallback callback) override {}
 
   void Crash() override {}
 
@@ -285,7 +295,7 @@ class HostGpuMemoryBufferManagerTest : public ::testing::Test {
     gpu_memory_buffer_manager_ = std::make_unique<HostGpuMemoryBufferManager>(
         std::move(gpu_service_provider), 1,
         std::move(gpu_memory_buffer_support),
-        base::ThreadTaskRunnerHandle::Get());
+        base::SingleThreadTaskRunner::GetCurrentDefault());
     if (MustSignalGmbConfigReadyForTest())
       gpu_memory_buffer_manager_->native_configurations_initialized_.Set();
   }
@@ -294,10 +304,10 @@ class HostGpuMemoryBufferManagerTest : public ::testing::Test {
   // Mac and some Ozone platforms). Abort the test in those platforms.
   bool IsNativePixmapConfigSupported() {
     bool native_pixmap_supported = false;
-#if defined(USE_OZONE)
-      native_pixmap_supported =
-          ui::OzonePlatform::GetInstance()->IsNativePixmapConfigSupported(
-              gfx::BufferFormat::RGBA_8888, gfx::BufferUsage::GPU_READ);
+#if BUILDFLAG(IS_OZONE)
+    native_pixmap_supported =
+        ui::OzonePlatform::GetInstance()->IsNativePixmapConfigSupported(
+            gfx::BufferFormat::RGBA_8888, gfx::BufferUsage::GPU_READ);
 #elif BUILDFLAG(IS_ANDROID)
     native_pixmap_supported =
         base::AndroidHardwareBufferCompat::IsSupportAvailable();
@@ -308,8 +318,8 @@ class HostGpuMemoryBufferManagerTest : public ::testing::Test {
     if (native_pixmap_supported)
       return true;
 
-    gpu::GpuMemoryBufferSupport support;
-    DCHECK(gpu::GetNativeGpuMemoryBufferConfigurations(&support).empty());
+    DCHECK(gpu::GpuMemoryBufferSupport::GetNativeGpuMemoryBufferConfigurations()
+               .empty());
     return false;
   }
 
@@ -522,8 +532,8 @@ TEST_F(HostGpuMemoryBufferManagerTest, CancelRequestsForShutdown) {
   // Flush tasks posted back to main thread from CreateGpuMemoryBuffer() to make
   // sure they are harmless.
   base::RunLoop loop;
-  base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                   loop.QuitClosure());
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
+                                                           loop.QuitClosure());
   loop.Run();
 }
 

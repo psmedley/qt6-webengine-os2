@@ -24,12 +24,9 @@
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/notification_types.h"
 #include "extensions/common/api/commands/commands_handler.h"
 #include "extensions/common/command.h"
 #include "extensions/common/feature_switch.h"
@@ -87,8 +84,7 @@ void MergeSuggestedKeyPrefs(const std::string& extension_id,
   }
 
   extension_prefs->UpdateExtensionPref(
-      extension_id, kCommands,
-      std::make_unique<base::Value>(std::move(suggested_key_prefs)));
+      extension_id, kCommands, base::Value(std::move(suggested_key_prefs)));
 }
 
 }  // namespace
@@ -132,26 +128,27 @@ bool CommandService::GetNamedCommands(const std::string& extension_id,
                                       QueryType type,
                                       CommandScope scope,
                                       CommandMap* command_map) const {
-  const ExtensionSet& extensions =
-      ExtensionRegistry::Get(profile_)->enabled_extensions();
-  const Extension* extension = extensions.GetByID(extension_id);
-  CHECK(extension);
+  const Extension* extension =
+      GetExtensionInEnabledOrDisabledExtensions(extension_id);
+  if (!extension) {
+    return false;
+  }
 
   command_map->clear();
   const CommandMap* commands = CommandsInfo::GetNamedCommands(extension);
   if (!commands)
     return false;
 
-  for (auto iter = commands->cbegin(); iter != commands->cend(); ++iter) {
+  for (const auto& named_command : *commands) {
     // Look up to see if the user has overridden how the command should work.
     Command saved_command =
-        FindCommandByName(extension_id, iter->second.command_name());
+        FindCommandByName(extension_id, named_command.second.command_name());
     ui::Accelerator shortcut_assigned = saved_command.accelerator();
 
     if (type == ACTIVE && shortcut_assigned.key_code() == ui::VKEY_UNKNOWN)
       continue;
 
-    Command command = iter->second;
+    Command command = named_command.second;
     if (scope != ANY_SCOPE && ((scope == GLOBAL) != saved_command.global()))
       continue;
 
@@ -159,7 +156,7 @@ bool CommandService::GetNamedCommands(const std::string& extension_id,
       command.set_accelerator(shortcut_assigned);
     command.set_global(saved_command.global());
 
-    (*command_map)[iter->second.command_name()] = command;
+    (*command_map)[named_command.second.command_name()] = command;
   }
 
   return !command_map->empty();
@@ -211,10 +208,10 @@ bool CommandService::AddKeybindingPref(
     RemoveKeybindingPrefs(extension_id, command_name);
 
   // Set the keybinding pref.
-  base::Value keybinding(base::Value::Type::DICTIONARY);
-  keybinding.SetStringKey(kExtension, extension_id);
-  keybinding.SetStringKey(kCommandName, command_name);
-  keybinding.SetBoolKey(kGlobal, global);
+  base::Value::Dict keybinding;
+  keybinding.Set(kExtension, extension_id);
+  keybinding.Set(kCommandName, command_name);
+  keybinding.Set(kGlobal, global);
 
   bindings.Set(key, std::move(keybinding));
 
@@ -292,17 +289,18 @@ Command CommandService::FindCommandByName(const std::string& extension_id,
   const base::Value::Dict& bindings =
       profile_->GetPrefs()->GetDict(prefs::kExtensionCommands);
   for (const auto it : bindings) {
-    const std::string* extension = it.second.FindStringKey(kExtension);
+    const std::string* extension = it.second.GetDict().FindString(kExtension);
     if (!extension || *extension != extension_id)
       continue;
-    const std::string* command_name = it.second.FindStringKey(kCommandName);
+    const std::string* command_name =
+        it.second.GetDict().FindString(kCommandName);
     if (!command_name || *command_name != command)
       continue;
     // Format stored in Preferences is: "Platform:Shortcut[:ExtensionId]".
     std::string shortcut = it.first;
     if (!IsForCurrentPlatform(shortcut))
       continue;
-    absl::optional<bool> global = it.second.FindBoolKey(kGlobal);
+    std::optional<bool> global = it.second.GetDict().FindBool(kGlobal);
 
     std::vector<base::StringPiece> tokens = base::SplitStringPiece(
         shortcut, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
@@ -323,13 +321,33 @@ void CommandService::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void CommandService::UpdateKeybindings(const Extension* extension) {
-  const ExtensionSet& extensions =
+const Extension* CommandService::GetExtensionInEnabledOrDisabledExtensions(
+    const ExtensionId& extension_id) const {
+  const ExtensionSet& enabled_extensions =
       ExtensionRegistry::Get(profile_)->enabled_extensions();
-  // The extension is not added to the profile by this point on first install,
-  // so don't try to check for existing keybindings.
-  if (extensions.GetByID(extension->id()))
+  const Extension* enabled_extension = enabled_extensions.GetByID(extension_id);
+  if (enabled_extension) {
+    return enabled_extension;
+  }
+  const ExtensionSet& disabled_extensions =
+      ExtensionRegistry::Get(profile_)->disabled_extensions();
+  return disabled_extensions.GetByID(extension_id);
+}
+
+bool CommandService::IsUpgradeFromMV2ToMV3(
+    const Extension* extension,
+    const std::string& existing_command_name) const {
+  bool browser_or_page_action_command_in_bindings =
+      existing_command_name == manifest_values::kBrowserActionCommandEvent ||
+      existing_command_name == manifest_values::kPageActionCommandEvent;
+  return browser_or_page_action_command_in_bindings &&
+         CommandsInfo::GetActionCommand(extension);
+}
+
+void CommandService::UpdateKeybindings(const Extension* extension) {
+  if (GetExtensionInEnabledOrDisabledExtensions(extension->id())) {
     RemoveRelinquishedKeybindings(extension);
+  }
   AssignKeybindings(extension);
   UpdateExtensionSuggestedCommandPrefs(extension);
   RemoveDefunctExtensionSuggestedCommandPrefs(extension);
@@ -364,9 +382,19 @@ void CommandService::RemoveRelinquishedKeybindings(const Extension* extension) {
       return;
     }
 
-    if (IsCommandShortcutUserModified(extension,
-                                      existing_command.command_name())) {
-      // Don't relinquish user-modified shortcuts.
+    const std::string& existing_command_name = existing_command.command_name();
+    bool is_shortcut_user_modified =
+        IsCommandShortcutUserModified(extension, existing_command_name);
+    bool is_upgrade_from_mv2_to_mv3 =
+        IsUpgradeFromMV2ToMV3(extension, existing_command_name);
+    if (is_shortcut_user_modified && is_upgrade_from_mv2_to_mv3) {
+      // TODO(jlulejian): Could this be an out param to IsUpgradeFromMV2ToMV3?
+      const Command* action_command = CommandsInfo::GetActionCommand(extension);
+      AddKeybindingPref(existing_command.accelerator(), extension->id(),
+                        action_command->command_name(), true,
+                        action_command->global());
+    } else if (is_shortcut_user_modified) {
+      // Don't relinquish user-modified shortcuts otherwise.
       return;
     }
 
@@ -397,7 +425,7 @@ void CommandService::RemoveRelinquishedKeybindings(const Extension* extension) {
     if (!should_relinquish)
       return;
 
-    RemoveKeybindingPrefs(extension->id(), existing_command.command_name());
+    RemoveKeybindingPrefs(extension->id(), existing_command_name);
   };
 
   // TODO(https://crbug.com/1067130): Extensions shouldn't be able to specify
@@ -415,8 +443,8 @@ void CommandService::AssignKeybindings(const Extension* extension) {
   if (!commands)
     return;
 
-  for (auto iter = commands->cbegin(); iter != commands->cend(); ++iter) {
-    const Command command = iter->second;
+  for (const auto& named_command : *commands) {
+    const Command command = named_command.second;
     if (CanAutoAssign(command, extension)) {
       AddKeybindingPref(command.accelerator(),
                         extension->id(),
@@ -499,8 +527,8 @@ void CommandService::UpdateExtensionSuggestedCommandPrefs(
 
   const CommandMap* commands = CommandsInfo::GetNamedCommands(extension);
   if (commands) {
-    for (auto iter = commands->cbegin(); iter != commands->cend(); ++iter) {
-      const Command command = iter->second;
+    for (const auto& named_command : *commands) {
+      const Command command = named_command.second;
       base::Value::Dict command_keys;
       command_keys.Set(kSuggestedKey,
                        Command::AcceleratorToString(command.accelerator()));
@@ -576,7 +604,7 @@ void CommandService::RemoveDefunctExtensionSuggestedCommandPrefs(
 
     extension_prefs->UpdateExtensionPref(
         extension->id(), kCommands,
-        std::make_unique<base::Value>(std::move(suggested_key_prefs)));
+        base::Value(std::move(suggested_key_prefs)));
   }
 }
 
@@ -585,7 +613,7 @@ bool CommandService::IsCommandShortcutUserModified(
     const std::string& command_name) {
   // Get the previous suggested key, if any.
   ui::Accelerator suggested_key;
-  absl::optional<bool> suggested_key_was_assigned;
+  std::optional<bool> suggested_key_was_assigned;
   ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(profile_);
   const base::Value::Dict* commands_prefs =
       extension_prefs->ReadPrefAsDict(extension->id(), kCommands);
@@ -657,10 +685,11 @@ bool CommandService::GetExtensionActionCommand(const std::string& extension_id,
                                                QueryType query_type,
                                                Command* command,
                                                bool* active) const {
-  const ExtensionSet& extensions =
-      ExtensionRegistry::Get(profile_)->enabled_extensions();
-  const Extension* extension = extensions.GetByID(extension_id);
-  CHECK(extension);
+  const Extension* extension =
+      GetExtensionInEnabledOrDisabledExtensions(extension_id);
+  if (!extension) {
+    return false;
+  }
 
   if (active)
     *active = false;

@@ -9,6 +9,7 @@
 
 #include "extensions/pdf_iframe_navigation_throttle_qt.h"
 
+#include "base/task/sequenced_task_runner.h"
 #include "chrome/grit/renderer_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/download_utils.h"
@@ -25,11 +26,11 @@
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
 
+#include "pdf_util_qt.h"
+
 #include <QtGlobal>
 
 namespace extensions {
-
-constexpr char kPDFMimeType[] = "application/pdf";
 
 // Used to scope the posted navigation task to the lifetime of |web_contents|.
 class PdfWebContentsLifetimeHelper : public content::WebContentsUserData<PdfWebContentsLifetimeHelper>
@@ -37,7 +38,6 @@ class PdfWebContentsLifetimeHelper : public content::WebContentsUserData<PdfWebC
 public:
     explicit PdfWebContentsLifetimeHelper(content::WebContents *web_contents)
         : content::WebContentsUserData<PdfWebContentsLifetimeHelper>(*web_contents)
-        , web_contents_(web_contents)
     {}
 
     base::WeakPtr<PdfWebContentsLifetimeHelper> GetWeakPtr()
@@ -47,13 +47,12 @@ public:
 
     void NavigateIFrameToPlaceholder(const content::OpenURLParams &url_params)
     {
-        web_contents_->OpenURL(url_params);
+        GetWebContents().OpenURL(url_params);
     }
 
 private:
     friend class content::WebContentsUserData<PdfWebContentsLifetimeHelper>;
 
-    content::WebContents *const web_contents_;
     base::WeakPtrFactory<PdfWebContentsLifetimeHelper> weak_factory_{this};
 
     WEB_CONTENTS_USER_DATA_KEY_DECL();
@@ -74,10 +73,11 @@ bool IsPDFPluginEnabled(content::NavigationHandle *navigation_handle, bool *is_s
     content::WebPluginInfo plugin_info;
     // Will check WebEngineSettings by PluginServiceFilterQt
     return content::PluginService::GetInstance()->GetPluginInfo(
-                process_id, routing_id, nullptr, navigation_handle->GetURL(),
-                kPDFMimeType,
-                false /* allow_wildcard */, is_stale, &plugin_info,
-                nullptr /* actual_mime_type */);
+                process_id, routing_id,
+                navigation_handle->GetWebContents()->GetBrowserContext(),
+                navigation_handle->GetURL(),
+                QtWebEngineCore::kPDFMimeType, false /* allow_wildcard */,
+                is_stale, &plugin_info, nullptr /* actual_mime_type */);
 }
 
 std::string GetPDFPlaceholderHTML(const GURL &pdf_url)
@@ -119,12 +119,15 @@ content::NavigationThrottle::ThrottleCheckResult PDFIFrameNavigationThrottleQt::
 
     std::string mime_type;
     response_headers->GetMimeType(&mime_type);
-    if (mime_type != kPDFMimeType)
+    if (mime_type != QtWebEngineCore::kPDFMimeType)
         return content::NavigationThrottle::PROCEED;
 
     // We MUST download responses marked as attachments rather than showing
     // a placeholder.
-    if (content::download_utils::MustDownload(navigation_handle()->GetURL(), response_headers, mime_type))
+    if (content::download_utils::MustDownload(navigation_handle()->GetWebContents()
+                                                  ? navigation_handle()->GetWebContents()->GetBrowserContext()
+                                                  : nullptr,
+                                              navigation_handle()->GetURL(), response_headers, mime_type))
         return content::NavigationThrottle::PROCEED;
 
     bool is_stale = false;
@@ -182,7 +185,7 @@ void PDFIFrameNavigationThrottleQt::LoadPlaceholderHTML()
 
     PdfWebContentsLifetimeHelper::CreateForWebContents(web_contents);
     PdfWebContentsLifetimeHelper *helper = PdfWebContentsLifetimeHelper::FromWebContents(web_contents);
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(&PdfWebContentsLifetimeHelper::NavigateIFrameToPlaceholder,
                        helper->GetWeakPtr(), std::move(params)));

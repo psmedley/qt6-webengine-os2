@@ -1,23 +1,28 @@
 // Copyright (C) 2017 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "ozone_platform_qt.h"
 
 #if defined(USE_OZONE)
 #include "base/no_destructor.h"
+#include "base/task/thread_pool.h"
+#include "media/gpu/buildflags.h"
 #include "ui/base/buildflags.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/display/types/native_display_delegate.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
 #include "ui/events/ozone/layout/stub/stub_keyboard_layout_engine.h"
+#include "ui/gfx/linux/client_native_pixmap_dmabuf.h"
+#include "ui/gfx/linux/client_native_pixmap_factory_dmabuf.h"
 #include "ui/ozone/common/bitmap_cursor_factory.h"
-#include "ui/ozone/common/stub_client_native_pixmap_factory.h"
 #include "ui/ozone/common/stub_overlay_manager.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
 #include "ui/ozone/public/input_controller.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/platform_screen.h"
 #include "ui/ozone/public/system_input_injector.h"
+#include "ui/ozone/platform/wayland/gpu/wayland_gl_egl_utility.h"
 #include "ui/platform_window/platform_window_delegate.h"
 #include "ui/platform_window/platform_window_init_properties.h"
 
@@ -32,9 +37,14 @@
 #include <X11/XKBlib.h>
 #include <X11/extensions/XKBrules.h>
 #include <filesystem>
+#endif // BUILDFLAG(USE_XKBCOMMON)
+
+#if BUILDFLAG(IS_OZONE_X11)
+#include "ui/gfx/linux/gpu_memory_buffer_support_x11.h"
+#include "ui/ozone/platform/x11/gl_egl_utility_x11.h"
 
 extern void *GetQtXDisplay();
-#endif // BUILDFLAG(USE_XKBCOMMON)
+#endif
 
 namespace ui {
 
@@ -56,6 +66,20 @@ public:
     std::unique_ptr<InputMethod> CreateInputMethod(ImeKeyEventDispatcher *ime_key_event_dispatcher, gfx::AcceleratedWidget widget) override;
     std::unique_ptr<ui::PlatformScreen> CreateScreen() override { return nullptr; }
     const PlatformProperties &GetPlatformProperties() override;
+    PlatformGLEGLUtility *GetPlatformGLEGLUtility() override;
+
+    const PlatformRuntimeProperties &GetPlatformRuntimeProperties() override
+    {
+        static OzonePlatform::PlatformRuntimeProperties properties;
+        if (has_initialized_gpu()) {
+            // This property is set when the GetPlatformRuntimeProperties is
+            // called on the gpu process side.
+            DCHECK(m_supportsNativePixmaps);
+            properties.supports_native_pixmaps = m_supportsNativePixmaps.value();
+        }
+        return properties;
+    }
+    bool IsNativePixmapConfigSupported(gfx::BufferFormat format, gfx::BufferUsage usage) const override;
 
 private:
     bool InitializeUI(const ui::OzonePlatform::InitParams &) override;
@@ -63,6 +87,7 @@ private:
 
     void InitScreen(ui::PlatformScreen *) override {}
 
+    absl::optional<bool> m_supportsNativePixmaps;
     std::unique_ptr<QtWebEngineCore::SurfaceFactoryQt> surface_factory_ozone_;
     std::unique_ptr<CursorFactory> cursor_factory_;
 
@@ -74,6 +99,7 @@ private:
     XkbEvdevCodes m_xkbEvdevCodeConverter;
 #endif
     std::unique_ptr<KeyboardLayoutEngine> m_keyboardLayoutEngine;
+    std::unique_ptr<PlatformGLEGLUtility> gl_egl_utility_;
 };
 
 
@@ -86,8 +112,8 @@ const ui::OzonePlatform::PlatformProperties &OzonePlatformQt::GetPlatformPropert
     static base::NoDestructor<ui::OzonePlatform::PlatformProperties> properties;
     static bool initialized = false;
     if (!initialized) {
-        properties->fetch_buffer_formats_for_gmb_on_gpu = true;
-
+        DCHECK(m_supportsNativePixmaps);
+        properties->fetch_buffer_formats_for_gmb_on_gpu = m_supportsNativePixmaps.value();
         initialized = true;
     }
 
@@ -202,12 +228,23 @@ bool OzonePlatformQt::InitializeUI(const ui::OzonePlatform::InitParams &)
     input_controller_ = CreateStubInputController();
     cursor_factory_.reset(new BitmapCursorFactory());
     gpu_platform_support_host_.reset(ui::CreateStubGpuPlatformSupportHost());
+    m_supportsNativePixmaps = QtWebEngineCore::SurfaceFactoryQt::SupportsNativePixmaps();
     return true;
 }
 
-void OzonePlatformQt::InitializeGPU(const ui::OzonePlatform::InitParams &)
+void OzonePlatformQt::InitializeGPU(const ui::OzonePlatform::InitParams &params)
 {
     surface_factory_ozone_.reset(new QtWebEngineCore::SurfaceFactoryQt());
+
+#if BUILDFLAG(IS_OZONE_X11)
+    if (params.enable_native_gpu_memory_buffers) {
+        base::ThreadPool::PostTask(FROM_HERE,
+                                   base::BindOnce([]()
+            {
+                ui::GpuMemoryBufferSupportX11::GetInstance();
+            }));
+    }
+#endif
 }
 
 std::unique_ptr<InputMethod> OzonePlatformQt::CreateInputMethod(ImeKeyEventDispatcher *, gfx::AcceleratedWidget)
@@ -216,13 +253,31 @@ std::unique_ptr<InputMethod> OzonePlatformQt::CreateInputMethod(ImeKeyEventDispa
     return nullptr;
 }
 
+bool OzonePlatformQt::IsNativePixmapConfigSupported(gfx::BufferFormat format, gfx::BufferUsage usage) const
+{
+    return gfx::ClientNativePixmapDmaBuf::IsConfigurationSupported(format, usage);
+}
+
+PlatformGLEGLUtility *OzonePlatformQt::GetPlatformGLEGLUtility()
+{
+    if (!gl_egl_utility_) {
+#if BUILDFLAG(IS_OZONE_X11)
+        if (GetQtXDisplay())
+            gl_egl_utility_ = std::make_unique<GLEGLUtilityX11>();
+        else
+#endif
+            gl_egl_utility_ = std::make_unique<WaylandGLEGLUtility>();
+    }
+    return gl_egl_utility_.get();
+}
+
 } // namespace
 
 OzonePlatform* CreateOzonePlatformQt() { return new OzonePlatformQt; }
 
-gfx::ClientNativePixmapFactory* CreateClientNativePixmapFactoryQt()
+gfx::ClientNativePixmapFactory *CreateClientNativePixmapFactoryQt()
 {
-    return CreateStubClientNativePixmapFactory();
+    return gfx::CreateClientNativePixmapFactoryDmabuf();
 }
 
 }  // namespace ui

@@ -10,16 +10,23 @@
 #include "web_contents_adapter_client.h"
 #include "web_contents_view_qt.h"
 
-#include "base/task/thread_pool.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace QtWebEngineCore {
 
+void AutofillClientQt::CreateForWebContents(content::WebContents *contents)
+{
+    DCHECK(contents);
+    if (!FromWebContents(contents))
+        contents->SetUserData(UserDataKey(), base::WrapUnique(new AutofillClientQt(contents)));
+}
+
 AutofillClientQt::AutofillClientQt(content::WebContents *webContents)
-    : content::WebContentsUserData<AutofillClientQt>(*webContents)
+    : autofill::ContentAutofillClient(
+            webContents, base::BindRepeating(&autofill::BrowserDriverInitHook, this, ""))
     , content::WebContentsObserver(webContents)
     , m_popupController(new AutofillPopupController(new AutofillPopupControllerPrivate))
 {
@@ -51,24 +58,22 @@ const PrefService *AutofillClientQt::GetPrefs() const
 void AutofillClientQt::ShowAutofillPopup(const autofill::AutofillClient::PopupOpenArgs &open_args,
                                          base::WeakPtr<autofill::AutofillPopupDelegate> delegate)
 {
-    // Specific popups (personal, address, credit card, password) are not supported.
-    DCHECK(open_args.popup_type == autofill::PopupType::kUnspecified);
-
     m_popupController->d->delegate = delegate;
     m_popupController->d->suggestions = open_args.suggestions;
     m_popupController->updateModel();
 
+    bool autoSelectFirstSuggestion =
+        open_args.trigger_source == autofill::AutofillSuggestionTriggerSource::kTextFieldDidReceiveKeyDown;
+
     adapterClient()->showAutofillPopup(m_popupController.data(),
                                        QRect(toQt(gfx::ToEnclosingRect(open_args.element_bounds))),
-                                       open_args.autoselect_first_suggestion.value());
+                                       autoSelectFirstSuggestion);
 }
 
-void AutofillClientQt::UpdateAutofillPopupDataListValues(const std::vector<std::u16string> &values,
-                                                         const std::vector<std::u16string> &labels)
+void AutofillClientQt::UpdateAutofillPopupDataListValues(
+        base::span<const autofill::SelectOption> datalist)
 {
-    Q_UNUSED(labels);
-
-    if (values.empty())
+    if (datalist.empty())
         HideAutofillPopup(autofill::PopupHidingReason::kNoSuggestions);
 }
 
@@ -78,24 +83,18 @@ void AutofillClientQt::PinPopupView()
     NOTIMPLEMENTED();
 }
 
-autofill::AutofillClient::PopupOpenArgs AutofillClientQt::GetReopenPopupArgs() const
+autofill::AutofillClient::PopupOpenArgs AutofillClientQt::GetReopenPopupArgs(autofill::AutofillSuggestionTriggerSource trigger_source) const
 {
     // Called by password_manager component only.
     NOTIMPLEMENTED();
     return autofill::AutofillClient::PopupOpenArgs();
 }
 
-base::span<const autofill::Suggestion> AutofillClientQt::GetPopupSuggestions() const
+std::vector<autofill::Suggestion> AutofillClientQt::GetPopupSuggestions() const
 {
     // Called by password_manager component only.
     NOTIMPLEMENTED();
-    return base::span<const autofill::Suggestion>();
-}
-
-void AutofillClientQt::UpdatePopup(const std::vector<autofill::Suggestion> &, autofill::PopupType)
-{
-    // Called by password_manager component only.
-    NOTIMPLEMENTED();
+    return {};
 }
 
 void AutofillClientQt::HideAutofillPopup(autofill::PopupHidingReason)
@@ -103,7 +102,7 @@ void AutofillClientQt::HideAutofillPopup(autofill::PopupHidingReason)
     adapterClient()->hideAutofillPopup();
 }
 
-bool AutofillClientQt::IsAutocompleteEnabled()
+bool AutofillClientQt::IsAutocompleteEnabled() const
 {
     return autofill::prefs::IsAutocompleteEnabled(GetPrefs());
 }
@@ -113,11 +112,14 @@ bool AutofillClientQt::IsPasswordManagerEnabled()
     return false;
 }
 
-void AutofillClientQt::PropagateAutofillPredictions(autofill::AutofillDriver *,
-                                                    const std::vector<autofill::FormStructure *> &)
+bool AutofillClientQt::IsOffTheRecord()
 {
-    // For testing purposes only.
-    NOTIMPLEMENTED();
+    return web_contents()->GetBrowserContext()->IsOffTheRecord();
+}
+
+scoped_refptr<network::SharedURLLoaderFactory> AutofillClientQt::GetURLLoaderFactory()
+{
+    return nullptr;
 }
 
 WebContentsAdapterClient *AutofillClientQt::adapterClient()
@@ -126,7 +128,5 @@ WebContentsAdapterClient *AutofillClientQt::adapterClient()
                    static_cast<content::WebContentsImpl *>(web_contents())->GetView())
             ->client();
 }
-
-WEB_CONTENTS_USER_DATA_KEY_IMPL(AutofillClientQt);
 
 } // namespace QtWebEngineCore

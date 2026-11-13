@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,10 +34,6 @@ class CFX_WindowsRenderDevice : public CFX_RenderDevice {
                           CFX_PSFontTracker* ps_font_tracker,
                           const EncoderIface* encoder_iface);
   ~CFX_WindowsRenderDevice() override;
-
-#if defined(_SKIA_SUPPORT_)
-  void DebugVerifyBitmapIsPreMultiplied() const override;
-#endif
 };
 
 #endif  // CORE_FXGE_CFX_WINDOWSRENDERDEVICE_H_

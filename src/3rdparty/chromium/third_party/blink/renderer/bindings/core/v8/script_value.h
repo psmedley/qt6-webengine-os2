@@ -41,16 +41,28 @@
 #include "v8/include/v8.h"
 
 namespace blink {
-
+namespace bindings {
+class DictionaryBase;
+class UnionBase;
+}  // namespace bindings
 class ScriptState;
 
+// ScriptValue is used when an idl specifies the type as 'any'. ScriptValue
+// stores the v8 value using WorldSafeV8Reference.
 class CORE_EXPORT ScriptValue final {
   DISALLOW_NEW();
 
  public:
-  // Defined in ToV8.h due to circular dependency
+  // Defined in to_v8_traits.h due to circular dependency
+  // ScriptValue::From() is restricted to certain types that are unambiguous in
+  // how they are exposed to V8. Objects that need to know what the expected IDL
+  // type is in order to be correctly converted must explicitly use ToV8Traits<>
+  // to get a v8::Value, then pass it directly to the constructor.
   template <typename T>
-  static ScriptValue From(ScriptState*, T&& value);
+    requires std::derived_from<T, bindings::DictionaryBase> ||
+             std::derived_from<T, ScriptWrappable> ||
+             std::derived_from<T, bindings::UnionBase>
+  static ScriptValue From(ScriptState*, T* value);
 
   template <typename T, typename... Arguments>
   static inline T To(v8::Isolate* isolate,
@@ -82,6 +94,27 @@ class CORE_EXPORT ScriptValue final {
         value_(isolate,
                value.IsEmpty() ? v8::Local<T>() : value.ToLocalChecked()) {
     DCHECK(isolate_);
+  }
+
+  ~ScriptValue() {
+    // Reset() below eagerly cleans up Oilpan-internal book-keeping data
+    // structures. Since most uses of ScriptValue are from stack or parameters
+    // this significantly helps in keeping memory compact at the expense of a
+    // few more finalizers in the on-heap use case. Keeping the internals
+    // compact is important in AudioWorklet use cases that don't allocate and
+    // thus never trigger GC.
+    //
+    // Note: If you see a CHECK() fail in non-production code (e.g. C++ unit
+    // tests) then this means that the test runs manual GCs and/or invokes the
+    // `RunLoop` to trigger GCs without stack while having a ScriptValue on the
+    // stack which is not supported. To solve this pass the `v8::StackState`
+    // explicitly on GCs. Alternatively, you can keep ScriptValue alive via
+    // wrapper objects through Persistent instead of referring to it from the
+    // stack.
+    //
+    // TODO(v8:v8:13372): Remove once v8::TracedReference is implemented as
+    // direct pointer.
+    value_.Reset();
   }
 
   ScriptValue(const ScriptValue& value) = default;

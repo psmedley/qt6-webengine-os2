@@ -1,5 +1,5 @@
 // Copyright (C) 2016 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 // Functions and macros that really need to be in QTestLib
 
@@ -163,7 +163,7 @@ static inline QRect elementGeometry(QWebEnginePage *page, const QString &id)
     QVariantList coords = evaluateJavaScriptSync(page, jsCode).toList();
 
     if (coords.size() != 4) {
-        qWarning("elementGeometry faield.");
+        qWarning("elementGeometry failed.");
         return QRect();
     }
 

@@ -14,6 +14,106 @@ The checklists below show how to achieve some common tasks in the codebase.
 
 Here is an [example change](https://android-review.googlesource.com/c/platform/external/perfetto/+/1290645) which added the `ion/ion_stat` event.
 
+## Contribute to SQL standard library
+
+1. Add or edit an SQL file inside `perfetto/src/trace_processor/stdlib/`.
+2. For a new file inside an existing module add the file to the corresponding `BUILD.gn`.
+3. For a new module (subdirectory of `/stdlib/`), module name (directory name) has to be added to the list in `/stdlib/BUILD.gn`.
+
+Files inside the standard library have to be formatted in a very specific way, as its structure is used to generate documentation. There are presubmit checks, but they are not infallible.
+
+- Running the file cannot generate any data. There can be only
+  `CREATE PERFETTO FUNCTION`, `CREATE PERFETTO TABLE` and `CREATE PERFETTO VIEW` statements inside.
+- The name of each table/view/function needs to start with `{module_name}_` or `{internal_}`.
+  The names of views/tables/functions are must be `[a-z_]`. When a module is imported (using the `IMPORT` function), objects prefixed with internal should not be used.
+  - The only exception is the `common` module. The name of functions/views/tables inside should not be prefixed with `common_`, as they are supposed to be module agnostic and widely used.
+- Every table or view should have [a schema](/docs/analysis/perfetto-sql-syntax.md#tableview-schema).
+- Every non internal object, as well as its function arguments and columns in its schema have to be prefixed with an SQL comment documenting it.
+  Any text is going to be parsed as markdown, so usage of markdown functionality (code, links, lists) is encouraged.
+  Whitespaces in anything apart from descriptions are ignored, so comments can be formatted neatly.
+  If the line with description exceeds 80 chars, description can be continued in following lines.
+  - **Table/view**: each has to have schema, object description and a comment above each column's definition in the schema.
+    - Description is any text in the comment above `CREATE PERFETTO {TABLE,VIEW}` statement.
+    - Column's comment is the text immediately above column definition in the schema.
+  - **Scalar Functions**: each has to have a function description and description of return value in this order.
+    - Function description is any text in the comment above `CREATE PERFETTO FUNCTION` statement.
+    - For each argument there has to be a comment line immediately above argument definition.
+    - Return comment should immediately precede `RETURNS`.
+  - **Table Functions**: each has to have a function description, list of arguments (names, types, description) and list of columns.
+    - Function description is any text in the comment above `CREATE PERFETTO FUNCTION` statement.
+    - For each argument there has to be a comment line immediately above argument definition.
+    - For each column there has to be a comment line immediately above column definition.
+
+NOTE: Break lines outside of import description will be ignored.
+
+Example of properly formatted view in module `android`:
+```sql
+-- Count Binder transactions per process.
+CREATE PERFETTO VIEW android_binder_metrics_by_process(
+  -- Name of the process that started the binder transaction.
+  process_name STRING,
+  -- PID of the process that started the binder transaction.
+  pid INT,
+-- Name of the slice with binder transaction.
+  slice_name STRING,
+-- Number of binder transactions in process in slice.
+  event_count INT
+) AS
+SELECT
+  process.name AS process_name,
+  process.pid AS pid,
+  slice.name AS slice_name,
+  COUNT(*) AS event_count
+FROM slice
+INNER JOIN thread_track ON slice.track_id = thread_track.id
+INNER JOIN thread ON thread.utid = thread_track.utid
+INNER JOIN process ON thread.upid = process.upid
+WHERE
+  slice.name GLOB 'binder*'
+GROUP BY
+  process_name,
+  slice_name;
+```
+
+Example of function in module `common`:
+```sql
+-- Extracts an int value with the given name from the metadata table.
+CREATE PERFETTO FUNCTION extract_int_metadata(
+  -- The name of the metadata entry.
+  name STRING)
+-- int_value for the given name. NULL if there's no such entry.
+RETURNS LONG
+AS SELECT int_value FROM metadata WHERE name = ($name)
+```
+
+Example of table function in module `android`:
+```sql
+-- Given a launch id and GLOB for a slice name, returns columns for matching slices.
+CREATE PERFETTO FUNCTION ANDROID_SLICES_FOR_LAUNCH_AND_SLICE_NAME(
+  -- Id of launch.
+  launch_id INT,
+  -- Name of slice with launch.
+  slice_name STRING
+)
+RETURNS TABLE(
+  -- Name of slice with launch.
+  slice_name STRING,
+  -- Timestamp of slice start.
+  slice_ts INT,
+  -- Duration of slice.
+  slice_dur INT,
+  -- Name of thread with slice.
+  thread_name STRING,
+  -- Arg set id.
+  arg_set_id INT
+)
+AS
+SELECT slice_name, slice_ts, slice_dur, thread_name, arg_set_id
+FROM thread_slices_for_all_launches
+WHERE launch_id = $launch_id AND slice_name GLOB $slice_name;
+```
+
+
 ## {#new-metric} Add a new trace-based metric
 
 1. Create the proto file containing the metric in the [protos/perfetto/metrics](/protos/perfetto/metrics) folder. The appropriate` BUILD.gn` file should be updated as well.
@@ -21,16 +121,14 @@ Here is an [example change](https://android-review.googlesource.com/c/platform/e
 3. Run `tools/gen_all out/YOUR_BUILD_DIRECTORY`. This will update the generated headers containing the descriptors for the proto.
   * *Note: this step has to be performed any time any metric-related proto is modified.*
   * If you don't see anything inside the `out/` directory you might have to
-  rerun `tools/build_all_configs.py`.
+  rerun `tools/setup_all_configs.py`.
 4. Add a new SQL file for the metric to [src/trace_processor/metrics](/src/trace_processor/metrics). The appropriate `BUILD.gn` file should be updated as well.
   * To learn how to write new metrics, see the [trace-based metrics documentation](/docs/analysis/metrics.md).
 5. Build all targets in your out directory with `tools/ninja -C out/YOUR_BUILD_DIRECTORY`.
 6. Add a new diff test for the metric. This can be done by adding files to
-the [test/trace_processor](/test/trace_processor) folder and modifying one
-of the index files listed in
-[/test/trace_processor/include_index](/test/trace_processor/include_index).
-7. Run the newly added test with `tools/diff_test_trace_processor.py <path to trace processor binary>`.
-8. Upload and land your change as normal.
+the `tests.*.py` files in a proper [test/trace_processor](/test/trace_processor) subfolder.
+1. Run the newly added test with `tools/diff_test_trace_processor.py <path to trace processor binary>`.
+2. Upload and land your change as normal.
 
 Here is an [example change](https://android-review.googlesource.com/c/platform/external/perfetto/+/1290643) which added the `time_in_state` metric.
 
@@ -41,19 +139,9 @@ Here is an [example change](https://android-review.googlesource.com/c/platform/e
 2. Register the table with the trace processor in the constructor for the [TraceProcessorImpl class](/src/trace_processor/trace_processor_impl.cc).
 3. If also implementing ingestion of events into the table:
   1. Modify the appropriate parser class in [src/trace_processor/importers](/src/trace_processor/importers) and add the code to add rows to the newly added table.
-  2. Add a new diff test for the added parsing code and table using
-  `tools/add_tp_diff_test.py`.
-  3. Run the newly added test with `tools/diff_test_trace_processor.py <path to trace processor binary>`.
+  2. Add a new diff test for the added parsing code and table.
+  3. Run the newly added test with `tools/diff_test_trace_processor.py <path to trace processor shell binary>`.
 4. Upload and land your change as normal.
-
-## {#new-annotation} Add a new annotation
-
-NOTE: all currently implemented annotations are based only on the name of the slice. It is straightforward to extend this to also consider ancestors and other similar properties; we plan on doing this in the future.
-
-1. Change the [`DescribeSlice`](/src/trace_processor/analysis/describe_slice.h) function as appropriate.
-  * The inputs are the table containing all the slices from the trace and the id of the slice which an embedder (e.g. the UI) is requesting a description for.
-  * The output is a `SliceDescription` which is simply a `pair<description, doc link>`.
-2. Upload and land your change as normal.
 
 ## Adding new derived events
 
@@ -72,14 +160,14 @@ To extend a metric with annotations:
 
 The schema of the `<metric name>_event` table/view is as follows:
 
-| Name         | Type     | Presence                              | Meaning                                                      |
-| :----------- | -------- | ------------------------------------- | ------------------------------------------------------------ |
-| `track_type` | `string` | Mandatory                             | 'slice' for slices, 'counter' for counters                   |
-| `track_name` | `string` | Mandatory                             | Name of the track to display in the UI. Also the track identifier i.e. all events with same `track_name` appear on the same track. |
-| `ts`         | `int64`  | Mandatory                             | The timestamp of the event (slice or counter)                |
-| `dur`        | `int64`  | Mandatory for slice, NULL for counter | The duration of the slice                                    |
-| `slice_name` | `string` | Mandatory for slice, NULL for counter | The name of the slice                                        |
-| `value`      | `double` | Mandatory for counter, NULL for slice | The value of the counter                                     |
+| Name         | Type     | Presence                              | Meaning                                                                                                                                                                                                                                     |
+| :----------- | -------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `track_type` | `string` | Mandatory                             | 'slice' for slices, 'counter' for counters                                                                                                                                                                                                  |
+| `track_name` | `string` | Mandatory                             | Name of the track to display in the UI. Also the track identifier i.e. all events with same `track_name` appear on the same track.                                                                                                          |
+| `ts`         | `int64`  | Mandatory                             | The timestamp of the event (slice or counter)                                                                                                                                                                                               |
+| `dur`        | `int64`  | Mandatory for slice, NULL for counter | The duration of the slice                                                                                                                                                                                                                   |
+| `slice_name` | `string` | Mandatory for slice, NULL for counter | The name of the slice                                                                                                                                                                                                                       |
+| `value`      | `double` | Mandatory for counter, NULL for slice | The value of the counter                                                                                                                                                                                                                    |
 | `group_name` | `string` | Optional                              | Name of the track group under which the track appears. All tracks with the same `group_name` are placed under the same group by that name. Tracks that lack this field or have NULL value in this field are displayed without any grouping. |
 
 #### Known issues:
@@ -95,3 +183,22 @@ The schema of the `<metric name>_event` table/view is as follows:
 * There is no way to tie newly added events back to the source events in the
   trace which were used to generate them. This is not currently a priority but
   something we may add in the future.
+
+
+## Update `TRACE_PROCESSOR_CURRENT_API_VERSION`
+
+Generally you do not have to worry about version skew between the UI
+and the `trace_processor` since they are built together at the same
+commit. However version skew can occur when using the `--httpd` mode
+which allows a native `trace_processor` instance to be used with the UI.
+
+A common case is when the UI is more recent than `trace_processor`
+and depends on a new table definition. With older versions of
+`trace_processor` in `--httpd` mode the UI crashes attempting to query
+a non-existant table. To avoid this we use a version number. If the
+version number `trace_processor` reports is older than the one the UI
+was built with we prompt the user to update.
+
+1. Go to `protos/perfetto/trace_processor/trace_processor.proto`
+2. Increment `TRACE_PROCESSOR_CURRENT_API_VERSION`
+3. Add a comment explaining what has changed.

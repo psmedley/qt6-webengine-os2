@@ -4,8 +4,8 @@
 
 #include "storage/browser/blob/blob_url_store_impl.h"
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
@@ -27,18 +27,72 @@ using blink::mojom::BlobURLStore;
 
 namespace storage {
 
-class BlobURLStoreImplTest : public testing::Test {
+namespace {
+
+enum class PartitionedBlobUrlTestCase {
+  kPartitioningDisabledWithSupportDisabled,
+  kPartitioningDisabledWithSupportEnabled,
+  kPartitioningEnabledWithSupportDisabled,
+  kPartitioningEnabledWithSupportEnabled,
+};
+
+class BlobURLStoreImplTestP
+    : public testing::Test,
+      public testing::WithParamInterface<PartitionedBlobUrlTestCase> {
  public:
   void SetUp() override {
+    test_case_ = GetParam();
+    InitializeScopedFeatureList();
+
     context_ = std::make_unique<BlobStorageContext>();
     agent_cluster_id_ = base::UnguessableToken::Create();
 
     mojo::SetDefaultProcessErrorHandler(base::BindRepeating(
-        &BlobURLStoreImplTest::OnBadMessage, base::Unretained(this)));
+        &BlobURLStoreImplTestP::OnBadMessage, base::Unretained(this)));
   }
 
   void TearDown() override {
     mojo::SetDefaultProcessErrorHandler(base::NullCallback());
+  }
+
+  void InitializeScopedFeatureList() {
+    std::vector<base::test::FeatureRef> enabled_features{};
+    std::vector<base::test::FeatureRef> disabled_features{};
+
+    if (PartitionedBlobUrlSupported()) {
+      enabled_features.push_back(net::features::kSupportPartitionedBlobUrl);
+    } else {
+      disabled_features.push_back(net::features::kSupportPartitionedBlobUrl);
+    }
+
+    if (StoragePartitioningEnabled()) {
+      enabled_features.push_back(net::features::kThirdPartyStoragePartitioning);
+    } else {
+      disabled_features.push_back(
+          net::features::kThirdPartyStoragePartitioning);
+    }
+
+    scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);
+  }
+
+  bool StoragePartitioningEnabled() {
+    switch (test_case_) {
+      case PartitionedBlobUrlTestCase::kPartitioningEnabledWithSupportDisabled:
+      case PartitionedBlobUrlTestCase::kPartitioningEnabledWithSupportEnabled:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool PartitionedBlobUrlSupported() {
+    switch (test_case_) {
+      case PartitionedBlobUrlTestCase::kPartitioningDisabledWithSupportEnabled:
+      case PartitionedBlobUrlTestCase::kPartitioningEnabledWithSupportEnabled:
+        return true;
+      default:
+        return false;
+    }
   }
 
   void OnBadMessage(const std::string& error) {
@@ -73,9 +127,15 @@ class BlobURLStoreImplTest : public testing::Test {
 
   mojo::PendingRemote<BlobURLStore> CreateURLStore() {
     mojo::PendingRemote<BlobURLStore> result;
-    mojo::MakeSelfOwnedReceiver(std::make_unique<BlobURLStoreImpl>(
-                                    kStorageKey, url_registry_.AsWeakPtr()),
+    if (base::FeatureList::IsEnabled(
+            net::features::kSupportPartitionedBlobUrl)) {
+      url_registry_.AddReceiver(kStorageKey,
                                 result.InitWithNewPipeAndPassReceiver());
+    } else {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<BlobURLStoreImpl>(
+                                      kStorageKey, url_registry_.AsWeakPtr()),
+                                  result.InitWithNewPipeAndPassReceiver());
+    }
     return result;
   }
 
@@ -98,7 +158,7 @@ class BlobURLStoreImplTest : public testing::Test {
                           mojo::PendingRemote<blink::mojom::Blob>* blob_out,
                           const base::UnguessableToken& agent_registered,
                           mojo::PendingRemote<blink::mojom::Blob> blob,
-                          const absl::optional<base::UnguessableToken>&
+                          const std::optional<base::UnguessableToken>&
                               unsafe_agent_cluster_id) {
                          if (blob)
                            EXPECT_EQ(agent_registered, unsafe_agent_cluster_id);
@@ -112,7 +172,8 @@ class BlobURLStoreImplTest : public testing::Test {
 
   const std::string kId = "id";
   const url::Origin kOrigin = url::Origin::Create(GURL("https://example.com"));
-  const blink::StorageKey kStorageKey = blink::StorageKey(kOrigin);
+  const blink::StorageKey kStorageKey =
+      blink::StorageKey::CreateFirstParty(kOrigin);
   const GURL kValidUrl = GURL("blob:" + kOrigin.Serialize() + "/id1");
   const GURL kValidUrl2 = GURL("blob:" + kOrigin.Serialize() + "/id2");
   const GURL kInvalidUrl = GURL("bolb:id");
@@ -124,14 +185,16 @@ class BlobURLStoreImplTest : public testing::Test {
       net::SchemefulSite(kWrongOriginUrl);
 
  protected:
+  base::test::ScopedFeatureList scoped_feature_list_;
   base::test::TaskEnvironment task_environment_;
+  PartitionedBlobUrlTestCase test_case_;
   std::unique_ptr<BlobStorageContext> context_;
   BlobUrlRegistry url_registry_;
   std::vector<std::string> bad_messages_;
   base::UnguessableToken agent_cluster_id_;
 };
 
-TEST_F(BlobURLStoreImplTest, BasicRegisterRevoke) {
+TEST_P(BlobURLStoreImplTestP, BasicRegisterRevoke) {
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
 
@@ -154,7 +217,7 @@ TEST_F(BlobURLStoreImplTest, BasicRegisterRevoke) {
   EXPECT_FALSE(context_->registry().HasEntry(kId));
 }
 
-TEST_F(BlobURLStoreImplTest, RegisterInvalidScheme) {
+TEST_P(BlobURLStoreImplTestP, RegisterInvalidScheme) {
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
 
@@ -164,7 +227,7 @@ TEST_F(BlobURLStoreImplTest, RegisterInvalidScheme) {
   EXPECT_EQ(1u, bad_messages_.size());
 }
 
-TEST_F(BlobURLStoreImplTest, RegisterWrongOrigin) {
+TEST_P(BlobURLStoreImplTestP, RegisterWrongOrigin) {
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
 
@@ -174,7 +237,7 @@ TEST_F(BlobURLStoreImplTest, RegisterWrongOrigin) {
   EXPECT_EQ(1u, bad_messages_.size());
 }
 
-TEST_F(BlobURLStoreImplTest, RegisterUrlFragment) {
+TEST_P(BlobURLStoreImplTestP, RegisterUrlFragment) {
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
 
@@ -184,7 +247,7 @@ TEST_F(BlobURLStoreImplTest, RegisterUrlFragment) {
   EXPECT_EQ(1u, bad_messages_.size());
 }
 
-TEST_F(BlobURLStoreImplTest, ImplicitRevoke) {
+TEST_P(BlobURLStoreImplTestP, ImplicitRevoke) {
   mojo::Remote<blink::mojom::Blob> blob(
       CreateBlobFromString(kId, "hello world"));
   mojo::PendingRemote<blink::mojom::Blob> blob2;
@@ -203,7 +266,7 @@ TEST_F(BlobURLStoreImplTest, ImplicitRevoke) {
   EXPECT_FALSE(url_registry_.GetBlobFromUrl(kValidUrl2));
 }
 
-TEST_F(BlobURLStoreImplTest, RevokeThroughDifferentURLStore) {
+TEST_P(BlobURLStoreImplTestP, RevokeThroughDifferentURLStore) {
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
 
@@ -217,34 +280,30 @@ TEST_F(BlobURLStoreImplTest, RevokeThroughDifferentURLStore) {
   EXPECT_FALSE(url_registry_.GetBlobFromUrl(kValidUrl));
 }
 
-TEST_F(BlobURLStoreImplTest, RevokeInvalidScheme) {
+TEST_P(BlobURLStoreImplTestP, RevokeInvalidScheme) {
   mojo::Remote<BlobURLStore> url_store(CreateURLStore());
   url_store->Revoke(kInvalidUrl);
   url_store.FlushForTesting();
   EXPECT_EQ(1u, bad_messages_.size());
 }
 
-TEST_F(BlobURLStoreImplTest, RevokeWrongOrigin) {
+TEST_P(BlobURLStoreImplTestP, RevokeWrongOrigin) {
   mojo::Remote<BlobURLStore> url_store(CreateURLStore());
   url_store->Revoke(kWrongOriginUrl);
   url_store.FlushForTesting();
   EXPECT_EQ(1u, bad_messages_.size());
 }
 
-TEST_F(BlobURLStoreImplTest, RevokeURLWithFragment) {
+TEST_P(BlobURLStoreImplTestP, RevokeURLWithFragment) {
   mojo::Remote<BlobURLStore> url_store(CreateURLStore());
   url_store->Revoke(kFragmentUrl);
   url_store.FlushForTesting();
   EXPECT_EQ(1u, bad_messages_.size());
 }
 
-TEST_F(BlobURLStoreImplTest, RevokeWrongStorageKey) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      net::features::kThirdPartyStoragePartitioning);
-
-  const blink::StorageKey kWrongStorageKey =
-      blink::StorageKey::CreateForTesting(kOrigin, kWrongTopLevelSite);
+TEST_P(BlobURLStoreImplTestP, RevokeWrongStorageKey) {
+  const blink::StorageKey kWrongStorageKey = blink::StorageKey::Create(
+      kOrigin, kWrongTopLevelSite, blink::mojom::AncestorChainBit::kCrossSite);
 
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
@@ -256,12 +315,15 @@ TEST_F(BlobURLStoreImplTest, RevokeWrongStorageKey) {
   EXPECT_TRUE(url_registry_.GetBlobFromUrl(kValidUrl));
 
   url_store2.Revoke(kValidUrl);
-  // TODO(https://crbug.com/1261328): This expectation will change once we've
-  // partitioned Blob URL.
-  EXPECT_FALSE(url_registry_.GetBlobFromUrl(kValidUrl));
+  if (StoragePartitioningEnabled() && PartitionedBlobUrlSupported()) {
+    EXPECT_TRUE(url_registry_.GetBlobFromUrl(kValidUrl));
+  } else {
+    // The storage keys are either the same or are ignored by the Revoke call.
+    EXPECT_FALSE(url_registry_.GetBlobFromUrl(kValidUrl));
+  }
 }
 
-TEST_F(BlobURLStoreImplTest, Resolve) {
+TEST_P(BlobURLStoreImplTestP, Resolve) {
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
 
@@ -279,7 +341,7 @@ TEST_F(BlobURLStoreImplTest, Resolve) {
   EXPECT_EQ(kId, UUIDFromBlob(blob_remote.get()));
 }
 
-TEST_F(BlobURLStoreImplTest, ResolveNonExistentURL) {
+TEST_P(BlobURLStoreImplTestP, ResolveNonExistentURL) {
   BlobURLStoreImpl url_store(kStorageKey, url_registry_.AsWeakPtr());
 
   mojo::PendingRemote<blink::mojom::Blob> blob =
@@ -289,7 +351,7 @@ TEST_F(BlobURLStoreImplTest, ResolveNonExistentURL) {
   EXPECT_FALSE(blob);
 }
 
-TEST_F(BlobURLStoreImplTest, ResolveInvalidURL) {
+TEST_P(BlobURLStoreImplTestP, ResolveInvalidURL) {
   BlobURLStoreImpl url_store(kStorageKey, url_registry_.AsWeakPtr());
 
   mojo::PendingRemote<blink::mojom::Blob> blob =
@@ -297,7 +359,7 @@ TEST_F(BlobURLStoreImplTest, ResolveInvalidURL) {
   EXPECT_FALSE(blob);
 }
 
-TEST_F(BlobURLStoreImplTest, ResolveAsURLLoaderFactory) {
+TEST_P(BlobURLStoreImplTestP, ResolveAsURLLoaderFactory) {
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
 
@@ -311,9 +373,9 @@ TEST_F(BlobURLStoreImplTest, ResolveAsURLLoaderFactory) {
       base::BindOnce(
           [](base::OnceClosure done,
              const base::UnguessableToken& agent_registered,
-             const absl::optional<base::UnguessableToken>&
+             const std::optional<base::UnguessableToken>&
                  unsafe_agent_cluster_id,
-             const absl::optional<net::SchemefulSite>& unsafe_top_level_site) {
+             const std::optional<net::SchemefulSite>& unsafe_top_level_site) {
             EXPECT_EQ(agent_registered, unsafe_agent_cluster_id);
             std::move(done).Run();
           },
@@ -335,7 +397,7 @@ TEST_F(BlobURLStoreImplTest, ResolveAsURLLoaderFactory) {
   download_loop.Run();
 }
 
-TEST_F(BlobURLStoreImplTest, ResolveForNavigation) {
+TEST_P(BlobURLStoreImplTestP, ResolveForNavigation) {
   mojo::PendingRemote<blink::mojom::Blob> blob =
       CreateBlobFromString(kId, "hello world");
 
@@ -349,7 +411,7 @@ TEST_F(BlobURLStoreImplTest, ResolveForNavigation) {
       base::BindOnce(
           [](base::OnceClosure done,
              const base::UnguessableToken& agent_registered,
-             const absl::optional<base::UnguessableToken>&
+             const std::optional<base::UnguessableToken>&
                  unsafe_agent_cluster_id) {
             EXPECT_EQ(agent_registered, unsafe_agent_cluster_id);
             std::move(done).Run();
@@ -373,4 +435,14 @@ TEST_F(BlobURLStoreImplTest, ResolveForNavigation) {
   EXPECT_EQ(kId, UUIDFromBlob(blob_remote.get()));
 }
 
+INSTANTIATE_TEST_SUITE_P(
+    BlobURLStoreImplTests,
+    BlobURLStoreImplTestP,
+    ::testing::Values(
+        PartitionedBlobUrlTestCase::kPartitioningDisabledWithSupportDisabled,
+        PartitionedBlobUrlTestCase::kPartitioningDisabledWithSupportEnabled,
+        PartitionedBlobUrlTestCase::kPartitioningEnabledWithSupportDisabled,
+        PartitionedBlobUrlTestCase::kPartitioningEnabledWithSupportEnabled));
+
+}  // namespace
 }  // namespace storage

@@ -1,5 +1,5 @@
 // Copyright (C) 2017 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 #ifndef HTTPSERVER_H
 #define HTTPSERVER_H
 
@@ -58,6 +58,8 @@ public:
     Q_INVOKABLE void setResourceDirs(const QStringList &dirs) { m_dirs = dirs; }
 
     Q_INVOKABLE void setHostDomain(const QString &host) { m_url.setHost(host); }
+
+    Q_INVOKABLE QTcpServer *getTcpServer() const { return m_tcpServer; }
 
 Q_SIGNALS:
     // Emitted after a HTTP request has been successfully parsed.

@@ -6,12 +6,13 @@
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "content/browser/broadcast_channel/broadcast_channel_provider.h"
 #include "content/browser/broadcast_channel/broadcast_channel_service.h"
 #include "content/browser/buckets/bucket_manager.h"
 #include "content/browser/code_cache/generated_code_cache_context.h"
+#include "content/browser/file_system_access/file_system_access_error.h"
 #include "content/browser/renderer_host/code_cache_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/service_worker/service_worker_consts.h"
@@ -20,12 +21,13 @@
 #include "content/browser/webtransport/web_transport_connector_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/child_process_host.h"
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/common/child_process_host.h"
 #include "content/public/common/origin_util.h"
 #include "mojo/public/cpp/bindings/message.h"
+#include "storage/browser/blob/blob_url_store_impl.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/messaging/message_port_channel.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
@@ -97,6 +99,24 @@ void ServiceWorkerHost::BindCacheStorage(
       storage::BucketLocator::ForDefaultBucket(version_->key()));
 }
 
+void ServiceWorkerHost::GetSandboxedFileSystemForBucket(
+    const storage::BucketInfo& bucket,
+    blink::mojom::FileSystemAccessManager::GetSandboxedFileSystemCallback
+        callback) {
+  auto* process =
+      RenderProcessHost::FromID(version_->embedded_worker()->process_id());
+  if (process) {
+    process->GetSandboxedFileSystemForBucket(bucket.ToBucketLocator(),
+                                             std::move(callback));
+  } else {
+    std::move(callback).Run(
+        file_system_access_error::FromStatus(
+            blink::mojom::FileSystemAccessStatus::kInvalidState,
+            "Process gone."),
+        {});
+  }
+}
+
 #if !BUILDFLAG(IS_ANDROID)
 void ServiceWorkerHost::BindHidService(
     mojo::PendingReceiver<blink::mojom::HidService> receiver) {
@@ -125,17 +145,14 @@ void ServiceWorkerHost::BindUsbService(
 }
 
 net::NetworkIsolationKey ServiceWorkerHost::GetNetworkIsolationKey() const {
-  // TODO(https://crbug.com/1147281): This is the NetworkIsolationKey of a
-  // top-level browsing context, which shouldn't be use for ServiceWorkers used
-  // in iframes.
-  return net::NetworkIsolationKey::ToDoUseTopFrameOriginAsWell(
-      version_->key().origin());
+  return version_->key().ToPartialNetIsolationInfo().network_isolation_key();
 }
 
 net::NetworkAnonymizationKey ServiceWorkerHost::GetNetworkAnonymizationKey()
     const {
-  return net::NetworkAnonymizationKey::ToDoUseTopFrameOriginAsWell(
-      version_->key().origin());
+  return version_->key()
+      .ToPartialNetIsolationInfo()
+      .network_anonymization_key();
 }
 
 const base::UnguessableToken& ServiceWorkerHost::GetReportingSource() const {
@@ -165,8 +182,9 @@ void ServiceWorkerHost::CreateCodeCacheHost(
   // 3) Renderer gets the Stop() IPC and realize it should try to stop the
   // worker.
   // Given the worker is stopping it is safe to ignore these messages.
-  if (embedded_worker_status == EmbeddedWorkerStatus::STOPPING)
+  if (embedded_worker_status == blink::EmbeddedWorkerStatus::kStopping) {
     return;
+  }
 
   // Create a new CodeCacheHostImpl and bind it to the given receiver.
   StoragePartition* storage_partition = GetStoragePartition();
@@ -180,7 +198,7 @@ void ServiceWorkerHost::CreateCodeCacheHost(
   }
   code_cache_host_receivers_->Add(version_->embedded_worker()->process_id(),
                                   GetNetworkIsolationKey(),
-                                  std::move(receiver));
+                                  GetBucketStorageKey(), std::move(receiver));
 }
 
 void ServiceWorkerHost::CreateBroadcastChannelProvider(
@@ -197,6 +215,18 @@ void ServiceWorkerHost::CreateBroadcastChannelProvider(
       std::make_unique<BroadcastChannelProvider>(broadcast_channel_service,
                                                  version()->key()),
       std::move(receiver));
+}
+
+void ServiceWorkerHost::CreateBlobUrlStoreProvider(
+    mojo::PendingReceiver<blink::mojom::BlobURLStore> receiver) {
+  auto* storage_partition_impl =
+      static_cast<StoragePartitionImpl*>(GetStoragePartition());
+  if (!storage_partition_impl) {
+    return;
+  }
+
+  storage_partition_impl->GetBlobUrlRegistry()->AddReceiver(
+      version()->key(), std::move(receiver));
 }
 
 void ServiceWorkerHost::CreateBucketManagerHost(
@@ -238,6 +268,12 @@ void ServiceWorkerHost::BindCacheStorageForBucket(
     mojo::PendingReceiver<blink::mojom::CacheStorage> receiver) {
   version_->embedded_worker()->BindCacheStorage(std::move(receiver),
                                                 bucket.ToBucketLocator());
+}
+
+GlobalRenderFrameHostId ServiceWorkerHost::GetAssociatedRenderFrameHostId()
+    const {
+  // For `ServiceWorkerHost` there is no associated `RenderFrameHost`.
+  return GlobalRenderFrameHostId();
 }
 
 }  // namespace content

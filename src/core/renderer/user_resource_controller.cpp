@@ -1,10 +1,12 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "user_resource_controller.h"
 
 #include "base/memory/weak_ptr.h"
 #include "base/strings/pattern.h"
+#include "base/task/single_thread_task_runner.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "extensions/common/url_pattern.h"
@@ -109,7 +111,7 @@ private:
     void DidCommitProvisionalLoad(ui::PageTransition transition) override;
     void DidDispatchDOMContentLoadedEvent() override;
     void DidFinishLoad() override;
-    void WillDetach() override;
+    void WillDetach(blink::DetachReason detach_reason) override;
     void OnDestruct() override;
     void AddScript(const QtWebEngineCore::UserScriptData &data) override;
     void RemoveScript(const QtWebEngineCore::UserScriptData &data) override;
@@ -203,7 +205,7 @@ void UserResourceController::RenderFrameObserverHelper::DidCommitProvisionalLoad
 
     m_runner.reset(new Runner(render_frame()->GetWebFrame(), m_userResourceController));
 
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
             FROM_HERE,
             base::BindOnce(&Runner::run, m_runner->AsWeakPtr(),
                            QtWebEngineCore::UserScriptData::DocumentElementCreation));
@@ -214,7 +216,7 @@ void UserResourceController::RenderFrameObserverHelper::DidDispatchDOMContentLoa
     // Don't run scripts if provisional load failed (DidFailProvisionalLoad
     // called instead of DidCommitProvisionalLoad).
     if (m_runner)
-        base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
                 FROM_HERE,
                 base::BindOnce(&Runner::run, m_runner->AsWeakPtr(),
                                QtWebEngineCore::UserScriptData::AfterLoad),
@@ -224,13 +226,14 @@ void UserResourceController::RenderFrameObserverHelper::DidDispatchDOMContentLoa
 void UserResourceController::RenderFrameObserverHelper::DidFinishLoad()
 {
     if (m_runner)
-        base::ThreadTaskRunnerHandle::Get()->PostTask(
+        base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
                 FROM_HERE,
                 base::BindOnce(&Runner::run, m_runner->AsWeakPtr(),
                                QtWebEngineCore::UserScriptData::AfterLoad));
 }
 
-void UserResourceController::RenderFrameObserverHelper::WillDetach()
+void UserResourceController::RenderFrameObserverHelper::WillDetach(
+        blink::DetachReason detach_reason)
 {
     m_runner.reset();
 }

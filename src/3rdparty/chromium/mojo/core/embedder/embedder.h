@@ -8,14 +8,16 @@
 #include <stddef.h>
 
 #include "base/component_export.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "mojo/core/embedder/configuration.h"
+#include "mojo/public/cpp/platform/platform_channel_endpoint.h"
+#include "third_party/ipcz/include/ipcz/ipcz.h"
 
-namespace mojo {
-namespace core {
+namespace mojo::core {
 
 // Basic configuration/initialization ------------------------------------------
 
@@ -48,6 +50,14 @@ scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner();
 // base::Features inside of Mojo.
 COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void InitFeatures();
 
+// Enables MojoIpcz. Called before Init() is called. Only call this if the
+// current program doesn't have base::FeatureList integration, since otherwise
+// InitFeatures() will do the work.
+//
+// TODO(crbug.com/1299283): Remove once MojoIpcz becomes the default
+// implementation.
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void EnableMojoIpcz();
+
 // Indicates whether the ipcz-based Mojo implementation is enabled. This can be
 // done by enabling the MojoIpcz feature.
 COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) bool IsMojoIpczEnabled();
@@ -59,7 +69,25 @@ COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) bool IsMojoIpczEnabled();
 COMPONENT_EXPORT(MOJO_CORE_EMBEDDER)
 void InstallMojoIpczBaseSharedMemoryHooks();
 
-}  // namespace core
-}  // namespace mojo
+// These functions expose the IpczAPI and IpczDriver structures used internally
+// by the Mojo Core implementation when MojoIpcz is enabled.
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) const IpczAPI& GetIpczAPIForMojo();
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) const IpczDriver& GetIpczDriverForMojo();
+
+// Creates a new ipcz driver transport from `endpoint`. The caller must specify
+// whether each end of the transport will be attached to a broker node. If the
+// local endpoint is a broker, `process` identifies the remote process if
+// possible.
+struct TransportEndpointTypes {
+  bool local_is_broker;
+  bool remote_is_broker;
+};
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER)
+IpczDriverHandle CreateIpczTransportFromEndpoint(
+    mojo::PlatformChannelEndpoint endpoint,
+    const TransportEndpointTypes& endpoint_types,
+    base::Process remote_process = base::Process());
+
+}  // namespace mojo::core
 
 #endif  // MOJO_CORE_EMBEDDER_EMBEDDER_H_

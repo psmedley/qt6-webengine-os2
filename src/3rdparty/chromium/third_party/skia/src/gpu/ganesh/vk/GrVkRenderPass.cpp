@@ -13,6 +13,9 @@
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
 #include "src/gpu/ganesh/vk/GrVkRenderTarget.h"
 #include "src/gpu/ganesh/vk/GrVkUtil.h"
+#include "src/gpu/vk/VulkanUtilsPriv.h"
+
+using namespace skia_private;
 
 typedef GrVkRenderPass::AttachmentsDescriptor::AttachmentDesc AttachmentDesc;
 
@@ -22,7 +25,7 @@ void setup_vk_attachment_description(VkAttachmentDescription* attachment,
                                      VkImageLayout endLayout) {
     attachment->flags = 0;
     attachment->format = desc.fFormat;
-    SkAssertResult(GrSampleCountToVkSampleCount(desc.fSamples, &attachment->samples));
+    SkAssertResult(skgpu::SampleCountToVkSampleCount(desc.fSamples, &attachment->samples));
     switch (startLayout) {
         case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
@@ -123,7 +126,7 @@ GrVkRenderPass* GrVkRenderPass::Create(GrVkGpu* gpu,
 
     uint32_t numAttachments = attachmentsDescriptor->fAttachmentCount;
     // Attachment descriptions to be set on the render pass
-    SkTArray<VkAttachmentDescription> attachments(numAttachments);
+    TArray<VkAttachmentDescription> attachments(numAttachments);
     attachments.reset(numAttachments);
     memset(attachments.begin(), 0, numAttachments * sizeof(VkAttachmentDescription));
 
@@ -403,8 +406,10 @@ bool GrVkRenderPass::isCompatible(GrVkRenderTarget* target,
 
     AttachmentsDescriptor desc;
     AttachmentFlags flags;
-    target->getAttachmentsDescriptor(&desc, &flags, this->hasResolveAttachment(),
-                                     this->hasStencilAttachment());
+    if (!target->getAttachmentsDescriptor(&desc, &flags, this->hasResolveAttachment(),
+                                          this->hasStencilAttachment())) {
+        return false;
+    }
 
     return this->isCompatible(desc, flags, selfDepFlags, loadFromResolve);
 }

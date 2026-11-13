@@ -8,6 +8,7 @@ TODO: add tests to check that textureLoad operations stay in-bounds.
 import { makeTestGroup } from '../../../common/framework/test_group.js';
 import { assert } from '../../../common/util/util.js';
 import { GPUTest } from '../../gpu_test.js';
+import { align } from '../../util/math.js';
 import { generateTypes, supportedScalarTypes, supportsAtomics } from '../types.js';
 
 export const g = makeTestGroup(GPUTest);
@@ -22,14 +23,14 @@ const kMinI32 = -0x8000_0000;
  * Non-test bindings are in bind group 1, including:
  * - `constants.zero`: a dynamically-uniform `0u` value.
  */
-function runShaderTest(
+async function runShaderTest(
   t: GPUTest,
   stage: GPUShaderStageFlags,
   testSource: string,
   layout: GPUPipelineLayout,
   testBindings: GPUBindGroupEntry[],
   dynamicOffsets?: number[]
-): void {
+): Promise<void> {
   assert(stage === GPUShaderStage.COMPUTE, 'Only know how to deal with compute for now');
 
   // Contains just zero (for now).
@@ -61,7 +62,7 @@ fn main() {
 
   t.debug(source);
   const module = t.device.createShaderModule({ code: source });
-  const pipeline = t.device.createComputePipeline({
+  const pipeline = await t.device.createComputePipelineAsync({
     layout,
     compute: { module, entryPoint: 'main' },
   });
@@ -126,41 +127,46 @@ g.test('linear_memory')
   .params(u =>
     u
       .combineWithParams([
-        { storageClass: 'storage', storageMode: 'read', access: 'read', dynamicOffset: false },
+        { addressSpace: 'storage', storageMode: 'read', access: 'read', dynamicOffset: false },
         {
-          storageClass: 'storage',
+          addressSpace: 'storage',
           storageMode: 'read_write',
           access: 'read',
           dynamicOffset: false,
         },
         {
-          storageClass: 'storage',
+          addressSpace: 'storage',
           storageMode: 'read_write',
           access: 'write',
           dynamicOffset: false,
         },
-        { storageClass: 'storage', storageMode: 'read', access: 'read', dynamicOffset: true },
-        { storageClass: 'storage', storageMode: 'read_write', access: 'read', dynamicOffset: true },
+        { addressSpace: 'storage', storageMode: 'read', access: 'read', dynamicOffset: true },
+        { addressSpace: 'storage', storageMode: 'read_write', access: 'read', dynamicOffset: true },
         {
-          storageClass: 'storage',
+          addressSpace: 'storage',
           storageMode: 'read_write',
           access: 'write',
           dynamicOffset: true,
         },
-        { storageClass: 'uniform', access: 'read', dynamicOffset: false },
-        { storageClass: 'uniform', access: 'read', dynamicOffset: true },
-        { storageClass: 'private', access: 'read' },
-        { storageClass: 'private', access: 'write' },
-        { storageClass: 'function', access: 'read' },
-        { storageClass: 'function', access: 'write' },
-        { storageClass: 'workgroup', access: 'read' },
-        { storageClass: 'workgroup', access: 'write' },
+        { addressSpace: 'uniform', access: 'read', dynamicOffset: false },
+        { addressSpace: 'uniform', access: 'read', dynamicOffset: true },
+        { addressSpace: 'private', access: 'read' },
+        { addressSpace: 'private', access: 'write' },
+        { addressSpace: 'function', access: 'read' },
+        { addressSpace: 'function', access: 'write' },
+        { addressSpace: 'workgroup', access: 'read' },
+        { addressSpace: 'workgroup', access: 'write' },
       ] as const)
       .combineWithParams([
         { containerType: 'array' },
         { containerType: 'matrix' },
         { containerType: 'vector' },
       ] as const)
+      .combineWithParams([
+        { shadowingMode: 'none' },
+        { shadowingMode: 'module-scope' },
+        { shadowingMode: 'function-scope' },
+      ])
       .expand('isAtomic', p => (supportsAtomics(p) ? [false, true] : [false]))
       .beginSubcases()
       .expand('baseType', supportedScalarTypes)
@@ -168,7 +174,7 @@ g.test('linear_memory')
   )
   .fn(async t => {
     const {
-      storageClass,
+      addressSpace,
       storageMode,
       access,
       dynamicOffset,
@@ -176,6 +182,7 @@ g.test('linear_memory')
       containerType,
       baseType,
       type,
+      shadowingMode,
       _kTypeInfo,
     } = t.params;
 
@@ -200,14 +207,14 @@ struct S {
 };`;
 
     const testGroupBGLEntires: GPUBindGroupLayoutEntry[] = [];
-    switch (storageClass) {
+    switch (addressSpace) {
       case 'uniform':
       case 'storage':
         {
           assert(_kTypeInfo.layout !== undefined);
           const layout = _kTypeInfo.layout;
-          bufferBindingSize = layout.size;
-          const qualifiers = storageClass === 'storage' ? `storage, ${storageMode}` : storageClass;
+          bufferBindingSize = align(layout.size, layout.alignment);
+          const qualifiers = addressSpace === 'storage' ? `storage, ${storageMode}` : addressSpace;
           globalSource += `
 struct TestData {
   data: ${type},
@@ -219,7 +226,7 @@ struct TestData {
             visibility: GPUShaderStage.COMPUTE,
             buffer: {
               type:
-                storageClass === 'uniform'
+                addressSpace === 'uniform'
                   ? 'uniform'
                   : storageMode === 'read'
                   ? 'read-only-storage'
@@ -234,7 +241,7 @@ struct TestData {
       case 'workgroup':
         usesCanary = true;
         globalSource += structDecl;
-        globalSource += `var<${storageClass}> s: S;`;
+        globalSource += `var<${addressSpace}> s: S;`;
         break;
 
       case 'function':
@@ -311,7 +318,7 @@ struct TestData {
             case 'read':
               {
                 let exprLoadElement = isAtomic ? `atomicLoad(&${exprElement})` : exprElement;
-                if (storageClass === 'uniform' && containerType === 'array') {
+                if (addressSpace === 'uniform' && containerType === 'array') {
                   // Scalar types will be wrapped in a vec4 to satisfy array element size
                   // requirements for the uniform address space, so we need an additional index
                   // accessor expression.
@@ -353,13 +360,45 @@ struct TestData {
   }`;
     }
 
+    // Shadowing case declarations
+    let moduleScopeShadowDecls = '';
+    let functionScopeShadowDecls = '';
+
+    switch (shadowingMode) {
+      case 'module-scope':
+        // Shadow the builtins likely used by robustness as module-scope variables
+        moduleScopeShadowDecls = `
+var<private> min = 0;
+var<private> max = 0;
+var<private> arrayLength = 0;
+`;
+        // Make sure that these are referenced by the function.
+        // This ensures that compilers don't strip away unused variables.
+        functionScopeShadowDecls = `
+  _ = min;
+  _ = max;
+  _ = arrayLength;
+`;
+        break;
+      case 'function-scope':
+        // Shadow the builtins likely used by robustness as function-scope variables
+        functionScopeShadowDecls = `
+  let min = 0;
+  let max = 0;
+  let arrayLength = 0;
+`;
+        break;
+    }
+
     // Run the test
 
     // First aggregate the test source
     const testSource = `
-      ${globalSource}
+${globalSource}
+${moduleScopeShadowDecls}
 
 fn runTest() -> u32 {
+  ${functionScopeShadowDecls}
   ${testFunctionSource}
   return 0u;
 }`;
@@ -409,7 +448,7 @@ fn runTest() -> u32 {
       );
 
       // Run the shader, accessing the buffer.
-      runShaderTest(
+      await runShaderTest(
         t,
         GPUShaderStage.COMPUTE,
         testSource,
@@ -436,6 +475,6 @@ fn runTest() -> u32 {
         bufferBindingEnd
       );
     } else {
-      runShaderTest(t, GPUShaderStage.COMPUTE, testSource, layout, []);
+      await runShaderTest(t, GPUShaderStage.COMPUTE, testSource, layout, []);
     }
   });

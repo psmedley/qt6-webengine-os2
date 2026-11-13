@@ -4,28 +4,19 @@
 
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import {CategorizedBreakpointsSidebarPane} from './CategorizedBreakpointsSidebarPane.js';
 
-let cspViolationBreakpointsSidebarPaneInstance: CSPViolationBreakpointsSidebarPane;
-
 export class CSPViolationBreakpointsSidebarPane extends CategorizedBreakpointsSidebarPane {
-  private constructor() {
+  constructor() {
     const breakpoints: SDK.DOMDebuggerModel.CSPViolationBreakpoint[] =
         SDK.DOMDebuggerModel.DOMDebuggerManager.instance().cspViolationBreakpoints();
-    const categories = breakpoints.map(breakpoint => breakpoint.category());
-    categories.sort();
-    super(categories, breakpoints, 'sources.cspViolationBreakpoints', Protocol.Debugger.PausedEventReason.CSPViolation);
+    super(breakpoints, 'sources.cspViolationBreakpoints', Protocol.Debugger.PausedEventReason.CSPViolation);
+    this.contentElement.setAttribute('jslog', `${VisualLogging.pane().context('debugger-csp-breakpoints')}`);
   }
 
-  static instance(): CSPViolationBreakpointsSidebarPane {
-    if (!cspViolationBreakpointsSidebarPaneInstance) {
-      cspViolationBreakpointsSidebarPaneInstance = new CSPViolationBreakpointsSidebarPane();
-    }
-    return cspViolationBreakpointsSidebarPaneInstance;
-  }
-
-  protected getBreakpointFromPausedDetails(details: SDK.DebuggerModel.DebuggerPausedDetails):
+  protected override getBreakpointFromPausedDetails(details: SDK.DebuggerModel.DebuggerPausedDetails):
       SDK.CategorizedBreakpoint.CategorizedBreakpoint|null {
     const breakpointType = details.auxData && details.auxData['violationType'] ? details.auxData['violationType'] : '';
     const breakpoints = SDK.DOMDebuggerModel.DOMDebuggerManager.instance().cspViolationBreakpoints();
@@ -33,7 +24,8 @@ export class CSPViolationBreakpointsSidebarPane extends CategorizedBreakpointsSi
     return breakpoint ? breakpoint : null;
   }
 
-  protected toggleBreakpoint(breakpoint: SDK.CategorizedBreakpoint.CategorizedBreakpoint, enabled: boolean): void {
+  protected override toggleBreakpoint(breakpoint: SDK.CategorizedBreakpoint.CategorizedBreakpoint, enabled: boolean):
+      void {
     breakpoint.setEnabled(enabled);
     SDK.DOMDebuggerModel.DOMDebuggerManager.instance().updateCSPViolationBreakpoints();
   }

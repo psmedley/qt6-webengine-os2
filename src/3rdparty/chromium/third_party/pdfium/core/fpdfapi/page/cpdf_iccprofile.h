@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CPDF_Stream;
 
@@ -40,7 +40,8 @@ class CPDF_IccProfile final : public Retainable, public Observable {
  private:
   // Keeps stream alive for the duration of the CPDF_IccProfile.
   CPDF_IccProfile(RetainPtr<const CPDF_Stream> pStream,
-                  pdfium::span<const uint8_t> span);
+                  pdfium::span<const uint8_t> span,
+                  uint32_t expected_components);
   ~CPDF_IccProfile() override;
 
   const bool m_bsRGB;

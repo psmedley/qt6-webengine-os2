@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Duration} from '../../base/time';
 import {ColumnDef} from '../../common/aggregation_data';
-import {Engine} from '../../common/engine';
+import {pluginManager} from '../../common/plugins';
 import {Area, Sorting} from '../../common/state';
-import {toNs} from '../../common/time';
-import {Config, COUNTER_TRACK_KIND} from '../../tracks/counter';
-import {globals} from '../globals';
+import {globals} from '../../frontend/globals';
+import {Engine} from '../../trace_processor/engine';
+import {COUNTER_TRACK_KIND} from '../../tracks/counter';
 
 import {AggregationController} from './aggregation_controller';
 
@@ -25,34 +26,33 @@ export class CounterAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
-    const ids = [];
-    for (const trackId of area.tracks) {
-      const track = globals.state.tracks[trackId];
-      // Track will be undefined for track groups.
-      if (track !== undefined && track.kind === COUNTER_TRACK_KIND) {
-        const config = track.config as Config;
-        // TODO(hjd): Also aggregate annotation (with namespace) counters.
-        if (config.namespace === undefined) {
-          ids.push(config.trackId);
+    const trackIds: (string|number)[] = [];
+    for (const trackKey of area.tracks) {
+      const track = globals.state.tracks[trackKey];
+      if (track?.uri) {
+        const trackInfo = pluginManager.resolveTrackInfo(track.uri);
+        if (trackInfo?.kind === COUNTER_TRACK_KIND) {
+          trackInfo.trackIds && trackIds.push(...trackInfo.trackIds);
         }
       }
     }
-    if (ids.length === 0) return false;
+    if (trackIds.length === 0) return false;
+    const duration = area.end - area.start;
+    const durationSec = Duration.toSeconds(duration);
 
     const query = `create view ${this.kind} as select
     name,
     count(1) as count,
-    round(sum(weighted_value)/${
-        toNs(area.endSec) - toNs(area.startSec)}, 2) as avg_value,
+    round(sum(weighted_value)/${duration}, 2) as avg_value,
     last as last_value,
     first as first_value,
     max(last) - min(first) as delta_value,
-    round((max(last) - min(first))/${area.endSec - area.startSec}, 2) as rate,
+    round((max(last) - min(first))/${durationSec}, 2) as rate,
     min(value) as min_value,
     max(value) as max_value
     from
         (select *,
-        (min(ts + dur, ${toNs(area.endSec)}) - max(ts,${toNs(area.startSec)}))
+        (min(ts + dur, ${area.end}) - max(ts,${area.start}))
         * value as weighted_value,
         first_value(value) over
         (partition by track_id order by ts) as first,
@@ -60,9 +60,9 @@ export class CounterAggregationController extends AggregationController {
         (partition by track_id order by ts
             range between unbounded preceding and unbounded following) as last
         from experimental_counter_dur
-        where track_id in (${ids})
-        and ts + dur >= ${toNs(area.startSec)} and
-        ts <= ${toNs(area.endSec)})
+        where track_id in (${trackIds})
+        and ts + dur >= ${area.start} and
+        ts <= ${area.end})
     join counter_track
     on track_id = counter_track.id
     group by track_id`;

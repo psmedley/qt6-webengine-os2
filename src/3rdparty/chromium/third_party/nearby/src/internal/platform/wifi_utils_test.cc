@@ -17,8 +17,8 @@
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
+#include "absl/strings/escaping.h"
 
-namespace location {
 namespace nearby {
 namespace {
 
@@ -40,8 +40,6 @@ constexpr int kChan0Num_6G_NotExist = 0;
 constexpr int kChan30Num_60G_NotExist = 30;
 
 constexpr int kFreqNotExist = 1002;
-
-
 
 TEST(WifiUtilsTest, ConvertChannelToFrequency) {
   EXPECT_EQ(WifiUtils::ConvertChannelToFrequencyMhz(kChan6Num_2G,
@@ -70,7 +68,8 @@ TEST(WifiUtilsTest, ConvertChannelToFrequency) {
             WifiUtils::kUnspecified);
   EXPECT_EQ(WifiUtils::ConvertChannelToFrequencyMhz(kChan30Num_60G_NotExist,
                                                     WifiBandType::kBand60Ghz),
-            WifiUtils::kUnspecified);}
+            WifiUtils::kUnspecified);
+}
 
 TEST(WifiUtilsTest, ConvertFrequencyToChannel) {
   EXPECT_EQ(WifiUtils::ConvertFrequencyMhzToChannel(kChan6NumFreq_2G),
@@ -85,7 +84,19 @@ TEST(WifiUtilsTest, ConvertFrequencyToChannel) {
             WifiUtils::kUnspecified);
 }
 
+TEST(WifiUtilsTest, Ipv4Validation) {
+  EXPECT_FALSE(WifiUtils::ValidateIPV4("12.34.212.46.37"));
+  EXPECT_FALSE(WifiUtils::ValidateIPV4("12.gt.212.46"));
+  EXPECT_FALSE(WifiUtils::ValidateIPV4("192.168.358.46"));
+  EXPECT_FALSE(WifiUtils::ValidateIPV4("192.-168.1.46"));
+  EXPECT_TRUE(WifiUtils::ValidateIPV4("192.168.1.46"));
+}
+
+TEST(WifiUtilsTest, GetHumanReadableIpAddress) {
+  EXPECT_EQ(
+      WifiUtils::GetHumanReadableIpAddress(absl::HexStringToBytes("000AFEFF")),
+      "0.10.254.255");
+}
+
 }  // namespace
 }  // namespace nearby
-}  // namespace location
-

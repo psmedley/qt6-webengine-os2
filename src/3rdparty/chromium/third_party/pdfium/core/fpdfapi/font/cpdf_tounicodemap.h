@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,13 +28,13 @@ class CPDF_ToUnicodeMap {
   WideString Lookup(uint32_t charcode) const;
   uint32_t ReverseLookup(wchar_t unicode) const;
 
-  size_t GetUnicodeCountByCharcodeForTesting(uint32_t cid) const;
+  size_t GetUnicodeCountByCharcodeForTesting(uint32_t charcode) const;
 
  private:
   friend class cpdf_tounicodemap_StringToCode_Test;
   friend class cpdf_tounicodemap_StringToWideString_Test;
 
-  static absl::optional<uint32_t> StringToCode(ByteStringView str);
+  static absl::optional<uint32_t> StringToCode(ByteStringView input);
   static WideString StringToWideString(ByteStringView str);
 
   void Load(RetainPtr<const CPDF_Stream> pStream);

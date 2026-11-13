@@ -9,10 +9,12 @@
 #define GrVkCaps_DEFINED
 
 #include "include/gpu/vk/GrVkTypes.h"
-#include "include/private/SkTDArray.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTDArray.h"
 #include "src/gpu/ganesh/GrCaps.h"
 
 class GrVkRenderTarget;
+enum class SkTextureCompressionType;
 
 namespace skgpu {
 class VulkanExtensions;
@@ -28,14 +30,14 @@ public:
      * Creates a GrVkCaps that is set such that nothing is supported. The init function should
      * be called to fill out the caps.
      */
-    GrVkCaps(const GrContextOptions& contextOptions,
-             const skgpu::VulkanInterface* vkInterface,
-             VkPhysicalDevice device,
-             const VkPhysicalDeviceFeatures2& features,
+    GrVkCaps(const GrContextOptions&,
+             const skgpu::VulkanInterface*,
+             VkPhysicalDevice,
+             const VkPhysicalDeviceFeatures2&,
              uint32_t instanceVersion,
              uint32_t physicalDeviceVersion,
-             const skgpu::VulkanExtensions& extensions,
-             GrProtected isProtected = GrProtected::kNo);
+             const skgpu::VulkanExtensions&,
+             skgpu::Protected);
 
     bool isFormatSRGB(const GrBackendFormat&) const override;
 
@@ -162,9 +164,6 @@ public:
         return 3;
     }
 
-    // Returns true if the device supports protected memory.
-    bool supportsProtectedMemory() const { return fSupportsProtectedMemory; }
-
     // Returns true if the VK_EXT_image_drm_format_modifier is enabled.
     bool supportsDRMFormatModifiers() const { return fSupportsDRMFormatModifiers; }
 
@@ -233,7 +232,7 @@ public:
                           int srcSamplecnt,
                           bool srcHasYcbcr) const;
 
-    GrBackendFormat getBackendFormatFromCompressionType(SkImage::CompressionType) const override;
+    GrBackendFormat getBackendFormatFromCompressionType(SkTextureCompressionType) const override;
 
     VkFormat getFormatFromColorType(GrColorType colorType) const {
         int idx = static_cast<int>(colorType);
@@ -270,14 +269,15 @@ public:
 
     bool supportsMemorylessAttachments() const { return fSupportsMemorylessAttachments; }
 
-#if GR_TEST_UTILS
-    std::vector<TestFormatColorTypeCombination> getTestingCombinations() const override;
+#if defined(GR_TEST_UTILS)
+    std::vector<GrTest::TestFormatColorTypeCombination> getTestingCombinations() const override;
 #endif
 
 private:
     enum VkVendor {
         kAMD_VkVendor = 4098,
         kARM_VkVendor = 5045,
+        kGoogle_VkVendor = 0x1AE0,
         kImagination_VkVendor = 4112,
         kIntel_VkVendor = 32902,
         kNvidia_VkVendor = 4318,
@@ -285,6 +285,9 @@ private:
     };
 
     enum class IntelGPUType {
+        // 9th gen
+        kSkyLake,
+
         // 11th gen
         kIceLake,
 
@@ -296,9 +299,16 @@ private:
         kOther
     };
 
+    enum DeviceID {
+        kSwiftshader_DeviceID = 0xC0DE, // As listed in Swiftshader code this may be a placeholder
+                                        // value but works for now.
+    };
+
     static IntelGPUType GetIntelGPUType(uint32_t deviceID);
     static int GetIntelGen(IntelGPUType type) {
         switch (type) {
+            case IntelGPUType::kSkyLake:
+                return 9;
             case IntelGPUType::kIceLake:
                 return 11;
             case IntelGPUType::kRocketLake: // fall through
@@ -315,13 +325,13 @@ private:
         SkUNREACHABLE;
     }
 
-    void init(const GrContextOptions& contextOptions,
-              const skgpu::VulkanInterface* vkInterface,
-              VkPhysicalDevice device,
+    void init(const GrContextOptions&,
+              const skgpu::VulkanInterface*,
+              VkPhysicalDevice,
               const VkPhysicalDeviceFeatures2&,
               uint32_t physicalDeviceVersion,
               const skgpu::VulkanExtensions&,
-              GrProtected isProtected);
+              GrProtected);
     void initGrCaps(const skgpu::VulkanInterface* vkInterface,
                     VkPhysicalDevice physDev,
                     const VkPhysicalDeviceProperties&,
@@ -330,9 +340,12 @@ private:
                     const skgpu::VulkanExtensions&);
     void initShaderCaps(const VkPhysicalDeviceProperties&, const VkPhysicalDeviceFeatures2&);
 
-    void initFormatTable(const skgpu::VulkanInterface*,
+    void initFormatTable(const GrContextOptions&,
+                         const skgpu::VulkanInterface*,
                          VkPhysicalDevice,
-                         const VkPhysicalDeviceProperties&);
+                         const VkPhysicalDeviceProperties&,
+                         const VkPhysicalDeviceFeatures2&,
+                         const skgpu::VulkanExtensions&);
     void initStencilFormat(const skgpu::VulkanInterface* iface, VkPhysicalDevice physDev);
 
     void applyDriverCorrectnessWorkarounds(const VkPhysicalDeviceProperties&);
@@ -382,12 +395,14 @@ private:
             return 0;
         }
 
-        void init(const skgpu::VulkanInterface*,
+        void init(const GrContextOptions&,
+                  const skgpu::VulkanInterface*,
                   VkPhysicalDevice,
                   const VkPhysicalDeviceProperties&,
                   VkFormat);
         static void InitFormatFlags(VkFormatFeatureFlags, uint16_t* flags);
-        void initSampleCounts(const skgpu::VulkanInterface*,
+        void initSampleCounts(const GrContextOptions&,
+                              const skgpu::VulkanInterface*,
                               VkPhysicalDevice,
                               const VkPhysicalDeviceProperties&,
                               VkFormat);
@@ -407,7 +422,7 @@ private:
         std::unique_ptr<ColorTypeInfo[]> fColorTypeInfos;
         int fColorTypeInfoCount = 0;
     };
-    static const size_t kNumVkFormats = 22;
+    static const size_t kNumVkFormats = 25;
     FormatInfo fFormatTable[kNumVkFormats];
 
     FormatInfo& getFormatInfo(VkFormat);
@@ -418,7 +433,7 @@ private:
 
     VkFormat fPreferredStencilFormat;
 
-    SkSTArray<1, GrVkYcbcrConversionInfo> fYcbcrInfos;
+    skia_private::STArray<1, GrVkYcbcrConversionInfo> fYcbcrInfos;
 
     bool fMustSyncCommandBuffersWithQueue = false;
     bool fShouldAlwaysUseDedicatedImageMemory = false;
@@ -439,8 +454,6 @@ private:
     bool fSupportsAndroidHWBExternalMemory = false;
 
     bool fSupportsYcbcrConversion = false;
-
-    bool fSupportsProtectedMemory = false;
 
     bool fSupportsDRMFormatModifiers = false;
 

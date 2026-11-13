@@ -19,16 +19,14 @@ namespace blink {
 
 const unsigned kInvalidFallbackMetricsValue = static_cast<unsigned>(-1);
 
-// The HarfBuzzFontData struct carries thread specific user-pointer data for
+// The HarfBuzzFontData struct carries user-pointer data for
 // |hb_font_t| callback functions/operations. It contains metrics and OpenType
 // layout information related to a font scaled to a particular size.
-struct HarfBuzzFontData final : public RefCounted<HarfBuzzFontData> {
+struct HarfBuzzFontData final {
   USING_FAST_MALLOC(HarfBuzzFontData);
 
  public:
-  static scoped_refptr<HarfBuzzFontData> Create(hb_font_t* hb_font) {
-    return base::AdoptRef(new HarfBuzzFontData(hb_font));
-  }
+  HarfBuzzFontData() : vertical_data_(nullptr), range_set_(nullptr) {}
 
   HarfBuzzFontData(const HarfBuzzFontData&) = delete;
   HarfBuzzFontData& operator=(const HarfBuzzFontData&) = delete;
@@ -41,15 +39,12 @@ struct HarfBuzzFontData final : public RefCounted<HarfBuzzFontData> {
       HarfBuzzFace::VerticalLayoutCallbacks vertical_layout) {
     float ascent = 0;
     float descent = 0;
-    unsigned dummy_ascent_inflation = 0;
-    unsigned dummy_descent_inflation = 0;
 
     font_ = platform_data.CreateSkFont();
 
     if (UNLIKELY(vertical_layout == HarfBuzzFace::kPrepareForVerticalLayout)) {
-      FontMetrics::AscentDescentWithHacks(
-          ascent, descent, dummy_ascent_inflation, dummy_descent_inflation,
-          platform_data, font_);
+      FontMetrics::AscentDescentWithHacks(ascent, descent, platform_data,
+                                          font_);
       ascent_fallback_ = ascent;
       // Simulate the rounding that FontMetrics does so far for returning the
       // integer Height()
@@ -101,9 +96,6 @@ struct HarfBuzzFontData final : public RefCounted<HarfBuzzFontData> {
 
   scoped_refptr<OpenTypeVerticalData> vertical_data_;
   scoped_refptr<UnicodeRangeSet> range_set_;
-
- private:
-  explicit HarfBuzzFontData(hb_font_t* hb_font) : unscaled_font_(hb_font) {}
 };
 
 }  // namespace blink

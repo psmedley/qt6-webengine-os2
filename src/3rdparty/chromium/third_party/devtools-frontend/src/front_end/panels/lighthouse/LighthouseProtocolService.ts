@@ -8,8 +8,8 @@ import type * as Platform from '../../core/platform/platform.js';
 import * as SDK from '../../core/sdk/sdk.js';
 
 import type * as ReportRenderer from './LighthouseReporterTypes.js';
-import type * as Protocol from '../../generated/protocol.js';
 
+/* eslint-disable jsdoc/check-alignment */
 /**
  * @overview
                                                    ┌────────────┐
@@ -42,7 +42,8 @@ LighthouseWorkerService   ││          Either ConnectionProxy or LegacyPort  
  * All messages within ConnectionProxy/LegacyPort speak pure CDP.
  * The foundational CDP connection is `parallelConnection`.
  * All connections within the worker are not actual ParallelConnection's.
-*/
+ */
+/* eslint-enable jsdoc/check-alignment */
 
 let lastId = 1;
 
@@ -57,18 +58,22 @@ export interface LighthouseRun {
  */
 export class ProtocolService {
   private mainSessionId?: string;
-  private mainFrameId?: string;
-  private targetInfos?: Protocol.Target.TargetInfo[];
+  private rootTargetId?: string;
   private parallelConnection?: ProtocolClient.InspectorBackend.Connection;
   private lighthouseWorkerPromise?: Promise<Worker>;
   private lighthouseMessageUpdateCallback?: ((arg0: string) => void);
+  private removeDialogHandler?: () => void;
   private configForTesting?: Object;
 
   async attach(): Promise<void> {
     await SDK.TargetManager.TargetManager.instance().suspendAllTargets();
-    const mainTarget = SDK.TargetManager.TargetManager.instance().mainTarget();
+    const mainTarget = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (!mainTarget) {
       throw new Error('Unable to find main target required for Lighthouse');
+    }
+    const rootTarget = SDK.TargetManager.TargetManager.instance().rootTarget();
+    if (!rootTarget) {
+      throw new Error('Could not find the root target');
     }
     const childTargetManager = mainTarget.model(SDK.ChildTargetManager.ChildTargetManager);
     if (!childTargetManager) {
@@ -78,21 +83,38 @@ export class ProtocolService {
     if (!resourceTreeModel) {
       throw new Error('Unable to find resource tree model required for Lighthouse');
     }
-    const mainFrame = resourceTreeModel.mainFrame;
-    if (!mainFrame) {
-      throw new Error('Unable to find main frame required for Lighthouse');
+
+    const rootChildTargetManager = rootTarget.model(SDK.ChildTargetManager.ChildTargetManager);
+    if (!rootChildTargetManager) {
+      throw new Error('Could not find the child target manager class for the root target');
     }
 
-    const {connection, sessionId} = await childTargetManager.createParallelConnection(message => {
+    const {connection, sessionId} = await rootChildTargetManager.createParallelConnection(message => {
       if (typeof message === 'string') {
         message = JSON.parse(message);
       }
       this.dispatchProtocolMessage(message);
     });
 
+    // Lighthouse implements its own dialog handler like this, however its lifecycle ends when
+    // the internal Lighthouse session is disposed.
+    //
+    // If the page is reloaded near the end of the run (e.g. bfcache testing), the Lighthouse
+    // internal session can be disposed before a dialog message appears. This allows the dialog
+    // to block important Lighthouse teardown operations in LighthouseProtocolService.
+    //
+    // To ensure the teardown operations can proceed, we need a dialog handler which lasts until
+    // the LighthouseProtocolService detaches.
+    const dialogHandler = (): void => {
+      void mainTarget.pageAgent().invoke_handleJavaScriptDialog({accept: true});
+    };
+
+    resourceTreeModel.addEventListener(SDK.ResourceTreeModel.Events.JavaScriptDialogOpening, dialogHandler);
+    this.removeDialogHandler = (): void =>
+        resourceTreeModel.removeEventListener(SDK.ResourceTreeModel.Events.JavaScriptDialogOpening, dialogHandler);
+
     this.parallelConnection = connection;
-    this.targetInfos = childTargetManager.targetInfos();
-    this.mainFrameId = mainFrame.id;
+    this.rootTargetId = await rootChildTargetManager.getParentTargetId();
     this.mainSessionId = sessionId;
   }
 
@@ -103,7 +125,7 @@ export class ProtocolService {
   async startTimespan(currentLighthouseRun: LighthouseRun): Promise<void> {
     const {inspectedURL, categoryIDs, flags} = currentLighthouseRun;
 
-    if (!this.mainFrameId || !this.mainSessionId || !this.targetInfos) {
+    if (!this.mainSessionId || !this.rootTargetId) {
       throw new Error('Unable to get target info required for Lighthouse');
     }
 
@@ -114,15 +136,14 @@ export class ProtocolService {
       config: this.configForTesting,
       locales: this.getLocales(),
       mainSessionId: this.mainSessionId,
-      mainFrameId: this.mainFrameId,
-      targetInfos: this.targetInfos,
+      rootTargetId: this.rootTargetId,
     });
   }
 
   async collectLighthouseResults(currentLighthouseRun: LighthouseRun): Promise<ReportRenderer.RunnerResult> {
     const {inspectedURL, categoryIDs, flags} = currentLighthouseRun;
 
-    if (!this.mainFrameId || !this.mainSessionId || !this.targetInfos) {
+    if (!this.mainSessionId || !this.rootTargetId) {
       throw new Error('Unable to get target info required for Lighthouse');
     }
 
@@ -138,8 +159,7 @@ export class ProtocolService {
       config: this.configForTesting,
       locales: this.getLocales(),
       mainSessionId: this.mainSessionId,
-      mainFrameId: this.mainFrameId,
-      targetInfos: this.targetInfos,
+      rootTargetId: this.rootTargetId,
     });
   }
 
@@ -161,6 +181,7 @@ export class ProtocolService {
       await oldParallelConnection.disconnect();
     }
     await SDK.TargetManager.TargetManager.instance().resumeAllTargets();
+    this.removeDialogHandler?.();
   }
 
   registerStatusCallback(callback: (arg0: string) => void): void {

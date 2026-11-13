@@ -18,13 +18,20 @@ Component-wise when T is a vector.
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { kValue } from '../../../../../util/constants.js';
-import { i32, TypeF32, TypeI32, TypeU32, u32 } from '../../../../../util/conversion.js';
-import { maxInterval } from '../../../../../util/f32_interval.js';
-import { fullF32Range } from '../../../../../util/math.js';
-import { allInputSources, Case, makeBinaryToF32IntervalCase, run } from '../../expression.js';
+import {
+  TypeAbstractFloat,
+  TypeF16,
+  TypeF32,
+  TypeI32,
+  TypeU32,
+  i32,
+  u32,
+} from '../../../../../util/conversion.js';
+import { Case } from '../../case.js';
+import { allInputSources, onlyConstInputSource, run } from '../../expression.js';
 
-import { builtin } from './builtin.js';
+import { abstractBuiltin, builtin } from './builtin.js';
+import { d } from './max.cache.js';
 
 /** Generate set of max test cases from list of interesting values */
 function generateTestCases(
@@ -88,9 +95,21 @@ g.test('abstract_float')
   .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
   .desc(`abstract float tests`)
   .params(u =>
-    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
+    u
+      .combine('inputSource', onlyConstInputSource)
+      .combine('vectorize', [undefined, 2, 3, 4] as const)
   )
-  .unimplemented();
+  .fn(async t => {
+    const cases = await d.get('abstract');
+    await run(
+      t,
+      abstractBuiltin('max'),
+      [TypeAbstractFloat, TypeAbstractFloat],
+      TypeAbstractFloat,
+      t.params,
+      cases
+    );
+  });
 
 g.test('f32')
   .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
@@ -99,19 +118,7 @@ g.test('f32')
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    const makeCase = (x: number, y: number): Case => {
-      return makeBinaryToF32IntervalCase(x, y, maxInterval);
-    };
-
-    const cases: Array<Case> = [];
-    const numeric_range = fullF32Range();
-    numeric_range.push(kValue.f32.infinity.positive, kValue.f32.infinity.negative);
-    numeric_range.forEach(lhs => {
-      numeric_range.forEach(rhs => {
-        cases.push(makeCase(lhs, rhs));
-      });
-    });
-
+    const cases = await d.get('f32');
     await run(t, builtin('max'), [TypeF32, TypeF32], TypeF32, t.params, cases);
   });
 
@@ -121,4 +128,10 @@ g.test('f16')
   .params(u =>
     u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
-  .unimplemented();
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase({ requiredFeatures: ['shader-f16'] });
+  })
+  .fn(async t => {
+    const cases = await d.get('f16');
+    await run(t, builtin('max'), [TypeF16, TypeF16], TypeF16, t.params, cases);
+  });

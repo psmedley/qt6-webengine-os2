@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,10 @@
 #include "core/fpdfapi/render/cpdf_renderstatus.h"
 #include "core/fxcrt/stl_util.h"
 #include "core/fxge/cfx_defaultrenderdevice.h"
+#include "core/fxge/dib/cfx_dibitmap.h"
 #include "fpdfsdk/cpdfsdk_customaccess.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
+#include "third_party/base/notreached.h"
 
 namespace {
 
@@ -197,13 +199,70 @@ FPDFImageObj_GetBitmap(FPDF_PAGEOBJECT image_object) {
   if (!pSource)
     return nullptr;
 
-  // If the source image has a representation of 1 bit per pixel, then convert
-  // it to a grayscale bitmap having 1 byte per pixel, since bitmaps have no
-  // concept of bits. Otherwise, convert the source image to a bitmap directly,
+  // If the source image has a representation of 1 bit per pixel, or if the
+  // source image has a color palette, convert it to a representation that does
+  // not have a color palette, as there is no public API to access the palette.
+  //
+  // Otherwise, convert the source image to a bitmap directly,
   // retaining its color representation.
-  RetainPtr<CFX_DIBitmap> pBitmap =
-      pSource->GetBPP() == 1 ? pSource->ConvertTo(FXDIB_Format::k8bppRgb)
-                             : pSource->Realize();
+  //
+  // Only return FPDF_BITMAPs in formats that FPDFBitmap_CreateEx() would
+  // return.
+  enum class ConversionOp {
+    kRealize,
+    kConvertTo8bppRgb,
+    kConvertToRgb,
+  };
+
+  ConversionOp op;
+  switch (pSource->GetFormat()) {
+    case FXDIB_Format::k1bppMask:
+    case FXDIB_Format::k8bppMask:
+      // Masks do not have palettes, so they can be safely converted to
+      // `FXDIB_Format::k8bppRgb`.
+      CHECK(!pSource->HasPalette());
+      op = ConversionOp::kConvertTo8bppRgb;
+      break;
+    case FXDIB_Format::k1bppRgb:
+      // If there is a palette, then convert to `FXDIB_Format::kRgb` to avoid
+      // creating a bitmap with a palette.
+      op = pSource->HasPalette() ? ConversionOp::kConvertToRgb
+                                 : ConversionOp::kConvertTo8bppRgb;
+      break;
+    case FXDIB_Format::k8bppRgb:
+      // If there is a palette, then convert to `FXDIB_Format::kRgb` to avoid
+      // creating a bitmap with a palette.
+      op = pSource->HasPalette() ? ConversionOp::kConvertToRgb
+                                 : ConversionOp::kRealize;
+      break;
+
+    case FXDIB_Format::kArgb:
+    case FXDIB_Format::kRgb:
+    case FXDIB_Format::kRgb32:
+      CHECK(!pSource->HasPalette());
+      op = ConversionOp::kRealize;
+      break;
+
+    case FXDIB_Format::kInvalid: {
+      NOTREACHED_NORETURN();
+    }
+  }
+
+  RetainPtr<CFX_DIBitmap> pBitmap;
+  switch (op) {
+    case ConversionOp::kRealize:
+      pBitmap = pSource->Realize();
+      break;
+    case ConversionOp::kConvertTo8bppRgb:
+      pBitmap = pSource->ConvertTo(FXDIB_Format::k8bppRgb);
+      break;
+    case ConversionOp::kConvertToRgb:
+      pBitmap = pSource->ConvertTo(FXDIB_Format::kRgb);
+      break;
+  }
+  if (pBitmap) {
+    CHECK(!pBitmap->HasPalette());
+  }
 
   return FPDFBitmapFromCFXDIBitmap(pBitmap.Leak());
 }
@@ -257,9 +316,10 @@ FPDFImageObj_GetRenderedBitmap(FPDF_DOCUMENT document,
   if (!renderer.GetResult())
     return nullptr;
 
-#if defined(_SKIA_SUPPORT_)
-  if (CFX_DefaultRenderDevice::SkiaIsDefaultRenderer())
+#if defined(PDF_USE_SKIA)
+  if (CFX_DefaultRenderDevice::UseSkiaRenderer()) {
     result_bitmap->UnPreMultiply();
+  }
 #endif
 
   // Caller takes ownership.
@@ -282,7 +342,9 @@ FPDFImageObj_GetImageDataDecoded(FPDF_PAGEOBJECT image_object,
   if (!pImgStream)
     return 0;
 
-  return DecodeStreamMaybeCopyAndReturnLength(pImgStream.Get(), buffer, buflen);
+  return DecodeStreamMaybeCopyAndReturnLength(
+      std::move(pImgStream),
+      {static_cast<uint8_t*>(buffer), static_cast<size_t>(buflen)});
 }
 
 FPDF_EXPORT unsigned long FPDF_CALLCONV
@@ -301,7 +363,9 @@ FPDFImageObj_GetImageDataRaw(FPDF_PAGEOBJECT image_object,
   if (!pImgStream)
     return 0;
 
-  return GetRawStreamMaybeCopyAndReturnLength(pImgStream.Get(), buffer, buflen);
+  return GetRawStreamMaybeCopyAndReturnLength(
+      std::move(pImgStream),
+      {static_cast<uint8_t*>(buffer), static_cast<size_t>(buflen)});
 }
 
 FPDF_EXPORT int FPDF_CALLCONV
@@ -392,7 +456,7 @@ FPDFImageObj_GetImageMetadata(FPDF_PAGEOBJECT image_object,
   RetainPtr<CPDF_DIB> pSource = pImg->CreateNewDIB();
   CPDF_DIB::LoadState ret = pSource->StartLoadDIBBase(
       false, nullptr, pPage->GetPageResources().Get(), false,
-      CPDF_ColorSpace::Family::kUnknown, false);
+      CPDF_ColorSpace::Family::kUnknown, false, {0, 0});
   if (ret == CPDF_DIB::LoadState::kFail)
     return true;
 
@@ -401,5 +465,24 @@ FPDFImageObj_GetImageMetadata(FPDF_PAGEOBJECT image_object,
     metadata->colorspace =
         static_cast<int>(pSource->GetColorSpace()->GetFamily());
   }
+  return true;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
+FPDFImageObj_GetImagePixelSize(FPDF_PAGEOBJECT image_object,
+                               unsigned int* width,
+                               unsigned int* height) {
+  CPDF_ImageObject* pImgObj = CPDFImageObjectFromFPDFPageObject(image_object);
+  if (!pImgObj || !width || !height) {
+    return false;
+  }
+
+  RetainPtr<CPDF_Image> pImg = pImgObj->GetImage();
+  if (!pImg) {
+    return false;
+  }
+
+  *width = pImg->GetPixelWidth();
+  *height = pImg->GetPixelHeight();
   return true;
 }

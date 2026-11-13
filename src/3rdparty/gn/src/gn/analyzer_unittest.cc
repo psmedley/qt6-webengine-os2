@@ -4,9 +4,9 @@
 
 #include "gn/analyzer.h"
 
-#include "gn/c_tool.h"
 #include "gn/build_settings.h"
 #include "gn/builder.h"
+#include "gn/c_tool.h"
 #include "gn/config.h"
 #include "gn/general_tool.h"
 #include "gn/loader.h"
@@ -480,7 +480,7 @@ TEST_F(AnalyzerTest, AffectedPoolpropagatesToDependentTargets) {
   t->set_output_type(Target::ACTION);
   std::unique_ptr<Pool> p = MakePool("//dir", "pool_name");
   Pool* p_raw = p.get();
-  t->action_values().set_pool(LabelPtrPair<Pool>(p.get()));
+  t->set_pool(LabelPtrPair<Pool>(p.get()));
 
   builder_.ItemDefined(std::move(t));
   builder_.ItemDefined(std::move(p));

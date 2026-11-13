@@ -37,6 +37,10 @@ void InitExtensionBehavior(const ShBuiltInResources &resources, TExtensionBehavi
     {
         extBehavior[TExtension::EXT_blend_func_extended] = EBhUndefined;
     }
+    if (resources.EXT_conservative_depth)
+    {
+        extBehavior[TExtension::EXT_conservative_depth] = EBhUndefined;
+    }
     if (resources.EXT_draw_buffers)
     {
         extBehavior[TExtension::EXT_draw_buffers] = EBhUndefined;
@@ -52,6 +56,10 @@ void InitExtensionBehavior(const ShBuiltInResources &resources, TExtensionBehavi
     if (resources.OES_primitive_bounding_box)
     {
         extBehavior[TExtension::OES_primitive_bounding_box] = EBhUndefined;
+    }
+    if (resources.EXT_separate_shader_objects)
+    {
+        extBehavior[TExtension::EXT_separate_shader_objects] = EBhUndefined;
     }
     if (resources.EXT_shader_texture_lod)
     {
@@ -184,6 +192,10 @@ void InitExtensionBehavior(const ShBuiltInResources &resources, TExtensionBehavi
     if (resources.EXT_clip_cull_distance)
     {
         extBehavior[TExtension::EXT_clip_cull_distance] = EBhUndefined;
+    }
+    if (resources.ANGLE_clip_cull_distance)
+    {
+        extBehavior[TExtension::ANGLE_clip_cull_distance] = EBhUndefined;
     }
     if (resources.ANDROID_extension_pack_es31a)
     {

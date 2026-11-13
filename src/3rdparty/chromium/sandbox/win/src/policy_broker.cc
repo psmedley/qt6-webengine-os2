@@ -10,7 +10,6 @@
 
 #include "base/check.h"
 #include "base/win/pe_image.h"
-#include "base/win/windows_version.h"
 #include "sandbox/win/src/interception.h"
 #include "sandbox/win/src/interceptors.h"
 #include "sandbox/win/src/internal_types.h"
@@ -29,7 +28,9 @@ namespace sandbox {
 
 bool SetupNtdllImports(TargetProcess& child) {
   return (SBOX_ALL_OK ==
-          child.TransferVariable("g_nt", GetNtExports(), sizeof(NtExports)));
+          child.TransferVariable("g_nt", GetNtExports(),
+                                 const_cast<NtExports*>(GetNtExports()),
+                                 sizeof(NtExports)));
 }
 
 #undef INIT_GLOBAL_NT

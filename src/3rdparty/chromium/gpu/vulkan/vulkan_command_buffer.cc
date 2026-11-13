@@ -105,12 +105,12 @@ bool VulkanCommandBuffer::Initialize() {
   VkDevice device = device_queue_->GetVulkanDevice();
 
   VkCommandBufferAllocateInfo command_buffer_info = {
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-      nullptr,
-      command_pool_->handle(),
-      primary_ ? VK_COMMAND_BUFFER_LEVEL_PRIMARY
-               : VK_COMMAND_BUFFER_LEVEL_SECONDARY,
-      1,
+      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+      .pNext = nullptr,
+      .commandPool = command_pool_->handle(),
+      .level = primary_ ? VK_COMMAND_BUFFER_LEVEL_PRIMARY
+                        : VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+      .commandBufferCount = 1,
   };
 
   DCHECK_EQ(static_cast<VkCommandBuffer>(VK_NULL_HANDLE), command_buffer_);
@@ -244,9 +244,10 @@ void VulkanCommandBuffer::CopyBufferToImage(VkBuffer buffer,
                                             uint32_t buffer_width,
                                             uint32_t buffer_height,
                                             uint32_t width,
-                                            uint32_t height) {
+                                            uint32_t height,
+                                            uint64_t buffer_offset) {
   VkBufferImageCopy region = {};
-  region.bufferOffset = 0;
+  region.bufferOffset = buffer_offset;
   region.bufferRowLength = buffer_width;
   region.bufferImageHeight = buffer_height;
   region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -264,9 +265,10 @@ void VulkanCommandBuffer::CopyImageToBuffer(VkBuffer buffer,
                                             uint32_t buffer_width,
                                             uint32_t buffer_height,
                                             uint32_t width,
-                                            uint32_t height) {
+                                            uint32_t height,
+                                            uint64_t buffer_offset) {
   VkBufferImageCopy region = {};
-  region.bufferOffset = 0;
+  region.bufferOffset = buffer_offset;
   region.bufferRowLength = buffer_width;
   region.bufferImageHeight = buffer_height;
   region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;

@@ -106,9 +106,9 @@ QuicCryptoStream* QuicSessionPeer::GetMutableCryptoStream(
 }
 
 // static
-QuicWriteBlockedList* QuicSessionPeer::GetWriteBlockedStreams(
+QuicWriteBlockedListInterface* QuicSessionPeer::GetWriteBlockedStreams(
     QuicSession* session) {
-  return &session->write_blocked_streams_;
+  return session->write_blocked_streams();
 }
 
 // static
@@ -171,7 +171,7 @@ QuicStream* QuicSessionPeer::GetStream(QuicSession* session, QuicStreamId id) {
 // static
 bool QuicSessionPeer::IsStreamWriteBlocked(QuicSession* session,
                                            QuicStreamId id) {
-  return session->write_blocked_streams_.IsStreamBlocked(id);
+  return session->write_blocked_streams()->IsStreamBlocked(id);
 }
 
 // static
@@ -240,6 +240,11 @@ size_t QuicSessionPeer::GetNumOpenDynamicStreams(QuicSession* session) {
 // static
 size_t QuicSessionPeer::GetNumDrainingStreams(QuicSession* session) {
   return session->num_draining_streams_;
+}
+
+// static
+QuicAlarm* QuicSessionPeer::GetStreamCountResetAlarm(QuicSession* session) {
+  return session->stream_count_reset_alarm_.get();
 }
 
 }  // namespace test

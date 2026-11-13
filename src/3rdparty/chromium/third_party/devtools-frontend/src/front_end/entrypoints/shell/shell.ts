@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 
 import '../../Images/Images.js';
-import '../../core/root/root-legacy.js';
 import '../../core/dom_extension/dom_extension.js';
 import '../../panels/sources/sources-meta.js';
+import '../../panels/explain/explain-meta.js';
 import '../../panels/profiler/profiler-meta.js';
 import '../../panels/console/console-meta.js';
 import '../../panels/coverage/coverage-meta.js';
 import '../../panels/changes/changes-meta.js';
-import '../../ui/components/linear_memory_inspector/linear_memory_inspector-meta.js';
+import '../../panels/linear_memory_inspector/linear_memory_inspector-meta.js';
 import '../../panels/settings/settings-meta.js';
 import '../../panels/protocol_monitor/protocol_monitor-meta.js';
 import '../../models/persistence/persistence-meta.js';

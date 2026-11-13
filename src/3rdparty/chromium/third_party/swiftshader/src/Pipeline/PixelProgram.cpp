@@ -104,12 +104,12 @@ void PixelProgram::setBuiltins(Int &x, Int &y, SIMD::Float (&z)[4], SIMD::Float 
 	routine.pointCoord[0] = SIMD::Float(0.5f) + pointSizeInv * (((SIMD::Float(Float(x)) + SIMD::Float(0.0f, 1.0f, 0.0f, 1.0f)) - SIMD::Float(*Pointer<Float>(primitive + OFFSET(Primitive, x0)))));
 	routine.pointCoord[1] = SIMD::Float(0.5f) + pointSizeInv * (((SIMD::Float(Float(y)) + SIMD::Float(0.0f, 0.0f, 1.0f, 1.0f)) - SIMD::Float(*Pointer<Float>(primitive + OFFSET(Primitive, y0)))));
 
-	routine.setInputBuiltin(spirvShader, spv::BuiltInViewIndex, [&](const SpirvShader::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
+	routine.setInputBuiltin(spirvShader, spv::BuiltInViewIndex, [&](const Spirv::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
 		assert(builtin.SizeInComponents == 1);
 		value[builtin.FirstComponent] = As<SIMD::Float>(SIMD::Int(routine.layer));
 	});
 
-	routine.setInputBuiltin(spirvShader, spv::BuiltInFragCoord, [&](const SpirvShader::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
+	routine.setInputBuiltin(spirvShader, spv::BuiltInFragCoord, [&](const Spirv::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
 		assert(builtin.SizeInComponents == 4);
 		value[builtin.FirstComponent + 0] = routine.fragCoord[0];
 		value[builtin.FirstComponent + 1] = routine.fragCoord[1];
@@ -117,18 +117,18 @@ void PixelProgram::setBuiltins(Int &x, Int &y, SIMD::Float (&z)[4], SIMD::Float 
 		value[builtin.FirstComponent + 3] = routine.fragCoord[3];
 	});
 
-	routine.setInputBuiltin(spirvShader, spv::BuiltInPointCoord, [&](const SpirvShader::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
+	routine.setInputBuiltin(spirvShader, spv::BuiltInPointCoord, [&](const Spirv::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
 		assert(builtin.SizeInComponents == 2);
 		value[builtin.FirstComponent + 0] = routine.pointCoord[0];
 		value[builtin.FirstComponent + 1] = routine.pointCoord[1];
 	});
 
-	routine.setInputBuiltin(spirvShader, spv::BuiltInSubgroupSize, [&](const SpirvShader::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
+	routine.setInputBuiltin(spirvShader, spv::BuiltInSubgroupSize, [&](const Spirv::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
 		assert(builtin.SizeInComponents == 1);
 		value[builtin.FirstComponent] = As<SIMD::Float>(SIMD::Int(SIMD::Width));
 	});
 
-	routine.setInputBuiltin(spirvShader, spv::BuiltInHelperInvocation, [&](const SpirvShader::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
+	routine.setInputBuiltin(spirvShader, spv::BuiltInHelperInvocation, [&](const Spirv::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
 		assert(builtin.SizeInComponents == 1);
 		value[builtin.FirstComponent] = As<SIMD::Float>(routine.helperInvocation);
 	});
@@ -199,12 +199,6 @@ void PixelProgram::executeShader(Int cMask[4], Int sMask[4], Int zMask[4], const
 
 	spirvShader->emit(&routine, activeLaneMask, storesAndAtomicsMask, descriptorSets, state.multiSampleCount);
 	spirvShader->emitEpilog(&routine);
-	// At the last invocation of the fragment shader, clear phi data.
-	// TODO(b/178662288): Automatically clear phis through SpirvRoutine lifetime reduction.
-	if(samples[0] == static_cast<int>(state.multiSampleCount - 1))
-	{
-		spirvShader->clearPhis(&routine);
-	}
 
 	for(int i = 0; i < MAX_COLOR_BUFFERS; i++)
 	{
@@ -272,91 +266,18 @@ void PixelProgram::blendColor(Pointer<Byte> cBuffer[4], Int &x, Int sMask[4], In
 			continue;
 		}
 
-		auto format = state.colorFormat[index];
-		switch(format)
+		for(unsigned int q : samples)
 		{
-		case VK_FORMAT_R4G4B4A4_UNORM_PACK16:
-		case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
-		case VK_FORMAT_A4R4G4B4_UNORM_PACK16:
-		case VK_FORMAT_A4B4G4R4_UNORM_PACK16:
-		case VK_FORMAT_B5G6R5_UNORM_PACK16:
-		case VK_FORMAT_R5G5B5A1_UNORM_PACK16:
-		case VK_FORMAT_B5G5R5A1_UNORM_PACK16:
-		case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
-		case VK_FORMAT_R5G6B5_UNORM_PACK16:
-		case VK_FORMAT_B8G8R8A8_UNORM:
-		case VK_FORMAT_B8G8R8A8_SRGB:
-		case VK_FORMAT_R8G8B8A8_UNORM:
-		case VK_FORMAT_R8G8B8A8_SRGB:
-		case VK_FORMAT_R8G8_UNORM:
-		case VK_FORMAT_R8_UNORM:
-		case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
-		case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
-		case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
-		case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
-			for(unsigned int q : samples)
-			{
-				Pointer<Byte> buffer = cBuffer[index] + q * *Pointer<Int>(data + OFFSET(DrawData, colorSliceB[index]));
+			Pointer<Byte> buffer = cBuffer[index] + q * *Pointer<Int>(data + OFFSET(DrawData, colorSliceB[index]));
 
-				SIMD::Float4 colorf = alphaBlend(index, buffer, c[index], x);
-
-				ASSERT(SIMD::Width == 4);
-				Vector4s color;
-				color.x = UShort4(Extract128(colorf.x, 0) * 0xFFFF, true);  // Saturating
-				color.y = UShort4(Extract128(colorf.y, 0) * 0xFFFF, true);  // Saturating
-				color.z = UShort4(Extract128(colorf.z, 0) * 0xFFFF, true);  // Saturating
-				color.w = UShort4(Extract128(colorf.w, 0) * 0xFFFF, true);  // Saturating
-				writeColor(index, buffer, x, color, sMask[q], zMask[q], cMask[q]);
-			}
-			break;
-		case VK_FORMAT_R16_SFLOAT:
-		case VK_FORMAT_R16G16_SFLOAT:
-		case VK_FORMAT_R16G16B16A16_SFLOAT:
-		case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
-		case VK_FORMAT_R32_SFLOAT:
-		case VK_FORMAT_R32G32_SFLOAT:
-		case VK_FORMAT_R32G32B32A32_SFLOAT:
-		case VK_FORMAT_R32_SINT:
-		case VK_FORMAT_R32G32_SINT:
-		case VK_FORMAT_R32G32B32A32_SINT:
-		case VK_FORMAT_R32_UINT:
-		case VK_FORMAT_R32G32_UINT:
-		case VK_FORMAT_R32G32B32A32_UINT:
-		case VK_FORMAT_R16_UNORM:
-		case VK_FORMAT_R16G16_UNORM:
-		case VK_FORMAT_R16G16B16A16_UNORM:
-		case VK_FORMAT_R16_SINT:
-		case VK_FORMAT_R16G16_SINT:
-		case VK_FORMAT_R16G16B16A16_SINT:
-		case VK_FORMAT_R16_UINT:
-		case VK_FORMAT_R16G16_UINT:
-		case VK_FORMAT_R16G16B16A16_UINT:
-		case VK_FORMAT_R8_SINT:
-		case VK_FORMAT_R8G8_SINT:
-		case VK_FORMAT_R8G8B8A8_SINT:
-		case VK_FORMAT_R8_UINT:
-		case VK_FORMAT_R8G8_UINT:
-		case VK_FORMAT_R8G8B8A8_UINT:
-		case VK_FORMAT_A8B8G8R8_UINT_PACK32:
-		case VK_FORMAT_A8B8G8R8_SINT_PACK32:
-		case VK_FORMAT_A2B10G10R10_UINT_PACK32:
-		case VK_FORMAT_A2R10G10B10_UINT_PACK32:
-			for(unsigned int q : samples)
-			{
-				Pointer<Byte> buffer = cBuffer[index] + q * *Pointer<Int>(data + OFFSET(DrawData, colorSliceB[index]));
-
-				SIMD::Float4 C = alphaBlend(index, buffer, c[index], x);
-				ASSERT(SIMD::Width == 4);
-				Vector4f color;
-				color.x = Extract128(C.x, 0);
-				color.y = Extract128(C.y, 0);
-				color.z = Extract128(C.z, 0);
-				color.w = Extract128(C.w, 0);
-				writeColor(index, buffer, x, color, sMask[q], zMask[q], cMask[q]);
-			}
-			break;
-		default:
-			UNSUPPORTED("VkFormat: %d", int(format));
+			SIMD::Float4 C = alphaBlend(index, buffer, c[index], x);
+			ASSERT(SIMD::Width == 4);
+			Vector4f color;
+			color.x = Extract128(C.x, 0);
+			color.y = Extract128(C.y, 0);
+			color.z = Extract128(C.z, 0);
+			color.w = Extract128(C.w, 0);
+			writeColor(index, buffer, x, color, sMask[q], zMask[q], cMask[q]);
 		}
 	}
 }

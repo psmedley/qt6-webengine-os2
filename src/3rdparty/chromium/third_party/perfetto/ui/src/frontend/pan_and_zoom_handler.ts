@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Disposable, Trash} from '../base/disposable';
+import {currentTargetOffset, elementIsEditable} from '../base/dom_utils';
+import {raf} from '../core/raf_scheduler';
+
 import {Animation} from './animation';
 import {DragGestureHandler} from './drag_gesture_handler';
-import {globals} from './globals';
 import {handleKey} from './keyboard_event_handler';
 
 // When first starting to pan or zoom, move at least this many units.
@@ -46,15 +49,32 @@ const EDITING_RANGE_CURSOR = 'ew-resize';
 const DRAG_CURSOR = 'default';
 const PAN_CURSOR = 'move';
 
+// Use key mapping based on the 'KeyboardEvent.code' property vs the
+// 'KeyboardEvent.key', because the former corresponds to the physical key
+// position rather than the glyph printed on top of it, and is unaffected by
+// the user's keyboard layout.
+// For example, 'KeyW' always corresponds to the key at the physical location of
+// the 'w' key on an English QWERTY keyboard, regardless of the user's keyboard
+// layout, or at least the layout they have configured in their OS.
+// Seeing as most users use the keys in the English QWERTY "WASD" position for
+// controlling kb+mouse applications like games, it's a good bet that these are
+// the keys most poeple are going to find natural for navigating the UI.
+// See https://www.w3.org/TR/uievents-code/#key-alphanumeric-writing-system
+export enum KeyMapping {
+  KEY_PAN_LEFT = 'KeyA',
+  KEY_PAN_RIGHT = 'KeyD',
+  KEY_ZOOM_IN = 'KeyW',
+  KEY_ZOOM_OUT = 'KeyS',
+}
+
 enum Pan {
   None = 0,
   Left = -1,
   Right = 1
 }
 function keyToPan(e: KeyboardEvent): Pan {
-  const key = e.key.toLowerCase();
-  if (['a'].includes(key)) return Pan.Left;
-  if (['d', 'e'].includes(key)) return Pan.Right;
+  if (e.code === KeyMapping.KEY_PAN_LEFT) return Pan.Left;
+  if (e.code === KeyMapping.KEY_PAN_RIGHT) return Pan.Right;
   return Pan.None;
 }
 
@@ -64,16 +84,15 @@ enum Zoom {
   Out = -1
 }
 function keyToZoom(e: KeyboardEvent): Zoom {
-  const key = e.key.toLowerCase();
-  if (['w', ','].includes(key)) return Zoom.In;
-  if (['s', 'o'].includes(key)) return Zoom.Out;
+  if (e.code === KeyMapping.KEY_ZOOM_IN) return Zoom.In;
+  if (e.code === KeyMapping.KEY_ZOOM_OUT) return Zoom.Out;
   return Zoom.None;
 }
 
 /**
  * Enables horizontal pan and zoom with mouse-based drag and WASD navigation.
  */
-export class PanAndZoomHandler {
+export class PanAndZoomHandler implements Disposable {
   private mousePositionX: number|null = null;
   private boundOnMouseMove = this.onMouseMove.bind(this);
   private boundOnWheel = this.onWheel.bind(this);
@@ -90,7 +109,6 @@ export class PanAndZoomHandler {
   private zoomAnimation = new Animation(this.onZoomAnimationStep.bind(this));
 
   private element: HTMLElement;
-  private contentOffsetX: number;
   private onPanned: (movedPx: number) => void;
   private onZoomed: (zoomPositionPx: number, zoomRatio: number) => void;
   private editSelection: (currentPx: number) => boolean;
@@ -98,10 +116,10 @@ export class PanAndZoomHandler {
       (dragStartX: number, dragStartY: number, prevX: number, currentX: number,
        currentY: number, editing: boolean) => void;
   private endSelection: (edit: boolean) => void;
+  private trash: Trash;
 
   constructor({
     element,
-    contentOffsetX,
     onPanned,
     onZoomed,
     editSelection,
@@ -109,7 +127,6 @@ export class PanAndZoomHandler {
     endSelection,
   }: {
     element: HTMLElement,
-    contentOffsetX: number,
     onPanned: (movedPx: number) => void,
     onZoomed: (zoomPositionPx: number, zoomRatio: number) => void,
     editSelection: (currentPx: number) => boolean,
@@ -119,23 +136,29 @@ export class PanAndZoomHandler {
     endSelection: (edit: boolean) => void,
   }) {
     this.element = element;
-    this.contentOffsetX = contentOffsetX;
     this.onPanned = onPanned;
     this.onZoomed = onZoomed;
     this.editSelection = editSelection;
     this.onSelection = onSelection;
     this.endSelection = endSelection;
+    this.trash = new Trash();
 
     document.body.addEventListener('keydown', this.boundOnKeyDown);
     document.body.addEventListener('keyup', this.boundOnKeyUp);
     this.element.addEventListener('mousemove', this.boundOnMouseMove);
     this.element.addEventListener('wheel', this.boundOnWheel, {passive: true});
+    this.trash.addCallback(() => {
+      this.element.removeEventListener('wheel', this.boundOnWheel);
+      this.element.removeEventListener('mousemove', this.boundOnMouseMove);
+      document.body.removeEventListener('keyup', this.boundOnKeyUp);
+      document.body.removeEventListener('keydown', this.boundOnKeyDown);
+    });
 
     let prevX = -1;
     let dragStartX = -1;
     let dragStartY = -1;
     let edit = false;
-    new DragGestureHandler(
+    this.trash.add(new DragGestureHandler(
         this.element,
         (x, y) => {
           if (this.shiftDown) {
@@ -164,15 +187,12 @@ export class PanAndZoomHandler {
           dragStartX = -1;
           dragStartY = -1;
           this.endSelection(edit);
-        });
+        }));
   }
 
 
-  shutdown() {
-    document.body.removeEventListener('keydown', this.boundOnKeyDown);
-    document.body.removeEventListener('keyup', this.boundOnKeyUp);
-    this.element.removeEventListener('mousemove', this.boundOnMouseMove);
-    this.element.removeEventListener('wheel', this.boundOnWheel);
+  dispose() {
+    this.trash.dispose();
   }
 
   private onPanAnimationStep(msSinceStartOfAnimation: number) {
@@ -211,11 +231,8 @@ export class PanAndZoomHandler {
   }
 
   private onMouseMove(e: MouseEvent) {
-    const pageOffset = globals.state.sidebarVisible && !globals.hideSidebar ?
-        this.contentOffsetX :
-        0;
-    // We can't use layerX here because there are many layers in this element.
-    this.mousePositionX = e.clientX - pageOffset;
+    this.mousePositionX = currentTargetOffset(e).x;
+
     // Only change the cursor when hovering, the DragGestureHandler handles
     // changing the cursor during drag events. This avoids the problem of
     // the cursor flickering between styles if you drag fast and get too
@@ -232,20 +249,24 @@ export class PanAndZoomHandler {
   private onWheel(e: WheelEvent) {
     if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
       this.onPanned(e.deltaX * HORIZONTAL_WHEEL_PAN_SPEED);
-      globals.rafScheduler.scheduleRedraw();
-    } else if (e.ctrlKey && this.mousePositionX) {
+      raf.scheduleRedraw();
+    } else if (e.ctrlKey && this.mousePositionX !== null) {
       const sign = e.deltaY < 0 ? -1 : 1;
       const deltaY = sign * Math.log2(1 + Math.abs(e.deltaY));
       this.onZoomed(this.mousePositionX, deltaY * WHEEL_ZOOM_SPEED);
-      globals.rafScheduler.scheduleRedraw();
+      raf.scheduleRedraw();
     }
   }
 
   private onKeyDown(e: KeyboardEvent) {
+    if (elementIsEditable(e.target)) return;
+
     this.updateShift(e.shiftKey);
 
     // Handle key events that are not pan or zoom.
     if (handleKey(e, true)) return;
+
+    if (e.ctrlKey || e.metaKey) return;
 
     if (keyToPan(e) !== Pan.None) {
       if (this.panning !== keyToPan(e)) {
@@ -274,6 +295,8 @@ export class PanAndZoomHandler {
     // Handle key events that are not pan or zoom.
     if (handleKey(e, false)) return;
 
+    if (e.ctrlKey || e.metaKey) return;
+
     if (keyToPan(e) === this.panning) {
       this.panning = Pan.None;
     }
@@ -288,7 +311,7 @@ export class PanAndZoomHandler {
     this.shiftDown = down;
     if (this.shiftDown) {
       this.element.style.cursor = PAN_CURSOR;
-    } else if (this.mousePositionX) {
+    } else if (this.mousePositionX !== null) {
       this.element.style.cursor = DRAG_CURSOR;
     }
   }

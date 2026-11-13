@@ -5,14 +5,10 @@
 #define PROFILE_QT_H
 
 #include "chrome/browser/profiles/profile.h"
-#include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/resource_context.h"
+#include "components/embedder_support/user_agent_utils.h"
 #include "extensions/buildflags/buildflags.h"
 #include "pref_service_adapter.h"
-#include "profile_io_data_qt.h"
-#include <QtGlobal>
 
-class InMemoryPrefStore;
 class PrefService;
 
 namespace extensions {
@@ -22,8 +18,9 @@ class ExtensionSystemQt;
 namespace QtWebEngineCore {
 
 class BrowsingDataRemoverDelegateQt;
-class ProfileAdapter;
 class PermissionManagerQt;
+class ProfileAdapter;
+class ProfileIODataQt;
 class SSLHostStateDelegateQt;
 
 class ProfileQt : public Profile
@@ -39,7 +36,6 @@ public:
     base::FilePath GetPath() override;
     bool IsOffTheRecord() override;
 
-    content::ResourceContext *GetResourceContext() override;
     content::DownloadManagerDelegate *GetDownloadManagerDelegate() override;
     content::BrowserPluginGuestManager *GetGuestManager() override;
     storage::SpecialStoragePolicy *GetSpecialStoragePolicy() override;
@@ -54,7 +50,6 @@ public:
     content::ClientHintsControllerDelegate *GetClientHintsControllerDelegate() override;
     content::StorageNotificationService *GetStorageNotificationService() override;
     content::PlatformNotificationService *GetPlatformNotificationService() override;
-    std::string GetMediaDeviceIDSalt() override;
     content::FileSystemAccessPermissionContext *GetFileSystemAccessPermissionContext() override;
     content::ReduceAcceptLanguageControllerDelegate *GetReduceAcceptLanguageControllerDelegate() override;
 
@@ -65,6 +60,7 @@ public:
 
     void DoFinalInit();
     ProfileAdapter *profileAdapter() { return m_profileAdapter; }
+    std::string GetMediaDeviceIDSalt();
 
 #if QT_CONFIG(webengine_spellchecker)
     void FailedToLoadDictionary(const std::string &language) override;
@@ -76,10 +72,13 @@ public:
     // Build/Re-build the preference service. Call when updating the storage
     // data path.
     void setupPrefService();
+    void setupStoragePath();
+    void setupPermissionsManager();
 
     PrefServiceAdapter &prefServiceAdapter();
-
     const PrefServiceAdapter &prefServiceAdapter() const;
+
+    const blink::UserAgentMetadata &userAgentMetadata();
 
 private:
     std::unique_ptr<BrowsingDataRemoverDelegateQt> m_removerDelegate;
@@ -89,6 +88,7 @@ private:
     std::unique_ptr<content::PlatformNotificationService> m_platformNotificationService;
     ProfileAdapter *m_profileAdapter;
     PrefServiceAdapter m_prefServiceAdapter;
+    blink::UserAgentMetadata m_userAgentMetadata;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     extensions::ExtensionSystemQt *m_extensionSystem;

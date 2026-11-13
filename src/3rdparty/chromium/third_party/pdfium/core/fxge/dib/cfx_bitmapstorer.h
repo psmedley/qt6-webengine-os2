@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/dib/scanlinecomposer_iface.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CFX_DIBitmap;
 
@@ -19,13 +19,11 @@ class CFX_BitmapStorer final : public ScanlineComposerIface {
   ~CFX_BitmapStorer() override;
 
   // ScanlineComposerIface:
-  void ComposeScanline(int line,
-                       pdfium::span<const uint8_t> scanline,
-                       pdfium::span<const uint8_t> scan_extra_alpha) override;
+  void ComposeScanline(int line, pdfium::span<const uint8_t> scanline) override;
   bool SetInfo(int width,
                int height,
                FXDIB_Format src_format,
-               pdfium::span<const uint32_t> src_palette) override;
+               DataVector<uint32_t> src_palette) override;
 
   RetainPtr<CFX_DIBitmap> GetBitmap() { return m_pBitmap; }
   RetainPtr<CFX_DIBitmap> Detach();

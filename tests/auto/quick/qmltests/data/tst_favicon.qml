@@ -1,5 +1,5 @@
 // Copyright (C) 2021 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 import QtQuick
 import QtTest
@@ -19,8 +19,9 @@ TestWebEngineView {
     }
 
     property QtObject nonOTRProfile: WebEngineProfile {
-        persistentStoragePath: tempDir.path() + '/WebEngineFavicon'
         offTheRecord: false
+        storageName: 'WebEngineFavicon'
+        persistentStoragePath: tempDir.path() + '/WebEngineFavicon'
     }
 
     function removeFaviconProviderPrefix(url) {
@@ -68,8 +69,7 @@ TestWebEngineView {
             webEngineView.url = url
             verify(webEngineView.waitForLoadSucceeded())
 
-            iconChangedSpy.wait()
-            compare(iconChangedSpy.count, 1)
+            tryCompare(iconChangedSpy, "count", 1)
 
             tryCompare(favicon, "status", Image.Ready)
             compare(favicon.width, 32)
@@ -91,8 +91,7 @@ TestWebEngineView {
             webEngineView.url = url
             verify(webEngineView.waitForLoadSucceeded())
 
-            iconChangedSpy.wait()
-            compare(iconChangedSpy.count, 1)
+            tryCompare(iconChangedSpy, "count", 1)
 
             tryCompare(favicon, "status", Image.Ready)
             compare(favicon.width, 32)
@@ -298,8 +297,7 @@ TestWebEngineView {
             webEngineView.url = url
             verify(webEngineView.waitForLoadSucceeded())
 
-            iconChangedSpy.wait()
-            compare(iconChangedSpy.count, 1)
+            tryCompare(iconChangedSpy, "count", 1)
 
             iconUrl = removeFaviconProviderPrefix(webEngineView.icon)
             // Touch icon is ignored
@@ -352,10 +350,9 @@ TestWebEngineView {
             webEngineView.url = url
             verify(webEngineView.waitForLoadSucceeded())
 
-            iconChangedSpy.wait()
+            tryCompare(iconChangedSpy, "count", 1)
             iconUrl = removeFaviconProviderPrefix(webEngineView.icon)
             compare(iconUrl, Qt.resolvedUrl("icons/qt144.png"))
-            compare(iconChangedSpy.count, 1)
             tryCompare(favicon, "status", Image.Ready)
             compare(favicon.width, 144)
             compare(favicon.height, 144)
@@ -376,8 +373,7 @@ TestWebEngineView {
             webEngineView.url = url
             verify(webEngineView.waitForLoadSucceeded())
 
-            iconChangedSpy.wait()
-            compare(iconChangedSpy.count, 1)
+            tryCompare(iconChangedSpy, "count", 1)
             tryCompare(favicon, "status", Image.Ready)
             compare(favicon.width, 32)
             compare(favicon.height, 32)
@@ -517,8 +513,7 @@ TestWebEngineView {
             webEngineView.url = row.url
             verify(webEngineView.waitForLoadSucceeded())
 
-            iconChangedSpy.wait()
-            compare(iconChangedSpy.count, 1)
+            tryCompare(iconChangedSpy, "count", 1)
 
             var iconUrl = removeFaviconProviderPrefix(webEngineView.icon)
             compare(iconUrl, row.expectedIconUrl)

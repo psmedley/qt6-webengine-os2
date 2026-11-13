@@ -58,7 +58,8 @@ std::string EventNameToProtoFieldName(const std::string& group,
   std::string event_name = (name == "0") ? "zero" : name;
   // These groups have events where the name alone conflicts with an existing
   // proto:
-  if (group == "sde" || group == "g2d" || group == "dpu" || group == "mali") {
+  if (group == "sde" || group == "g2d" || group == "dpu" || group == "mali" ||
+      group == "lwis" || group == "samsung") {
     event_name = group + "_" + event_name;
   }
   return event_name;
@@ -84,35 +85,21 @@ std::vector<FtraceEventName> ReadAllowList(const std::string& filename) {
   return lines;
 }
 
-bool GenerateProto(const std::string& group,
-                   const FtraceEvent& format,
-                   Proto* proto_out) {
-  proto_out->name = EventNameToProtoName(group, format.name);
-  proto_out->event_name = format.name;
-  std::set<std::string> seen;
-  // TODO(hjd): We should be cleverer about id assignment.
-  uint32_t i = 1;
-  for (const FtraceEvent::Field& field : format.fields) {
+std::vector<Proto::Field> ToProtoFields(const FtraceEvent& format) {
+  std::vector<Proto::Field> ret;
+  for (size_t i = 0; i < format.fields.size(); i++) {
+    const FtraceEvent::Field& field = format.fields[i];
     std::string name = GetNameFromTypeAndName(field.type_and_name);
-    // TODO(hjd): Handle dup names.
-    // sa_handler is problematic because glib headers redefine it at the
-    // preprocessor level. It's impossible to have a variable or a function
-    // called sa_handler. On the good side, we realistically don't care about
-    // this field, it's just easier to skip it.
-    if (name == "" || seen.count(name) || name == "sa_handler" ||
-        name == "errno")
+    // Skip tracepoint fields whose names cannot be used as an identifier in the
+    // generated C++ code due to stdlib header conflicts.
+    if (name == "" || name == "sa_handler" || name == "errno")
       continue;
-    seen.insert(name);
     ProtoType type = InferProtoType(field);
-    // Check we managed to infer a type.
     if (type.type == ProtoType::INVALID)
       continue;
-    Proto::Field protofield{std::move(type), name, i};
-    proto_out->AddField(std::move(protofield));
-    i++;
+    ret.push_back({type, std::move(name), static_cast<uint32_t>(i)});
   }
-
-  return true;
+  return ret;
 }
 
 void GenerateFtraceEventProto(const std::vector<FtraceEventName>& raw_eventlist,
@@ -134,14 +121,17 @@ void GenerateFtraceEventProto(const std::vector<FtraceEventName>& raw_eventlist,
   *fout << "\n";
   *fout << "package perfetto.protos;\n\n";
   *fout << R"(message FtraceEvent {
-  // Nanoseconds since an epoch.
-  // Epoch is configurable by writing into trace_clock.
-  // By default this timestamp is CPU local.
-  // TODO: Figure out a story for reconciling the various clocks.
+  // Timestamp in nanoseconds using .../tracing/trace_clock.
   optional uint64 timestamp = 1;
 
-  // Kernel pid (do not confuse with userspace pid aka tgid)
+  // Kernel pid (do not confuse with userspace pid aka tgid).
   optional uint32 pid = 2;
+
+  // Not populated in actual traces. Wire format might change.
+  // Placeholder declaration so that the ftrace parsing code accepts the
+  // existence of this common field. If this becomes needed for all events:
+  // consider merging with common_preempt_count to avoid extra proto tags.
+  optional uint32 common_flags = 5;
 
   oneof event {
 )";
@@ -201,6 +191,11 @@ std::string SingleEventInfo(perfetto::Proto proto,
     // configurations)
     if (group == "ftrace" && proto.event_name == "print" && field->name == "ip")
       continue;
+    // Ignore the "nid" field. On new kernels, this field has a type that we
+    // don't know how to parse. See b/281660544
+    if (group == "f2fs" && proto.event_name == "f2fs_truncate_partial_nodes" &&
+        field->name == "nid")
+      continue;
     s += "{";
     s += "kUnsetOffset, ";
     s += "kUnsetSize, ";
@@ -228,8 +223,9 @@ void GenerateEventInfo(const std::vector<std::string>& events_info,
   s += std::string("// ") + __FILE__ + "\n";
   s += "// Do not edit.\n";
   s += R"(
-#include "perfetto/protozero/proto_utils.h"
 #include "src/traced/probes/ftrace/event_info.h"
+
+#include "perfetto/protozero/proto_utils.h"
 
 namespace perfetto {
 

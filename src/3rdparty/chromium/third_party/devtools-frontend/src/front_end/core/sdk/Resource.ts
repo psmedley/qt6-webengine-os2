@@ -30,11 +30,12 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+import type * as Protocol from '../../generated/protocol.js';
 import * as TextUtils from '../../models/text_utils/text_utils.js';
 import * as Common from '../common/common.js';
 import * as Platform from '../platform/platform.js';
-import type * as Protocol from '../../generated/protocol.js';
 
+import {ContentData} from './ContentData.js';
 import {Events, type NetworkRequest} from './NetworkRequest.js';
 import {type ResourceTreeFrame, type ResourceTreeModel} from './ResourceTreeModel.js';
 
@@ -192,7 +193,7 @@ export class Resource implements TextUtils.ContentProvider.ContentProvider {
     }
     const result = await this.#resourceTreeModel.target().pageAgent().invoke_searchInResource(
         {frameId: this.frameId, url: this.url, query, caseSensitive, isRegex});
-    return result.result || [];
+    return TextUtils.TextUtils.performSearchInSearchMatches(result.result || [], query, caseSensitive, isRegex);
   }
 
   async populateImageSource(image: HTMLImageElement): Promise<void> {
@@ -230,10 +231,11 @@ export class Resource implements TextUtils.ContentProvider.ContentProvider {
     }|null = null;
     if (this.request) {
       const contentData = await this.request.contentData();
-      if (!contentData.error) {
-        this.#contentInternal = contentData.content;
-        this.#contentEncodedInternal = contentData.encoded;
-        loadResult = {content: (contentData.content as string), isEncoded: contentData.encoded};
+      if (!ContentData.isError(contentData)) {
+        const {isEncoded, content} = contentData.asDeferedContent();
+        this.#contentInternal = content;
+        this.#contentEncodedInternal = isEncoded;
+        loadResult = {content: content ?? '', isEncoded};
       }
     }
     if (!loadResult) {

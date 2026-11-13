@@ -1,4 +1,4 @@
-// Copyright 2020 PDFium Authors. All rights reserved.
+// Copyright 2020 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,8 @@
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/renderdevicedriver_iface.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+
+class CFX_DIBBase;
 
 class CGdiDeviceDriver : public RenderDeviceDriverIface {
  protected:
@@ -45,20 +47,22 @@ class CGdiDeviceDriver : public RenderDeviceDriverIface {
                         uint32_t color,
                         BlendMode blend_type) override;
   bool GetClipBox(FX_RECT* pRect) override;
+  bool MultiplyAlpha(float alpha) override;
+  bool MultiplyAlphaMask(const RetainPtr<const CFX_DIBBase>& mask) override;
 
   void DrawLine(float x1, float y1, float x2, float y2);
 
-  bool GDI_SetDIBits(const RetainPtr<CFX_DIBitmap>& pBitmap,
+  bool GDI_SetDIBits(const RetainPtr<const CFX_DIBBase>& source,
                      const FX_RECT& src_rect,
                      int left,
                      int top);
-  bool GDI_StretchDIBits(const RetainPtr<CFX_DIBitmap>& pBitmap,
+  bool GDI_StretchDIBits(RetainPtr<const CFX_DIBBase> source,
                          int dest_left,
                          int dest_top,
                          int dest_width,
                          int dest_height,
                          const FXDIB_ResampleOptions& options);
-  bool GDI_StretchBitMask(const RetainPtr<CFX_DIBitmap>& pBitmap,
+  bool GDI_StretchBitMask(RetainPtr<const CFX_DIBBase> source,
                           int dest_left,
                           int dest_top,
                           int dest_width,

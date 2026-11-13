@@ -1,5 +1,5 @@
 // Copyright (C) 2017 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 #include "httpserver.h"
 
 #include <QFile>
@@ -24,7 +24,8 @@ HttpServer::HttpServer(QTcpServer *tcpServer, const QString &protocol,
 {
     m_url.setHost(hostAddress.toString());
     m_url.setScheme(protocol);
-    connect(tcpServer, &QTcpServer::newConnection, this, &HttpServer::handleNewConnection);
+    connect(tcpServer, &QTcpServer::pendingConnectionAvailable, this,
+            &HttpServer::handleNewConnection);
 }
 
 HttpServer::~HttpServer()

@@ -26,10 +26,10 @@ GrTextureRenderTargetProxy::GrTextureRenderTargetProxy(const GrCaps& caps,
                                                        const GrBackendFormat& format,
                                                        SkISize dimensions,
                                                        int sampleCnt,
-                                                       GrMipmapped mipmapped,
+                                                       skgpu::Mipmapped mipmapped,
                                                        GrMipmapStatus mipmapStatus,
                                                        SkBackingFit fit,
-                                                       SkBudgeted budgeted,
+                                                       skgpu::Budgeted budgeted,
                                                        GrProtected isProtected,
                                                        GrInternalSurfaceFlags surfaceFlags,
                                                        UseAllocator useAllocator,
@@ -38,10 +38,27 @@ GrTextureRenderTargetProxy::GrTextureRenderTargetProxy(const GrCaps& caps,
         : GrSurfaceProxy(
                   format, dimensions, fit, budgeted, isProtected, surfaceFlags, useAllocator, label)
         // for now textures w/ data are always wrapped
-        , GrRenderTargetProxy(caps, format, dimensions, sampleCnt, fit, budgeted, isProtected,
-                              surfaceFlags, useAllocator, label)
-        , GrTextureProxy(format, dimensions, mipmapped, mipmapStatus, fit, budgeted, isProtected,
-                         surfaceFlags, useAllocator, creatingProvider, label) {
+        , GrRenderTargetProxy(caps,
+                              format,
+                              dimensions,
+                              sampleCnt,
+                              fit,
+                              budgeted,
+                              isProtected,
+                              surfaceFlags,
+                              useAllocator,
+                              label)
+        , GrTextureProxy(format,
+                         dimensions,
+                         mipmapped,
+                         mipmapStatus,
+                         fit,
+                         budgeted,
+                         isProtected,
+                         surfaceFlags,
+                         useAllocator,
+                         creatingProvider,
+                         label) {
     this->initSurfaceFlags(caps);
 }
 
@@ -51,10 +68,10 @@ GrTextureRenderTargetProxy::GrTextureRenderTargetProxy(const GrCaps& caps,
                                                        const GrBackendFormat& format,
                                                        SkISize dimensions,
                                                        int sampleCnt,
-                                                       GrMipmapped mipmapped,
+                                                       skgpu::Mipmapped mipmapped,
                                                        GrMipmapStatus mipmapStatus,
                                                        SkBackingFit fit,
-                                                       SkBudgeted budgeted,
+                                                       skgpu::Budgeted budgeted,
                                                        GrProtected isProtected,
                                                        GrInternalSurfaceFlags surfaceFlags,
                                                        UseAllocator useAllocator,
@@ -204,8 +221,8 @@ GrSurfaceProxy::LazySurfaceDesc GrTextureRenderTargetProxy::callbackDesc() const
 void GrTextureRenderTargetProxy::onValidateSurface(const GrSurface* surface) {
     // Anything checked here should also be checking the GrTextureProxy version
     SkASSERT(surface->asTexture());
-    SkASSERT(GrMipmapped::kNo == this->proxyMipmapped() ||
-             GrMipmapped::kYes == surface->asTexture()->mipmapped());
+    SkASSERT(skgpu::Mipmapped::kNo == this->proxyMipmapped() ||
+             skgpu::Mipmapped::kYes == surface->asTexture()->mipmapped());
 
     // Anything checked here should also be checking the GrRenderTargetProxy version
     SkASSERT(surface->asRenderTarget());

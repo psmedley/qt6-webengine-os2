@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 
 #include <stdint.h>
 
-#include "core/fxcrt/fixed_zeroed_data_vector.h"
-#include "third_party/base/span.h"
+#include "core/fxcrt/fixed_size_data_vector.h"
+#include "third_party/base/containers/span.h"
 
 class CBC_BarcodeRow final {
  public:
@@ -21,7 +21,7 @@ class CBC_BarcodeRow final {
   pdfium::span<const uint8_t> GetRow() const { return row_; }
 
  private:
-  FixedZeroedDataVector<uint8_t> row_;
+  FixedSizeDataVector<uint8_t> row_;
   size_t offset_ = 0;
 };
 

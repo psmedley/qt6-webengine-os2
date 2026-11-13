@@ -14,6 +14,8 @@ option optimize_for = LITE_RUNTIME;
 package user_data_auth;
 option go_package = "chromiumos/system_api/user_data_auth_proto";
 
+import "recoverable_key_store.proto";
+
 // Enum to define all the available types of AuthFactor. This would be used for
 // identification of a given AuthFactor.
 enum AuthFactorType {
@@ -24,6 +26,7 @@ enum AuthFactorType {
   AUTH_FACTOR_TYPE_KIOSK = 4;
   AUTH_FACTOR_TYPE_SMART_CARD = 5;
   AUTH_FACTOR_TYPE_LEGACY_FINGERPRINT = 6;
+  AUTH_FACTOR_TYPE_FINGERPRINT = 7;
 }
 
 // Enum to define the purpose of AuthFactor preparation. This would be used
@@ -81,16 +84,34 @@ message CryptohomeRecoveryAuthInput {
   // These fields are used for `AddAuthFactor`:
   // Public key of the mediator for Cryptohome recovery flow.
   bytes mediator_pub_key = 1;
+  // Gaia_id of the user executing the recovery flow.
+  string user_gaia_id = 2;
+  // Unique id of the user's vault on the device.
+  string device_user_id = 3;
+  // Whether the recovery id should be rotated.
+  optional bool ensure_fresh_recovery_id = 7;
 
   // These fields are used for `AuthenticateAuthFactor`:
-  // Serialized cryptorecovery::CryptoRecoveryEpochResponse.
+  // Serialized cryptohome.cryptorecovery.CryptoRecoveryEpochResponse.
   // An epoch response received from Recovery Mediator service containing epoch
   // beacon value for Cryptohome recovery flow.
-  bytes epoch_response = 2;
+  bytes epoch_response = 4;
   // Serialized cryptohome.cryptorecovery.CryptoRecoveryRpcResponse.
   // A response received from Recovery Mediator service and used by Cryptohome
   // recovery flow to derive the wrapping keys.
-  bytes recovery_response = 3;
+  bytes recovery_response = 5;
+  // The ledger info from the chrome side and used by Cryptohome
+  // recovery flow to determine which ledger is used.
+  message LedgerInfo {
+    // Ledger's name.
+    string name = 1;
+    // Ledger's public key hash.
+    // TODO(b/268054784): Remove this field if hash can be calculated.
+    uint32 key_hash = 2;
+    // Ledger's public key.
+    bytes public_key = 3;
+  }
+  LedgerInfo ledger_info = 6;
 }
 
 // Kiosk AuthFactor requires no secret to be passed for derivation and
@@ -113,6 +134,10 @@ message SmartCardAuthInput {
 // AuthenticateAuthFactorRequest.
 message LegacyFingerprintAuthInput {}
 
+// FingerprintAuthInput is empty. FingerprintAuthFactor does not require
+// user input any secret.
+message FingerprintAuthInput {}
+
 // AuthInput is a wrapper around any secret or input data that is required to
 // authenticate or create an AuthFactor on disk.
 message AuthInput {
@@ -126,12 +151,14 @@ message AuthInput {
     KioskAuthInput kiosk_input = 4;
     SmartCardAuthInput smart_card_input = 5;
     LegacyFingerprintAuthInput legacy_fingerprint_input = 6;
+    FingerprintAuthInput fingerprint_input = 7;
   }
 }
 
-// Password AuthFactor does not store any special metadata. Although this could
-// change in the future and keeping that in mind, an empty proto is defined.
-message PasswordMetadata {}
+message PasswordMetadata {
+  // The hash information used to generate the secret.
+  KnowledgeFactorHashInfo hash_info = 1;
+}
 
 message PinMetadata {
   // If true, the key is "locked" after too many unsuccessful authorization
@@ -139,18 +166,53 @@ message PinMetadata {
   // CRYPTOHOME_ERROR_TPM_DEFEND_LOCK error.
   // Currently, such locking is supported only for keys with
   // |low_entropy_credential| policy set to true,
-  // This field is ignored when registering a new key.
+  // This is populated by cryptohome,  should be omitted in any Add/Update
+  // request. And it will be ignored when present in any Add/Update request.
   bool auth_locked = 1;
+  // The hash information used to generate the secret.
+  KnowledgeFactorHashInfo hash_info = 2;
 }
 
-message CryptohomeRecoveryMetadata {}
+message CryptohomeRecoveryMetadata {
+  // Public key of the mediator for Cryptohome recovery flow.
+  bytes mediator_pub_key = 1;
+}
 
 message KioskMetadata {}
 
 message SmartCardMetadata {
   // Specifies the key which is asked to sign the data. Contains the DER-encoded
   // blob of the X.509 Subject Public Key Info.
+  // This is supplied by client, updated through Add/Update requests.
   bytes public_key_spki_der = 1;
+}
+
+enum LockoutPolicy {
+  // Default value.
+  LOCKOUT_POLICY_UNKNOWN = 0;
+  // Ideally this will be default, but should be explicitly set for an
+  // AuthFactor where multiple attempts are allowed without any repercussions.
+  LOCKOUT_POLICY_NONE = 1;
+  // ATTEMPT_LIMITED is for an AuthFactors that is not available for a
+  // user x number of wrong attempts. For example, for PIN we lockout
+  // user from PIN usage after five attempts.
+  LOCKOUT_POLICY_ATTEMPT_LIMITED = 2;
+  // TIME_LIMITED is when we locked out user from using a certain AuthFactor
+  // for a particular time after particular number of wrong attempts.
+  // The policy specifics itself can be custom defined by an AuthFactor.
+  LOCKOUT_POLICY_TIME_LIMITED = 3;
+}
+
+// The hash information of an auth factor that is used to generate the actual
+// secret. This can be used to generate the recoverable key store for the auth
+// factor.
+message KnowledgeFactorHashInfo {
+  cryptohome.KnowledgeFactorHashAlgorithm algorithm = 1;
+  bytes salt = 2;
+  // Some auth factors explicitly don't want to generate recoverable key stores
+  // even if they are knowledge factors with hash info. Use this flag to
+  // determine whether key stores should be generated using this hash info.
+  bool should_generate_key_store = 3;
 }
 
 message CommonMetadata {
@@ -159,14 +221,30 @@ message CommonMetadata {
   // /etc/lsb-release whenever AuthFactor is updated or first persisted.
   // See:https://chromium.googlesource.com/chromiumos/docs/+/HEAD/os_config.md
   // For example: "11012.0.2018_08_28_1422" could be returned as part of this.
+  // This is populated by cryptohome,  should be omitted in any Add/Update
+  // request. And it will be ignored when present in any Add/Update request.
   string chromeos_version_last_updated = 1;
   // This version number will be supplied by chrome when it calls AddAuthFactor
   // or UpdateAuthFactor.
   // Note: The format of this version will be maintained by chrome.
+  // This is supplied by client, updated through Add/Update requests.
   string chrome_version_last_updated = 2;
+  // This defines how lockout work for each factor. The non-default value is
+  // currently set only for PIN AuthFactor. For pins, if the feature
+  // CrosLateBCrOSLateBootEnableModernPin is enabled, then AddAuthFactor for PIN
+  // will expect LockoutPolicy::LOCKOUT_POLICY_TIME_LIMITED, else
+  // LockoutPolicy::LOCKOUT_POLICY_ATTEMPT_LIMITED. If anything else is provided
+  // then AuthFactor would return CRYPTOHOME_INVALID_ARGUMENT error.
+  // This is supplied by client, updated through Add/Update requests.
+  LockoutPolicy lockout_policy = 3;
+  // User supplied name of each auth factor.
+  // This is supplied by client, updated through Add/Update requests.
+  string user_specified_name = 4;
 }
 
 message LegacyFingerprintMetadata {}
+
+message FingerprintMetadata {}
 
 // AuthFactor is a backing store for any secret stored on Chrome OS in the USS
 // World. This proto definition is used to communicate with the client side.
@@ -198,6 +276,7 @@ message AuthFactor {
     KioskMetadata kiosk_metadata = 7;
     SmartCardMetadata smart_card_metadata = 8;
     LegacyFingerprintMetadata legacy_fingerprint_metadata = 11;
+    FingerprintMetadata fingerprint_metadata = 12;
   }
 
   reserved 3, 10;

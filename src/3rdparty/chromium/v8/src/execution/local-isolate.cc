@@ -50,12 +50,6 @@ bool LocalIsolate::has_active_deserializer() const {
 
 int LocalIsolate::GetNextScriptId() { return isolate_->GetNextScriptId(); }
 
-#if V8_SFI_HAS_UNIQUE_ID
-int LocalIsolate::GetNextUniqueSharedFunctionInfoId() {
-  return isolate_->GetNextUniqueSharedFunctionInfoId();
-}
-#endif  // V8_SFI_HAS_UNIQUE_ID
-
 // Used for lazy initialization, based on an assumption that most
 // LocalIsolates won't be used to parse any BigInt literals.
 void LocalIsolate::InitializeBigIntProcessor() {
@@ -70,8 +64,7 @@ bool StackLimitCheck::HasOverflowed(LocalIsolate* local_isolate) {
 #ifdef V8_INTL_SUPPORT
 // WARNING: This might be out-of-sync with the main-thread.
 const std::string& LocalIsolate::DefaultLocale() {
-  const std::string& res =
-      is_main_thread() ? isolate_->DefaultLocale() : default_locale_;
+  const std::string& res = isolate_->DefaultLocale();
   DCHECK(!res.empty());
   return res;
 }

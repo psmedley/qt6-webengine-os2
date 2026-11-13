@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,19 @@
 #include <algorithm>
 #include <utility>
 
-#include "absl/types/span.h"
 #include "cast/streaming/constants.h"
 #include "cast/streaming/receiver_packet_router.h"
 #include "cast/streaming/session_config.h"
+#include "platform/base/span.h"
+#include "platform/base/trivial_clock_traits.h"
 #include "util/chrono_helpers.h"
 #include "util/osp_logging.h"
 #include "util/std_util.h"
 #include "util/trace_logging.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
+
+using clock_operators::operator<<;
 
 // Conveniences for ensuring logging output includes the SSRC of the Receiver,
 // to help distinguish one out of multiple instances in a Cast Streaming
@@ -40,16 +42,15 @@ Receiver::Receiver(Environment* environment,
       rtp_timebase_(config.rtp_timebase),
       crypto_(config.aes_secret_key, config.aes_iv_mask),
       is_pli_enabled_(config.is_pli_enabled),
-      rtcp_buffer_capacity_(environment->GetMaxPacketSize()),
-      rtcp_buffer_(new uint8_t[rtcp_buffer_capacity_]),
       rtcp_alarm_(environment->now_function(), environment->task_runner()),
       smoothed_clock_offset_(ClockDriftSmoother::kDefaultTimeConstant),
       consumption_alarm_(environment->now_function(),
                          environment->task_runner()) {
   OSP_DCHECK(packet_router_);
   OSP_DCHECK_EQ(checkpoint_frame(), FrameId::leader());
-  OSP_CHECK_GT(rtcp_buffer_capacity_, 0);
-  OSP_CHECK(rtcp_buffer_);
+
+  rtcp_buffer_.assign(environment->GetMaxPacketSize(), 0);
+  OSP_CHECK_GT(rtcp_buffer_.size(), 0);
 
   rtcp_builder_.SetPlayoutDelay(config.target_playout_delay);
   playout_delay_changes_.emplace_back(FrameId::leader(),
@@ -141,7 +142,7 @@ int Receiver::AdvanceToNextFrame() {
   return kNoFramesReady;
 }
 
-EncodedFrame Receiver::ConsumeNextFrame(absl::Span<uint8_t> buffer) {
+EncodedFrame Receiver::ConsumeNextFrame(ByteBuffer buffer) {
   TRACE_DEFAULT_SCOPED(TraceCategory::kReceiver);
   // Assumption: The required call to AdvanceToNextFrame() ensures that
   // |last_frame_consumed_| is set to one before the frame to be consumed here.
@@ -151,21 +152,25 @@ EncodedFrame Receiver::ConsumeNextFrame(absl::Span<uint8_t> buffer) {
   // Decrypt the frame, populating the given output |frame|.
   PendingFrame& entry = GetQueueEntry(frame_id);
   OSP_DCHECK(entry.collector.is_complete());
-  EncodedFrame frame;
-  frame.data = buffer;
-  crypto_.Decrypt(entry.collector.PeekAtAssembledFrame(), &frame);
   OSP_DCHECK(entry.estimated_capture_time);
+
+  const EncryptedFrame& encrypted_frame =
+      entry.collector.PeekAtAssembledFrame();
+
+  // `buffer` will contain the decrypted frame contents.
+  crypto_.Decrypt(encrypted_frame, buffer);
+  EncodedFrame frame;
+  encrypted_frame.CopyMetadataTo(&frame);
+  frame.data = buffer;
   frame.reference_time =
       *entry.estimated_capture_time + ResolveTargetPlayoutDelay(frame_id);
 
   RECEIVER_VLOG << "ConsumeNextFrame → " << frame.frame_id << ": "
                 << frame.data.size() << " payload bytes, RTP Timestamp "
-                << frame.rtp_timestamp
-                       .ToTimeSinceOrigin<microseconds>(rtp_timebase_)
-                       .count()
-                << " µs, to play-out "
-                << to_microseconds(frame.reference_time - now_()).count()
-                << " µs from now.";
+                << frame.rtp_timestamp.ToTimeSinceOrigin<microseconds>(
+                       rtp_timebase_)
+                << ", to play-out " << (frame.reference_time - now_())
+                << " from now.";
 
   entry.Reset();
   last_frame_consumed_ = frame_id;
@@ -180,7 +185,7 @@ EncodedFrame Receiver::ConsumeNextFrame(absl::Span<uint8_t> buffer) {
 
 void Receiver::OnReceivedRtpPacket(Clock::time_point arrival_time,
                                    std::vector<uint8_t> packet) {
-  const absl::optional<RtpPacketParser::ParseResult> part =
+  const std::optional<RtpPacketParser::ParseResult> part =
       rtp_parser_.Parse(packet);
   if (!part) {
     RECEIVER_LOG(WARN) << "Parsing of " << packet.size()
@@ -290,7 +295,7 @@ void Receiver::OnReceivedRtpPacket(Clock::time_point arrival_time,
 void Receiver::OnReceivedRtcpPacket(Clock::time_point arrival_time,
                                     std::vector<uint8_t> packet) {
   TRACE_DEFAULT_SCOPED(TraceCategory::kReceiver);
-  absl::optional<SenderReportParser::SenderReportWithId> parsed_report =
+  std::optional<SenderReportParser::SenderReportWithId> parsed_report =
       rtcp_parser_.Parse(packet);
   if (!parsed_report) {
     RECEIVER_LOG(WARN) << "Parsing of " << packet.size()
@@ -341,9 +346,8 @@ void Receiver::SendRtcp() {
   rtcp_builder_.IncludeFeedbackInNextPacket(std::move(packet_nacks),
                                             std::move(frame_acks));
   last_rtcp_send_time_ = now_();
-  packet_router_->SendRtcpPacket(rtcp_builder_.BuildPacket(
-      last_rtcp_send_time_,
-      absl::Span<uint8_t>(rtcp_buffer_.get(), rtcp_buffer_capacity_)));
+  packet_router_->SendRtcpPacket(
+      rtcp_builder_.BuildPacket(last_rtcp_send_time_, rtcp_buffer_));
 
   // Schedule the automatic sending of another RTCP packet, if this method is
   // not called within some bounded amount of time. While incomplete frames
@@ -466,7 +470,7 @@ Receiver::PendingFrame::~PendingFrame() = default;
 
 void Receiver::PendingFrame::Reset() {
   collector.Reset();
-  estimated_capture_time = absl::nullopt;
+  estimated_capture_time = std::nullopt;
 }
 
 // static
@@ -474,5 +478,4 @@ constexpr milliseconds Receiver::kDefaultPlayerProcessingTime;
 constexpr int Receiver::kNoFramesReady;
 constexpr milliseconds Receiver::kNackFeedbackInterval;
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast

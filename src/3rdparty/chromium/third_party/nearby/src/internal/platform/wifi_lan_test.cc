@@ -24,7 +24,6 @@
 #include "internal/platform/logging.h"
 #include "internal/platform/medium_environment.h"
 
-namespace location {
 namespace nearby {
 namespace {
 
@@ -49,8 +48,6 @@ constexpr absl::string_view kEndpointInfoKey{"n"};
 class WifiLanMediumTest : public ::testing::TestWithParam<FeatureFlags> {
  protected:
   using DiscoveredServiceCallback = WifiLanMedium::DiscoveredServiceCallback;
-
-  WifiLanMediumTest() { env_.Stop(); }
 
   MediumEnvironment& env_{MediumEnvironment::Instance()};
 };
@@ -377,8 +374,7 @@ TEST_F(WifiLanMediumTest, CanDiscoverMultipleAdvertisementsOnSameService) {
 
   NsdServiceInfo nsd_service_info_1;
   nsd_service_info_1.SetServiceName("service1");
-  nsd_service_info_1.SetTxtRecord(std::string(kEndpointInfoKey),
-                                "endpoint1");
+  nsd_service_info_1.SetTxtRecord(std::string(kEndpointInfoKey), "endpoint1");
   nsd_service_info_1.SetServiceType(service_type);
 
   // Setup second advertising device.
@@ -388,8 +384,7 @@ TEST_F(WifiLanMediumTest, CanDiscoverMultipleAdvertisementsOnSameService) {
 
   NsdServiceInfo nsd_service_info_2;
   nsd_service_info_2.SetServiceName("service2");
-  nsd_service_info_2.SetTxtRecord(std::string(kEndpointInfoKey),
-                                "endpoint2");
+  nsd_service_info_2.SetTxtRecord(std::string(kEndpointInfoKey), "endpoint2");
   nsd_service_info_2.SetServiceType(service_type);
 
   EXPECT_TRUE(wifi_lan_advertising_1.StartAdvertising(nsd_service_info_1));
@@ -398,7 +393,6 @@ TEST_F(WifiLanMediumTest, CanDiscoverMultipleAdvertisementsOnSameService) {
   EXPECT_TRUE(wifi_lan_advertising_1.StopAdvertising(nsd_service_info_1));
   EXPECT_TRUE(wifi_lan_advertising_2.StopAdvertising(nsd_service_info_2));
   EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
-
 
   // Stop to descovery
   EXPECT_TRUE(wifi_lan_discovery.StopDiscovery(service_type));
@@ -449,4 +443,3 @@ TEST_F(WifiLanMediumTest, CanDiscoverThatOtherMediumAdvertise) {
 
 }  // namespace
 }  // namespace nearby
-}  // namespace location

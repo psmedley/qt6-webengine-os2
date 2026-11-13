@@ -39,10 +39,10 @@ jumbo_source_set("filters") {
     "decrypting_media_resource.h",
     "decrypting_video_decoder.cc",
     "decrypting_video_decoder.h",
+    "demuxer_manager.cc",
+    "demuxer_manager.h",
     "file_data_source.cc",
     "file_data_source.h",
-    "frame_buffer_pool.cc",
-    "frame_buffer_pool.h",
     "frame_processor.cc",
     "frame_processor.h",
     "memory_data_source.cc",
@@ -153,14 +153,6 @@ jumbo_source_set("filters") {
     deps += [ "//third_party/dav1d" ]
   }
 
-  if (enable_libgav1_decoder) {
-    sources += [
-      "gav1_video_decoder.cc",
-      "gav1_video_decoder.h",
-    ]
-    deps += [ "//third_party/libgav1" ]
-  }
-
   if (media_use_ffmpeg) {
     if (proprietary_codecs) {
       sources += [
@@ -207,13 +199,14 @@ jumbo_source_set("filters") {
     deps += [ "//media/base/android" ]
   }
 
-  if (is_mac) {
+  if (is_apple) {
     sources += [
       "mac/audio_toolbox_audio_decoder.cc",
       "mac/audio_toolbox_audio_decoder.h",
       "mac/audio_toolbox_audio_encoder.cc",
       "mac/audio_toolbox_audio_encoder.h",
     ]
+    deps += [ "//media/base/mac" ]
   }
   if (is_win && enable_platform_dts_audio) {
     sources += [
@@ -223,15 +216,11 @@ jumbo_source_set("filters") {
   }
   if (is_win) {
     sources += [
-      "win/media_foundation_utils.cc",
-      "win/media_foundation_utils.h",
+      "win/media_foundation_audio_decoder.cc",
+      "win/media_foundation_audio_decoder.h",
     ]
     deps += [ "//media/base/win:media_foundation_util" ]
     if (enable_platform_dts_audio) {
-      sources += [
-        "win/media_foundation_audio_decoder.cc",
-        "win/media_foundation_audio_decoder.h",
-      ]
       ldflags = [
         "/DELAYLOAD:packages/Microsoft.VCRTForwarders.140.1.0.6/runtimes/win10-x64/native/release/concrt140_app.dll",
         "/DELAYLOAD:packages/Microsoft.VCRTForwarders.140.1.0.6/runtimes/win10-x64/native/release/msvcp140_1_app.dll",
@@ -249,6 +238,26 @@ jumbo_source_set("filters") {
     sources += [
       "h264_bitstream_buffer.cc",
       "h264_bitstream_buffer.h",
+    ]
+  }
+
+  if (enable_hls_demuxer) {
+    sources += [
+      "hls_codec_detector.cc",
+      "hls_codec_detector.h",
+      "hls_data_source_provider.cc",
+      "hls_data_source_provider.h",
+      "hls_data_source_provider_impl.cc",
+      "hls_data_source_provider_impl.h",
+      "hls_demuxer_status.h",
+      "hls_manifest_demuxer_engine.cc",
+      "hls_manifest_demuxer_engine.h",
+      "hls_rendition.cc",
+      "hls_rendition.h",
+      "hls_rendition_impl.cc",
+      "hls_rendition_impl.h",
+      "manifest_demuxer.cc",
+      "manifest_demuxer.h",
     ]
   }
 }
@@ -304,7 +313,6 @@ source_set("unit_tests") {
     "decrypting_video_decoder_unittest.cc",
     "fake_video_decoder_unittest.cc",
     "file_data_source_unittest.cc",
-    "frame_buffer_pool_unittest.cc",
     "frame_processor_unittest.cc",
     "ivf_parser_unittest.cc",
     "memory_data_source_unittest.cc",
@@ -312,6 +320,7 @@ source_set("unit_tests") {
     "pipeline_controller_unittest.cc",
     "source_buffer_state_unittest.cc",
     "source_buffer_stream_unittest.cc",
+    "stream_parser_factory_unittest.cc",
     "video_cadence_estimator_unittest.cc",
     "video_decoder_stream_unittest.cc",
     "video_renderer_algorithm_unittest.cc",
@@ -369,7 +378,7 @@ source_set("unit_tests") {
       ]
     }
 
-    if (enable_ffmpeg_video_decoders) {
+    if (enable_ffmpeg_video_decoders && proprietary_codecs) {
       sources += [ "ffmpeg_video_decoder_unittest.cc" ]
     }
   }
@@ -380,10 +389,6 @@ source_set("unit_tests") {
 
   if (enable_dav1d_decoder) {
     sources += [ "dav1d_video_decoder_unittest.cc" ]
-  }
-
-  if (enable_libgav1_decoder) {
-    sources += [ "gav1_video_decoder_unittest.cc" ]
   }
 
   if (use_vaapi) {
@@ -403,6 +408,19 @@ source_set("unit_tests") {
         "ffmpeg_h264_to_annex_b_bitstream_converter_unittest.cc",
       ]
     }
+  }
+
+  if (enable_hls_demuxer) {
+    sources += [
+      "hls_codec_detector_unittest.cc",
+      "hls_data_source_provider_impl_unittest.cc",
+      "hls_data_source_provider_unittest.cc",
+      "hls_manifest_demuxer_engine_unittest.cc",
+      "hls_rendition_impl_unittest.cc",
+      "hls_test_helpers.cc",
+      "hls_test_helpers.h",
+      "manifest_demuxer_unittest.cc",
+    ]
   }
 
   if (media_use_ffmpeg) {

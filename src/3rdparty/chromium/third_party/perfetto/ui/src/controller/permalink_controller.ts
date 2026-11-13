@@ -15,28 +15,41 @@
 import {produce} from 'immer';
 
 import {assertExists} from '../base/logging';
+import {runValidator} from '../base/validators';
 import {Actions} from '../common/actions';
 import {ConversionJobStatus} from '../common/conversion_jobs';
 import {
   createEmptyNonSerializableState,
   createEmptyState,
 } from '../common/empty_state';
-import {State} from '../common/state';
-import {STATE_VERSION} from '../common/state';
+import {EngineConfig, ObjectById, State, STATE_VERSION} from '../common/state';
 import {
   BUCKET_NAME,
+  buggyToSha256,
+  deserializeStateObject,
   saveState,
-  saveTrace,
   toSha256,
+  TraceGcsUploader,
 } from '../common/upload_utils';
-import {globals as frontendGlobals} from '../frontend/globals';
+import {globals} from '../frontend/globals';
 import {publishConversionJobStatusUpdate} from '../frontend/publish';
 import {Router} from '../frontend/router';
 
 import {Controller} from './controller';
-import {globals} from './globals';
 import {RecordConfig, recordConfigValidator} from './record_config_types';
-import {runValidator} from './validators';
+
+interface MultiEngineState {
+  currentEngineId?: string;
+  engines: ObjectById<EngineConfig>
+}
+
+function isMultiEngineState(state: State|
+                            MultiEngineState): state is MultiEngineState {
+  if ((state as MultiEngineState).engines !== undefined) {
+    return true;
+  }
+  return false;
+}
 
 export class PermalinkController extends Controller<'main'> {
   private lastRequestId?: string;
@@ -97,17 +110,22 @@ export class PermalinkController extends Controller<'main'> {
   private static upgradeState(state: State): State {
     if (state.version !== STATE_VERSION) {
       const newState = createEmptyState();
-      let maxEngineId = Number.MIN_SAFE_INTEGER;
-      // Copy the URL of the trace into the empty state.
-      for (const cfg of Object.values(state.engines)) {
-        newState
-            .engines[cfg.id] = {id: cfg.id, ready: false, source: cfg.source};
-        maxEngineId = Math.max(maxEngineId, Number(cfg.id));
+      // Old permalinks from state versions prior to version 24
+      // have multiple engines of which only one is identified as the
+      // current engine via currentEngineId. Handle this case:
+      if (isMultiEngineState(state)) {
+        const engineId = state.currentEngineId;
+        if (engineId !== undefined) {
+          newState.engine = state.engines[engineId];
+        }
+      } else {
+        newState.engine = state.engine;
       }
-      if (maxEngineId !== Number.MIN_SAFE_INTEGER) {
-        // set the current engine Id to the maximum engine Id in the permalink
-        newState.currentEngineId = String(maxEngineId);
+
+      if (newState.engine !== undefined) {
+        newState.engine.ready = false;
       }
+
       const message = `Unable to parse old state version. Discarding state ` +
           `and loading trace.`;
       console.warn(message);
@@ -136,7 +154,7 @@ export class PermalinkController extends Controller<'main'> {
     if (isRecordingConfig) {
       uploadState = globals.state.recordConfig;
     } else {
-      const engine = assertExists(frontendGlobals.getCurrentEngine());
+      const engine = assertExists(globals.getCurrentEngine());
       let dataToUpload: File|ArrayBuffer|undefined = undefined;
       let traceName = `trace ${engine.id}`;
       if (engine.source.type === 'FILE') {
@@ -150,12 +168,27 @@ export class PermalinkController extends Controller<'main'> {
 
       if (dataToUpload !== undefined) {
         PermalinkController.updateStatus(`Uploading ${traceName}`);
-        const url = await saveTrace(dataToUpload);
-        // Convert state to use URLs and remove permalink.
-        uploadState = produce(globals.state, (draft) => {
-          draft.engines[engine.id].source = {type: 'URL', url};
-          draft.permalink = {};
-        });
+        const uploader = new TraceGcsUploader(dataToUpload, () => {
+          switch (uploader.state) {
+            case 'UPLOADING':
+              const statusTxt = `Uploading ${uploader.getEtaString()}`;
+              PermalinkController.updateStatus(statusTxt);
+              break;
+            case 'UPLOADED':
+              // Convert state to use URLs and remove permalink.
+              const url = uploader.uploadedUrl;
+              uploadState = produce(globals.state, (draft) => {
+                assertExists(draft.engine).source = {type: 'URL', url};
+                draft.permalink = {};
+              });
+              break;
+            case 'ERROR':
+              PermalinkController.updateStatus(
+                  `Upload failed ${uploader.error}`);
+              break;
+          }  // switch (state)
+        });  // onProgress
+        await uploader.waitForCompletion();
       }
     }
 
@@ -177,9 +210,16 @@ export class PermalinkController extends Controller<'main'> {
     }
     const text = await response.text();
     const stateHash = await toSha256(text);
-    const state = JSON.parse(text);
+    const state = deserializeStateObject<State>(text);
     if (stateHash !== id) {
-      throw new Error(`State hash does not match ${id} vs. ${stateHash}`);
+      // Old permalinks incorrectly dropped some digits from the
+      // hexdigest of the SHA256. We don't want to invalidate those
+      // links so we also compute the old string and try that here
+      // also.
+      const buggyStateHash = await buggyToSha256(text);
+      if (buggyStateHash !== id) {
+        throw new Error(`State hash does not match ${id} vs. ${stateHash}`);
+      }
     }
     if (!this.isRecordConfig(state)) {
       return this.upgradeState(state);

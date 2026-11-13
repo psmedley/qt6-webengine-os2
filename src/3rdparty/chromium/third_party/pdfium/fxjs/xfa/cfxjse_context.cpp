@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 #include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
-#include "third_party/base/ptr_util.h"
+#include "third_party/base/memory/ptr_util.h"
 #include "v8/include/v8-exception.h"
 #include "v8/include/v8-function.h"
 #include "v8/include/v8-message.h"
@@ -195,8 +195,8 @@ std::unique_ptr<CFXJSE_Context> CFXJSE_Context::Create(
   v8::Local<v8::Object> pThis = pThisProxy->GetPrototype().As<v8::Object>();
   FXJSE_UpdateObjectBinding(pThis, pGlobalObject);
 
-  v8::Local<v8::Context> hRootContext = v8::Local<v8::Context>::New(
-      pIsolate, CFXJSE_RuntimeData::Get(pIsolate)->GetRootContext());
+  v8::Local<v8::Context> hRootContext =
+      CFXJSE_RuntimeData::Get(pIsolate)->GetRootContext(pIsolate);
   hNewContext->SetSecurityToken(hRootContext->GetSecurityToken());
   pContext->m_hContext.Reset(pIsolate, hNewContext);
   return pContext;
@@ -235,13 +235,13 @@ CFXJSE_Class* CFXJSE_Context::GetClassByName(ByteStringView szName) const {
 }
 
 void CFXJSE_Context::EnableCompatibleMode() {
-  ExecuteScript(szCompatibleModeScript, nullptr, v8::Local<v8::Object>());
-  ExecuteScript(szConsoleScript, nullptr, v8::Local<v8::Object>());
+  ExecuteScript(szCompatibleModeScript, v8::Local<v8::Object>());
+  ExecuteScript(szConsoleScript, v8::Local<v8::Object>());
 }
 
-bool CFXJSE_Context::ExecuteScript(ByteStringView bsScript,
-                                   CFXJSE_Value* pRetValue,
-                                   v8::Local<v8::Object> hNewThis) {
+CFXJSE_Context::ExecutionResult CFXJSE_Context::ExecuteScript(
+    ByteStringView bsScript,
+    v8::Local<v8::Object> hNewThis) {
   CFXJSE_ScopeUtil_IsolateHandleContext scope(this);
   v8::Local<v8::Context> hContext = GetIsolate()->GetCurrentContext();
   v8::TryCatch trycatch(GetIsolate());
@@ -250,20 +250,17 @@ bool CFXJSE_Context::ExecuteScript(ByteStringView bsScript,
   if (hNewThis.IsEmpty()) {
     v8::Local<v8::Script> hScript;
     if (v8::Script::Compile(hContext, hScriptString).ToLocal(&hScript)) {
-      DCHECK(!trycatch.HasCaught());
+      CHECK(!trycatch.HasCaught());
       v8::Local<v8::Value> hValue;
       if (hScript->Run(hContext).ToLocal(&hValue)) {
-        DCHECK(!trycatch.HasCaught());
-        if (pRetValue)
-          pRetValue->ForceSetValue(GetIsolate(), hValue);
-        return true;
+        CHECK(!trycatch.HasCaught());
+        return ExecutionResult(
+            true, std::make_unique<CFXJSE_Value>(GetIsolate(), hValue));
       }
     }
-    if (pRetValue) {
-      pRetValue->ForceSetValue(GetIsolate(),
-                               CreateReturnValue(GetIsolate(), &trycatch));
-    }
-    return false;
+    return ExecutionResult(
+        false, std::make_unique<CFXJSE_Value>(
+                   GetIsolate(), CreateReturnValue(GetIsolate(), &trycatch)));
   }
 
   v8::Local<v8::String> hEval = fxv8::NewStringHelper(
@@ -272,16 +269,15 @@ bool CFXJSE_Context::ExecuteScript(ByteStringView bsScript,
       v8::Script::Compile(hContext, hEval).ToLocalChecked();
   v8::Local<v8::Value> hWrapperValue;
   if (hWrapper->Run(hContext).ToLocal(&hWrapperValue)) {
-    DCHECK(!trycatch.HasCaught());
+    CHECK(!trycatch.HasCaught());
+    CHECK(hWrapperValue->IsFunction());
     v8::Local<v8::Function> hWrapperFn = hWrapperValue.As<v8::Function>();
     v8::Local<v8::Value> rgArgs[] = {hScriptString};
     v8::Local<v8::Value> hValue;
-    if (hWrapperFn->Call(hContext, hNewThis.As<v8::Object>(), 1, rgArgs)
-            .ToLocal(&hValue)) {
+    if (hWrapperFn->Call(hContext, hNewThis, 1, rgArgs).ToLocal(&hValue)) {
       DCHECK(!trycatch.HasCaught());
-      if (pRetValue)
-        pRetValue->ForceSetValue(GetIsolate(), hValue);
-      return true;
+      return ExecutionResult(
+          true, std::make_unique<CFXJSE_Value>(GetIsolate(), hValue));
     }
   }
 
@@ -299,9 +295,22 @@ bool CFXJSE_Context::ExecuteScript(ByteStringView bsScript,
   }
 #endif  // NDEBUG
 
-  if (pRetValue) {
-    pRetValue->ForceSetValue(GetIsolate(),
-                             CreateReturnValue(GetIsolate(), &trycatch));
-  }
-  return false;
+  return ExecutionResult(
+      false, std::make_unique<CFXJSE_Value>(
+                 GetIsolate(), CreateReturnValue(GetIsolate(), &trycatch)));
 }
+
+CFXJSE_Context::ExecutionResult::ExecutionResult() = default;
+
+CFXJSE_Context::ExecutionResult::ExecutionResult(
+    bool sts,
+    std::unique_ptr<CFXJSE_Value> val)
+    : status(sts), value(std::move(val)) {}
+
+CFXJSE_Context::ExecutionResult::ExecutionResult(
+    ExecutionResult&& that) noexcept = default;
+
+CFXJSE_Context::ExecutionResult& CFXJSE_Context::ExecutionResult::operator=(
+    ExecutionResult&& that) noexcept = default;
+
+CFXJSE_Context::ExecutionResult::~ExecutionResult() = default;

@@ -5,8 +5,10 @@
 #ifndef SERVICES_NETWORK_PUBLIC_CPP_CORB_ORB_IMPL_H_
 #define SERVICES_NETWORK_PUBLIC_CPP_CORB_ORB_IMPL_H_
 
+#include <string_view>
+
 #include "base/component_export.h"
-#include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "services/network/public/cpp/corb/corb_api.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom-forward.h"
@@ -24,7 +26,10 @@ namespace corb {
 class COMPONENT_EXPORT(NETWORK_CPP) OpaqueResponseBlockingAnalyzer final
     : public ResponseAnalyzer {
  public:
-  explicit OpaqueResponseBlockingAnalyzer(PerFactoryState& state);
+  // The caller needs to guarantee that `state`'s lifetime is at least as long
+  // as the lifetime of `OpaqueResponseBlockingAnalyzer`.  `state` needs to be
+  // non-null.
+  explicit OpaqueResponseBlockingAnalyzer(PerFactoryState* state);
 
   OpaqueResponseBlockingAnalyzer(const OpaqueResponseBlockingAnalyzer&) =
       delete;
@@ -36,15 +41,12 @@ class COMPONENT_EXPORT(NETWORK_CPP) OpaqueResponseBlockingAnalyzer final
   Decision Init(const GURL& request_url,
                 const absl::optional<url::Origin>& request_initiator,
                 mojom::RequestMode request_mode,
+                mojom::RequestDestination request_destination_from_renderer,
                 const network::mojom::URLResponseHead& response) override;
-  Decision Sniff(base::StringPiece data) override;
+  Decision Sniff(std::string_view data) override;
   Decision HandleEndOfSniffableResponseBody() override;
   bool ShouldReportBlockedResponse() const override;
   BlockedResponseHandling ShouldHandleBlockedResponseAs() const override;
-
-  // TODO(https://crbug.com/1178928): Remove this once we gather enough
-  // DumpWithoutCrashing data.
-  void ReportOrbBlockedAndCorbDidnt() const;
 
   // Each `return Decision::kBlock` in the implementation of
   // OpaqueResponseBlockingAnalyzer has a corresponding enum value below.
@@ -84,12 +86,15 @@ class COMPONENT_EXPORT(NETWORK_CPP) OpaqueResponseBlockingAnalyzer final
   bool is_empty_response_ = false;
 
   // Remembering which past requests sniffed as media.  Never null.
-  // TODO(lukasza): Replace with raw_ref<T> or nonnull_raw_ptr<T> once
-  // available.
-  raw_ptr<PerFactoryState, DanglingUntriaged> per_factory_state_;
+  raw_ref<PerFactoryState> per_factory_state_;
 
   BlockingDecisionReason blocking_decision_reason_ =
       BlockingDecisionReason::kInvalid;
+
+  // The request destination. Note that this value always originates from
+  // the renderer.
+  mojom::RequestDestination request_destination_from_renderer_ =
+      mojom::RequestDestination::kEmpty;
 };
 
 }  // namespace corb

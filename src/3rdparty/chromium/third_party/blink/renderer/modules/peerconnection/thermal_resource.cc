@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/peerconnection/thermal_resource.h"
 
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "third_party/webrtc/rtc_base/ref_counted_object.h"
@@ -16,14 +17,15 @@ const int kReportIntervalSeconds = 10;
 
 }  // namespace
 
-CONSTINIT const base::Feature kWebRtcThermalResource(
-             "WebRtcThermalResource",
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
-             base::FEATURE_ENABLED_BY_DEFAULT
+BASE_FEATURE(kWebRtcThermalResource,
+             "WebRtcThermalResource",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #else
-             base::FEATURE_DISABLED_BY_DEFAULT
+BASE_FEATURE(kWebRtcThermalResource,
+             "WebRtcThermalResource",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
-);
 
 // static
 scoped_refptr<ThermalResource> ThermalResource::Create(
@@ -89,7 +91,7 @@ void ThermalResource::ReportMeasurementWhileHoldingLock(size_t measurement_id) {
   task_runner_->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&ThermalResource::ReportMeasurement,
-                     scoped_refptr<ThermalResource>(this), measurement_id),
+                     rtc::scoped_refptr<ThermalResource>(this), measurement_id),
       base::Seconds(kReportIntervalSeconds));
 }
 

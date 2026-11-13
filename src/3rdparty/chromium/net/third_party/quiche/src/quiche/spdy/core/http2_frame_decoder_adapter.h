@@ -9,14 +9,17 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
+#include "quiche/http2/decoder/decode_status.h"
 #include "quiche/http2/decoder/http2_frame_decoder.h"
+#include "quiche/http2/decoder/http2_frame_decoder_listener.h"
+#include "quiche/http2/http2_constants.h"
+#include "quiche/http2/http2_structures.h"
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/spdy/core/hpack/hpack_decoder_adapter.h"
-#include "quiche/spdy/core/hpack/hpack_header_table.h"
 #include "quiche/spdy/core/spdy_alt_svc_wire_format.h"
 #include "quiche/spdy/core/spdy_headers_handler_interface.h"
 #include "quiche/spdy/core/spdy_protocol.h"
@@ -33,7 +36,7 @@ class ExtensionVisitorInterface;
 namespace http2 {
 
 // Adapts SpdyFramer interface to use Http2FrameDecoder.
-class QUICHE_EXPORT_PRIVATE Http2DecoderAdapter
+class QUICHE_EXPORT Http2DecoderAdapter
     : public http2::Http2FrameDecoderListener {
  public:
   // HTTP2 states.
@@ -151,9 +154,9 @@ class QUICHE_EXPORT_PRIVATE Http2DecoderAdapter
   // has responded with an HTTP/1.1 (or earlier) response.
   bool probable_http_response() const;
 
-  spdy::HpackDecoderAdapter* GetHpackDecoder();
-  const spdy::HpackDecoderAdapter* GetHpackDecoder() const {
-    return hpack_decoder_.get();
+  spdy::HpackDecoderAdapter& GetHpackDecoder() { return hpack_decoder_; }
+  const spdy::HpackDecoderAdapter& GetHpackDecoder() const {
+    return hpack_decoder_;
   }
 
   bool HasError() const;
@@ -267,7 +270,7 @@ class QUICHE_EXPORT_PRIVATE Http2DecoderAdapter
 
   // Amount of trailing padding. Currently used just as an indicator of whether
   // OnPadLength has been called.
-  absl::optional<size_t> opt_pad_length_;
+  std::optional<size_t> opt_pad_length_;
 
   // Temporary buffers for the AltSvc fields.
   std::string alt_svc_origin_;
@@ -287,9 +290,8 @@ class QUICHE_EXPORT_PRIVATE Http2DecoderAdapter
   // If non-null, unknown frames and settings are passed to the extension.
   spdy::ExtensionVisitorInterface* extension_ = nullptr;
 
-  // The HPACK decoder to be used for this adapter. User is responsible for
-  // clearing if the adapter is to be used for another connection.
-  std::unique_ptr<spdy::HpackDecoderAdapter> hpack_decoder_;
+  // The HPACK decoder to be used for this adapter.
+  spdy::HpackDecoderAdapter hpack_decoder_;
 
   // The HTTP/2 frame decoder.
   Http2FrameDecoder frame_decoder_;
@@ -363,7 +365,7 @@ namespace spdy {
 //      been delivered for the control frame.
 // During step 2, if the visitor is not interested in accepting the header data,
 // it should return a no-op implementation of SpdyHeadersHandlerInterface.
-class QUICHE_EXPORT_PRIVATE SpdyFramerVisitorInterface {
+class QUICHE_EXPORT SpdyFramerVisitorInterface {
  public:
   virtual ~SpdyFramerVisitorInterface() {}
 
@@ -542,7 +544,7 @@ class QUICHE_EXPORT_PRIVATE SpdyFramerVisitorInterface {
                                      absl::string_view payload) = 0;
 };
 
-class QUICHE_EXPORT_PRIVATE ExtensionVisitorInterface {
+class QUICHE_EXPORT ExtensionVisitorInterface {
  public:
   virtual ~ExtensionVisitorInterface() {}
 

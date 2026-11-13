@@ -6,6 +6,14 @@
 
 namespace security_interstitials {
 
+InterstitialInteractionDetails::InterstitialInteractionDetails(
+    int occurrence_count,
+    int64_t first_timestamp,
+    int64_t last_timestamp)
+    : occurrence_count(occurrence_count),
+      first_timestamp(first_timestamp),
+      last_timestamp(last_timestamp) {}
+
 BaseSafeBrowsingErrorUI::BaseSafeBrowsingErrorUI(
     const GURL& request_url,
     const GURL& main_frame_url,
@@ -25,7 +33,8 @@ BaseSafeBrowsingErrorUI::BaseSafeBrowsingErrorUI(
 BaseSafeBrowsingErrorUI::~BaseSafeBrowsingErrorUI() {}
 
 BaseSafeBrowsingErrorUI::SBErrorDisplayOptions::SBErrorDisplayOptions(
-    bool is_main_frame_load_blocked,
+    bool is_main_frame_load_pending,
+    bool is_subresource,
     bool is_extended_reporting_opt_in_allowed,
     bool is_off_the_record,
     bool is_extended_reporting_enabled,
@@ -37,7 +46,8 @@ BaseSafeBrowsingErrorUI::SBErrorDisplayOptions::SBErrorDisplayOptions(
     bool is_enhanced_protection_message_enabled,
     bool is_safe_browsing_managed,
     const std::string& help_center_article_link)
-    : is_main_frame_load_blocked(is_main_frame_load_blocked),
+    : is_main_frame_load_pending(is_main_frame_load_pending),
+      is_subresource(is_subresource),
       is_extended_reporting_opt_in_allowed(
           is_extended_reporting_opt_in_allowed),
       is_off_the_record(is_off_the_record),
@@ -55,7 +65,8 @@ BaseSafeBrowsingErrorUI::SBErrorDisplayOptions::SBErrorDisplayOptions(
 
 BaseSafeBrowsingErrorUI::SBErrorDisplayOptions::SBErrorDisplayOptions(
     const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& other)
-    : is_main_frame_load_blocked(other.is_main_frame_load_blocked),
+    : is_main_frame_load_pending(other.is_main_frame_load_pending),
+      is_subresource(other.is_subresource),
       is_extended_reporting_opt_in_allowed(
           other.is_extended_reporting_opt_in_allowed),
       is_off_the_record(other.is_off_the_record),

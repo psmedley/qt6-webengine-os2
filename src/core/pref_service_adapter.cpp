@@ -6,7 +6,9 @@
 #include "profile_adapter.h"
 #include "type_conversion.h"
 #include "web_engine_context.h"
+#include "web_engine_library_info.h"
 
+#include "base/base_paths.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/prefs/chrome_command_line_pref_store.h"
 #include "content/public/browser/browser_thread.h"
@@ -19,9 +21,12 @@
 #include "components/prefs/pref_service_factory.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
-#include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/internal/identity_manager/gaia_cookie_manager_service.h"
+#include "components/signin/internal/identity_manager/primary_account_manager.h"
+#include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
+#include "chrome/browser/gcm/gcm_product_util.h"
 #include "chrome/common/pref_names.h"
 #include "extensions/buildflags/buildflags.h"
 #include "content/public/browser/browser_context.h"
@@ -43,12 +48,14 @@
 #endif
 
 #if defined(Q_OS_WIN)
-#include "components/os_crypt/os_crypt.h"
+#include "components/os_crypt/sync/os_crypt.h"
 #endif
 
 namespace {
 static const char kPrefMediaDeviceIDSalt[] = "qtwebengine.media_device_salt_id";
 }
+
+using namespace Qt::StringLiterals;
 
 namespace QtWebEngineCore {
 
@@ -59,11 +66,12 @@ void PrefServiceAdapter::setup(const ProfileAdapter &profileAdapter)
     factory.set_command_line_prefs(base::MakeRefCounted<ChromeCommandLinePrefStore>(
             base::CommandLine::ForCurrentProcess()));
 
-    QString userPrefStorePath = profileAdapter.dataPath();
+    QString userPrefStorePath;
+    userPrefStorePath += profileAdapter.dataPath();
     if (!profileAdapter.isOffTheRecord() && !userPrefStorePath.isEmpty() &&
             const_cast<ProfileAdapter *>(&profileAdapter)->ensureDataPathExists()) {
         userPrefStorePath += QDir::separator();
-        userPrefStorePath += QStringLiteral("user_prefs.json");
+        userPrefStorePath += "user_prefs.json"_L1;
         factory.set_user_prefs(base::MakeRefCounted<JsonPrefStore>(toFilePath(userPrefStorePath)));
     } else {
         factory.set_user_prefs(new InMemoryPrefStore);
@@ -84,19 +92,20 @@ void PrefServiceAdapter::setup(const ProfileAdapter &profileAdapter)
 #endif // QT_CONFIG(webengine_spellchecker)
     registry->RegisterBooleanPref(prefs::kShowInternalAccessibilityTree, false);
     registry->RegisterBooleanPref(prefs::kAccessibilityImageLabelsEnabled, false);
+
+    // chrome/browser/notifications
     registry->RegisterIntegerPref(prefs::kNotificationNextPersistentId, 10000);
+    // chrome/browser/push_messaging
     registry->RegisterDictionaryPref(prefs::kPushMessagingAppIdentifierMap);
-    registry->RegisterListPref(prefs::kAccountInfo);
-    registry->RegisterStringPref(prefs::kGoogleServicesLastAccountId,
-                               std::string());
-    registry->RegisterStringPref(prefs::kGoogleServicesLastUsername,
-                               std::string());
-    registry->RegisterStringPref(prefs::kGoogleServicesAccountId, std::string());
-    registry->RegisterBooleanPref(prefs::kGoogleServicesConsentedToSync, false);
-    registry->RegisterBooleanPref(prefs::kAutologinEnabled, true);
-    registry->RegisterListPref(prefs::kReverseAutologinRejectedEmailList);
-    registry->RegisterBooleanPref(prefs::kSigninAllowed, true);
-    registry->RegisterBooleanPref(prefs::kSignedInWithCredentialProvider, false);
+    // chrome/browser/gcm
+    gcm::RegisterPrefs(registry.get());
+
+    // signin
+    PrimaryAccountManager::RegisterProfilePrefs(registry.get());
+    ProfileOAuth2TokenService::RegisterProfilePrefs(registry.get());
+    GaiaCookieManagerService::RegisterPrefs(registry.get());
+    AccountTrackerService::RegisterPrefs(registry.get());
+
 #if defined(Q_OS_WIN)
     OSCrypt::RegisterLocalPrefs(registry.get());
 #endif
@@ -113,6 +122,7 @@ void PrefServiceAdapter::setup(const ProfileAdapter &profileAdapter)
     registry->RegisterListPref(extensions::pref_names::kNativeMessagingBlocklist);
     registry->RegisterListPref(extensions::pref_names::kNativeMessagingAllowlist);
     registry->RegisterBooleanPref(extensions::pref_names::kNativeMessagingUserLevelHosts, true);
+    registry->RegisterListPref(extensions::pref_names::kExtendedBackgroundLifetimeForPortConnectionsToUrls);
 #endif // BUILDFLAG(ENABLE_EXTENSIONS)
 
     // Media device salt id key
@@ -124,7 +134,6 @@ void PrefServiceAdapter::setup(const ProfileAdapter &profileAdapter)
     registry->RegisterBooleanPref(autofill::prefs::kAutofillProfileEnabled, false);
     registry->RegisterBooleanPref(autofill::prefs::kAutofillCreditCardEnabled, false);
     registry->RegisterBooleanPref(autofill::prefs::kAutofillCreditCardFidoAuthEnabled, false);
-    registry->RegisterBooleanPref(autofill::prefs::kAutofillWalletImportEnabled, false);
 
     // devtools
     registry->RegisterDictionaryPref(prefs::kDevToolsFileSystemPaths);
@@ -136,19 +145,9 @@ void PrefServiceAdapter::setup(const ProfileAdapter &profileAdapter)
     registry->RegisterDictionaryPref(prefs::kDevToolsSyncedPreferencesSyncDisabled);
     registry->RegisterDictionaryPref(prefs::kDevToolsSyncedPreferencesSyncEnabled);
 
-    registry->RegisterStringPref(prefs::kGoogleServicesSigninScopedDeviceId, std::string());
-    registry->RegisterStringPref(prefs::kGaiaCookieLastListAccountsData, std::string());
-    registry->RegisterStringPref(prefs::kGCMProductCategoryForSubtypes, std::string());
-
     {
         base::ScopedAllowBlocking allowBlock;
         m_prefService = factory.Create(registry);
-    }
-
-    // Initialize salt value if none was stored before
-    if (m_prefService->GetString(kPrefMediaDeviceIDSalt).empty()) {
-        m_prefService->SetString(kPrefMediaDeviceIDSalt,
-                content::BrowserContext::CreateRandomMediaDeviceIDSalt());
     }
 
 #if QT_CONFIG(webengine_spellchecker)
@@ -156,6 +155,8 @@ void PrefServiceAdapter::setup(const ProfileAdapter &profileAdapter)
     m_prefService->ClearPref(spellcheck::prefs::kSpellCheckEnable);
     m_prefService->ClearPref(spellcheck::prefs::kSpellCheckDictionaries);
 #endif // QT_CONFIG(webengine_spellchecker)
+
+    m_prefService->SchedulePendingLossyWrites();
 }
 
 void PrefServiceAdapter::commit()
@@ -191,6 +192,7 @@ void PrefServiceAdapter::setSpellCheckLanguages(const QStringList &languages)
     for (const auto &language : languages)
         dictionaries.push_back(language.toStdString());
     dictionaries_pref.SetValue(dictionaries);
+    m_prefService->SchedulePendingLossyWrites();
 }
 
 QStringList PrefServiceAdapter::spellCheckLanguages() const
@@ -206,7 +208,13 @@ QStringList PrefServiceAdapter::spellCheckLanguages() const
 
 void PrefServiceAdapter::setSpellCheckEnabled(bool enabled)
 {
-    m_prefService->SetBoolean(spellcheck::prefs::kSpellCheckEnable, enabled);
+    if (enabled == m_prefService->GetBoolean(spellcheck::prefs::kSpellCheckEnable))
+        return;
+
+    if (!WebEngineLibraryInfo::getPath(base::DIR_APP_DICTIONARIES, enabled).empty()) {
+        m_prefService->SetBoolean(spellcheck::prefs::kSpellCheckEnable, enabled);
+        m_prefService->SchedulePendingLossyWrites();
+    }
 }
 
 bool PrefServiceAdapter::isSpellCheckEnabled() const

@@ -123,9 +123,7 @@ export class ResizerWidget extends Common.ObjectWrapper.ObjectWrapper<EventTypes
   }
 }
 
-// TODO(crbug.com/1167717): Make this a const enum again
-// eslint-disable-next-line rulesdir/const_enum
-export enum Events {
+export const enum Events {
   ResizeStart = 'ResizeStart',
   ResizeUpdateXY = 'ResizeUpdateXY',
   ResizeUpdatePosition = 'ResizeUpdatePosition',
@@ -184,16 +182,16 @@ export class SimpleResizerWidget extends ResizerWidget {
     this.updateElementCursors();
   }
 
-  cursor(): string {
+  override cursor(): string {
     return this.isVerticalInternal ? 'ns-resize' : 'ew-resize';
   }
 
-  sendDragStart(x: number, y: number): void {
+  override sendDragStart(x: number, y: number): void {
     const position = this.isVerticalInternal ? y : x;
     this.dispatchEventToListeners(Events.ResizeStart, {startPosition: position, currentPosition: position});
   }
 
-  sendDragMove(startX: number, currentX: number, startY: number, currentY: number, shiftKey: boolean): void {
+  override sendDragMove(startX: number, currentX: number, startY: number, currentY: number, shiftKey: boolean): void {
     if (this.isVerticalInternal) {
       this.dispatchEventToListeners(
           Events.ResizeUpdatePosition, {startPosition: startY, currentPosition: currentY, shiftKey: shiftKey});

@@ -10,9 +10,9 @@
 
 #include "src/gpu/ganesh/glsl/GrGLSLProgramDataManager.h"
 
-#include "include/private/SkTArray.h"
+#include "include/private/base/SkTArray.h"
 #include "include/private/gpu/ganesh/GrTypesPriv.h"
-#include "src/core/SkAutoMalloc.h"
+#include "src/base/SkAutoMalloc.h"
 #include "src/core/SkSLTypeShared.h"
 
 /**
@@ -75,7 +75,7 @@ protected:
     uint32_t fUniformSize;
     bool fWrite16BitUniforms = false;
 
-    SkTArray<Uniform, true> fUniforms;
+    skia_private::TArray<Uniform, true> fUniforms;
 
     mutable SkAutoMalloc fUniformData;
     mutable bool         fUniformsDirty = false;

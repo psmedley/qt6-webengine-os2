@@ -25,7 +25,7 @@ namespace {
 
 TEST(TaskStateUnittest, PrevStateDefaultsToKernelVersion4p4) {
   auto from_raw = [](uint16_t raw) {
-    return TaskState::FromRawPrevState(raw, base::nullopt);
+    return TaskState::FromRawPrevState(raw, std::nullopt);
   };
 
   // No kernel version -> default to 4.4
@@ -95,7 +95,7 @@ TEST(TaskStateUnittest, KernelVersion4p14) {
 TEST(TaskStateUnittest, PreemptedFlag) {
   // Historical TASK_STATE_MAX as of 4.4:
   {
-    TaskState state = TaskState::FromRawPrevState(0x0800, base::nullopt);
+    TaskState state = TaskState::FromRawPrevState(0x0800, std::nullopt);
     EXPECT_STREQ(state.ToString().data(), "R+");
   }
   // TASK_STATE_MAX moved due to TASK_NEW:
@@ -135,12 +135,11 @@ TEST(TaskStateUnittest, FromParsedFlags) {
 // Covers both:
 // * parsing from systrace format ("prev_state=D|K")
 // * traceconv serializing the "raw" table into systrace format
-// See TODOs attached to b/247222275 for known bugs.
 TEST(TaskStateUnittest, Systrace) {
   auto roundtrip = [](const char* in) {
     uint16_t raw =
         TaskState::FromSystrace(in).ToRawStateOnlyForSystraceConversions();
-    return TaskState::FromRawPrevState(raw, base::nullopt).ToString('|');
+    return TaskState::FromRawPrevState(raw, std::nullopt).ToString('|');
   };
 
   EXPECT_STREQ(roundtrip("R").data(), "R");
@@ -149,11 +148,7 @@ TEST(TaskStateUnittest, Systrace) {
   EXPECT_STREQ(roundtrip("P").data(), "P");
   EXPECT_STREQ(roundtrip("x").data(), "x");
   EXPECT_STREQ(roundtrip("D|K").data(), "D|K");
-
-  // Idle state is parsed into kIdle when ingesting systrace, but not
-  // re-expanded when converting a trace to systrace format.
-  EXPECT_EQ(TaskState::FromSystrace("I").ParsedForTesting(), TaskState::kIdle);
-  EXPECT_STREQ(roundtrip("I").data(), "D|N");
+  EXPECT_STREQ(roundtrip("I").data(), "I");
 }
 
 }  // namespace

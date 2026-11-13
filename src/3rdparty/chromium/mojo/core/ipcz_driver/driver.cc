@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "base/containers/span.h"
-#include "base/containers/stack_container.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/rand_util.h"
 #include "mojo/core/ipcz_driver/object.h"
@@ -40,7 +39,7 @@ IpczResult IPCZ_API Serialize(IpczDriverHandle handle,
                               IpczDriverHandle transport_handle,
                               uint32_t flags,
                               const void* options,
-                              void* data,
+                              volatile void* data,
                               size_t* num_bytes,
                               IpczDriverHandle* handles,
                               size_t* num_handles) {
@@ -54,8 +53,10 @@ IpczResult IPCZ_API Serialize(IpczDriverHandle handle,
     return IPCZ_RESULT_ABORTED;
   }
 
-  const IpczResult result = transport->SerializeObject(*object, data, num_bytes,
-                                                       handles, num_handles);
+  // TODO(https://crbug.com/1451717): Propagate the volatile qualifier on
+  // `data`.
+  const IpczResult result = transport->SerializeObject(
+      *object, const_cast<void*>(data), num_bytes, handles, num_handles);
   if (result != IPCZ_RESULT_OK) {
     return result;
   }
@@ -65,7 +66,7 @@ IpczResult IPCZ_API Serialize(IpczDriverHandle handle,
   return IPCZ_RESULT_OK;
 }
 
-IpczResult IPCZ_API Deserialize(const void* data,
+IpczResult IPCZ_API Deserialize(const volatile void* data,
                                 size_t num_bytes,
                                 const IpczDriverHandle* handles,
                                 size_t num_handles,
@@ -78,9 +79,13 @@ IpczResult IPCZ_API Deserialize(const void* data,
     return IPCZ_RESULT_INVALID_ARGUMENT;
   }
 
+  // TODO(https://crbug.com/1451717): Propagate the volatile qualifier on
+  // `data`.
   scoped_refptr<ObjectBase> object;
   const IpczResult result = transport->DeserializeObject(
-      base::make_span(static_cast<const uint8_t*>(data), num_bytes),
+      base::make_span(
+          static_cast<const uint8_t*>(const_cast<const void*>(data)),
+          num_bytes),
       base::make_span(handles, num_handles), object);
   if (result != IPCZ_RESULT_OK) {
     return result;
@@ -90,34 +95,81 @@ IpczResult IPCZ_API Deserialize(const void* data,
   return IPCZ_RESULT_OK;
 }
 
-IpczResult IPCZ_API CreateTransports(IpczDriverHandle transport0_handle,
-                                     IpczDriverHandle transport1_handle,
-                                     uint32_t flags,
-                                     const void* options,
-                                     IpczDriverHandle* new_transport0,
-                                     IpczDriverHandle* new_transport1) {
-  Transport* transport0 = Transport::FromHandle(transport0_handle);
-  Transport* transport1 = Transport::FromHandle(transport1_handle);
-  if (!transport0 || !transport1) {
+IpczResult IPCZ_API
+CreateTransports(IpczDriverHandle existing_transport_from_here_to_a,
+                 IpczDriverHandle existing_transport_from_here_to_b,
+                 uint32_t flags,
+                 const void* options,
+                 IpczDriverHandle* new_transport_from_a_to_b,
+                 IpczDriverHandle* new_transport_from_b_to_a) {
+  // For two existing transports from the calling node (one to a node A and
+  // another to a node B), this creates a new transport that will be used to
+  // connect A and B directly to each other.
+  //
+  // The output `new_transport_from_a_to_b` is created to be sent to node A via
+  // `existing_transport_from_here_to_a`, while the output
+  // `new_transport_from_b_to_a` will be sent to node B via
+  // `existing_transport_from_here_to_b`.
+  //
+  // This function does not actually send the transports though: it only creates
+  // them and configures them with appropriate relative levels of trust in each
+  // other.
+  Transport* our_transport_to_a =
+      Transport::FromHandle(existing_transport_from_here_to_a);
+  Transport* our_transport_to_b =
+      Transport::FromHandle(existing_transport_from_here_to_b);
+  if (!our_transport_to_a || !our_transport_to_b) {
     return IPCZ_RESULT_INVALID_ARGUMENT;
   }
 
-  auto [one, two] = Transport::CreatePair(transport0->destination_type(),
-                                          transport1->destination_type());
-  if (transport0->destination_type() == Transport::EndpointType::kBroker) {
-    one->set_remote_process(transport1->remote_process().Duplicate());
+  const Transport::EndpointType node_a_type =
+      our_transport_to_a->destination_type();
+  const Transport::EndpointType node_b_type =
+      our_transport_to_b->destination_type();
+  auto [transport_from_a_to_b, transport_from_b_to_a] =
+      Transport::CreatePair(node_a_type, node_b_type);
+  if (node_a_type == Transport::EndpointType::kBroker) {
+    // If node A is a broker, give its new endpoint a handle to node B's process
+    // when possible.
+    transport_from_a_to_b->set_remote_process(
+        our_transport_to_b->remote_process().Duplicate());
   }
-  if (transport1->destination_type() == Transport::EndpointType::kBroker) {
-    two->set_remote_process(transport0->remote_process().Duplicate());
+
+  // A can trust B if we trust B. Note that this is only true if A also trusts
+  // us, which A must validate when accepting this transport from us. See
+  // Transport::Deserialize() for that validation.
+  transport_from_a_to_b->set_is_peer_trusted(
+      our_transport_to_b->is_peer_trusted());
+
+  // If A can assume it's trusted by us then it can also assume it's trusted by
+  // B, because we will tell B to do so.
+  transport_from_a_to_b->set_is_trusted_by_peer(
+      our_transport_to_a->is_trusted_by_peer());
+
+  if (node_b_type == Transport::EndpointType::kBroker) {
+    // If node B is a broker, give its new endpoint a handle to node A's process
+    // when possible.
+    transport_from_b_to_a->set_remote_process(
+        our_transport_to_a->remote_process().Duplicate());
   }
-  *new_transport0 = ObjectBase::ReleaseAsHandle(std::move(one));
-  *new_transport1 = ObjectBase::ReleaseAsHandle(std::move(two));
+
+  // Similar to above: B can trust A if we trust A; and if B can assume it's
+  // trusted by us then it can assume it's trusted by A too.
+  transport_from_b_to_a->set_is_peer_trusted(
+      our_transport_to_a->is_peer_trusted());
+  transport_from_b_to_a->set_is_trusted_by_peer(
+      our_transport_to_b->is_trusted_by_peer());
+
+  *new_transport_from_a_to_b =
+      ObjectBase::ReleaseAsHandle(std::move(transport_from_a_to_b));
+  *new_transport_from_b_to_a =
+      ObjectBase::ReleaseAsHandle(std::move(transport_from_b_to_a));
   return IPCZ_RESULT_OK;
 }
 
 IpczResult IPCZ_API
 ActivateTransport(IpczDriverHandle transport_handle,
-                  IpczHandle ipcz_transport,
+                  IpczHandle listener,
                   IpczTransportActivityHandler activity_handler,
                   uint32_t flags,
                   const void* options) {
@@ -126,7 +178,7 @@ ActivateTransport(IpczDriverHandle transport_handle,
     return IPCZ_RESULT_INVALID_ARGUMENT;
   }
 
-  transport->Activate(ipcz_transport, activity_handler);
+  transport->Activate(listener, activity_handler);
   return IPCZ_RESULT_OK;
 }
 
@@ -222,7 +274,7 @@ IpczResult IPCZ_API DuplicateSharedMemory(IpczDriverHandle driver_memory,
 IpczResult IPCZ_API MapSharedMemory(IpczDriverHandle driver_memory,
                                     uint32_t flags,
                                     const void* options,
-                                    void** address,
+                                    volatile void** address,
                                     IpczDriverHandle* driver_mapping) {
   SharedBuffer* buffer = SharedBuffer::FromHandle(driver_memory);
   if (!buffer || !driver_mapping) {

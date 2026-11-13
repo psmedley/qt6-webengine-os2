@@ -7,8 +7,8 @@
 #include <memory>
 #include <string>
 
-#include "base/bind.h"
 #include "base/debug/leak_annotations.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_runner.h"
@@ -380,6 +380,36 @@ TEST(WeakPtrFactoryTest, ComparisonToNull) {
   EXPECT_EQ(nullptr, null_ptr);
 }
 
+struct ReallyBaseClass {};
+struct BaseClass : ReallyBaseClass {
+  virtual ~BaseClass() = default;
+  void VirtualMethod() {}
+};
+struct OtherBaseClass {
+  virtual ~OtherBaseClass() = default;
+  virtual void VirtualMethod() {}
+};
+struct WithWeak final : BaseClass, OtherBaseClass {
+  WeakPtrFactory<WithWeak> factory{this};
+};
+
+TEST(WeakPtrTest, ConversionOffsetsPointer) {
+  WithWeak with;
+  WeakPtr<WithWeak> ptr(with.factory.GetWeakPtr());
+  {
+    // Copy construction.
+    WeakPtr<OtherBaseClass> base_ptr(ptr);
+    EXPECT_EQ(static_cast<WithWeak*>(&*base_ptr), &with);
+  }
+  {
+    // Move construction.
+    WeakPtr<OtherBaseClass> base_ptr(std::move(ptr));
+    EXPECT_EQ(static_cast<WithWeak*>(&*base_ptr), &with);
+  }
+
+  // WeakPtr doesn't have conversion operators for assignment.
+}
+
 TEST(WeakPtrTest, InvalidateWeakPtrs) {
   int data;
   WeakPtrFactory<int> factory(&data);
@@ -707,6 +737,24 @@ TEST(WeakPtrTest, ConstUpCast) {
       !std::is_constructible_v<WeakPtr<Target>, WeakPtr<const Target>>);
 }
 
+TEST(WeakPtrTest, ConstGetWeakPtr) {
+  struct TestTarget {
+    const char* Method() const { return "const method"; }
+    const char* Method() { return "non-const method"; }
+
+    WeakPtrFactory<TestTarget> weak_ptr_factory{this};
+  } non_const_test_target;
+
+  const TestTarget& const_test_target = non_const_test_target;
+
+  EXPECT_EQ(const_test_target.weak_ptr_factory.GetWeakPtr()->Method(),
+            "const method");
+  EXPECT_EQ(non_const_test_target.weak_ptr_factory.GetWeakPtr()->Method(),
+            "non-const method");
+  EXPECT_EQ(const_test_target.weak_ptr_factory.GetMutableWeakPtr()->Method(),
+            "non-const method");
+}
+
 TEST(WeakPtrTest, GetMutableWeakPtr) {
   struct TestStruct {
     int member = 0;
@@ -726,7 +774,7 @@ TEST(WeakPtrTest, GetMutableWeakPtr) {
 TEST(WeakPtrDeathTest, WeakPtrCopyDoesNotChangeThreadBinding) {
   // The default style "fast" does not support multi-threaded tests
   // (introduces deadlock on Linux).
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
 
   BackgroundThread background;
   background.Start();
@@ -754,7 +802,7 @@ TEST(WeakPtrDeathTest, WeakPtrCopyDoesNotChangeThreadBinding) {
 TEST(WeakPtrDeathTest, NonOwnerThreadDereferencesWeakPtrAfterReference) {
   // The default style "fast" does not support multi-threaded tests
   // (introduces deadlock on Linux).
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
 
   // Main thread creates a Target object.
   Target target;
@@ -774,7 +822,7 @@ TEST(WeakPtrDeathTest, NonOwnerThreadDereferencesWeakPtrAfterReference) {
 TEST(WeakPtrDeathTest, NonOwnerThreadDeletesWeakPtrAfterReference) {
   // The default style "fast" does not support multi-threaded tests
   // (introduces deadlock on Linux).
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
 
   std::unique_ptr<Target> target(new Target());
 
@@ -798,7 +846,7 @@ TEST(WeakPtrDeathTest, NonOwnerThreadDeletesWeakPtrAfterReference) {
 TEST(WeakPtrDeathTest, NonOwnerThreadDeletesObjectAfterReference) {
   // The default style "fast" does not support multi-threaded tests
   // (introduces deadlock on Linux).
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
 
   std::unique_ptr<Target> target(new Target());
 
@@ -817,7 +865,7 @@ TEST(WeakPtrDeathTest, NonOwnerThreadDeletesObjectAfterReference) {
 TEST(WeakPtrDeathTest, NonOwnerThreadReferencesObjectAfterDeletion) {
   // The default style "fast" does not support multi-threaded tests
   // (introduces deadlock on Linux).
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
 
   std::unique_ptr<Target> target(new Target());
 
@@ -837,7 +885,7 @@ TEST(WeakPtrDeathTest, NonOwnerThreadReferencesObjectAfterDeletion) {
 TEST(WeakPtrDeathTest, ArrowOperatorChecksOnBadDereference) {
   // The default style "fast" does not support multi-threaded tests
   // (introduces deadlock on Linux).
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
 
   auto target = std::make_unique<Target>();
   WeakPtr<Target> weak = target->AsWeakPtr();
@@ -848,7 +896,7 @@ TEST(WeakPtrDeathTest, ArrowOperatorChecksOnBadDereference) {
 TEST(WeakPtrDeathTest, StarOperatorChecksOnBadDereference) {
   // The default style "fast" does not support multi-threaded tests
   // (introduces deadlock on Linux).
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
 
   auto target = std::make_unique<Target>();
   WeakPtr<Target> weak = target->AsWeakPtr();

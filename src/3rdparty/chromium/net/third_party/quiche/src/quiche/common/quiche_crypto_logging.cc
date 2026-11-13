@@ -4,7 +4,12 @@
 
 #include "quiche/common/quiche_crypto_logging.h"
 
+#include <cstdint>
+#include <string>
+
+#include "absl/base/macros.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "openssl/err.h"
 #include "quiche/common/platform/api/quiche_logging.h"
@@ -28,7 +33,7 @@ void ClearOpenSslErrors() {
   }
 }
 
-absl::Status SslErrorAsStatus(absl::string_view msg) {
+absl::Status SslErrorAsStatus(absl::string_view msg, absl::StatusCode code) {
   std::string message;
   absl::StrAppend(&message, msg, "OpenSSL error: ");
   while (uint32_t error = ERR_get_error()) {
@@ -36,7 +41,7 @@ absl::Status SslErrorAsStatus(absl::string_view msg) {
     ERR_error_string_n(error, buf, ABSL_ARRAYSIZE(buf));
     absl::StrAppend(&message, buf);
   }
-  return absl::InternalError(message);
+  return absl::Status(code, message);
 }
 
 }  // namespace quiche

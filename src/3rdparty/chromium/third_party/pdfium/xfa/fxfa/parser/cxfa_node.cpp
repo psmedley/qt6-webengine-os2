@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,8 +36,8 @@
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
 #include "third_party/base/containers/contains.h"
+#include "third_party/base/containers/span.h"
 #include "third_party/base/notreached.h"
-#include "third_party/base/span.h"
 #include "xfa/fde/cfde_textout.h"
 #include "xfa/fgas/crt/cfgas_decimal.h"
 #include "xfa/fgas/crt/locale_iface.h"
@@ -511,9 +511,8 @@ RetainPtr<CFX_DIBitmap> XFA_LoadImageData(CXFA_FFDoc* pDoc,
     return nullptr;
 
   bNameImage = false;
-  RetainPtr<CFX_DIBitmap> pBitmap =
-      XFA_LoadImageFromBuffer(pImageFileRead, type, iImageXDpi, iImageYDpi);
-  return pBitmap;
+  return XFA_LoadImageFromBuffer(std::move(pImageFileRead), type, iImageXDpi,
+                                 iImageYDpi);
 }
 
 bool SplitDateTime(const WideString& wsDateTime,
@@ -1008,9 +1007,9 @@ void CXFA_Node::Trace(cppgc::Visitor* visitor) const {
   CXFA_Object::Trace(visitor);
   GCedTreeNodeMixin<CXFA_Node>::Trace(visitor);
   visitor->Trace(m_pAuxNode);
-  ContainerTrace(visitor, binding_nodes_);
   visitor->Trace(m_pLayoutData);
   visitor->Trace(ui_);
+  ContainerTrace(visitor, binding_nodes_);
 }
 
 CXFA_Node* CXFA_Node::Clone(bool bRecursive) {
@@ -1623,8 +1622,8 @@ void CXFA_Node::InsertChildAndNotify(CXFA_Node* pNode, CXFA_Node* pBeforeNode) {
     return;
 
   DCHECK(!pNode->xml_node_->GetParent());
-  xml_node_->InsertBefore(pNode->xml_node_.Get(),
-                          pBeforeNode ? pBeforeNode->xml_node_.Get() : nullptr);
+  xml_node_->InsertBefore(pNode->xml_node_,
+                          pBeforeNode ? pBeforeNode->xml_node_ : nullptr);
 }
 
 void CXFA_Node::RemoveChildAndNotify(CXFA_Node* pNode, bool bNotify) {
@@ -1640,12 +1639,12 @@ void CXFA_Node::RemoveChildAndNotify(CXFA_Node* pNode, bool bNotify) {
     return;
 
   if (!pNode->IsAttributeInXML()) {
-    xml_node_->RemoveChild(pNode->xml_node_.Get());
+    xml_node_->RemoveChild(pNode->xml_node_);
     return;
   }
 
   DCHECK_EQ(pNode->xml_node_, xml_node_);
-  CFX_XMLElement* pXMLElement = ToXMLElement(pNode->xml_node_.Get());
+  CFX_XMLElement* pXMLElement = ToXMLElement(pNode->xml_node_);
   if (pXMLElement) {
     WideString wsAttributeName =
         pNode->JSObject()->GetCData(XFA_Attribute::QualifiedName);
@@ -1850,7 +1849,7 @@ CFX_XMLNode* CXFA_Node::CreateXMLMappingNode() {
     xml_node_ = GetXMLDocument()->CreateNode<CFX_XMLElement>(
         JSObject()->GetCData(XFA_Attribute::Name));
   }
-  return xml_node_.Get();
+  return xml_node_;
 }
 
 bool CXFA_Node::IsNeedSavingXMLNode() const {
@@ -2489,8 +2488,8 @@ XFA_EventError CXFA_Node::ProcessCalculate(CXFA_FFDocView* pDocView) {
   if (IsUserInteractive())
     return XFA_EventError::kDisabled;
 
-  CXFA_EventParam EventParam;
-  EventParam.m_eType = XFA_EVENT_Calculate;
+  CXFA_EventParam EventParam(XFA_EVENT_Calculate);
+  EventParam.m_bTargeted = false;
   XFA_EventError iRet =
       ExecuteScript(pDocView, calc->GetScriptIfExists(), &EventParam);
   if (iRet != XFA_EventError::kSuccess)
@@ -2676,15 +2675,12 @@ XFA_EventError CXFA_Node::ProcessValidate(CXFA_FFDocView* pDocView,
       pDocView->GetLayoutStatus() != CXFA_FFDocView::LayoutStatus::kEnd;
 
   XFA_EventError iFormat = XFA_EventError::kNotExist;
-  XFA_EventError iRet = XFA_EventError::kNotExist;
   CXFA_Script* script = validate->GetScriptIfExists();
-  bool bRet = false;
   bool hasBoolResult = (bInitDoc || bStatus) && GetRawValue().IsEmpty();
+  CXFA_Node::BoolScriptResult result = {XFA_EventError::kNotExist, false};
   if (script) {
-    CXFA_EventParam eParam;
-    eParam.m_eType = XFA_EVENT_Validate;
-    eParam.m_pTarget = this;
-    std::tie(iRet, bRet) = ExecuteBoolScript(pDocView, script, &eParam);
+    CXFA_EventParam eParam(XFA_EVENT_Validate);
+    result = ExecuteBoolScript(pDocView, script, &eParam);
   }
 
   XFA_VERSION version = pDocView->GetDoc()->GetXFADoc()->GetCurVersionMode();
@@ -2697,15 +2693,16 @@ XFA_EventError CXFA_Node::ProcessValidate(CXFA_FFDocView* pDocView,
     if (!bVersionFlag)
       bVersionFlag = pDocView->GetDoc()->GetXFADoc()->is_scripting();
     XFA_EventErrorAccumulate(
-        &iRet,
+        &result.xfa_event_result,
         ProcessNullTestValidate(pDocView, validate, iFlags, bVersionFlag));
   }
-  if (iRet == XFA_EventError::kSuccess && iFormat != XFA_EventError::kSuccess &&
-      hasBoolResult && !bRet) {
+  if (result.xfa_event_result == XFA_EventError::kSuccess &&
+      iFormat != XFA_EventError::kSuccess && hasBoolResult &&
+      !result.script_result) {
     ProcessScriptTestValidate(pDocView, validate, bVersionFlag);
   }
-  XFA_EventErrorAccumulate(&iRet, iFormat);
-  return iRet;
+  XFA_EventErrorAccumulate(&result.xfa_event_result, iFormat);
+  return result.xfa_event_result;
 }
 
 WideString CXFA_Node::GetValidateCaptionName(bool bVersionFlag) {
@@ -2743,10 +2740,10 @@ WideString CXFA_Node::GetValidateMessage(bool bError, bool bVersionFlag) {
 XFA_EventError CXFA_Node::ExecuteScript(CXFA_FFDocView* pDocView,
                                         CXFA_Script* script,
                                         CXFA_EventParam* pEventParam) {
-  return ExecuteBoolScript(pDocView, script, pEventParam).first;
+  return ExecuteBoolScript(pDocView, script, pEventParam).xfa_event_result;
 }
 
-std::pair<XFA_EventError, bool> CXFA_Node::ExecuteBoolScript(
+CXFA_Node::BoolScriptResult CXFA_Node::ExecuteBoolScript(
     CXFA_FFDocView* pDocView,
     CXFA_Script* script,
     CXFA_EventParam* pEventParam) {
@@ -2769,7 +2766,8 @@ std::pair<XFA_EventError, bool> CXFA_Node::ExecuteBoolScript(
 
   CXFA_FFDoc* pDoc = pDocView->GetDoc();
   CFXJSE_Engine* pContext = pDoc->GetXFADoc()->GetScriptContext();
-  pContext->SetEventParam(pEventParam);
+  CFXJSE_Engine::EventParamScope paramScope(
+      pContext, pEventParam->m_bTargeted ? this : nullptr, pEventParam);
   pContext->SetRunAtType(script->GetRunAt());
 
   std::vector<cppgc::Persistent<CXFA_Node>> refNodes;
@@ -2778,24 +2776,24 @@ std::pair<XFA_EventError, bool> CXFA_Node::ExecuteBoolScript(
     pContext->SetNodesOfRunScript(&refNodes);
   }
 
-  auto pTmpRetValue = std::make_unique<CFXJSE_Value>();
-  bool bRet = false;
+  CFXJSE_Context::ExecutionResult exec_result;
   {
     AutoRestorer<uint8_t> restorer(&m_ExecuteRecursionDepth);
     ++m_ExecuteRecursionDepth;
-    bRet = pContext->RunScript(eScriptType, wsExpression.AsStringView(),
-                               pTmpRetValue.get(), this);
+    exec_result =
+        pContext->RunScript(eScriptType, wsExpression.AsStringView(), this);
   }
 
   XFA_EventError iRet = XFA_EventError::kError;
-  if (bRet) {
+  if (exec_result.status) {
     iRet = XFA_EventError::kSuccess;
     if (pEventParam->m_eType == XFA_EVENT_Calculate ||
         pEventParam->m_eType == XFA_EVENT_InitCalculate) {
-      if (!pTmpRetValue->IsUndefined(pContext->GetIsolate())) {
-        if (!pTmpRetValue->IsNull(pContext->GetIsolate()))
+      if (!exec_result.value->IsUndefined(pContext->GetIsolate())) {
+        if (!exec_result.value->IsNull(pContext->GetIsolate())) {
           pEventParam->m_wsResult =
-              pTmpRetValue->ToWideString(pContext->GetIsolate());
+              exec_result.value->ToWideString(pContext->GetIsolate());
+        }
 
         iRet = XFA_EventError::kSuccess;
       } else {
@@ -2820,10 +2818,9 @@ std::pair<XFA_EventError, bool> CXFA_Node::ExecuteBoolScript(
     }
   }
   pContext->SetNodesOfRunScript(nullptr);
-  pContext->SetEventParam(nullptr);
 
-  return {iRet, pTmpRetValue->IsBoolean(pContext->GetIsolate()) &&
-                    pTmpRetValue->ToBoolean(pContext->GetIsolate())};
+  return {iRet, exec_result.value->IsBoolean(pContext->GetIsolate()) &&
+                    exec_result.value->ToBoolean(pContext->GetIsolate())};
 }
 
 std::pair<XFA_FFWidgetType, CXFA_Ui*>
@@ -2919,7 +2916,7 @@ CXFA_Node::CreateChildUIAndValueNodesIfNeeded() {
       widget_type = XFA_FFWidgetType::kTextEdit;
     }
   } else {
-    NOTREACHED();
+    NOTREACHED_NORETURN();
   }
 
   if (!pUIChild) {
@@ -2934,8 +2931,7 @@ CXFA_Node::CreateChildUIAndValueNodesIfNeeded() {
 }
 
 XFA_FFWidgetType CXFA_Node::GetDefaultFFWidgetType() const {
-  NOTREACHED();
-  return XFA_FFWidgetType::kNone;
+  NOTREACHED_NORETURN();
 }
 
 CXFA_Node* CXFA_Node::CreateUINodeIfNeeded(CXFA_Ui* ui, XFA_Element type) {
@@ -2980,7 +2976,7 @@ CXFA_Node* CXFA_Node::GetUIChildNode() {
   } else if (type == XFA_Element::ExclGroup) {
     ff_widget_type_ = XFA_FFWidgetType::kExclGroup;
   } else {
-    NOTREACHED();
+    NOTREACHED_NORETURN();
   }
   return ui_ ? ui_->GetFirstChild() : nullptr;
 }
@@ -3711,8 +3707,7 @@ absl::optional<float> CXFA_Node::FindSplitPos(CXFA_FFDocView* pDocView,
           fStartOffset += (fHeight - fTextHeight + fSpaceAbove);
           break;
         default:
-          NOTREACHED();
-          break;
+          NOTREACHED_NORETURN();
       }
     }
     if (fStartOffset < 0.1f)
@@ -5097,7 +5092,7 @@ void CXFA_Node::SetToXML(const WideString& value) {
       ToXMLText(GetXMLMappingNode())->SetText(value);
       break;
     default:
-      NOTREACHED();
+      NOTREACHED_NORETURN();
   }
 }
 

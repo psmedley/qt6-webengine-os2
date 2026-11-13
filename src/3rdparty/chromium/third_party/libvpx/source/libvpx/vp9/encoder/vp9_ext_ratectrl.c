@@ -8,10 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <stddef.h>
+
 #include "vp9/encoder/vp9_ext_ratectrl.h"
 #include "vp9/encoder/vp9_encoder.h"
 #include "vp9/common/vp9_common.h"
 #include "vpx_dsp/psnr.h"
+#include "vpx/vpx_codec.h"
+#include "vpx/vpx_ext_ratectrl.h"
+#include "vpx/vpx_tpl.h"
 
 vpx_codec_err_t vp9_extrc_init(EXT_RATECTRL *ext_ratectrl) {
   if (ext_ratectrl == NULL) {
@@ -92,6 +97,7 @@ static void gen_rc_firstpass_stats(const FIRSTPASS_STATS *stats,
   rc_frame_stats->mv_in_out_count = stats->mv_in_out_count;
   rc_frame_stats->duration = stats->duration;
   rc_frame_stats->count = stats->count;
+  rc_frame_stats->new_mv_count = stats->new_mv_count;
 }
 
 vpx_codec_err_t vp9_extrc_send_firstpass_stats(
@@ -118,6 +124,21 @@ vpx_codec_err_t vp9_extrc_send_firstpass_stats(
   return VPX_CODEC_OK;
 }
 
+vpx_codec_err_t vp9_extrc_send_tpl_stats(EXT_RATECTRL *ext_ratectrl,
+                                         const VpxTplGopStats *tpl_gop_stats) {
+  if (ext_ratectrl == NULL) {
+    return VPX_CODEC_INVALID_PARAM;
+  }
+  if (ext_ratectrl->ready && ext_ratectrl->funcs.send_tpl_gop_stats != NULL) {
+    vpx_rc_status_t rc_status = ext_ratectrl->funcs.send_tpl_gop_stats(
+        ext_ratectrl->model, tpl_gop_stats);
+    if (rc_status == VPX_RC_ERROR) {
+      return VPX_CODEC_ERROR;
+    }
+  }
+  return VPX_CODEC_OK;
+}
+
 static int extrc_get_frame_type(FRAME_UPDATE_TYPE update_type) {
   // TODO(angiebird): Add unit test to make sure this function behaves like
   // get_frame_type_from_update_type()
@@ -131,7 +152,6 @@ static int extrc_get_frame_type(FRAME_UPDATE_TYPE update_type) {
     default:
       fprintf(stderr, "Unsupported update_type %d\n", update_type);
       abort();
-      return 1;
   }
 }
 
@@ -140,28 +160,26 @@ vpx_codec_err_t vp9_extrc_get_encodeframe_decision(
     FRAME_UPDATE_TYPE update_type, int gop_size, int use_alt_ref,
     RefCntBuffer *ref_frame_bufs[MAX_INTER_REF_FRAMES], int ref_frame_flags,
     vpx_rc_encodeframe_decision_t *encode_frame_decision) {
-  if (ext_ratectrl == NULL) {
-    return VPX_CODEC_INVALID_PARAM;
-  }
-  if (ext_ratectrl->ready && (ext_ratectrl->funcs.rc_type & VPX_RC_QP) != 0) {
-    vpx_rc_status_t rc_status;
-    vpx_rc_encodeframe_info_t encode_frame_info;
-    encode_frame_info.show_index = show_index;
-    encode_frame_info.coding_index = coding_index;
-    encode_frame_info.gop_index = gop_index;
-    encode_frame_info.frame_type = extrc_get_frame_type(update_type);
-    encode_frame_info.gop_size = gop_size;
-    encode_frame_info.use_alt_ref = use_alt_ref;
+  assert(ext_ratectrl != NULL);
+  assert(ext_ratectrl->ready && (ext_ratectrl->funcs.rc_type & VPX_RC_QP) != 0);
 
-    vp9_get_ref_frame_info(update_type, ref_frame_flags, ref_frame_bufs,
-                           encode_frame_info.ref_frame_coding_indexes,
-                           encode_frame_info.ref_frame_valid_list);
+  vpx_rc_status_t rc_status;
+  vpx_rc_encodeframe_info_t encode_frame_info;
+  encode_frame_info.show_index = show_index;
+  encode_frame_info.coding_index = coding_index;
+  encode_frame_info.gop_index = gop_index;
+  encode_frame_info.frame_type = extrc_get_frame_type(update_type);
+  encode_frame_info.gop_size = gop_size;
+  encode_frame_info.use_alt_ref = use_alt_ref;
 
-    rc_status = ext_ratectrl->funcs.get_encodeframe_decision(
-        ext_ratectrl->model, &encode_frame_info, encode_frame_decision);
-    if (rc_status == VPX_RC_ERROR) {
-      return VPX_CODEC_ERROR;
-    }
+  vp9_get_ref_frame_info(update_type, ref_frame_flags, ref_frame_bufs,
+                         encode_frame_info.ref_frame_coding_indexes,
+                         encode_frame_info.ref_frame_valid_list);
+
+  rc_status = ext_ratectrl->funcs.get_encodeframe_decision(
+      ext_ratectrl->model, &encode_frame_info, encode_frame_decision);
+  if (rc_status == VPX_RC_ERROR) {
+    return VPX_CODEC_ERROR;
   }
   return VPX_CODEC_OK;
 }
@@ -225,6 +243,35 @@ vpx_codec_err_t vp9_extrc_get_gop_decision(
           gop_info->max_gf_interval) {
     return VPX_CODEC_ERROR;
   }
+  if (rc_status == VPX_RC_ERROR) {
+    return VPX_CODEC_ERROR;
+  }
+  return VPX_CODEC_OK;
+}
+
+vpx_codec_err_t vp9_extrc_get_frame_rdmult(
+    EXT_RATECTRL *ext_ratectrl, int show_index, int coding_index, int gop_index,
+    FRAME_UPDATE_TYPE update_type, int gop_size, int use_alt_ref,
+    RefCntBuffer *ref_frame_bufs[MAX_INTER_REF_FRAMES], int ref_frame_flags,
+    int *rdmult) {
+  vpx_rc_status_t rc_status;
+  vpx_rc_encodeframe_info_t encode_frame_info;
+  if (ext_ratectrl == NULL || !ext_ratectrl->ready ||
+      (ext_ratectrl->funcs.rc_type & VPX_RC_RDMULT) == 0) {
+    return VPX_CODEC_INVALID_PARAM;
+  }
+  encode_frame_info.show_index = show_index;
+  encode_frame_info.coding_index = coding_index;
+  encode_frame_info.gop_index = gop_index;
+  encode_frame_info.frame_type = extrc_get_frame_type(update_type);
+  encode_frame_info.gop_size = gop_size;
+  encode_frame_info.use_alt_ref = use_alt_ref;
+
+  vp9_get_ref_frame_info(update_type, ref_frame_flags, ref_frame_bufs,
+                         encode_frame_info.ref_frame_coding_indexes,
+                         encode_frame_info.ref_frame_valid_list);
+  rc_status = ext_ratectrl->funcs.get_frame_rdmult(ext_ratectrl->model,
+                                                   &encode_frame_info, rdmult);
   if (rc_status == VPX_RC_ERROR) {
     return VPX_CODEC_ERROR;
   }

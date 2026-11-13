@@ -15,19 +15,21 @@
 #ifndef PLATFORM_IMPL_WINDOWS_BLUETOOTH_ADAPTER_H_
 #define PLATFORM_IMPL_WINDOWS_BLUETOOTH_ADAPTER_H_
 
-#include <guiddef.h>
+// clang-format off
 #include <windows.h>
+#include <guiddef.h>
+// clang-format on
 
-#include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 
+#include "absl/functional/any_invocable.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Bluetooth.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Radios.h"
 #include "internal/platform/implementation/windows/generated/winrt/base.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
 
@@ -38,7 +40,7 @@ using WindowsBluetoothAdapter =
 
 // Represents a radio device on the system.
 // https://docs.microsoft.com/en-us/uwp/api/windows.devices.radios.radio?view=winrt-20348
-using winrt::Windows::Devices::Radios::IRadio;
+using winrt::Windows::Devices::Radios::Radio;
 
 // Enumeration that describes possible radio states.
 // https://docs.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate?view=winrt-20348
@@ -51,7 +53,8 @@ class BluetoothAdapter : public api::BluetoothAdapter {
 
   ~BluetoothAdapter() override = default;
 
-  typedef std::function<void(api::BluetoothAdapter::ScanMode)> ScanModeCallback;
+  typedef absl::AnyInvocable<void(api::BluetoothAdapter::ScanMode)>
+      ScanModeCallback;
 
   // Synchronously sets the status of the BluetoothAdapter to 'status', and
   // returns true if the operation was a success.
@@ -87,14 +90,24 @@ class BluetoothAdapter : public api::BluetoothAdapter {
   std::string GetNameFromComputerName() const;
 
   void SetOnScanModeChanged(ScanModeCallback callback) {
-    if (scan_mode_changed_ == nullptr) {
-      scan_mode_changed_ = callback;
+    if (scan_mode_changed_) {
+      scan_mode_changed_ = std::move(callback);
     }
   }
 
   // Returns true if the Bluetooth hardware supports Bluetooth 5.0 Extended
   // Advertising
   bool IsExtendedAdvertisingSupported() const;
+
+  // Returns true if the Bluetooth hardware supports BLE Central Role
+  bool IsCentralRoleSupported() const;
+
+  // Returns true if the Bluetooth hardware supports BLE Peripheral Role
+  bool IsPeripheralRoleSupported() const;
+
+  // Returns true if the Bluetooth hardware supports BLE
+  bool IsLowEnergySupported() const;
+
   void RestoreRadioNameIfNecessary();
 
  private:
@@ -102,15 +115,15 @@ class BluetoothAdapter : public api::BluetoothAdapter {
   void StoreRadioNames(absl::string_view original_radio_name,
                        absl::string_view nearby_radio_name);
 
-  WindowsBluetoothAdapter windows_bluetooth_adapter_;
+  WindowsBluetoothAdapter windows_bluetooth_adapter_ = nullptr;
   std::string registry_bluetooth_adapter_name_;
 
-  IRadio windows_bluetooth_radio_;
-  char *GetGenericBluetoothAdapterInstanceID() const;
+  Radio windows_bluetooth_radio_ = nullptr;
+  std::optional<std::string> GetGenericBluetoothAdapterInstanceID() const;
   void find_and_replace(char *source, const char *strFind,
                         const char *strReplace) const;
   ScanMode scan_mode_ = ScanMode::kNone;
-  ScanModeCallback scan_mode_changed_ = nullptr;
+  ScanModeCallback scan_mode_changed_;
 
   // Used to fake the device name when the device name is longer than android
   // limitation.
@@ -119,6 +132,5 @@ class BluetoothAdapter : public api::BluetoothAdapter {
 
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_IMPL_WINDOWS_BLUETOOTH_ADAPTER_H_

@@ -56,11 +56,17 @@ void QueryCacheParams(CpuCacheParams* cache_params) {
         continue;  // continue, not break, it is possible to have L1+L3 but no
                    // L2.
       }
-      const bool is_local =
-          cpuinfo_get_processor(cache->processor_start)->core ==
-          cpuinfo_get_processor(cache->processor_start +
-                                cache->processor_count - 1)
-              ->core;
+      if (!cache->processor_count) {
+        continue;  // crashes from Chrome on Android suggests that might happen?
+      }
+      const cpuinfo_processor* processor_start =
+          cpuinfo_get_processor(cache->processor_start);
+      const cpuinfo_processor* processor_end = cpuinfo_get_processor(
+          cache->processor_start + cache->processor_count - 1);
+      if (!processor_start || !processor_end) {
+        continue;  // crashes from Chrome on Android suggests this might happen.
+      }
+      const bool is_local = processor_start->core == processor_end->core;
       if (is_local) {
         local_cache_size = cache->size;
       }
@@ -123,7 +129,12 @@ bool CpuInfo::CurrentCpuIsA55ish() {
     return false;
   }
 
-  switch (cpuinfo_get_uarch(cpuinfo_get_current_uarch_index())->uarch) {
+  const struct cpuinfo_uarch_info* cpuinfo_uarch =
+      cpuinfo_get_uarch(cpuinfo_get_current_uarch_index());
+  if (!cpuinfo_uarch) {
+    return false;
+  }
+  switch (cpuinfo_uarch->uarch) {
     case cpuinfo_uarch_cortex_a53:
     case cpuinfo_uarch_cortex_a55r0:
     case cpuinfo_uarch_cortex_a55:
@@ -137,8 +148,12 @@ bool CpuInfo::CurrentCpuIsX1() {
   if (!EnsureInitialized()) {
     return false;
   }
-  if (cpuinfo_get_uarch(cpuinfo_get_current_uarch_index())->uarch ==
-      cpuinfo_uarch_cortex_x1) {
+  const struct cpuinfo_uarch_info* cpuinfo_uarch =
+      cpuinfo_get_uarch(cpuinfo_get_current_uarch_index());
+  if (!cpuinfo_uarch) {
+    return false;
+  }
+  if (cpuinfo_uarch->uarch == cpuinfo_uarch_cortex_x1) {
     return true;
   }
   return false;

@@ -19,21 +19,20 @@
 #ifndef AVCODEC_CBS_INTERNAL_H
 #define AVCODEC_CBS_INTERNAL_H
 
+#include <stddef.h>
 #include <stdint.h>
 
-#include "libavutil/buffer.h"
 #include "libavutil/log.h"
 
 #include "cbs.h"
 #include "codec_id.h"
 #include "get_bits.h"
 #include "put_bits.h"
+#include "refstruct.h"
 
 
 enum CBSContentType {
-    // Unit content is a simple structure.
-    CBS_CONTENT_TYPE_POD,
-    // Unit content contains some references to other structures, but all
+    // Unit content may contain some references to other structures, but all
     // managed via buffer reference counting.  The descriptor defines the
     // structure offsets of every buffer reference.
     CBS_CONTENT_TYPE_INTERNAL_REFS,
@@ -43,9 +42,9 @@ enum CBSContentType {
 };
 
 enum {
-      // Maximum number of unit types described by the same unit type
-      // descriptor.
-      CBS_MAX_UNIT_TYPES  = 3,
+      // Maximum number of unit types described by the same non-range
+      // unit type descriptor.
+      CBS_MAX_LIST_UNIT_TYPES = 3,
       // Maximum number of reference buffer offsets in any one unit.
       CBS_MAX_REF_OFFSETS = 2,
       // Special value used in a unit type descriptor to indicate that it
@@ -62,7 +61,7 @@ typedef const struct CodedBitstreamUnitTypeDescriptor {
 
     union {
         // Array of unit types that this entry describes.
-        CodedBitstreamUnitType list[CBS_MAX_UNIT_TYPES];
+        CodedBitstreamUnitType list[CBS_MAX_LIST_UNIT_TYPES];
         // Start and end of unit type range, used if nb_unit_types is
         // CBS_UNIT_TYPE_RANGE.
         struct {
@@ -78,9 +77,12 @@ typedef const struct CodedBitstreamUnitTypeDescriptor {
     size_t content_size;
 
     union {
+        // This union's state is determined by content_type:
+        // ref for CBS_CONTENT_TYPE_INTERNAL_REFS,
+        // complex for CBS_CONTENT_TYPE_COMPLEX.
         struct {
-            // Number of entries in the ref_offsets array.  Only nonzero
-            // if the content_type is CBS_CONTENT_TYPE_INTERNAL_REFS.
+            // Number of entries in the ref_offsets array.
+            // May be zero, then the structure is POD-like.
             int nb_offsets;
             // The structure must contain two adjacent elements:
             //   type        *field;
@@ -91,8 +93,8 @@ typedef const struct CodedBitstreamUnitTypeDescriptor {
         } ref;
 
         struct {
-            void (*content_free)(void *opaque, uint8_t *data);
-            int  (*content_clone)(AVBufferRef **ref, CodedBitstreamUnit *unit);
+            void (*content_free)(FFRefStructOpaque opaque, void *content);
+            int  (*content_clone)(void **new_content, CodedBitstreamUnit *unit);
         } complex;
     } type;
 } CodedBitstreamUnitTypeDescriptor;
@@ -132,6 +134,12 @@ typedef struct CodedBitstreamType {
                       CodedBitstreamUnit *unit,
                       PutBitContext *pbc);
 
+    // Return 1 when the unit should be dropped according to 'skip',
+    // 0 otherwise.
+    int (*discarded_unit)(CodedBitstreamContext *ctx,
+                          const CodedBitstreamUnit *unit,
+                          enum AVDiscard skip);
+
     // Read the data from all of frag->units and assemble it into
     // a bitstream for the whole fragment.
     int (*assemble_fragment)(CodedBitstreamContext *ctx,
@@ -150,23 +158,28 @@ typedef struct CodedBitstreamType {
 void ff_cbs_trace_header(CodedBitstreamContext *ctx,
                          const char *name);
 
-void ff_cbs_trace_syntax_element(CodedBitstreamContext *ctx, int position,
-                                 const char *name, const int *subscripts,
-                                 const char *bitstring, int64_t value);
-
 
 // Helper functions for read/write of common bitstream elements, including
-// generation of trace output.
+// generation of trace output. The simple functions are equivalent to
+// their non-simple counterparts except that their range is unrestricted
+// (i.e. only limited by the amount of bits used) and they lack
+// the ability to use subscripts.
 
 int ff_cbs_read_unsigned(CodedBitstreamContext *ctx, GetBitContext *gbc,
                          int width, const char *name,
                          const int *subscripts, uint32_t *write_to,
                          uint32_t range_min, uint32_t range_max);
 
+int ff_cbs_read_simple_unsigned(CodedBitstreamContext *ctx, GetBitContext *gbc,
+                                int width, const char *name, uint32_t *write_to);
+
 int ff_cbs_write_unsigned(CodedBitstreamContext *ctx, PutBitContext *pbc,
                           int width, const char *name,
                           const int *subscripts, uint32_t value,
                           uint32_t range_min, uint32_t range_max);
+
+int ff_cbs_write_simple_unsigned(CodedBitstreamContext *ctx, PutBitContext *pbc,
+                                 int width, const char *name, uint32_t value);
 
 int ff_cbs_read_signed(CodedBitstreamContext *ctx, GetBitContext *gbc,
                        int width, const char *name,
@@ -190,19 +203,102 @@ int ff_cbs_write_signed(CodedBitstreamContext *ctx, PutBitContext *pbc,
 // range_min in the above functions.
 #define MIN_INT_BITS(length) (-(INT64_C(1) << ((length) - 1)))
 
+
+// Start of a syntax element during read tracing.
+#define CBS_TRACE_READ_START() \
+    GetBitContext trace_start; \
+    do { \
+        if (ctx->trace_enable) \
+            trace_start = *gbc; \
+    } while (0)
+
+// End of a syntax element for tracing, make callback.
+#define CBS_TRACE_READ_END() \
+    do { \
+        if (ctx->trace_enable) { \
+            int start_position = get_bits_count(&trace_start); \
+            int end_position   = get_bits_count(gbc); \
+            av_assert0(start_position <= end_position); \
+            ctx->trace_read_callback(ctx->trace_context, &trace_start, \
+                                     end_position - start_position, \
+                                     name, subscripts, value); \
+        } \
+    } while (0)
+
+// End of a syntax element with no subscript entries.
+#define CBS_TRACE_READ_END_NO_SUBSCRIPTS() \
+    do { \
+        const int *subscripts = NULL; \
+        CBS_TRACE_READ_END(); \
+    } while (0)
+
+// End of a syntax element which is made up of subelements which
+// are aleady traced, so we are only showing the value.
+#define CBS_TRACE_READ_END_VALUE_ONLY() \
+    do { \
+        if (ctx->trace_enable) { \
+            ctx->trace_read_callback(ctx->trace_context, &trace_start, 0, \
+                                     name, subscripts, value); \
+        } \
+    } while (0)
+
+// Start of a syntax element during write tracing.
+#define CBS_TRACE_WRITE_START() \
+    int start_position; \
+    do { \
+        if (ctx->trace_enable) \
+            start_position = put_bits_count(pbc);; \
+    } while (0)
+
+// End of a syntax element for tracing, make callback.
+#define CBS_TRACE_WRITE_END() \
+    do { \
+        if (ctx->trace_enable) { \
+            int end_position   = put_bits_count(pbc); \
+            av_assert0(start_position <= end_position); \
+            ctx->trace_write_callback(ctx->trace_context, pbc, \
+                                      end_position - start_position, \
+                                      name, subscripts, value); \
+        } \
+    } while (0)
+
+// End of a syntax element with no subscript entries.
+#define CBS_TRACE_WRITE_END_NO_SUBSCRIPTS() \
+    do { \
+        const int *subscripts = NULL; \
+        CBS_TRACE_WRITE_END(); \
+    } while (0)
+
+// End of a syntax element which is made up of subelements which are
+// aleady traced, so we are only showing the value.  This forges a
+// PutBitContext to point to the position of the start of the syntax
+// element, but the other state doesn't matter because length is zero.
+#define CBS_TRACE_WRITE_END_VALUE_ONLY() \
+    do { \
+        if (ctx->trace_enable) { \
+            PutBitContext tmp; \
+            init_put_bits(&tmp, pbc->buf, start_position); \
+            skip_put_bits(&tmp, start_position); \
+            ctx->trace_write_callback(ctx->trace_context, &tmp, 0, \
+                                      name, subscripts, value); \
+        } \
+    } while (0)
+
 #define TYPE_LIST(...) { __VA_ARGS__ }
-#define CBS_UNIT_TYPE_POD(type, structure) { \
+#define CBS_UNIT_TYPE_POD(type_, structure) { \
         .nb_unit_types  = 1, \
-        .unit_type.list = { type }, \
-        .content_type   = CBS_CONTENT_TYPE_POD, \
+        .unit_type.list = { type_ }, \
+        .content_type   = CBS_CONTENT_TYPE_INTERNAL_REFS, \
         .content_size   = sizeof(structure), \
+        .type.ref       = { .nb_offsets = 0 }, \
     }
 #define CBS_UNIT_RANGE_POD(range_start, range_end, structure) { \
         .nb_unit_types         = CBS_UNIT_TYPE_RANGE, \
         .unit_type.range.start = range_start, \
         .unit_type.range.end   = range_end, \
-        .content_type          = CBS_CONTENT_TYPE_POD, \
+        .content_type          = CBS_CONTENT_TYPE_INTERNAL_REFS, \
         .content_size          = sizeof(structure), \
+        .type.ref              = { .nb_offsets = 0 }, \
     }
 
 #define CBS_UNIT_TYPES_INTERNAL_REF(types, structure, ref_field) { \
@@ -242,8 +338,10 @@ int ff_cbs_write_signed(CodedBitstreamContext *ctx, PutBitContext *pbc,
 extern const CodedBitstreamType ff_cbs_type_av1;
 extern const CodedBitstreamType ff_cbs_type_h264;
 extern const CodedBitstreamType ff_cbs_type_h265;
+extern const CodedBitstreamType ff_cbs_type_h266;
 extern const CodedBitstreamType ff_cbs_type_jpeg;
 extern const CodedBitstreamType ff_cbs_type_mpeg2;
+extern const CodedBitstreamType ff_cbs_type_vp8;
 extern const CodedBitstreamType ff_cbs_type_vp9;
 
 

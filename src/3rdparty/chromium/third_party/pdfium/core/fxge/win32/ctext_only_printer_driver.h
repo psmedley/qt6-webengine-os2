@@ -1,4 +1,4 @@
-// Copyright 2020 PDFium Authors. All rights reserved.
+// Copyright 2020 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,13 +36,13 @@ class CTextOnlyPrinterDriver final : public RenderDeviceDriverIface {
                 const CFX_FillRenderOptions& fill_options,
                 BlendMode blend_type) override;
   bool GetClipBox(FX_RECT* pRect) override;
-  bool SetDIBits(const RetainPtr<CFX_DIBBase>& pBitmap,
+  bool SetDIBits(const RetainPtr<const CFX_DIBBase>& pBitmap,
                  uint32_t color,
                  const FX_RECT& src_rect,
                  int left,
                  int top,
                  BlendMode blend_type) override;
-  bool StretchDIBits(const RetainPtr<CFX_DIBBase>& pBitmap,
+  bool StretchDIBits(RetainPtr<const CFX_DIBBase> bitmap,
                      uint32_t color,
                      int dest_left,
                      int dest_top,
@@ -51,8 +51,8 @@ class CTextOnlyPrinterDriver final : public RenderDeviceDriverIface {
                      const FX_RECT* pClipRect,
                      const FXDIB_ResampleOptions& options,
                      BlendMode blend_type) override;
-  bool StartDIBits(const RetainPtr<CFX_DIBBase>& pBitmap,
-                   int bitmap_alpha,
+  bool StartDIBits(RetainPtr<const CFX_DIBBase> bitmap,
+                   float alpha,
                    uint32_t color,
                    const CFX_Matrix& matrix,
                    const FXDIB_ResampleOptions& options,
@@ -64,6 +64,8 @@ class CTextOnlyPrinterDriver final : public RenderDeviceDriverIface {
                       float font_size,
                       uint32_t color,
                       const CFX_TextRenderOptions& options) override;
+  bool MultiplyAlpha(float alpha) override;
+  bool MultiplyAlphaMask(const RetainPtr<const CFX_DIBBase>& mask) override;
 
   HDC m_hDC;
   const int m_Width;

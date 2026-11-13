@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "api/candidate.h"
@@ -42,6 +43,7 @@
 #include "rtc_base/memory/always_valid_pointer.h"
 #include "rtc_base/net_helper.h"
 #include "rtc_base/network.h"
+#include "rtc_base/network/received_packet.h"
 #include "rtc_base/proxy_info.h"
 #include "rtc_base/rate_tracker.h"
 #include "rtc_base/socket_address.h"
@@ -50,11 +52,6 @@
 #include "rtc_base/weak_ptr.h"
 
 namespace cricket {
-
-RTC_EXPORT extern const char LOCAL_PORT_TYPE[];
-RTC_EXPORT extern const char STUN_PORT_TYPE[];
-RTC_EXPORT extern const char PRFLX_PORT_TYPE[];
-RTC_EXPORT extern const char RELAY_PORT_TYPE[];
 
 // RFC 6544, TCP candidate encoding rules.
 extern const int DISCARD_PORT;
@@ -176,7 +173,7 @@ typedef std::set<rtc::SocketAddress> ServerAddresses;
 // Represents a local communication mechanism that can be used to create
 // connections to similar mechanisms of the other client.  Subclasses of this
 // one add support for specific mechanisms like local UDP ports.
-class Port : public PortInterface, public sigslot::has_slots<> {
+class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
  public:
   // INIT: The state when a port is just created.
   // KEEP_ALIVE_UNTIL_PRUNED: A port should not be destroyed even if no
@@ -185,14 +182,14 @@ class Port : public PortInterface, public sigslot::has_slots<> {
   // 30 seconds.
   enum class State { INIT, KEEP_ALIVE_UNTIL_PRUNED, PRUNED };
   Port(webrtc::TaskQueueBase* thread,
-       absl::string_view type,
+       absl::string_view type ABSL_ATTRIBUTE_LIFETIME_BOUND,
        rtc::PacketSocketFactory* factory,
        const rtc::Network* network,
        absl::string_view username_fragment,
        absl::string_view password,
        const webrtc::FieldTrialsView* field_trials = nullptr);
   Port(webrtc::TaskQueueBase* thread,
-       absl::string_view type,
+       absl::string_view type ABSL_ATTRIBUTE_LIFETIME_BOUND,
        rtc::PacketSocketFactory* factory,
        const rtc::Network* network,
        uint16_t min_port,
@@ -207,7 +204,7 @@ class Port : public PortInterface, public sigslot::has_slots<> {
   // uniquely identify subclasses. Whenever a new subclass of Port introduces a
   // conflit in the value of the 2-tuple, make sure that the implementation that
   // relies on this 2-tuple for RTTI is properly changed.
-  const std::string& Type() const override;
+  const absl::string_view Type() const override;
   const rtc::Network* Network() const override;
 
   // Methods to set/get ICE role and tiebreaker values.
@@ -255,7 +252,7 @@ class Port : public PortInterface, public sigslot::has_slots<> {
   uint32_t generation() const { return generation_; }
   void set_generation(uint32_t generation) { generation_ = generation; }
 
-  const std::string username_fragment() const;
+  const std::string& username_fragment() const;
   const std::string& password() const { return password_; }
 
   // May be called when this port was initially created by a pooled
@@ -312,10 +309,7 @@ class Port : public PortInterface, public sigslot::has_slots<> {
   // port implemented this method.
   // TODO(mallinath) - Make it pure virtual.
   virtual bool HandleIncomingPacket(rtc::AsyncPacketSocket* socket,
-                                    const char* data,
-                                    size_t size,
-                                    const rtc::SocketAddress& remote_addr,
-                                    int64_t packet_time_us);
+                                    const rtc::ReceivedPacket& packet);
 
   // Shall the port handle packet from this `remote_addr`.
   // This method is overridden by TurnPort.
@@ -394,8 +388,6 @@ class Port : public PortInterface, public sigslot::has_slots<> {
  protected:
   virtual void UpdateNetworkCost();
 
-  void set_type(absl::string_view type) { type_ = std::string(type); }
-
   rtc::WeakPtr<Port> NewWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
   void AddAddress(const rtc::SocketAddress& address,
@@ -423,10 +415,19 @@ class Port : public PortInterface, public sigslot::has_slots<> {
   // Called when a packet is received from an unknown address that is not
   // currently a connection.  If this is an authenticated STUN binding request,
   // then we will signal the client.
-  void OnReadPacket(const char* data,
-                    size_t size,
-                    const rtc::SocketAddress& addr,
-                    ProtocolType proto);
+  void OnReadPacket(const rtc::ReceivedPacket& packet, ProtocolType proto);
+
+  [[deprecated(
+      "Use OnReadPacket(const rtc::ReceivedPacket& packet, ProtocolType "
+      "proto)")]] void
+  OnReadPacket(const char* data,
+               size_t size,
+               const rtc::SocketAddress& addr,
+               ProtocolType proto) {
+    OnReadPacket(rtc::ReceivedPacket::CreateFromLegacy(
+                     data, size, /*packet_time_us = */ -1, addr),
+                 proto);
+  }
 
   // If the given data comprises a complete and correct STUN message then the
   // return value is true, otherwise false. If the message username corresponds
@@ -484,7 +485,7 @@ class Port : public PortInterface, public sigslot::has_slots<> {
 
   webrtc::TaskQueueBase* const thread_;
   rtc::PacketSocketFactory* const factory_;
-  std::string type_;
+  const absl::string_view type_;
   bool send_retransmit_count_attribute_;
   const rtc::Network* network_;
   uint16_t min_port_;
@@ -496,12 +497,8 @@ class Port : public PortInterface, public sigslot::has_slots<> {
   // sent through), the other side must send us a STUN binding request that is
   // authenticated with this username_fragment and password.
   // PortAllocatorSession will provide these username_fragment and password.
-  //
-  // Note: we should always use username_fragment() instead of using
-  // `ice_username_fragment_` directly. For the details see the comment on
-  // username_fragment().
-  std::string ice_username_fragment_;
-  std::string password_;
+  std::string ice_username_fragment_ RTC_GUARDED_BY(thread_);
+  std::string password_ RTC_GUARDED_BY(thread_);
   std::vector<Candidate> candidates_ RTC_GUARDED_BY(thread_);
   AddressMap connections_;
   int timeout_delay_;

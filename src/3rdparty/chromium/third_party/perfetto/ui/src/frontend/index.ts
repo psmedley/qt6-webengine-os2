@@ -12,111 +12,96 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Patch, produce} from 'immer';
-import * as m from 'mithril';
+// Keep this import first.
+import '../base/static_initializers';
+import '../gen/all_plugins';
+
+import {Draft} from 'immer';
+import m from 'mithril';
 
 import {defer} from '../base/deferred';
-import {assertExists, reportError, setErrorHandler} from '../base/logging';
+import {addErrorHandler, reportError} from '../base/logging';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
+import {CommandManager} from '../common/commands';
 import {createEmptyState} from '../common/empty_state';
-import {RECORDING_V2_FLAG} from '../common/feature_flags';
-import {initializeImmerJs} from '../common/immer_init';
-import {PluginContextImpl, pluginRegistry} from '../common/plugins';
+import {flattenArgs, traceEvent} from '../common/metatracing';
+import {pluginManager, pluginRegistry} from '../common/plugins';
 import {State} from '../common/state';
-import {initWasm} from '../common/wasm_engine_proxy';
-import {ControllerWorkerInitMessage} from '../common/worker_messages';
+import {initController, runControllers} from '../controller';
 import {
   isGetCategoriesResponse,
 } from '../controller/chrome_proxy_record_controller';
-import {initController} from '../controller/index';
+import {RECORDING_V2_FLAG} from '../core/feature_flags';
+import {initLiveReloadIfLocalhost} from '../core/live_reload';
+import {raf} from '../core/raf_scheduler';
+import {initWasm} from '../trace_processor/wasm_engine_proxy';
+import {setScheduleFullRedraw} from '../widgets/raf';
 
-import {AnalyzePage} from './analyze_page';
+import {App} from './app';
 import {initCssConstants} from './css_constants';
+import {registerDebugGlobals} from './debug';
 import {maybeShowErrorDialog} from './error_dialog';
 import {installFileDropHandler} from './file_drop_handler';
 import {FlagsPage} from './flags_page';
 import {globals} from './globals';
 import {HomePage} from './home_page';
-import {initLiveReloadIfLocalhost} from './live_reload';
+import {InsightsPage} from './insights_page';
 import {MetricsPage} from './metrics_page';
+import {PluginsPage} from './plugins_page';
 import {postMessageHandler} from './post_message_handler';
+import {QueryPage} from './query_page';
 import {RecordPage, updateAvailableAdbDevices} from './record_page';
 import {RecordPageV2} from './record_page_v2';
-import {Router} from './router';
+import {Route, Router} from './router';
 import {CheckHttpRpcConnection} from './rpc_http_dialog';
+import {Store} from './store';
 import {TraceInfoPage} from './trace_info_page';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
 import {ViewerPage} from './viewer_page';
+import {VizPage} from './viz_page';
+import {WidgetsPage} from './widgets_page';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
 class FrontendApi {
-  private port: MessagePort;
-  private state: State;
-
-  constructor(port: MessagePort) {
-    this.state = createEmptyState();
-    this.port = port;
+  constructor() {
+    globals.store.subscribe(this.handleStoreUpdate);
   }
 
-  dispatchMultiple(actions: DeferredAction[]) {
-    const oldState = this.state;
-    const patches: Patch[] = [];
-    for (const action of actions) {
-      const originalLength = patches.length;
-      const morePatches = this.applyAction(action);
-      patches.length += morePatches.length;
-      for (let i = 0; i < morePatches.length; ++i) {
-        patches[i + originalLength] = morePatches[i];
-      }
-    }
+  private handleStoreUpdate = (store: Store<State>, oldState: State) => {
+    const newState = store.state;
 
-    if (this.state === oldState) {
-      return;
-    }
-
-    // Update overall state.
-    globals.state = this.state;
-
-    // If the visible time in the global state has been updated more recently
-    // than the visible time handled by the frontend @ 60fps, update it. This
-    // typically happens when restoring the state from a permalink.
-    globals.frontendLocalState.mergeState(this.state.frontendLocalState);
+    // If the visible time in the global state has been updated more
+    // recently than the visible time handled by the frontend @ 60fps,
+    // update it. This typically happens when restoring the state from a
+    // permalink.
+    globals.timeline.mergeState(newState.frontendLocalState);
 
     // Only redraw if something other than the frontendLocalState changed.
     let key: keyof State;
-    for (key in this.state) {
-      if (key !== 'frontendLocalState' && key !== 'visibleTracks' &&
-          oldState[key] !== this.state[key]) {
-        globals.rafScheduler.scheduleFullRedraw();
+    for (key in store.state) {
+      if (key !== 'frontendLocalState' && oldState[key] !== newState[key]) {
+        raf.scheduleFullRedraw();
         break;
       }
     }
 
-    if (patches.length > 0) {
-      this.port.postMessage(patches);
-    }
-  }
+    // Run in microtask to avoid avoid reentry
+    setTimeout(runControllers, 0);
+  };
 
-  private applyAction(action: DeferredAction): Patch[] {
-    const patches: Patch[] = [];
-
-    // 'produce' creates a immer proxy which wraps the current state turning
-    // all imperative mutations of the state done in the callback into
-    // immutable changes to the returned state.
-    this.state = produce(
-        this.state,
-        (draft) => {
+  dispatchMultiple(actions: DeferredAction[]) {
+    const edits = actions.map((action) => {
+      return traceEvent(`action.${action.type}`, () => {
+        return (draft: Draft<State>) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (StateActions as any)[action.type](draft, action.args);
-        },
-        (morePatches, _) => {
-          const originalLength = patches.length;
-          patches.length += morePatches.length;
-          for (let i = 0; i < morePatches.length; ++i) {
-            patches[i + originalLength] = morePatches[i];
-          }
-        });
-    return patches;
+        };
+      }, {
+        args: flattenArgs(action.args),
+      });
+    });
+    globals.store.edit(edits);
   }
 }
 
@@ -126,10 +111,20 @@ function setExtensionAvailability(available: boolean) {
   }));
 }
 
-function initGlobalsFromQueryString() {
-  const queryString = window.location.search;
-  globals.embeddedMode = queryString.includes('mode=embedded');
-  globals.hideSidebar = queryString.includes('hideSidebar=true');
+function routeChange(route: Route) {
+  raf.scheduleFullRedraw();
+  maybeOpenTraceFromRoute(route);
+  if (route.fragment) {
+    // This needs to happen after the next redraw call. It's not enough
+    // to use setTimeout(..., 0); since that may occur before the
+    // redraw scheduled above.
+    raf.addPendingCallback(() => {
+      const e = document.getElementById(route.fragment);
+      if (e) {
+        e.scrollIntoView();
+      }
+    });
+  }
 }
 
 function setupContentSecurityPolicy() {
@@ -148,7 +143,7 @@ function setupContentSecurityPolicy() {
       'https://*.google.com',
       'https://*.googleusercontent.com',
       'https://www.googletagmanager.com',
-      'https://www.google-analytics.com',
+      'https://*.google-analytics.com',
     ],
     'object-src': ['none'],
     'connect-src': [
@@ -156,7 +151,7 @@ function setupContentSecurityPolicy() {
       'http://127.0.0.1:9001',  // For trace_processor_shell --httpd.
       'ws://127.0.0.1:9001',    // Ditto, for the websocket RPC.
       'ws://127.0.0.1:8037',    // For the adb websocket server.
-      'https://www.google-analytics.com',
+      'https://*.google-analytics.com',
       'https://*.googleapis.com',  // For Google Cloud Storage fetches.
       'blob:',
       'data:',
@@ -165,8 +160,13 @@ function setupContentSecurityPolicy() {
       `'self'`,
       'data:',
       'blob:',
-      'https://www.google-analytics.com',
+      'https://*.google-analytics.com',
       'https://www.googletagmanager.com',
+      'https://*.googleapis.com',
+    ],
+    'style-src': [
+      `'self'`,
+      `'unsafe-inline'`,
     ],
     'navigate-to': ['https://*.perfetto.dev', 'self'],
   };
@@ -181,18 +181,23 @@ function setupContentSecurityPolicy() {
 }
 
 function main() {
+  // Wire up raf for widgets.
+  setScheduleFullRedraw(() => raf.scheduleFullRedraw());
+
   setupContentSecurityPolicy();
 
   // Load the css. The load is asynchronous and the CSS is not ready by the time
-  // appenChild returns.
+  // appendChild returns.
   const cssLoadPromise = defer<void>();
   const css = document.createElement('link');
   css.rel = 'stylesheet';
   css.href = globals.root + 'perfetto.css';
   css.onload = () => cssLoadPromise.resolve();
   css.onerror = (err) => cssLoadPromise.reject(err);
-  const favicon = document.head.querySelector('#favicon') as HTMLLinkElement;
-  if (favicon) favicon.href = globals.root + 'assets/favicon.png';
+  const favicon = document.head.querySelector('#favicon');
+  if (favicon instanceof HTMLLinkElement) {
+    favicon.href = globals.root + 'assets/favicon.png';
+  }
 
   // Load the script to detect if this is a Googler (see comments on globals.ts)
   // and initialize GA after that (or after a timeout if something goes wrong).
@@ -206,28 +211,18 @@ function main() {
 
   document.head.append(script, css);
 
+  // Route errors to both the UI bugreport dialog and Analytics (if enabled).
+  addErrorHandler(maybeShowErrorDialog);
+  addErrorHandler((e) => globals.logging.logError(e));
+
   // Add Error handlers for JS error and for uncaught exceptions in promises.
-  setErrorHandler((err: string) => maybeShowErrorDialog(err));
   window.addEventListener('error', (e) => reportError(e));
   window.addEventListener('unhandledrejection', (e) => reportError(e));
 
-  const controllerChannel = new MessageChannel();
   const extensionLocalChannel = new MessageChannel();
-  const errorReportingChannel = new MessageChannel();
-
-  errorReportingChannel.port2.onmessage = (e) =>
-      maybeShowErrorDialog(`${e.data}`);
-
-  const msg: ControllerWorkerInitMessage = {
-    controllerPort: controllerChannel.port1,
-    extensionPort: extensionLocalChannel.port1,
-    errorReportingPort: errorReportingChannel.port1,
-  };
 
   initWasm(globals.root);
-  initializeImmerJs();
-
-  initController(msg);
+  initController(extensionLocalChannel.port1);
 
   const dispatch = (action: DeferredAction) => {
     frontendApi.dispatchMultiple([action]);
@@ -237,23 +232,34 @@ function main() {
     '/': HomePage,
     '/viewer': ViewerPage,
     '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
-    '/query': AnalyzePage,
+    '/query': QueryPage,
+    '/insights': InsightsPage,
     '/flags': FlagsPage,
     '/metrics': MetricsPage,
     '/info': TraceInfoPage,
+    '/widgets': WidgetsPage,
+    '/viz': VizPage,
+    '/plugins': PluginsPage,
   });
-  router.onRouteChanged = (route) => {
-    globals.rafScheduler.scheduleFullRedraw();
-    maybeOpenTraceFromRoute(route);
-  };
-  globals.initialize(dispatch, router);
+  router.onRouteChanged = routeChange;
+
+  // These need to be set before globals.initialize.
+  const route = Router.parseUrl(window.location.href);
+  globals.embeddedMode = route.args.mode === 'embedded';
+  globals.hideSidebar = route.args.hideSidebar === true;
+
+  const cmdManager = new CommandManager();
+
+  globals.initialize(dispatch, router, createEmptyState(), cmdManager);
+
   globals.serviceWorkerController.install();
 
-  const frontendApi = new FrontendApi(controllerChannel.port2);
-  globals.publishRedraw = () => globals.rafScheduler.scheduleFullRedraw();
+  const frontendApi = new FrontendApi();
+  globals.publishRedraw = () => raf.scheduleFullRedraw();
 
   // We proxy messages between the extension and the controller because the
   // controller's worker can't access chrome.runtime.
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
   const extensionPort = window.chrome && chrome.runtime ?
       chrome.runtime.connect(EXTENSION_ID) :
       undefined;
@@ -281,10 +287,8 @@ function main() {
     if (extensionPort) extensionPort.postMessage(data);
   };
 
-  // Put these variables in the global scope for better debugging.
-  (window as {} as {m: {}}).m = m;
-  (window as {} as {globals: {}}).globals = globals;
-  (window as {} as {Actions: {}}).Actions = Actions;
+  // Put debug variables in the global scope for better debugging.
+  registerDebugGlobals();
 
   // Prevent pinch zoom.
   document.body.addEventListener('wheel', (e: MouseEvent) => {
@@ -297,27 +301,24 @@ function main() {
     document.body.classList.add('testing');
   }
 
-  // Initialize all plugins:
   for (const plugin of pluginRegistry.values()) {
-    const context = new PluginContextImpl(plugin.pluginId);
-    plugin.activate(context);
+    pluginManager.activatePlugin(plugin.pluginId);
   }
-}
 
+  cmdManager.registerCommandSource(pluginManager);
+}
 
 function onCssLoaded() {
   initCssConstants();
   // Clear all the contents of the initial page (e.g. the <pre> error message)
   // And replace it with the root <main> element which will be used by mithril.
-  document.body.innerHTML = '<main></main>';
-  const main = assertExists(document.body.querySelector('main'));
-  globals.rafScheduler.domRedraw = () => {
-    m.render(main, globals.router.resolve());
+  document.body.innerHTML = '';
+
+  raf.domRedraw = () => {
+    m.render(document.body, m(App, globals.router.resolve()));
   };
 
-  initGlobalsFromQueryString();
-
-  initLiveReloadIfLocalhost();
+  initLiveReloadIfLocalhost(globals.embeddedMode);
 
   if (!RECORDING_V2_FLAG.get()) {
     updateAvailableAdbDevices();
@@ -338,7 +339,21 @@ function onCssLoaded() {
   // accidentially clober the state of an open trace processor instance
   // otherwise.
   CheckHttpRpcConnection().then(() => {
-    installFileDropHandler();
+    const route = Router.parseUrl(window.location.href);
+
+    globals.dispatch(Actions.maybeSetPendingDeeplink({
+      ts: route.args.ts,
+      tid: route.args.tid,
+      dur: route.args.dur,
+      pid: route.args.pid,
+      query: route.args.query,
+      visStart: route.args.visStart,
+      visEnd: route.args.visEnd,
+    }));
+
+    if (!globals.embeddedMode) {
+      installFileDropHandler();
+    }
 
     // Don't allow postMessage or opening trace from route when the user says
     // that they want to reuse the already loaded trace in trace processor.
@@ -352,7 +367,7 @@ function onCssLoaded() {
 
     // Handles the initial ?local_cache_key=123 or ?s=permalink or ?url=...
     // cases.
-    maybeOpenTraceFromRoute(Router.parseUrl(window.location.href));
+    routeChange(route);
   });
 }
 

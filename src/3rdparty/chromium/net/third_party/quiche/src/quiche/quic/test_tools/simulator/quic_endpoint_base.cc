@@ -122,7 +122,8 @@ QuicEndpointBase::Writer::~Writer() {}
 
 WriteResult QuicEndpointBase::Writer::WritePacket(
     const char* buffer, size_t buf_len, const QuicIpAddress& /*self_address*/,
-    const QuicSocketAddress& /*peer_address*/, PerPacketOptions* options) {
+    const QuicSocketAddress& /*peer_address*/, PerPacketOptions* options,
+    const QuicPacketWriterParams& /*params*/) {
   QUICHE_DCHECK(!IsWriteBlocked());
   QUICHE_DCHECK(options == nullptr);
   QUICHE_DCHECK(buf_len <= kMaxOutgoingPacketSize);
@@ -152,8 +153,8 @@ bool QuicEndpointBase::Writer::IsWriteBlocked() const { return is_blocked_; }
 
 void QuicEndpointBase::Writer::SetWritable() { is_blocked_ = false; }
 
-absl::optional<int> QuicEndpointBase::Writer::MessageTooBigErrorCode() const {
-  return absl::nullopt;
+std::optional<int> QuicEndpointBase::Writer::MessageTooBigErrorCode() const {
+  return std::nullopt;
 }
 
 QuicByteCount QuicEndpointBase::Writer::GetMaxPacketSize(

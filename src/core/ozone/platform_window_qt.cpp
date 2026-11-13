@@ -1,9 +1,10 @@
 // Copyright (C) 2017 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #if defined(USE_OZONE)
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "ozone/platform_window_qt.h"
 #include "ui/base/cursor/platform_cursor.h"
 #include "ui/events/ozone/events_ozone.h"

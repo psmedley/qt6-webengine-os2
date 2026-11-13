@@ -9,11 +9,11 @@
 #define GrGLUtil_DEFINED
 
 #include "include/gpu/gl/GrGLInterface.h"
-#include "include/private/SkImageInfoPriv.h"
 #include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkImageInfoPriv.h"
 #include "src/gpu/ganesh/GrDataUtils.h"
 #include "src/gpu/ganesh/GrStencilSettings.h"
-#include "src/gpu/ganesh/gl/GrGLDefines_impl.h"
+#include "src/gpu/ganesh/gl/GrGLDefines.h"
 
 class SkMatrix;
 
@@ -142,6 +142,7 @@ enum class GrGLVendor {
     kQualcomm,
     kNVIDIA,
     kATI,
+    kApple,
 
     kOther
 };
@@ -151,6 +152,7 @@ enum class GrGLRenderer {
     kTegra,        // Tegra with the same architecture as NVIDIA desktop GPUs (K1+).
 
     kPowerVR54x,
+    kPowerVRBSeries,
     kPowerVRRogue,
 
     kAdreno3xx,
@@ -163,8 +165,6 @@ enum class GrGLRenderer {
     kAdreno630,  // Pixel3
     kAdreno640,  // Pixel4
     kAdreno6xx_other,
-
-    kGoogleSwiftShader,
 
     /** Intel GPU families, ordered by generation **/
     // 6th gen
@@ -208,6 +208,8 @@ enum class GrGLRenderer {
     kAMDRadeonPro5xxx,    // AMD Radeon Pro 5000 Series
     kAMDRadeonProVegaxx,  // AMD Radeon Pro Vega
 
+    kApple,
+
     kWebGL,
 
     kOther
@@ -217,12 +219,12 @@ enum class GrGLDriver {
     kMesa,
     kNVIDIA,
     kIntel,
-    kSwiftShader,
     kQualcomm,
     kFreedreno,
     kAndroidEmulator,
     kImagination,
     kARM,
+    kApple,
     kUnknown
 };
 
@@ -332,6 +334,18 @@ void GrGLCheckErr(const GrGLInterface* gl,
                   const char* call);
 
 ////////////////////////////////////////////////////////////////////////////////
+
+/**
+ *  GR_STRING makes a string of X where X is expanded before conversion to a string
+ *  if X itself contains macros.
+ */
+#define GR_STRING(X) GR_STRING_IMPL(X)
+#define GR_STRING_IMPL(X) #X
+
+/**
+ *  Creates a string of the form "<filename>(<linenumber>) : "
+ */
+#define GR_FILE_AND_LINE_STR __FILE__ "(" GR_STRING(__LINE__) ") : "
 
 /**
  * Macros for using GrGLInterface to make GL calls
@@ -607,7 +621,7 @@ static constexpr bool GrGLFormatIsSRGB(GrGLFormat format) {
     SkUNREACHABLE;
 }
 
-#if defined(SK_DEBUG) || GR_TEST_UTILS
+#if defined(SK_DEBUG) || defined(GR_TEST_UTILS)
 static constexpr const char* GrGLFormatToStr(GrGLenum glFormat) {
     switch (glFormat) {
         case GR_GL_RGBA8:                return "RGBA8";

@@ -96,9 +96,9 @@ Since DevTools is a complex application that integrates with Chromium, it is bui
 The build system ensures that all relevant files are correctly defined for consumption by Chromium.
 It also integrates with (third_party) tooling such as a type checker ([TypeScript]) and upstream Chromium packages ([Chrome DevTools Protocol]).
 
-DevTools-specific GN templates are defined in [scripts/build/ninja/](scripts/build/ninja/).
-Chromium consumes the output of the DevTools GN target [:generate_devtools_grd defined in BUILD.gn](BUILD.gn), which generates a GRD bundle using [GRIT].
-Detailed descriptions about each template are included in [scripts/build/ninja/README.md](scripts/build/ninja/README.md).
+DevTools-specific GN templates are defined in [scripts/build/ninja/](../scripts/build/ninja/).
+Chromium consumes the output of the DevTools GN target [:generate_devtools_grd defined in BUILD.gn](../BUILD.gn), which generates a GRD bundle using [GRIT].
+Detailed descriptions about each template are included in [scripts/build/ninja/README.md](../scripts/build/ninja/README.md).
 
 # Startup process overview
 
@@ -113,15 +113,15 @@ Features themselves use static imports for loading core and feature-specific fun
 
 ![A high-level overview of how feature implementations are lazily loaded in the DevTools startup process](architecture_of_devtools_lazy_loading_features.png)
 
-Enforcement of the rules regarding loading is implemented using the [ESLint] rule defined in [scripts/eslint_rules/lib/es_modules_import.js](scripts/eslint_rules/lib/es_modules_import.js).
+Enforcement of the rules regarding loading is implemented using the [ESLint] rule defined in [scripts/eslint_rules/lib/es_modules_import.js](../scripts/eslint_rules/lib/es_modules_import.js).
 
 ## DevTools application entrypoints
 
 There are multiple variants of the DevTools application.
-The main DevTools application is [front_end/devtools_app.js](front_end/devtools_app/devtools_app.js), which developers can open via F12 or "Right click -> Inspect element" in their Chromium browser.
-Other application entrypoints are used when debugging via Node ([front_end/node_app.js](front_end/node_app/node_app.js)), a slimmed down V8-specific Node debugging context ([front_end/js_app.js](front_end/js_app/js_app.js)), a (service) worker context ([front_end/worker_app.js](front_end/worker_app/worker_app.js)), a standalone browser window ([front_end/toolbox.ts](front_end/toolbox/toolbox.ts)), remote debugging of (Android) devices with `chrome://inspect/#devices` ([front_end/inspector.js](front_end/inspector/inspector.js)), standalone Node debugger [ndb] ([front_end/ndb_app.js](front_end/ndb_app/ndb_app.js)) and a legacy entrypoint for Chromium layout tests ([front_end/integration_test_runner/integration_test_runner.js](front_end/integration_test_runner.js)).
+The main DevTools application is [devtools_app.ts](../front_end/entrypoints/devtools_app/devtools_app.ts), which developers can open via F12 or "Right click -> Inspect element" in their Chromium browser.
+Other application entrypoints are a dedicated tool for debugging Node on which multiple targets can be inspected ([node_app.ts](../front_end/entrypoints/node_app/node_app.ts)), a non-browser context debugger for V8 targets ([js_app.ts](../front_end/entrypoints/js_app/js_app.ts)), a (service) worker context ([worker_app.ts](../front_end/entrypoints/worker_app/worker_app.ts)), remote debugging of (Android) devices ([inspector.ts](../front_end/entrypoints/inspector/inspector.ts)) and a basic version of DevTools which was initially intended for non-browser targets but doesn't have any particular use case that differentiates it from the other variants ([ndb_app.ts](../front_end/entrypoints/ndb_app/ndb_app.ts)).
 
-Each application entrypoint has a corresponding `.html` file with the same name, that can be loaded by the Chromium DevTools backend.
+Each application entrypoint has a corresponding `.html` file with the same name, that is automatically in the frontend generated and can be loaded by the Chromium DevTools backend.
 The JavaScript files import the relevant "meta" files containing the declarations of DevTools features.
 
 ## Upfront declaration of DevTools features
@@ -132,18 +132,18 @@ Extensions add functionality to the DevTools application using declarative regis
 There are multiple types of extensions, including how DevTools handles its own internal business logic or to declare user-facing features with localized strings.
 There are 4 main types of extensions:
 
-* [UI.ActionRegistration.Action](front_end/ui/ActionRegistration.ts)
-* [UI.View.View](front_end/ui/View.js)
-* [Common.Settings.Setting](front_end/common/Settings.js)
+* [UI.ActionRegistration.Action](../front_end/ui/legacy/ActionRegistration.ts)
+* [UI.View.View](../front_end/ui/legacy/View.ts)
+* [Common.Settings.Setting](../front_end/core/common/Settings.ts)
 * General type lookups.
 
 Each specific extension is documented in the README of their respective folder.
 
 The registration of a particular extension implemented in `module` must always be declared in a `<module>-meta.ts` in the same folder.
 The meta files should be included by all relevant DevTools application entrypoints.
-If you want to make functionality available in all DevTools application entrypoints, you can import it in [shell.js](front_end/shell.js).
+If you want to make functionality available in all DevTools application entrypoints, you can import it in [shell.ts](../front_end/entrypoints/shell.ts).
 
-For example, the meta declaration file for [front_end/network/](front_end/network/) is called [front_end/network/network-meta.ts](front_end/network/network-meta.ts) and defined in [front_end/network/BUILD.gn](front_end/network/BUILD.gn):
+For example, the meta declaration file for [front_end/panels/network/](../front_end/panels/network/) is called [front_end/panels/network/network-meta.ts](../front_end/panels/network/network-meta.ts) and defined in [front_end/panels/network/BUILD.gn](../front_end/panels/network/BUILD.gn):
 
 ```python
 devtools_entrypoint("meta") {
@@ -156,8 +156,8 @@ devtools_entrypoint("meta") {
 }
 ```
 
-Below is an example implementation of a `<module>-meta.ts` (using [front_end/network/network-meta.ts](front_end/network/network-meta.ts) as running example).
-For information about the localization system, please see the documentation in [docs/localization/](docs/localization/).
+Below is an example implementation of a `<module>-meta.ts` (using [front_end/panels/network/network-meta.ts](../front_end/panels/network/network-meta.ts) as running example).
+For information about the localization system, please see [l10n.md](l10n.md).
 
 ```ts
 // Any static imports on core modules
@@ -257,7 +257,7 @@ UI.ActionRegistration.registerActionExtension({
 });
 ```
 
-The ":meta" `devtools_entrypoint` is added as a dependency to all DevTools application entrypoints defined in [front_end/BUILD.gn](front_end/BUILD.gn).
+The ":meta" `devtools_entrypoint` is added as a dependency to all DevTools application entrypoints defined in [front_end/BUILD.gn](../front_end/BUILD.gn).
 
 # Folder structure
 
@@ -402,6 +402,5 @@ The GRD file is placed in `gen/third_party/devtools-frontend/src/front_end/` in 
 [GN `visibility` rules]: https://gn.googlesource.com/gn/+/main/docs/reference.md#var_visibility
 [GN `metadata` definitions]: https://gn.googlesource.com/gn/+/main/docs/reference.md#var_metadata
 [GRIT]: https://www.chromium.org/developers/tools-we-use-in-chromium/grit/grit-users-guide
-[ndb]: https://github.com/GoogleChromeLabs/ndb
 [Ninja]: https://ninja-build.org/
 [TypeScript]: https://www.typescriptlang.org/

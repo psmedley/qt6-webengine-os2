@@ -47,6 +47,7 @@ static const struct arg_enum_list tuning_enum[] = {
   { "vmaf", AOM_TUNE_VMAF_MAX_GAIN },
   { "vmaf_neg", AOM_TUNE_VMAF_NEG_MAX_GAIN },
   { "butteraugli", AOM_TUNE_BUTTERAUGLI },
+  { "vmaf_saliency_map", AOM_TUNE_VMAF_SALIENCY_MAP },
   { NULL, 0 }
 };
 
@@ -226,13 +227,17 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "use-16bit-internal", 0, "Force use of 16-bit pipeline"),
   .dropframe_thresh =
       ARG_DEF(NULL, "drop-frame", 1, "Temporal resampling threshold (buf %)"),
-  .resize_mode = ARG_DEF(NULL, "resize-mode", 1, "Frame resize mode"),
+  .resize_mode = ARG_DEF(
+      NULL, "resize-mode", 1,
+      "Frame resize mode (0: off (default), 1: fixed, 2: random, 3: dynamic)"),
   .resize_denominator =
       ARG_DEF(NULL, "resize-denominator", 1, "Frame resize denominator"),
   .resize_kf_denominator = ARG_DEF(NULL, "resize-kf-denominator", 1,
                                    "Frame resize keyframe denominator"),
   .superres_mode =
-      ARG_DEF(NULL, "superres-mode", 1, "Frame super-resolution mode"),
+      ARG_DEF(NULL, "superres-mode", 1,
+              "Frame super-resolution mode (0: disabled (default), 1: fixed, "
+              "2: random, 3: qthresh, 4: auto)"),
   .superres_denominator = ARG_DEF(NULL, "superres-denominator", 1,
                                   "Frame super-resolution denominator"),
   .superres_kf_denominator =
@@ -298,7 +303,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "max-intra-rate", 1, "Max I-frame bitrate (pct)"),
 #if CONFIG_AV1_ENCODER
   .cpu_used_av1 = ARG_DEF(NULL, "cpu-used", 1,
-                          "Speed setting (0..6 in good mode, 5..10 in realtime "
+                          "Speed setting (0..6 in good mode, 5..11 in realtime "
                           "mode, 0..9 in all intra mode)"),
   .rowmtarg =
       ARG_DEF(NULL, "row-mt", 1,
@@ -495,6 +500,16 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
 #endif
   .partition_info_path = ARG_DEF(NULL, "partition-info-path", 1,
                                  "Partition information read and write path"),
+  .enable_rate_guide_deltaq =
+      ARG_DEF(NULL, "enable-rate-guide-deltaq", 1,
+              "Enable rate guide deltaq (1), by default off (0). "
+              "It requires --deltaq-mode=3. "
+              "If turned on, it requires an input file specified "
+              "by --rate-distribution-info."),
+  .rate_distribution_info =
+      ARG_DEF(NULL, "rate-distribution-info", 1,
+              "Rate distribution information input."
+              "It requires --enable-rate-guide-deltaq=1."),
   .film_grain_test = ARG_DEF(
       NULL, "film-grain-test", 1,
       "Film grain test vectors (0: none (default), 1: test-1  2: test-2, "
@@ -679,5 +694,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       "key frame (-1 to 5). When set to -1 (default), it does not have any "
       "effect. The actual maximum pyramid height will be the minimum of this "
       "value and the value of gf_max_pyr_height."),
+  .sb_qp_sweep =
+      ARG_DEF(NULL, "sb-qp-sweep", 1,
+              "When set to 1, enable the superblock level qp sweep for a "
+              "given lambda to minimize the rdcost."),
 #endif  // CONFIG_AV1_ENCODER
 };

@@ -1,25 +1,40 @@
-// Copyright 2018 The Dawn Authors
+// Copyright 2018 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/metal/DeviceMTL.h"
 
 #include "dawn/common/GPUInfo.h"
 #include "dawn/common/Platform.h"
+#include "dawn/native/Adapter.h"
 #include "dawn/native/BackendConnection.h"
-#include "dawn/native/BindGroupLayout.h"
+#include "dawn/native/ChainUtils.h"
 #include "dawn/native/Commands.h"
 #include "dawn/native/ErrorData.h"
+#include "dawn/native/EventManager.h"
 #include "dawn/native/metal/BindGroupLayoutMTL.h"
 #include "dawn/native/metal/BindGroupMTL.h"
 #include "dawn/native/metal/BufferMTL.h"
@@ -31,7 +46,8 @@
 #include "dawn/native/metal/RenderPipelineMTL.h"
 #include "dawn/native/metal/SamplerMTL.h"
 #include "dawn/native/metal/ShaderModuleMTL.h"
-#include "dawn/native/metal/StagingBufferMTL.h"
+#include "dawn/native/metal/SharedFenceMTL.h"
+#include "dawn/native/metal/SharedTextureMemoryMTL.h"
 #include "dawn/native/metal/SwapChainMTL.h"
 #include "dawn/native/metal/TextureMTL.h"
 #include "dawn/native/metal/UtilsMetal.h"
@@ -107,21 +123,21 @@ void API_AVAILABLE(macos(10.15), ios(14)) UpdateTimestampPeriod(id<MTLDevice> de
 // static
 ResultOrError<Ref<Device>> Device::Create(AdapterBase* adapter,
                                           NSPRef<id<MTLDevice>> mtlDevice,
-                                          const DeviceDescriptor* descriptor,
-                                          const TripleStateTogglesSet& userProvidedToggles) {
-    Ref<Device> device =
-        AcquireRef(new Device(adapter, std::move(mtlDevice), descriptor, userProvidedToggles));
-    DAWN_TRY(device->Initialize(descriptor));
-    return device;
+                                          const UnpackedPtr<DeviceDescriptor>& descriptor,
+                                          const TogglesState& deviceToggles) {
+    @autoreleasepool {
+        Ref<Device> device =
+            AcquireRef(new Device(adapter, std::move(mtlDevice), descriptor, deviceToggles));
+        DAWN_TRY(device->Initialize(descriptor));
+        return device;
+    }
 }
 
 Device::Device(AdapterBase* adapter,
                NSPRef<id<MTLDevice>> mtlDevice,
-               const DeviceDescriptor* descriptor,
-               const TripleStateTogglesSet& userProvidedToggles)
-    : DeviceBase(adapter, descriptor, userProvidedToggles),
-      mMtlDevice(std::move(mtlDevice)),
-      mCompletedSerial(0) {
+               const UnpackedPtr<DeviceDescriptor>& descriptor,
+               const TogglesState& deviceToggles)
+    : DeviceBase(adapter, descriptor, deviceToggles), mMtlDevice(std::move(mtlDevice)) {
     // On macOS < 11.0, we only can check whether counter sampling is supported, and the counter
     // only can be sampled between command boundary using sampleCountersInBuffer API if it's
     // supported.
@@ -132,27 +148,23 @@ Device::Device(AdapterBase* adapter,
         mCounterSamplingAtCommandBoundary = true;
         mCounterSamplingAtStageBoundary = false;
     }
+
+    mIsTimestampQueryEnabled = HasFeature(Feature::TimestampQuery) ||
+                               HasFeature(Feature::ChromiumExperimentalTimestampQueryInsidePasses);
 }
 
 Device::~Device() {
     Destroy();
 }
 
-MaybeError Device::Initialize(const DeviceDescriptor* descriptor) {
-    InitTogglesFromDriver();
+MaybeError Device::Initialize(const UnpackedPtr<DeviceDescriptor>& descriptor) {
+    Ref<Queue> queue;
+    DAWN_TRY_ASSIGN(queue, Queue::Create(this, &descriptor->defaultQueue));
 
-    mCommandQueue.Acquire([*mMtlDevice newCommandQueue]);
-    if (mCommandQueue == nil) {
-        return DAWN_INTERNAL_ERROR("Failed to allocate MTLCommandQueue.");
-    }
-
-    DAWN_TRY(mCommandContext.PrepareNextCommandBuffer(*mCommandQueue));
-
-    if (HasFeature(Feature::TimestampQuery) &&
-        !IsToggleEnabled(Toggle::DisableTimestampQueryConversion)) {
+    if (mIsTimestampQueryEnabled && !IsToggleEnabled(Toggle::DisableTimestampQueryConversion)) {
         // Make a best guess of timestamp period based on device vendor info, and converge it to
         // an accurate value by the following calculations.
-        mTimestampPeriod = gpu_info::IsIntel(GetAdapter()->GetVendorId()) ? 83.333f : 1.0f;
+        mTimestampPeriod = gpu_info::IsIntel(GetPhysicalDevice()->GetVendorId()) ? 83.333f : 1.0f;
 
         // Initialize kalman filter parameters
         mKalmanInfo = std::make_unique<KalmanInfo>();
@@ -162,109 +174,25 @@ MaybeError Device::Initialize(const DeviceDescriptor* descriptor) {
                                    // value is, the more we can trust the measured value.
         mKalmanInfo->P = 1.0f;
 
-        if (@available(macos 10.15, iOS 14.0, *)) {
+        if (@available(macOS 10.15, iOS 14.0, *)) {
             // Sample CPU timestamp and GPU timestamp for first time at device creation
             [*mMtlDevice sampleTimestamps:&mCpuTimestamp gpuTimestamp:&mGpuTimestamp];
         }
     }
 
-    return DeviceBase::Initialize(AcquireRef(new Queue(this, &descriptor->defaultQueue)));
-}
-
-void Device::InitTogglesFromDriver() {
-    {
-        bool haveStoreAndMSAAResolve = false;
-#if DAWN_PLATFORM_IS(MACOS)
-        if (@available(macOS 10.12, *)) {
-            haveStoreAndMSAAResolve =
-                [*mMtlDevice supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily1_v2];
-        }
-#elif DAWN_PLATFORM_IS(IOS)
-        haveStoreAndMSAAResolve = [*mMtlDevice supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2];
-#endif
-        // On tvOS, we would need MTLFeatureSet_tvOS_GPUFamily2_v1.
-        SetToggle(Toggle::EmulateStoreAndMSAAResolve, !haveStoreAndMSAAResolve);
-
-        bool haveSamplerCompare = true;
-#if DAWN_PLATFORM_IS(IOS)
-        haveSamplerCompare = [*mMtlDevice supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v1];
-#endif
-        // TODO(crbug.com/dawn/342): Investigate emulation -- possibly expensive.
-        SetToggle(Toggle::MetalDisableSamplerCompare, !haveSamplerCompare);
-
-        bool haveBaseVertexBaseInstance = true;
-#if DAWN_PLATFORM_IS(IOS)
-        haveBaseVertexBaseInstance =
-            [*mMtlDevice supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v1];
-#endif
-        // TODO(crbug.com/dawn/343): Investigate emulation.
-        SetToggle(Toggle::DisableBaseVertex, !haveBaseVertexBaseInstance);
-        SetToggle(Toggle::DisableBaseInstance, !haveBaseVertexBaseInstance);
-    }
-
-    // Vertex buffer robustness is implemented by using programmable vertex pulling. Enable
-    // that code path if it isn't explicitly disabled.
-    if (IsRobustnessEnabled()) {
-        SetToggle(Toggle::MetalEnableVertexPulling, true);
-    }
-
-    // TODO(crbug.com/dawn/846): tighten this workaround when the driver bug is fixed.
-    SetToggle(Toggle::AlwaysResolveIntoZeroLevelAndLayer, true);
-
-    uint32_t deviceId = GetAdapter()->GetDeviceId();
-    uint32_t vendorId = GetAdapter()->GetVendorId();
-
-    // TODO(crbug.com/dawn/847): Use MTLStorageModeShared instead of MTLStorageModePrivate when
-    // creating MTLCounterSampleBuffer in QuerySet on Intel platforms, otherwise it fails to
-    // create the buffer. Change to use MTLStorageModePrivate when the bug is fixed.
-    if (@available(macOS 10.15, iOS 14.0, *)) {
-        bool useSharedMode = gpu_info::IsIntel(vendorId);
-        SetToggle(Toggle::MetalUseSharedModeForCounterSampleBuffer, useSharedMode);
-    }
-
-    // Rendering R8Unorm and RG8Unorm to small mip doesn't work properly on Intel.
-    // TODO(crbug.com/dawn/1071): Tighten the workaround when this issue is fixed.
-    if (gpu_info::IsIntel(vendorId)) {
-        SetToggle(Toggle::MetalRenderR8RG8UnormSmallMipToTempTexture, true);
-    }
-
-    // On some Intel GPUs vertex only render pipeline get wrong depth result if no fragment
-    // shader provided. Create a placeholder fragment shader module to work around this issue.
-    if (gpu_info::IsIntel(vendorId)) {
-        bool usePlaceholderFragmentShader = true;
-        if (gpu_info::IsSkylake(deviceId)) {
-            usePlaceholderFragmentShader = false;
-        }
-        SetToggle(Toggle::UsePlaceholderFragmentInVertexOnlyPipeline, usePlaceholderFragmentShader);
-    }
-
-    // On some Intel GPUs using big integer values as clear values in render pass doesn't work
-    // correctly. Currently we have to add workaround for this issue by enabling the toggle
-    // "apply_clear_big_integer_color_value_with_draw". See https://crbug.com/dawn/1109 and
-    // https://crbug.com/dawn/1463 for more details.
-    if (gpu_info::IsIntel(vendorId)) {
-        SetToggle(Toggle::ApplyClearBigIntegerColorValueWithDraw, true);
-    }
-
-    // TODO(dawn:1473): Metal fails to store GPU counters to sampleBufferAttachments on empty
-    // encoders on macOS 11.0+, we need to add dummy blit command to blit encoder when encoding
-    // writeTimestamp as workaround by enabling the toggle
-    // "metal_use_dummy_blit_encoder_for_write_timestamp".
-    if (@available(macos 11.0, iOS 14.0, *)) {
-        SetToggle(Toggle::MetalUseDummyBlitEncoderForWriteTimestamp, true);
-    }
+    return DeviceBase::Initialize(std::move(queue));
 }
 
 ResultOrError<Ref<BindGroupBase>> Device::CreateBindGroupImpl(
     const BindGroupDescriptor* descriptor) {
     return BindGroup::Create(this, descriptor);
 }
-ResultOrError<Ref<BindGroupLayoutBase>> Device::CreateBindGroupLayoutImpl(
-    const BindGroupLayoutDescriptor* descriptor,
-    PipelineCompatibilityToken pipelineCompatibilityToken) {
-    return BindGroupLayout::Create(this, descriptor, pipelineCompatibilityToken);
+ResultOrError<Ref<BindGroupLayoutInternalBase>> Device::CreateBindGroupLayoutImpl(
+    const BindGroupLayoutDescriptor* descriptor) {
+    return BindGroupLayout::Create(this, descriptor);
 }
-ResultOrError<Ref<BufferBase>> Device::CreateBufferImpl(const BufferDescriptor* descriptor) {
+ResultOrError<Ref<BufferBase>> Device::CreateBufferImpl(
+    const UnpackedPtr<BufferDescriptor>& descriptor) {
     return Buffer::Create(this, descriptor);
 }
 ResultOrError<Ref<CommandBufferBase>> Device::CreateCommandBuffer(
@@ -273,40 +201,37 @@ ResultOrError<Ref<CommandBufferBase>> Device::CreateCommandBuffer(
     return CommandBuffer::Create(encoder, descriptor);
 }
 Ref<ComputePipelineBase> Device::CreateUninitializedComputePipelineImpl(
-    const ComputePipelineDescriptor* descriptor) {
+    const UnpackedPtr<ComputePipelineDescriptor>& descriptor) {
     return ComputePipeline::CreateUninitialized(this, descriptor);
 }
 ResultOrError<Ref<PipelineLayoutBase>> Device::CreatePipelineLayoutImpl(
-    const PipelineLayoutDescriptor* descriptor) {
+    const UnpackedPtr<PipelineLayoutDescriptor>& descriptor) {
     return PipelineLayout::Create(this, descriptor);
 }
 ResultOrError<Ref<QuerySetBase>> Device::CreateQuerySetImpl(const QuerySetDescriptor* descriptor) {
     return QuerySet::Create(this, descriptor);
 }
 Ref<RenderPipelineBase> Device::CreateUninitializedRenderPipelineImpl(
-    const RenderPipelineDescriptor* descriptor) {
+    const UnpackedPtr<RenderPipelineDescriptor>& descriptor) {
     return RenderPipeline::CreateUninitialized(this, descriptor);
 }
 ResultOrError<Ref<SamplerBase>> Device::CreateSamplerImpl(const SamplerDescriptor* descriptor) {
     return Sampler::Create(this, descriptor);
 }
 ResultOrError<Ref<ShaderModuleBase>> Device::CreateShaderModuleImpl(
-    const ShaderModuleDescriptor* descriptor,
+    const UnpackedPtr<ShaderModuleDescriptor>& descriptor,
     ShaderModuleParseResult* parseResult,
     OwnedCompilationMessages* compilationMessages) {
     return ShaderModule::Create(this, descriptor, parseResult, compilationMessages);
 }
 ResultOrError<Ref<SwapChainBase>> Device::CreateSwapChainImpl(
-    const SwapChainDescriptor* descriptor) {
-    return OldSwapChain::Create(this, descriptor);
-}
-ResultOrError<Ref<NewSwapChainBase>> Device::CreateSwapChainImpl(
     Surface* surface,
-    NewSwapChainBase* previousSwapChain,
+    SwapChainBase* previousSwapChain,
     const SwapChainDescriptor* descriptor) {
     return SwapChain::Create(this, surface, previousSwapChain, descriptor);
 }
-ResultOrError<Ref<TextureBase>> Device::CreateTextureImpl(const TextureDescriptor* descriptor) {
+ResultOrError<Ref<TextureBase>> Device::CreateTextureImpl(
+    const UnpackedPtr<TextureDescriptor>& descriptor) {
     return Texture::Create(this, descriptor);
 }
 ResultOrError<Ref<TextureViewBase>> Device::CreateTextureViewImpl(
@@ -325,29 +250,59 @@ void Device::InitializeRenderPipelineAsyncImpl(Ref<RenderPipelineBase> renderPip
     RenderPipeline::InitializeAsync(std::move(renderPipeline), callback, userdata);
 }
 
-ResultOrError<ExecutionSerial> Device::CheckAndUpdateCompletedSerials() {
-    uint64_t frontendCompletedSerial{GetCompletedCommandSerial()};
-    // sometimes we increase the serials, in which case the completed serial in
-    // the device base will surpass the completed serial we have in the metal backend, so we
-    // must update ours when we see that the completed serial from device base has
-    // increased.
-    //
-    // This update has to be atomic otherwise there is a race with the `addCompletedHandler`
-    // call below and this call could set the mCompletedSerial backwards.
-    uint64_t current = mCompletedSerial.load();
-    while (frontendCompletedSerial > current &&
-           !mCompletedSerial.compare_exchange_weak(current, frontendCompletedSerial)) {
-    }
+ResultOrError<wgpu::TextureUsage> Device::GetSupportedSurfaceUsageImpl(
+    const Surface* surface) const {
+    wgpu::TextureUsage usages = wgpu::TextureUsage::RenderAttachment |
+                                wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopySrc |
+                                wgpu::TextureUsage::CopyDst;
+    return usages;
+}
 
-    return ExecutionSerial(mCompletedSerial.load());
+ResultOrError<Ref<SharedTextureMemoryBase>> Device::ImportSharedTextureMemoryImpl(
+    const SharedTextureMemoryDescriptor* baseDescriptor) {
+    UnpackedPtr<SharedTextureMemoryDescriptor> unpacked;
+    DAWN_TRY_ASSIGN(unpacked, ValidateAndUnpack(baseDescriptor));
+
+    wgpu::SType type;
+    DAWN_TRY_ASSIGN(type,
+                    (unpacked.ValidateBranches<Branch<SharedTextureMemoryIOSurfaceDescriptor>>()));
+    DAWN_ASSERT(type == wgpu::SType::SharedTextureMemoryIOSurfaceDescriptor);
+    const auto* descriptor = unpacked.Get<SharedTextureMemoryIOSurfaceDescriptor>();
+    DAWN_ASSERT(descriptor != nullptr);
+
+    DAWN_INVALID_IF(!HasFeature(Feature::SharedTextureMemoryIOSurface), "%s is not enabled.",
+                    wgpu::FeatureName::SharedTextureMemoryIOSurface);
+
+    return SharedTextureMemory::Create(this, baseDescriptor->label, descriptor);
+}
+
+ResultOrError<Ref<SharedFenceBase>> Device::ImportSharedFenceImpl(
+    const SharedFenceDescriptor* baseDescriptor) {
+    UnpackedPtr<SharedFenceDescriptor> unpacked;
+    DAWN_TRY_ASSIGN(unpacked, ValidateAndUnpack(baseDescriptor));
+
+    wgpu::SType type;
+    DAWN_TRY_ASSIGN(type,
+                    (unpacked.ValidateBranches<Branch<SharedFenceMTLSharedEventDescriptor>>()));
+    DAWN_ASSERT(type == wgpu::SType::SharedFenceMTLSharedEventDescriptor);
+    const auto* descriptor = unpacked.Get<SharedFenceMTLSharedEventDescriptor>();
+    DAWN_ASSERT(descriptor != nullptr);
+
+    DAWN_INVALID_IF(!HasFeature(Feature::SharedFenceMTLSharedEvent), "%s is not enabled.",
+                    wgpu::FeatureName::SharedFenceMTLSharedEvent);
+    if (@available(macOS 10.14, ios 12.0, *)) {
+        return SharedFence::Create(this, baseDescriptor->label, descriptor);
+    }
+    DAWN_UNREACHABLE();
 }
 
 MaybeError Device::TickImpl() {
-    DAWN_TRY(SubmitPendingCommandBuffer());
+    DAWN_TRY(ToBackend(GetQueue())->SubmitPendingCommandBuffer());
 
-    // Just run timestamp period calculation when timestamp feature is enabled.
-    if (HasFeature(Feature::TimestampQuery)) {
-        if (@available(macos 10.15, iOS 14.0, *)) {
+    // Just run timestamp period calculation when timestamp feature is enabled and timestamp
+    // conversion is not disabled.
+    if (mIsTimestampQueryEnabled && !IsToggleEnabled(Toggle::DisableTimestampQueryConversion)) {
+        if (@available(macOS 10.15, iOS 14.0, *)) {
             UpdateTimestampPeriod(GetMTLDevice(), mKalmanInfo.get(), &mCpuTimestamp, &mGpuTimestamp,
                                   &mTimestampPeriod);
         }
@@ -356,170 +311,68 @@ MaybeError Device::TickImpl() {
     return {};
 }
 
-id<MTLDevice> Device::GetMTLDevice() {
+id<MTLDevice> Device::GetMTLDevice() const {
     return mMtlDevice.Get();
 }
 
-id<MTLCommandQueue> Device::GetMTLQueue() {
-    return mCommandQueue.Get();
-}
-
-CommandRecordingContext* Device::GetPendingCommandContext() {
-    mCommandContext.MarkUsed();
-    return &mCommandContext;
-}
-
-MaybeError Device::SubmitPendingCommandBuffer() {
-    if (!mCommandContext.WasUsed()) {
-        return {};
-    }
-
-    IncrementLastSubmittedCommandSerial();
-
-    // Acquire the pending command buffer, which is retained. It must be released later.
-    NSPRef<id<MTLCommandBuffer>> pendingCommands = mCommandContext.AcquireCommands();
-
-    // Replace mLastSubmittedCommands with the mutex held so we avoid races between the
-    // schedule handler and this code.
-    {
-        std::lock_guard<std::mutex> lock(mLastSubmittedCommandsMutex);
-        mLastSubmittedCommands = pendingCommands;
-    }
-
-    // Make a local copy of the pointer to the commands because it's not clear how ObjC blocks
-    // handle types with copy / move constructors being referenced in the block..
-    id<MTLCommandBuffer> pendingCommandsPointer = pendingCommands.Get();
-    [*pendingCommands addScheduledHandler:^(id<MTLCommandBuffer>) {
-        // This is DRF because we hold the mutex for mLastSubmittedCommands and pendingCommands
-        // is a local value (and not the member itself).
-        std::lock_guard<std::mutex> lock(mLastSubmittedCommandsMutex);
-        if (this->mLastSubmittedCommands.Get() == pendingCommandsPointer) {
-            this->mLastSubmittedCommands = nullptr;
-        }
-    }];
-
-    // Update the completed serial once the completed handler is fired. Make a local copy of
-    // mLastSubmittedSerial so it is captured by value.
-    ExecutionSerial pendingSerial = GetLastSubmittedCommandSerial();
-    // this ObjC block runs on a different thread
-    [*pendingCommands addCompletedHandler:^(id<MTLCommandBuffer>) {
-        TRACE_EVENT_ASYNC_END0(GetPlatform(), GPUWork, "DeviceMTL::SubmitPendingCommandBuffer",
-                               uint64_t(pendingSerial));
-        ASSERT(uint64_t(pendingSerial) > mCompletedSerial.load());
-        this->mCompletedSerial = uint64_t(pendingSerial);
-    }];
-
-    TRACE_EVENT_ASYNC_BEGIN0(GetPlatform(), GPUWork, "DeviceMTL::SubmitPendingCommandBuffer",
-                             uint64_t(pendingSerial));
-    [*pendingCommands commit];
-
-    return mCommandContext.PrepareNextCommandBuffer(*mCommandQueue);
-}
-
-ResultOrError<std::unique_ptr<StagingBufferBase>> Device::CreateStagingBuffer(size_t size) {
-    std::unique_ptr<StagingBufferBase> stagingBuffer = std::make_unique<StagingBuffer>(size, this);
-    DAWN_TRY(stagingBuffer->Initialize());
-    return std::move(stagingBuffer);
-}
-
-MaybeError Device::CopyFromStagingToBuffer(StagingBufferBase* source,
-                                           uint64_t sourceOffset,
-                                           BufferBase* destination,
-                                           uint64_t destinationOffset,
-                                           uint64_t size) {
+MaybeError Device::CopyFromStagingToBufferImpl(BufferBase* source,
+                                               uint64_t sourceOffset,
+                                               BufferBase* destination,
+                                               uint64_t destinationOffset,
+                                               uint64_t size) {
     // Metal validation layers forbid  0-sized copies, assert it is skipped prior to calling
     // this function.
-    ASSERT(size != 0);
+    DAWN_ASSERT(size != 0);
 
     ToBackend(destination)
-        ->EnsureDataInitializedAsDestination(GetPendingCommandContext(), destinationOffset, size);
+        ->EnsureDataInitializedAsDestination(
+            ToBackend(GetQueue())->GetPendingCommandContext(QueueBase::SubmitMode::Passive),
+            destinationOffset, size);
 
-    id<MTLBuffer> uploadBuffer = ToBackend(source)->GetBufferHandle();
-    id<MTLBuffer> buffer = ToBackend(destination)->GetMTLBuffer();
-    [GetPendingCommandContext()->EnsureBlit() copyFromBuffer:uploadBuffer
-                                                sourceOffset:sourceOffset
-                                                    toBuffer:buffer
-                                           destinationOffset:destinationOffset
-                                                        size:size];
+    id<MTLBuffer> uploadBuffer = ToBackend(source)->GetMTLBuffer();
+    Buffer* buffer = ToBackend(destination);
+    buffer->TrackUsage();
+    [ToBackend(GetQueue())->GetPendingCommandContext(QueueBase::SubmitMode::Passive)->EnsureBlit()
+           copyFromBuffer:uploadBuffer
+             sourceOffset:sourceOffset
+                 toBuffer:buffer->GetMTLBuffer()
+        destinationOffset:destinationOffset
+                     size:size];
     return {};
 }
 
 // In Metal we don't write from the CPU to the texture directly which can be done using the
 // replaceRegion function, because the function requires a non-private storage mode and Dawn
 // sets the private storage mode by default for all textures except IOSurfaces on macOS.
-MaybeError Device::CopyFromStagingToTexture(const StagingBufferBase* source,
-                                            const TextureDataLayout& dataLayout,
-                                            TextureCopy* dst,
-                                            const Extent3D& copySizePixels) {
-    Texture* texture = ToBackend(dst->texture.Get());
-    EnsureDestinationTextureInitialized(GetPendingCommandContext(), texture, *dst, copySizePixels);
+MaybeError Device::CopyFromStagingToTextureImpl(const BufferBase* source,
+                                                const TextureDataLayout& dataLayout,
+                                                const TextureCopy& dst,
+                                                const Extent3D& copySizePixels) {
+    Texture* texture = ToBackend(dst.texture.Get());
+    texture->SynchronizeTextureBeforeUse(ToBackend(GetQueue())->GetPendingCommandContext());
+    DAWN_TRY(EnsureDestinationTextureInitialized(
+        ToBackend(GetQueue())->GetPendingCommandContext(QueueBase::SubmitMode::Passive), texture,
+        dst, copySizePixels));
 
-    RecordCopyBufferToTexture(GetPendingCommandContext(), ToBackend(source)->GetBufferHandle(),
-                              source->GetSize(), dataLayout.offset, dataLayout.bytesPerRow,
-                              dataLayout.rowsPerImage, texture, dst->mipLevel, dst->origin,
-                              dst->aspect, copySizePixels);
-    return {};
-}
-
-Ref<Texture> Device::CreateTextureWrappingIOSurface(const ExternalImageDescriptor* descriptor,
-                                                    IOSurfaceRef ioSurface) {
-    const TextureDescriptor* textureDescriptor = FromAPI(descriptor->cTextureDescriptor);
-    if (ConsumedError(ValidateIsAlive())) {
-        return nullptr;
-    }
-    if (ConsumedError(ValidateTextureDescriptor(this, textureDescriptor))) {
-        return nullptr;
-    }
-    if (ConsumedError(ValidateIOSurfaceCanBeWrapped(this, textureDescriptor, ioSurface))) {
-        return nullptr;
-    }
-
-    Ref<Texture> result;
-    if (ConsumedError(Texture::CreateFromIOSurface(this, descriptor, ioSurface), &result)) {
-        return nullptr;
-    }
-    return result;
-}
-
-void Device::WaitForCommandsToBeScheduled() {
-    if (ConsumedError(SubmitPendingCommandBuffer())) {
-        return;
-    }
-
-    // Only lock the object while we take a reference to it, otherwise we could block further
-    // progress if the driver calls the scheduled handler (which also acquires the lock) before
-    // finishing the waitUntilScheduled.
-    NSPRef<id<MTLCommandBuffer>> lastSubmittedCommands;
-    {
-        std::lock_guard<std::mutex> lock(mLastSubmittedCommandsMutex);
-        lastSubmittedCommands = mLastSubmittedCommands;
-    }
-    [*lastSubmittedCommands waitUntilScheduled];
-}
-
-MaybeError Device::WaitForIdleForDestruction() {
-    // Forget all pending commands.
-    mCommandContext.AcquireCommands();
-    DAWN_TRY(CheckPassedSerials());
-
-    // Wait for all commands to be finished so we can free resources
-    while (GetCompletedCommandSerial() != GetLastSubmittedCommandSerial()) {
-        usleep(100);
-        DAWN_TRY(CheckPassedSerials());
-    }
-
+    RecordCopyBufferToTexture(
+        ToBackend(GetQueue())->GetPendingCommandContext(QueueBase::SubmitMode::Passive),
+        ToBackend(source)->GetMTLBuffer(), source->GetSize(), dataLayout.offset,
+        dataLayout.bytesPerRow, dataLayout.rowsPerImage, texture, dst.mipLevel, dst.origin,
+        dst.aspect, copySizePixels);
     return {};
 }
 
 void Device::DestroyImpl() {
-    ASSERT(GetState() == State::Disconnected);
-
-    // Forget all pending commands.
-    mCommandContext.AcquireCommands();
-
-    mCommandQueue = nullptr;
+    DAWN_ASSERT(GetState() == State::Disconnected);
+    // TODO(crbug.com/dawn/831): DestroyImpl is called from two places.
+    // - It may be called if the device is explicitly destroyed with APIDestroy.
+    //   This case is NOT thread-safe and needs proper synchronization with other
+    //   simultaneous uses of the device.
+    // - It may be called when the last ref to the device is dropped and the device
+    //   is implicitly destroyed. This case is thread-safe because there are no
+    //   other threads using the device since there are no other live refs.
     mMtlDevice = nullptr;
-    mDummyBlitMtlBuffer = nullptr;
+    mMockBlitMtlBuffer = nullptr;
 }
 
 uint32_t Device::GetOptimalBytesPerRowAlignment() const {
@@ -534,6 +387,10 @@ float Device::GetTimestampPeriodInNS() const {
     return mTimestampPeriod;
 }
 
+bool Device::IsResolveTextureBlitWithDrawSupported() const {
+    return true;
+}
+
 bool Device::UseCounterSamplingAtCommandBoundary() const {
     return mCounterSamplingAtCommandBoundary;
 }
@@ -542,13 +399,13 @@ bool Device::UseCounterSamplingAtStageBoundary() const {
     return mCounterSamplingAtStageBoundary;
 }
 
-id<MTLBuffer> Device::GetDummyBlitMtlBuffer() {
-    if (mDummyBlitMtlBuffer == nullptr) {
-        mDummyBlitMtlBuffer.Acquire(
+id<MTLBuffer> Device::GetMockBlitMtlBuffer() {
+    if (mMockBlitMtlBuffer == nullptr) {
+        mMockBlitMtlBuffer.Acquire(
             [GetMTLDevice() newBufferWithLength:1 options:MTLResourceStorageModePrivate]);
     }
 
-    return mDummyBlitMtlBuffer.Get();
+    return mMockBlitMtlBuffer.Get();
 }
 
 }  // namespace dawn::native::metal

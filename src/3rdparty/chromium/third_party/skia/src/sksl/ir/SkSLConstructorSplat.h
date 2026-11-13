@@ -9,9 +9,10 @@
 #define SKSL_CONSTRUCTOR_SPLAT
 
 #include "include/core/SkTypes.h"
-#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLConstructor.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLIRNode.h"
 #include "src/sksl/ir/SkSLType.h"
 
 #include <memory>
@@ -29,10 +30,10 @@ class Context;
  */
 class ConstructorSplat final : public SingleArgumentConstructor {
 public:
-    inline static constexpr Kind kExpressionKind = Kind::kConstructorSplat;
+    inline static constexpr Kind kIRNodeKind = Kind::kConstructorSplat;
 
     ConstructorSplat(Position pos, const Type& type, std::unique_ptr<Expression> arg)
-        : INHERITED(pos, kExpressionKind, &type, std::move(arg)) {}
+        : INHERITED(pos, kIRNodeKind, &type, std::move(arg)) {}
 
     // The input argument must be scalar. A "splat" to a scalar type will be optimized into a no-op.
     static std::unique_ptr<Expression> Make(const Context& context,

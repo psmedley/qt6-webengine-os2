@@ -47,8 +47,8 @@ def Fix(line):
     if result:
       line = result.group(1)
   # For Android tests:
-  if line[:2] == 'I ':
-    result = re.search('I\s+\d+\.\d+s run_tests_on_device\([0-9a-f]+\)\s+(.*)',
+  if line[:2] == 'I ' or line[:2] == 'E ':
+    result = re.search('[I|E].*run_tests_on_device\([^\)]+\)\s+(.*)',
                        line)
     if result:
       line = result.group(1)
@@ -105,18 +105,22 @@ def Run():
   else:
     patchSetArg = '';
 
-  (_, tmppath) = tempfile.mkstemp()
-  print('Temp file: %s' % tmppath)
-  os.system('git cl try-results --json %s %s' % (tmppath, patchSetArg))
+  try:
+    (fd, tmppath) = tempfile.mkstemp()
+    print('Temp file: %s' % tmppath)
+    os.system('git cl try-results --json %s %s' % (tmppath, patchSetArg))
 
-  try_result = open(tmppath).read()
-  if len(try_result) < 1000:
-    print('Did not seem to get try bot data.')
-    print(try_result)
-    return
+    with open(tmppath) as file:
+      try_result = file.read()
+      if len(try_result) < 1000:
+        print('Did not seem to get try bot data.')
+        print(try_result)
+        return
+  finally:
+    os.close(fd)
+    os.unlink(tmppath)
 
   data = json.loads(try_result)
-  os.unlink(tmppath)
 
   for builder in data:
     print(builder['builder']['builder'], builder['status'])
@@ -140,16 +144,16 @@ def Run():
             name.startswith('content_browsertests')) and '(with patch)' in name:
           s_name = name
 
-      bb_command = [
-          'bb',
-          'log',
-          builder['id'],
-          '\'%s\'' % s_name,
-      ]
-      bb_command_expanded = ' '.join(bb_command)
-      # print((BRIGHT_COLOR + '=> %s' + NORMAL_COLOR) % bb_command_expanded)
-      output = os.popen(bb_command_expanded).readlines()
-      ParseLog('\n'.join(output))
+          bb_command = [
+              'bb',
+              'log',
+              builder['id'],
+              '\"%s\"' % s_name,
+          ]
+          bb_command_expanded = ' '.join(bb_command)
+          # print((BRIGHT_COLOR + '=> %s' + NORMAL_COLOR) % bb_command_expanded)
+          output = os.popen(bb_command_expanded).readlines()
+          ParseLog('\n'.join(output))
       if not output:
         print('No content_browsertests (with patch) step found')
         continue

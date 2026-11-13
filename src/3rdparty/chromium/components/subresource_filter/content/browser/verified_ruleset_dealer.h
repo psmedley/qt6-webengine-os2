@@ -7,8 +7,8 @@
 
 #include <memory>
 
-#include "base/callback_forward.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
@@ -182,7 +182,7 @@ class VerifiedRuleset::Handle {
   friend class AsyncDocumentSubresourceFilter;
 
   // Note: Raw pointer, |ruleset_| already holds a reference to |task_runner_|.
-  raw_ptr<base::SequencedTaskRunner> task_runner_;
+  raw_ptr<base::SequencedTaskRunner, DanglingUntriaged> task_runner_;
   std::unique_ptr<VerifiedRuleset, base::OnTaskRunnerDeleter> ruleset_;
   SEQUENCE_CHECKER(sequence_checker_);
 };

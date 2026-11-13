@@ -16,33 +16,37 @@
 #define PLATFORM_BASE_MEDIUM_ENVIRONMENT_H_
 
 #include <atomic>
-#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
+#include "internal/base/observer_list.h"
+#include "internal/platform/borrowable.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/uuid.h"
+#include "internal/test/fake_clock.h"
 #ifndef NO_WEBRTC
 #include "internal/platform/implementation/webrtc.h"
 #endif
 #include "internal/platform/byte_array.h"
 #include "internal/platform/feature_flags.h"
+#include "internal/platform/implementation/wifi_direct.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
 #include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/nsd_service_info.h"
 #include "internal/platform/single_thread_executor.h"
-#include "internal/platform/wifi_hotspot_credential.h"
+#include "internal/platform/wifi_credential.h"
 
-namespace location {
 namespace nearby {
 
 // Environment config that can control availability of certain mediums for
@@ -52,6 +56,11 @@ struct EnvironmentConfig {
   // This is currently set to false, due to http://b/139734036 that would lead
   // to flaky tests.
   bool webrtc_enabled = false;
+
+  // Installs a simulated clock, which can be used to test timeouts.
+  // The simulated clock is automatically picked up by SystemClock, Timer and
+  // ScheduledExecutor implementations.
+  bool use_simulated_clock = false;
 };
 
 // MediumEnvironment is a simulated environment which allows multiple instances
@@ -147,6 +156,9 @@ class MediumEnvironment {
   // Returns a Bluetooth Device object matching given mac address to nullptr.
   api::BluetoothDevice* FindBluetoothDevice(const std::string& mac_address);
 
+  api::ble_v2::BlePeripheral* FindBleV2Peripheral(
+      absl::string_view mac_address);
+
   const EnvironmentConfig& GetEnvironmentConfig();
 #ifndef NO_WEBRTC
   // Registers |message_callback| to receive messages sent to device with id
@@ -222,7 +234,8 @@ class MediumEnvironment {
   // expects they should communicate.
   // The registered `medium` must refer to a valid instance that outlives this
   // object.
-  void RegisterBleV2Medium(api::ble_v2::BleMedium& medium);
+  void RegisterBleV2Medium(api::ble_v2::BleMedium& medium,
+                           api::ble_v2::BlePeripheral* peripheral);
 
   // Updates advertising info to indicate the current medium is exposing
   // advertising event.
@@ -244,29 +257,6 @@ class MediumEnvironment {
                                     std::uint32_t internal_session_id,
                                     BleScanCallback callback,
                                     api::ble_v2::BleMedium& medium);
-
-  // Inserts the BLE GATT characteristic and its value BleAdvertisement byte
-  // array.
-  void InsertBleV2MediumGattCharacteristics(
-      const api::ble_v2::GattCharacteristic& characteristic,
-      const ByteArray& gatt_advertisement_byte);
-
-  // Clears the map `gatt_advertisement_bytes_`.
-  void ClearBleV2MediumGattCharacteristics();
-
-  // Discover `service_uuid` and `characteristic_uuids`. This is to save the
-  // matched `gatt_advertisement_bytes_` to the
-  // `discovered_gatt_advertisement_bytes_`.
-  bool DiscoverBleV2MediumGattCharacteristics(
-      const Uuid& service_uuid, const std::vector<Uuid>& characteristic_uuids);
-
-  // Reads the BLE GATT characteristic value. If the GATT characteristic is not
-  // existed, return empty byte array.
-  ByteArray ReadBleV2MediumGattCharacteristics(
-      const api::ble_v2::GattCharacteristic& characteristic);
-
-  // Clears the map `discovered_gatt_advertisement_bytes_`.
-  void ClearBleV2MediumGattCharacteristicsForDiscovery();
 
   // Removes medium-related info. This should correspond to device power off.
   void UnregisterBleV2Medium(api::ble_v2::BleMedium& mediumum);
@@ -309,6 +299,28 @@ class MediumEnvironment {
   // port, or nullptr.
   api::WifiLanMedium* GetWifiLanMedium(const std::string& ip_address, int port);
 
+  // Adds medium-related info to allow for start/connect WifiDirect to work.
+  void RegisterWifiDirectMedium(api::WifiDirectMedium& medium);
+
+  // Returns WifiDirect medium that matches ssid or IP address with the role of
+  // the Medium. Returns nullptr if not found.
+  api::WifiDirectMedium* GetWifiDirectMedium(absl::string_view ssid,
+                                             absl::string_view ip_address);
+
+  // Updates credential and Medium role(GO or GC) to indicate the current
+  // medium is exposing Start WifiDirect event.
+  void UpdateWifiDirectMediumForStartOrConnect(
+      api::WifiDirectMedium& medium,
+      const WifiDirectCredentials* wifi_direct_credentials, bool is_go,
+      bool enabled);
+
+  // For unit test only
+  bool IsWifiDirectMediumsEmpty();
+
+  // Removes medium-related info. This should correspond to device being stopped
+  // or disconnected.
+  void UnregisterWifiDirectMedium(api::WifiDirectMedium& medium);
+
   // Adds medium-related info to allow for start/connect Hotspot to work.
   // This provides access to this medium from other mediums, when protocol
   // expects they should communicate.
@@ -330,6 +342,51 @@ class MediumEnvironment {
   void UnregisterWifiHotspotMedium(api::WifiHotspotMedium& medium);
 
   void SetFeatureFlags(const FeatureFlags::Flags& flags);
+
+  absl::optional<FakeClock*> GetSimulatedClock();
+
+  api::ble_v2::BleMedium* FindBleV2Medium(absl::string_view address);
+  api::ble_v2::BleMedium* FindBleV2Medium(uint64_t id);
+
+  void RegisterGattServer(api::ble_v2::BleMedium& medium,
+                          api::ble_v2::BlePeripheral* peripheral,
+                          Borrowable<api::ble_v2::GattServer*> gatt_server);
+  void UnregisterGattServer(api::ble_v2::BleMedium& medium);
+
+  Borrowable<api::ble_v2::GattServer*> GetGattServer(
+      api::ble_v2::BlePeripheral& peripheral);
+
+  // Configures the BluetoothPairingContext for remote BluetoothDevice.
+  void ConfigBluetoothPairingContext(api::BluetoothDevice* device,
+                                     api::PairingParams pairing_params);
+
+  // Sets the current pairing states of remote BluetoothDevice.
+  bool SetPairingState(api::BluetoothDevice* device, bool paired);
+
+  // Mocks the pairing result for remote BluetoothDevice.
+  bool SetPairingResult(
+      api::BluetoothDevice* device,
+      std::optional<api::BluetoothPairingCallback::PairingError> error);
+
+  // Requests for pairing with remote BluetoothDevice,
+  // and registers BluetoothPairingCallback.
+  bool InitiatePairing(api::BluetoothDevice* remote_device,
+                       api::BluetoothPairingCallback pairing_cb);
+
+  // Finishes pairing for remote BluetoothDevice.
+  bool FinishPairing(api::BluetoothDevice* device);
+
+  // Cancels ongoing pairing for remote BluetoothDevice.
+  bool CancelPairing(api::BluetoothDevice* device);
+
+  // Returns the pairing states of remote BluetoothDevice.
+  bool IsPaired(api::BluetoothDevice* device);
+
+  // Clears the map `devices_pairing_contexts_`.
+  void ClearBluetoothDevicesForPairing();
+
+  void AddObserver(api::BluetoothClassicMedium::Observer* observer);
+  void RemoveObserver(api::BluetoothClassicMedium::Observer* observer);
 
  private:
   struct BluetoothMediumContext {
@@ -355,6 +412,7 @@ class MediumEnvironment {
     api::ble_v2::BleAdvertisementData advertisement_data;
     bool advertising = false;
     bool scanning = false;
+    std::unique_ptr<Borrowable<api::ble_v2::GattServer*>> gatt_server = nullptr;
   };
 
   struct WifiLanMediumContext {
@@ -367,12 +425,27 @@ class MediumEnvironment {
     absl::flat_hash_map<std::string, NsdServiceInfo> discovered_services;
   };
 
+  struct WifiDirectMediumContext {
+    // Set to "true" for Medium act as WifiDirect GO role; "false" for GC role
+    bool is_go = false;
+    // Set "true" when GO is started or GC is connected
+    bool is_active = false;
+    const WifiDirectCredentials* wifi_direct_credentials;
+  };
+
   struct WifiHotspotMediumContext {
     // Set to "true" for Medium act as SoftAP role; "false" for STA role
     bool is_ap = true;
     // Set "true" when SoftAP is started or STA is connected
     bool is_active = false;
     HotspotCredentials* hotspot_credentials;
+  };
+
+  struct BluetoothPairingContext {
+    api::PairingParams pairing_params;
+    api::BluetoothPairingCallback pairing_callback;
+    bool is_paired = false;
+    std::optional<api::BluetoothPairingCallback::PairingError> pairing_error;
   };
 
   // This is a singleton object, for which destructor will never be called.
@@ -402,9 +475,9 @@ class MediumEnvironment {
                                     const NsdServiceInfo& service_info,
                                     bool enabled);
 
-  void RunOnMediumEnvironmentThread(std::function<void()> runnable);
+  void RunOnMediumEnvironmentThread(Runnable runnable);
 
-  std::atomic_bool enabled_ = true;
+  std::atomic_bool enabled_ = false;
   std::atomic_int job_count_ = 0;
   std::atomic_bool enable_notifications_ = false;
   SingleThreadExecutor executor_;
@@ -420,13 +493,8 @@ class MediumEnvironment {
   absl::flat_hash_map<api::BleMedium*, BleMediumContext> ble_mediums_;
   absl::flat_hash_map<api::ble_v2::BleMedium*, BleV2MediumContext>
       ble_v2_mediums_;
-  absl::flat_hash_map<api::ble_v2::GattCharacteristic,
-                      location::nearby::ByteArray>
-      gatt_advertisement_bytes_;
-  absl::flat_hash_map<api::ble_v2::GattCharacteristic,
-                      location::nearby::ByteArray>
-      discovered_gatt_advertisement_bytes_;
-
+  absl::flat_hash_map<api::BluetoothDevice*, BluetoothPairingContext>
+      devices_pairing_contexts_;
 #ifndef NO_WEBRTC
   // Maps peer id to callback for receiving signaling messages.
   absl::flat_hash_map<std::string, OnSignalingMessageCallback>
@@ -441,14 +509,18 @@ class MediumEnvironment {
       wifi_lan_mediums_;
 
   Mutex mutex_;
+  absl::flat_hash_map<api::WifiDirectMedium*, WifiDirectMediumContext>
+      wifi_direct_mediums_ ABSL_GUARDED_BY(mutex_);
+
   absl::flat_hash_map<api::WifiHotspotMedium*, WifiHotspotMediumContext>
       wifi_hotspot_mediums_ ABSL_GUARDED_BY(mutex_);
 
   bool use_valid_peer_connection_ = true;
   absl::Duration peer_connection_latency_ = absl::ZeroDuration();
+  std::unique_ptr<FakeClock> simulated_clock_ ABSL_GUARDED_BY(mutex_);
+  ObserverList<api::BluetoothClassicMedium::Observer> observers_;
 };
 
 }  // namespace nearby
-}  // namespace location
 
 #endif  // PLATFORM_BASE_MEDIUM_ENVIRONMENT_H_

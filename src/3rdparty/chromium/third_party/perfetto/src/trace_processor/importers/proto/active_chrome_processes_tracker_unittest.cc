@@ -45,8 +45,8 @@ TEST(ActiveChromeProcessesTrackerTest, NoDescriptors) {
   tracker.AddActiveProcessMetadata(/*timestamp=*/10, /*upid=*/1);
   tracker.AddActiveProcessMetadata(/*timestamp=*/10, /*upid=*/2);
   EXPECT_THAT(tracker.GetProcessesWithDataLoss(),
-              UnorderedElementsAre(ProcessWithDataLoss{1, base::nullopt},
-                                   ProcessWithDataLoss{2, base::nullopt}));
+              UnorderedElementsAre(ProcessWithDataLoss{1, std::nullopt},
+                                   ProcessWithDataLoss{2, std::nullopt}));
 }
 
 TEST(ActiveChromeProcessesTrackerTest, InexactMatch) {
@@ -89,6 +89,22 @@ TEST(ActiveChromeProcessesTrackerTest, ExtraDescriptor) {
   tracker.AddProcessDescriptor(/*timestamp=*/15 * kNanosecondsInSecond,
                                /*upid=*/1);
   EXPECT_THAT(tracker.GetProcessesWithDataLoss(), IsEmpty());
+}
+
+TEST(ActiveChromeProcessesTracker, TemrinatedProcess) {
+  ActiveChromeProcessesTracker tracker(nullptr);
+  // First metadata packet - two processes.
+  tracker.AddActiveProcessMetadata(/*timestamp=*/10, /*upid=*/1);
+  tracker.AddActiveProcessMetadata(/*timestamp=*/10, /*upid=*/2);
+  // Second metadata packet - only one process, the first process terminated.
+  tracker.AddActiveProcessMetadata(/*timestamp=*/15, /*upid=*/2);
+
+  // The first process is reliable since the second snapshot - it terminated,
+  // so it has no data loss.
+  // The second process has data loss till the end of the trace.
+  EXPECT_THAT(tracker.GetProcessesWithDataLoss(),
+              UnorderedElementsAre(ProcessWithDataLoss{1, 15},
+                                   ProcessWithDataLoss{2, std::nullopt}));
 }
 
 }  // namespace

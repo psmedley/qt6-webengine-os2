@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,8 @@ CXFA_ImageRenderer::~CXFA_ImageRenderer() = default;
 bool CXFA_ImageRenderer::Start() {
   FXDIB_ResampleOptions options;
   options.bInterpolateBilinear = true;
-  if (m_pDevice->StartDIBits(m_pDIBBase, 255, 0, m_ImageMatrix, options,
-                             &m_DeviceHandle)) {
+  if (m_pDevice->StartDIBits(m_pDIBBase, /*alpha=*/1.0f, /*argb=*/0,
+                             m_ImageMatrix, options, &m_DeviceHandle)) {
     if (m_DeviceHandle) {
       m_State = State::kStarted;
       return true;
@@ -148,7 +148,7 @@ void CXFA_ImageRenderer::CompositeDIBitmap(
   if (!pConverted)
     return;
 
-  CXFA_ImageRenderer imageRender(m_pDevice.Get(), pConverted, m_ImageMatrix);
+  CXFA_ImageRenderer imageRender(m_pDevice, pConverted, m_ImageMatrix);
   if (!imageRender.Start())
     return;
 

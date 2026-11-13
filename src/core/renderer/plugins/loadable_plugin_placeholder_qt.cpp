@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 // Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -22,11 +23,11 @@ namespace QtWebEngineCore {
 // static
 gin::WrapperInfo LoadablePluginPlaceholderQt::kWrapperInfo = {gin::kEmbedderNativeGin};
 
-LoadablePluginPlaceholderQt::LoadablePluginPlaceholderQt(content::RenderFrame* render_frame,
-                                                         const blink::WebPluginParams& params,
-                                                         const std::string& html_data,
-                                                         const std::u16string& title)
-    : plugins::LoadablePluginPlaceholder(render_frame, params, html_data)
+LoadablePluginPlaceholderQt::LoadablePluginPlaceholderQt(content::RenderFrame *render_frame,
+                                                         const blink::WebPluginParams &params,
+                                                         const std::string &html_data,
+                                                         const std::u16string &title)
+    : plugins::LoadablePluginPlaceholder(render_frame, params)
 {}
 
 LoadablePluginPlaceholderQt::~LoadablePluginPlaceholderQt()

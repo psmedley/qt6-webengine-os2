@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,13 +28,11 @@ class CPDF_SecurityHandler final : public Retainable {
               const ByteString& password);
   void OnCreate(CPDF_Dictionary* pEncryptDict,
                 const CPDF_Array* pIdArray,
-                const ByteString& user_password,
-                const ByteString& owner_password);
-  void OnCreate(CPDF_Dictionary* pEncryptDict,
-                const CPDF_Array* pIdArray,
-                const ByteString& user_password);
+                const ByteString& password);
 
-  uint32_t GetPermissions() const;
+  // When `get_owner_perms` is true, returns full permissions if unlocked by
+  // owner.
+  uint32_t GetPermissions(bool get_owner_perms) const;
   bool IsMetadataEncrypted() const;
 
   CPDF_CryptoHandler* GetCryptoHandler() const {
@@ -68,14 +66,8 @@ class CPDF_SecurityHandler final : public Retainable {
   bool CheckOwnerPassword(const ByteString& password);
   bool AES256_CheckPassword(const ByteString& password, bool bOwner);
   void AES256_SetPassword(CPDF_Dictionary* pEncryptDict,
-                          const ByteString& password,
-                          bool bOwner);
+                          const ByteString& password);
   void AES256_SetPerms(CPDF_Dictionary* pEncryptDict);
-  void OnCreateInternal(CPDF_Dictionary* pEncryptDict,
-                        const CPDF_Array* pIdArray,
-                        const ByteString& user_password,
-                        const ByteString& owner_password,
-                        bool bDefault);
   bool CheckSecurity(const ByteString& password);
 
   void InitCryptoHandler();
@@ -90,7 +82,7 @@ class CPDF_SecurityHandler final : public Retainable {
   ByteString m_FileId;
   RetainPtr<const CPDF_Dictionary> m_pEncryptDict;
   std::unique_ptr<CPDF_CryptoHandler> m_pCryptoHandler;
-  uint8_t m_EncryptKey[32];
+  uint8_t m_EncryptKey[32] = {};
 };
 
 #endif  // CORE_FPDFAPI_PARSER_CPDF_SECURITY_HANDLER_H_

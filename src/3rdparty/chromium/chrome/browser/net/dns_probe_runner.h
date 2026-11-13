@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_NET_DNS_PROBE_RUNNER_H_
 #define CHROME_BROWSER_NET_DNS_PROBE_RUNNER_H_
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/sequence_checker.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -73,8 +73,8 @@ class DnsProbeRunner : public network::ResolveHostClientBase {
   // network::ResolveHostClientBase impl:
   void OnComplete(int32_t result,
                   const net::ResolveErrorInfo& resolve_error_info,
-                  const absl::optional<net::AddressList>& resolved_addresses,
-                  const absl::optional<net::HostResolverEndpointResults>&
+                  const std::optional<net::AddressList>& resolved_addresses,
+                  const std::optional<net::HostResolverEndpointResults>&
                       endpoint_results_with_metadata) override;
 
   net::DnsConfigOverrides GetConfigOverridesForTesting() {

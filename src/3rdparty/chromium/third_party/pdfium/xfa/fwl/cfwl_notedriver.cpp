@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "build/build_config.h"
 #include "core/fxcrt/fx_extension.h"
+#include "fxjs/gc/container_trace.h"
 #include "xfa/fwl/cfwl_app.h"
 #include "xfa/fwl/cfwl_event.h"
 #include "xfa/fwl/cfwl_messagekey.h"
@@ -27,17 +28,16 @@ uint64_t g_next_listener_key = 1;
 
 }  // namespace
 
-CFWL_NoteDriver::CFWL_NoteDriver() = default;
+CFWL_NoteDriver::CFWL_NoteDriver(CFWL_App* pApp) : m_pApp(pApp) {}
 
 CFWL_NoteDriver::~CFWL_NoteDriver() = default;
 
 void CFWL_NoteDriver::Trace(cppgc::Visitor* visitor) const {
-  for (const auto& item : m_eventTargets)
-    item.second->Trace(visitor);
-
+  visitor->Trace(m_pApp);
   visitor->Trace(m_pHover);
   visitor->Trace(m_pFocus);
   visitor->Trace(m_pGrab);
+  ContainerTrace(visitor, m_eventTargets);
 }
 
 void CFWL_NoteDriver::SendEvent(CFWL_Event* pNote) {
@@ -54,9 +54,10 @@ void CFWL_NoteDriver::RegisterEventTarget(CFWL_Widget* pListener,
     key = g_next_listener_key++;
     pListener->SetEventKey(key);
   }
-  if (!m_eventTargets[key])
-    m_eventTargets[key] = std::make_unique<Target>(pListener);
-
+  if (!m_eventTargets[key]) {
+    m_eventTargets[key] = cppgc::MakeGarbageCollected<Target>(
+        m_pApp->GetHeap()->GetAllocationHandle(), pListener);
+  }
   m_eventTargets[key]->SetEventSource(pEventSource);
 }
 
@@ -130,8 +131,6 @@ bool CFWL_NoteDriver::DispatchMessage(CFWL_Message* pMessage,
         return false;
       break;
     }
-    default:
-      break;
   }
   IFWL_WidgetDelegate* pDelegate = pMessage->GetDstTarget()->GetDelegate();
   if (pDelegate)

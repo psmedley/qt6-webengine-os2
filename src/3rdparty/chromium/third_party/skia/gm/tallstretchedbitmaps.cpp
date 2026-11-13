@@ -15,8 +15,9 @@
 #include "include/core/SkSize.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
-#include "include/private/SkTo.h"
-#include "include/utils/SkRandom.h"
+#include "include/private/base/SkTo.h"
+#include "src/base/SkRandom.h"
+#include "tools/GpuToolUtils.h"
 #include "tools/ToolUtils.h"
 
 int make_bm(SkBitmap* bm, int height) {
@@ -67,13 +68,9 @@ public:
     TallStretchedBitmapsGM() {}
 
 protected:
-    SkString onShortName() override {
-        return SkString("tall_stretched_bitmaps");
-    }
+    SkString getName() const override { return SkString("tall_stretched_bitmaps"); }
 
-    SkISize onISize() override {
-        return SkISize::Make(730, 690);
-    }
+    SkISize getISize() override { return SkISize::Make(730, 690); }
 
     void onOnceBeforeDraw() override {
         for (size_t i = 0; i < std::size(fTallBmps); ++i) {

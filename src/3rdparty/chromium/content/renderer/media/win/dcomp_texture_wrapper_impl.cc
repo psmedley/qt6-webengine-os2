@@ -4,14 +4,16 @@
 
 #include "content/renderer/media/win/dcomp_texture_wrapper_impl.h"
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/ptr_util.h"
+#include "base/task/bind_post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "cc/layers/video_frame_provider.h"
 #include "gpu/GLES2/gl2extchromium.h"
+#include "gpu/command_buffer/client/client_shared_image.h"
 #include "gpu/command_buffer/client/shared_image_interface.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/ipc/common/gpu_memory_buffer_impl_dxgi.h"
-#include "media/base/bind_to_current_loop.h"
 #include "media/base/win/mf_helpers.h"
 
 namespace content {
@@ -26,9 +28,10 @@ namespace content {
 class DCOMPTextureMailboxResources
     : public base::RefCounted<DCOMPTextureMailboxResources> {
  public:
-  DCOMPTextureMailboxResources(gpu::Mailbox mailbox,
-                               scoped_refptr<DCOMPTextureFactory> factory)
-      : mailbox_(mailbox), factory_(factory) {
+  DCOMPTextureMailboxResources(
+      scoped_refptr<gpu::ClientSharedImage> shared_image,
+      scoped_refptr<DCOMPTextureFactory> factory)
+      : shared_image_(std::move(shared_image)), factory_(factory) {
     DVLOG_FUNC(1);
   }
 
@@ -47,15 +50,15 @@ class DCOMPTextureMailboxResources
       return;
 
     gpu::SharedImageInterface* sii = factory_->SharedImageInterface();
-    sii->DestroySharedImage(last_sync_token_.value(), mailbox_);
+    sii->DestroySharedImage(last_sync_token_.value(), std::move(shared_image_));
   }
 
-  gpu::Mailbox mailbox_;
+  scoped_refptr<gpu::ClientSharedImage> shared_image_;
   scoped_refptr<DCOMPTextureFactory> factory_;
 
   // TODO(xhwang): Follow the example of UpdateReleaseSyncToken to wait for
   // all SyncTokens and create a new one for DestroySharedImage().
-  absl::optional<gpu::SyncToken> last_sync_token_;
+  std::optional<gpu::SyncToken> last_sync_token_;
 };
 
 namespace {
@@ -78,23 +81,30 @@ void OnReleaseVideoFrame(
 // static
 std::unique_ptr<media::DCOMPTextureWrapper> DCOMPTextureWrapperImpl::Create(
     scoped_refptr<DCOMPTextureFactory> factory,
-    scoped_refptr<base::SingleThreadTaskRunner> media_task_runner) {
+    scoped_refptr<base::SequencedTaskRunner> media_task_runner) {
   DVLOG(1) << __func__;
-  // auto* impl = new DCOMPTextureWrapperImpl(factory, media_task_runner);
+  DCHECK(media_task_runner);
+
+  // This can happen if EstablishGpuChannelSync() failed previously.
+  // See https://crbug.com/1378123.
+  if (!factory)
+    return nullptr;
+
   return base::WrapUnique(
       new DCOMPTextureWrapperImpl(factory, media_task_runner));
 }
 
 DCOMPTextureWrapperImpl::DCOMPTextureWrapperImpl(
     scoped_refptr<DCOMPTextureFactory> factory,
-    scoped_refptr<base::SingleThreadTaskRunner> media_task_runner)
+    scoped_refptr<base::SequencedTaskRunner> media_task_runner)
     : factory_(factory), media_task_runner_(media_task_runner) {
   DVLOG_FUNC(1);
+  DCHECK(factory_);
 }
 
 DCOMPTextureWrapperImpl::~DCOMPTextureWrapperImpl() {
   DVLOG_FUNC(1);
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
 
   // We do not need any additional cleanup logic here as the
   // OnReleaseVideoFrame() callback handles cleaning up the shared image.
@@ -104,7 +114,7 @@ bool DCOMPTextureWrapperImpl::Initialize(
     const gfx::Size& output_size,
     OutputRectChangeCB output_rect_change_cb) {
   DVLOG_FUNC(1);
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
 
   output_size_ = output_size;
 
@@ -118,7 +128,7 @@ bool DCOMPTextureWrapperImpl::Initialize(
 
 void DCOMPTextureWrapperImpl::UpdateTextureSize(const gfx::Size& new_size) {
   DVLOG_FUNC(2);
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
 
   // We would like to invoke SetTextureSize() which will let DCOMPTexture to
   // bind a mailbox to its SharedImage as early as possible. Let new_size of
@@ -134,7 +144,7 @@ void DCOMPTextureWrapperImpl::SetDCOMPSurfaceHandle(
     const base::UnguessableToken& token,
     SetDCOMPSurfaceHandleCB set_dcomp_surface_handle_cb) {
   DVLOG_FUNC(1);
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
 
   dcomp_texture_host_->SetDCOMPSurfaceHandle(
       token, std::move(set_dcomp_surface_handle_cb));
@@ -144,7 +154,7 @@ void DCOMPTextureWrapperImpl::CreateVideoFrame(
     const gfx::Size& natural_size,
     CreateVideoFrameCB create_video_frame_cb) {
   DVLOG_FUNC(2);
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
 
   natural_size_ = natural_size;
   if (mailbox_.IsZero()) {
@@ -155,25 +165,34 @@ void DCOMPTextureWrapperImpl::CreateVideoFrame(
 
   // No need to wait on any sync token as the SharedImage |mailbox_| should be
   // ready for use.
+  scoped_refptr<gpu::ClientSharedImage> shared_image;
   if (!mailbox_added_) {
     DVLOG_FUNC(1) << "AddMailbox";
     mailbox_added_ = true;
     gpu::SharedImageInterface* sii = factory_->SharedImageInterface();
-    sii->NotifyMailboxAdded(mailbox_, gpu::SHARED_IMAGE_USAGE_DISPLAY_READ |
-                                          gpu::SHARED_IMAGE_USAGE_GLES2 |
-                                          gpu::SHARED_IMAGE_USAGE_RASTER);
+
+    // The SI backing this VideoFrame will be read by the display compositor and
+    // raster. The latter will be over GL if not using OOP-R. NOTE: GL usage can
+    // be eliminated once OOP-R ships definitively.
+    shared_image = sii->NotifyMailboxAdded(
+        mailbox_, gpu::SHARED_IMAGE_USAGE_DISPLAY_READ |
+                      gpu::SHARED_IMAGE_USAGE_GLES2_READ |
+                      gpu::SHARED_IMAGE_USAGE_RASTER_READ |
+                      gpu::SHARED_IMAGE_USAGE_RASTER_WRITE);
   }
 
   gpu::MailboxHolder holders[media::VideoFrame::kMaxPlanes] = {
       gpu::MailboxHolder(mailbox_, gpu::SyncToken(), GL_TEXTURE_EXTERNAL_OES)};
 
   if (!dcomp_texture_resources_) {
+    CHECK(shared_image);
     dcomp_texture_resources_ =
-        base::MakeRefCounted<DCOMPTextureMailboxResources>(mailbox_, factory_);
+        base::MakeRefCounted<DCOMPTextureMailboxResources>(
+            std::move(shared_image), factory_);
   }
 
   auto frame = media::VideoFrame::WrapNativeTextures(
-      media::PIXEL_FORMAT_ARGB, holders,
+      media::PIXEL_FORMAT_BGRA, holders,
       base::BindPostTask(
           media_task_runner_,
           base::BindOnce(&OnReleaseVideoFrame, dcomp_texture_resources_)),
@@ -190,17 +209,18 @@ void DCOMPTextureWrapperImpl::CreateVideoFrame(
     const gfx::Size& natural_size,
     gfx::GpuMemoryBufferHandle dx_handle,
     CreateDXVideoFrameCB create_video_frame_cb) {
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
   gpu::SharedImageInterface* sii = factory_->SharedImageInterface();
 
-  uint32_t usage = gpu::SHARED_IMAGE_USAGE_RASTER |
+  uint32_t usage = gpu::SHARED_IMAGE_USAGE_RASTER_READ |
+                   gpu::SHARED_IMAGE_USAGE_RASTER_WRITE |
                    gpu::SHARED_IMAGE_USAGE_OOP_RASTERIZATION |
                    gpu::SHARED_IMAGE_USAGE_DISPLAY_READ |
                    gpu::SHARED_IMAGE_USAGE_SCANOUT;
 
   std::unique_ptr<gfx::GpuMemoryBuffer> gmb =
       gpu::GpuMemoryBufferImplDXGI::CreateFromHandle(
-          std::move(dx_handle), natural_size, gfx::BufferFormat::RGBA_8888,
+          std::move(dx_handle), natural_size, gfx::BufferFormat::BGRA_8888,
           gfx::BufferUsage::GPU_READ, base::NullCallback(), nullptr, nullptr);
 
   // The VideoFrame object requires a 4 array mailbox holder because some
@@ -209,9 +229,12 @@ void DCOMPTextureWrapperImpl::CreateVideoFrame(
   // still need to provide the video frame creation with a 4 array mailbox
   // holder.
   gpu::MailboxHolder holder[media::VideoFrame::kMaxPlanes];
-  gpu::Mailbox mailbox = sii->CreateSharedImage(
-      gmb.get(), nullptr, gfx::ColorSpace(), kTopLeft_GrSurfaceOrigin,
-      kPremul_SkAlphaType, usage);
+  auto client_shared_image = sii->CreateSharedImage(
+      viz::SinglePlaneFormat::kBGRA_8888, natural_size, gfx::ColorSpace(),
+      kTopLeft_GrSurfaceOrigin, kPremul_SkAlphaType, usage,
+      "DCOMPTextureWrapperImpl", gmb->CloneHandle());
+  CHECK(client_shared_image);
+  gpu::Mailbox mailbox = client_shared_image->mailbox();
   gpu::SyncToken sync_token = sii->GenVerifiedSyncToken();
   holder[0] = gpu::MailboxHolder(mailbox, sync_token, GL_TEXTURE_2D);
 
@@ -225,23 +248,24 @@ void DCOMPTextureWrapperImpl::CreateVideoFrame(
   video_frame_texture->AddDestructionObserver(base::BindPostTask(
       media_task_runner_,
       base::BindOnce(&DCOMPTextureWrapperImpl::OnDXVideoFrameDestruction,
-                     weak_factory_.GetWeakPtr(), sync_token, mailbox),
+                     weak_factory_.GetWeakPtr(), sync_token,
+                     std::move(client_shared_image)),
       FROM_HERE));
 
-  std::move(create_video_frame_cb).Run(video_frame_texture);
+  std::move(create_video_frame_cb).Run(video_frame_texture, mailbox);
 }
 
 void DCOMPTextureWrapperImpl::OnDXVideoFrameDestruction(
     const gpu::SyncToken& sync_token,
-    const gpu::Mailbox& image_mailbox) {
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+    scoped_refptr<gpu::ClientSharedImage> shared_image) {
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
   gpu::SharedImageInterface* sii = factory_->SharedImageInterface();
-  sii->DestroySharedImage(sync_token, image_mailbox);
+  sii->DestroySharedImage(sync_token, std::move(shared_image));
 }
 
 void DCOMPTextureWrapperImpl::OnSharedImageMailboxBound(gpu::Mailbox mailbox) {
   DVLOG_FUNC(1);
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
 
   mailbox_ = std::move(mailbox);
 
@@ -253,7 +277,7 @@ void DCOMPTextureWrapperImpl::OnSharedImageMailboxBound(gpu::Mailbox mailbox) {
 
 void DCOMPTextureWrapperImpl::OnOutputRectChange(gfx::Rect output_rect) {
   DVLOG_FUNC(1);
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(media_task_runner_->RunsTasksInCurrentSequence());
 
   output_rect_change_cb_.Run(output_rect);
 }

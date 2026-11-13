@@ -1,10 +1,12 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "fpdfsdk/formfiller/cffl_interactiveformfiller.h"
+
+#include <algorithm>
 
 #include "constants/access_permissions.h"
 #include "constants/ascii.h"
@@ -24,7 +26,6 @@
 #include "fpdfsdk/formfiller/cffl_textfield.h"
 #include "public/fpdf_fwlevent.h"
 #include "third_party/base/check.h"
-#include "third_party/base/cxx17_backports.h"
 
 CFFL_InteractiveFormFiller::CFFL_InteractiveFormFiller(
     CallbackIface* pCallbackIface)
@@ -432,6 +433,32 @@ bool CFFL_InteractiveFormFiller::OnKillFocus(
   return !!pWidget;
 }
 
+void CFFL_InteractiveFormFiller::OnSetFieldInputFocus(const WideString& text) {
+  m_pCallbackIface->OnSetFieldInputFocus(text);
+}
+
+void CFFL_InteractiveFormFiller::Invalidate(IPDF_Page* pPage,
+                                            const FX_RECT& rect) {
+  m_pCallbackIface->Invalidate(pPage, rect);
+}
+
+CPDFSDK_PageView* CFFL_InteractiveFormFiller::GetOrCreatePageView(
+    IPDF_Page* pPage) {
+  return m_pCallbackIface->GetOrCreatePageView(pPage);
+}
+
+CPDFSDK_PageView* CFFL_InteractiveFormFiller::GetPageView(IPDF_Page* pPage) {
+  return m_pCallbackIface->GetPageView(pPage);
+}
+
+CFX_Timer::HandlerIface* CFFL_InteractiveFormFiller::GetTimerHandler() {
+  return m_pCallbackIface->GetTimerHandler();
+}
+
+void CFFL_InteractiveFormFiller::OnChange() {
+  m_pCallbackIface->OnChange();
+}
+
 bool CFFL_InteractiveFormFiller::IsVisible(CPDFSDK_Widget* pWidget) {
   return pWidget->IsVisible();
 }
@@ -505,6 +532,16 @@ WideString CFFL_InteractiveFormFiller::GetSelectedText(
   return pFormField ? pFormField->GetSelectedText() : WideString();
 }
 
+void CFFL_InteractiveFormFiller::ReplaceAndKeepSelection(
+    CPDFSDK_Widget* pWidget,
+    const WideString& text) {
+  CFFL_FormField* pFormField = GetFormField(pWidget);
+  if (!pFormField)
+    return;
+
+  pFormField->ReplaceAndKeepSelection(text);
+}
+
 void CFFL_InteractiveFormFiller::ReplaceSelection(CPDFSDK_Widget* pWidget,
                                                   const WideString& text) {
   CFFL_FormField* pFormField = GetFormField(pWidget);
@@ -554,7 +591,7 @@ void CFFL_InteractiveFormFiller::InvalidateRect(PerWindowData* pWidgetData,
   if (!pWidget)
     return;
 
-  GetCallbackIface()->InvalidateRect(pWidget, rect);
+  m_pCallbackIface->InvalidateRect(pWidget, rect);
 }
 
 void CFFL_InteractiveFormFiller::OutputSelectedRect(PerWindowData* pWidgetData,
@@ -567,15 +604,15 @@ void CFFL_InteractiveFormFiller::OutputSelectedRect(PerWindowData* pWidgetData,
   if (!pFormField)
     return;
 
-  GetCallbackIface()->OutputSelectedRect(pFormField, rect);
+  m_pCallbackIface->OutputSelectedRect(pFormField, rect);
 }
 
 bool CFFL_InteractiveFormFiller::IsSelectionImplemented() const {
-  return GetCallbackIface()->IsSelectionImplemented();
+  return m_pCallbackIface->IsSelectionImplemented();
 }
 
 void CFFL_InteractiveFormFiller::SetCursor(CursorStyle nCursorStyle) {
-  GetCallbackIface()->SetCursor(nCursorStyle);
+  m_pCallbackIface->SetCursor(nCursorStyle);
 }
 
 void CFFL_InteractiveFormFiller::QueryWherePopup(
@@ -616,7 +653,7 @@ void CFFL_InteractiveFormFiller::QueryWherePopup(
 
   constexpr float kMaxListBoxHeight = 140;
   const float fMaxListBoxHeight =
-      pdfium::clamp(kMaxListBoxHeight, fPopupMin, fPopupMax);
+      std::clamp(kMaxListBoxHeight, fPopupMin, fPopupMax);
 
   if (fBottom > fMaxListBoxHeight) {
     *fPopupRet = fMaxListBoxHeight;
@@ -859,7 +896,8 @@ bool CFFL_InteractiveFormFiller::IsValidAnnot(const CPDFSDK_PageView* pPageView,
   return pPageView && pPageView->IsValidAnnot(pWidget->GetPDFAnnot());
 }
 
-std::pair<bool, bool> CFFL_InteractiveFormFiller::OnBeforeKeyStroke(
+IPWL_FillerNotify::BeforeKeystrokeResult
+CFFL_InteractiveFormFiller::OnBeforeKeyStroke(
     const IPWL_FillerNotify::PerWindowData* pAttached,
     WideString& strChange,
     const WideString& strChangeEx,

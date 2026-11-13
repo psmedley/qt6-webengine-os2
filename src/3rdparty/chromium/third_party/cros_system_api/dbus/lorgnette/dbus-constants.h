@@ -14,13 +14,22 @@ const char kManagerServiceError[] = "org.chromium.lorgnette.Error";
 // Methods.
 const char kListScannersMethod[] = "ListScanners";
 const char kGetScannerCapabilitiesMethod[] = "GetScannerCapabilities";
+const char kOpenScannerMethod[] = "OpenScanner";
+const char kCloseScannerMethod[] = "CloseScanner";
+const char kSetOptionsMethod[] = "SetOptions";
+const char kGetCurrentConfigMethod[] = "GetCurrentConfig";
+const char kStartPreparedScanMethod[] = "StartPreparedScan";
+const char kReadScanDataMethod[] = "ReadScanData";
 const char kScanImageMethod[] = "ScanImage";
 const char kStartScanMethod[] = "StartScan";
 const char kCancelScanMethod[] = "CancelScan";
 const char kGetNextImageMethod[] = "GetNextImage";
+const char kStartScannerDiscoveryMethod[] = "StartScannerDiscovery";
+const char kStopScannerDiscoveryMethod[] = "StopScannerDiscovery";
 
 // Signals.
 const char kScanStatusChangedSignal[] = "ScanStatusChanged";
+const char kScannerListChangedSignal[] = "ScannerListChanged";
 
 // Parameters supplied to a "ScanImage" request.
 const char kScanPropertyMode[] = "Mode";

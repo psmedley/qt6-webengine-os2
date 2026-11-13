@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,8 +45,7 @@ bool CPDF_PatternCS::GetRGB(pdfium::span<const float> pBuf,
                             float* R,
                             float* G,
                             float* B) const {
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 const CPDF_PatternCS* CPDF_PatternCS::AsPatternCS() const {

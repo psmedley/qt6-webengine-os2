@@ -47,6 +47,7 @@ angle_toggleable_extensions = [
 angle_requestable_extensions = [
     "GL_ANGLE_base_vertex_base_instance",
     "GL_ANGLE_base_vertex_base_instance_shader_builtin",
+    "GL_ANGLE_clip_cull_distance",
     "GL_ANGLE_compressed_texture_etc",
     "GL_ANGLE_copy_texture_3d",
     "GL_ANGLE_framebuffer_multisample",
@@ -59,10 +60,15 @@ angle_requestable_extensions = [
     "GL_ANGLE_memory_size",
     "GL_ANGLE_multi_draw",
     "GL_ANGLE_multiview_multisample",
+    "GL_ANGLE_polygon_mode",
     "GL_ANGLE_provoking_vertex",
     "GL_ANGLE_read_only_depth_stencil_feedback_loops",
+    "GL_ANGLE_renderability_validation",
     "GL_ANGLE_robust_fragment_shader_output",
     "GL_ANGLE_semaphore_fuchsia",
+    "GL_ANGLE_shader_pixel_local_storage",
+    "GL_ANGLE_shader_pixel_local_storage_coherent",
+    "GL_ANGLE_stencil_texturing",
     "GL_ANGLE_texture_compression_dxt3",
     "GL_ANGLE_texture_compression_dxt5",
     "GL_ANGLE_texture_external_update",
@@ -73,7 +79,6 @@ angle_requestable_extensions = [
     "GL_CHROMIUM_color_buffer_float_rgba",
     "GL_CHROMIUM_lose_context",
     "GL_CHROMIUM_sync_query",
-    "GL_CHROMIUM_texture_filtering_hint",
 ]
 
 gles_requestable_extensions = [
@@ -83,6 +88,7 @@ gles_requestable_extensions = [
     "GL_ANGLE_texture_usage",
     "GL_APPLE_clip_distance",
     "GL_ARB_sync",
+    "GL_ARM_shader_framebuffer_fetch",
     "GL_EXT_base_instance",
     "GL_EXT_blend_func_extended",
     "GL_EXT_blend_minmax",
@@ -92,7 +98,9 @@ gles_requestable_extensions = [
     "GL_EXT_color_buffer_float",
     "GL_EXT_color_buffer_half_float",
     "GL_EXT_compressed_ETC1_RGB8_sub_texture",
+    "GL_EXT_conservative_depth",
     "GL_EXT_copy_image",
+    "GL_EXT_depth_clamp",
     "GL_EXT_disjoint_timer_query",
     "GL_EXT_draw_buffers",
     "GL_EXT_draw_buffers_indexed",
@@ -113,9 +121,11 @@ gles_requestable_extensions = [
     "GL_EXT_multisampled_render_to_texture",
     "GL_EXT_multisampled_render_to_texture2",
     "GL_EXT_occlusion_query_boolean",
+    "GL_EXT_polygon_offset_clamp",
     "GL_EXT_protected_textures",
     "GL_EXT_pvrtc_sRGB",
     "GL_EXT_read_format_bgra",
+    "GL_EXT_render_snorm",
     "GL_EXT_semaphore",
     "GL_EXT_semaphore_fd",
     "GL_EXT_separate_shader_objects",
@@ -129,6 +139,8 @@ gles_requestable_extensions = [
     "GL_EXT_tessellation_shader",
     "GL_EXT_texture_border_clamp",
     "GL_EXT_texture_buffer",
+    "GL_EXT_texture_compression_astc_decode_mode",
+    "GL_EXT_texture_compression_astc_decode_mode_rgb9e5",
     "GL_EXT_texture_compression_bptc",
     "GL_EXT_texture_compression_dxt1",
     "GL_EXT_texture_compression_rgtc",
@@ -136,7 +148,9 @@ gles_requestable_extensions = [
     "GL_EXT_texture_compression_s3tc_srgb",
     "GL_EXT_texture_cube_map_array",
     "GL_EXT_texture_filter_anisotropic",
+    "GL_EXT_texture_filter_minmax",
     "GL_EXT_texture_format_BGRA8888",
+    "GL_EXT_texture_mirror_clamp_to_edge",
     "GL_EXT_texture_norm16",
     "GL_EXT_texture_rg",
     "GL_EXT_texture_sRGB_R8",
@@ -157,6 +171,7 @@ gles_requestable_extensions = [
     "GL_NV_framebuffer_blit",
     "GL_NV_pack_subimage",
     "GL_NV_pixel_buffer_object",
+    "GL_NV_polygon_mode",
     "GL_NV_read_depth",
     "GL_NV_read_depth_stencil",
     "GL_NV_read_stencil",
@@ -209,7 +224,10 @@ gles_requestable_extensions = [
     "GL_OES_vertex_type_10_10_10_2",
     "GL_OVR_multiview",
     "GL_OVR_multiview2",
+    "GL_QCOM_framebuffer_foveated",
+    "GL_QCOM_render_shared_exponent",
     "GL_QCOM_shading_rate",
+    "GL_QCOM_texture_foveated",
     "GL_WEBGL_video_texture",
 ]
 
@@ -223,8 +241,7 @@ angle_es_only_extensions = [
     "GL_ANGLE_rgbx_internal_format",
     "GL_ANGLE_robust_client_memory",
     "GL_ANGLE_robust_resource_initialization",
-    "GL_ANGLE_shader_pixel_local_storage",
-    "GL_ANGLE_shader_pixel_local_storage_coherent",
+    "GL_ANGLE_shader_binary",
     "GL_ANGLE_webgl_compatibility",
     "GL_CHROMIUM_bind_generates_resource",
     "GL_CHROMIUM_bind_uniform_location",
@@ -306,6 +323,7 @@ supported_egl_extensions = [
     "EGL_ANGLE_device_d3d",
     "EGL_ANGLE_display_semaphore_share_group",
     "EGL_ANGLE_display_texture_share_group",
+    "EGL_ANGLE_external_context_and_surface",
     "EGL_ANGLE_feature_control",
     "EGL_ANGLE_ggp_stream_descriptor",
     "EGL_ANGLE_metal_create_context_ownership_identity",
@@ -319,10 +337,14 @@ supported_egl_extensions = [
     "EGL_ANGLE_swap_with_frame_token",
     "EGL_ANGLE_sync_control_rate",
     "EGL_ANGLE_vulkan_image",
+    "EGL_ANGLE_wait_until_work_scheduled",
     "EGL_ANGLE_window_fixed_size",
     "EGL_CHROMIUM_sync_control",
     "EGL_EXT_create_context_robustness",
     "EGL_EXT_device_query",
+    "EGL_EXT_gl_colorspace_bt2020_hlg",
+    "EGL_EXT_gl_colorspace_bt2020_linear",
+    "EGL_EXT_gl_colorspace_bt2020_pq",
     "EGL_EXT_gl_colorspace_display_p3",
     "EGL_EXT_gl_colorspace_display_p3_linear",
     "EGL_EXT_gl_colorspace_display_p3_passthrough",
@@ -378,7 +400,7 @@ supported_cl_extensions = [
 ]
 
 # Strip these suffixes from Context entry point names. NV is excluded (for now).
-strip_suffixes = ["AMD", "ANDROID", "ANGLE", "CHROMIUM", "EXT", "KHR", "OES", "OVR"]
+strip_suffixes = ["AMD", "ANDROID", "ANGLE", "CHROMIUM", "EXT", "KHR", "OES", "OVR", "QCOM"]
 check_sorted('strip_suffixes', strip_suffixes)
 
 # The EGL_ANGLE_explicit_context extension is generated differently from other extensions.
@@ -584,6 +606,15 @@ class RegistryXML:
             self.ext_dupes[extension_name] = dupes
             self.all_cmd_names.add_commands(ext_annotations[extension_name], ext_cmd_names)
 
+    def GetEnums(self, override_prefix=None):
+        cmd_names = []
+        for cmd in self.all_cmd_names.get_all_commands():
+            stripped = strip_api_prefix(cmd)
+            prefix = override_prefix or cmd[:(len(cmd) - len(stripped))]
+            cmd_names.append(
+                ('%s%s' % (prefix.upper(), stripped), '%s%s' % (prefix.lower(), stripped)))
+        return cmd_names
+
 
 class EntryPoints:
 
@@ -613,3 +644,27 @@ class EntryPoints:
 
     def get_infos(self):
         return self._cmd_info
+
+
+def GetEGL():
+    egl = RegistryXML('egl.xml', 'egl_angle_ext.xml')
+    for major_version, minor_version in EGL_VERSIONS:
+        version = "%d_%d" % (major_version, minor_version)
+        name_prefix = "EGL_VERSION_"
+        feature_name = "%s%s" % (name_prefix, version)
+        egl.AddCommands(feature_name, version)
+    egl.AddExtensionCommands(supported_egl_extensions, ['egl'])
+    return egl
+
+
+def GetGLES():
+    gles = RegistryXML('gl.xml', 'gl_angle_ext.xml')
+    for major_version, minor_version in GLES_VERSIONS:
+        version = "{}_{}".format(major_version, minor_version)
+        name_prefix = "GL_ES_VERSION_"
+        if major_version == 1:
+            name_prefix = "GL_VERSION_ES_CM_"
+        feature_name = "{}{}".format(name_prefix, version)
+        gles.AddCommands(feature_name, version)
+    gles.AddExtensionCommands(supported_extensions, ['gles2', 'gles1'])
+    return gles

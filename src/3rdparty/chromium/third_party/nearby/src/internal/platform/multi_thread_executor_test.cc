@@ -15,7 +15,6 @@
 #include "internal/platform/multi_thread_executor.h"
 
 #include <atomic>
-#include <functional>
 
 #include "gtest/gtest.h"
 #include "absl/synchronization/mutex.h"
@@ -23,14 +22,13 @@
 #include "absl/time/time.h"
 #include "internal/platform/exception.h"
 
-namespace location {
 namespace nearby {
 
 namespace {
 const int kMaxThreads = 5;
 }
 
-TEST(MultiThreadExecutorTest, ConsructorDestructorWorks) {
+TEST(MultiThreadExecutorTest, ConstructorDestructorWorks) {
   MultiThreadExecutor executor(kMaxThreads);
 }
 
@@ -60,7 +58,7 @@ TEST(MultiThreadExecutorTest, JobsExecuteInParallel) {
   int count = 0;
 
   for (int i = 0; i < kMaxThreads; ++i) {
-    executor.Execute([&count, &mutex, &test_cond, &thread_cond]() {
+    executor.Execute([&]() {
       absl::MutexLock lock(&mutex);
       count++;
       test_cond.Signal();
@@ -71,12 +69,9 @@ TEST(MultiThreadExecutorTest, JobsExecuteInParallel) {
   }
 
   {
-    absl::Duration duration = absl::Milliseconds(kMaxThreads * 100);
     absl::MutexLock lock(&mutex);
     while (count < kMaxThreads) {
-      absl::Time start = absl::Now();
-      if (test_cond.WaitWithTimeout(&mutex, duration)) break;
-      duration -= absl::Now() - start;
+      if (test_cond.WaitWithTimeout(&mutex, absl::Seconds(30))) break;
     }
   }
 
@@ -84,12 +79,9 @@ TEST(MultiThreadExecutorTest, JobsExecuteInParallel) {
   thread_cond.SignalAll();
 
   {
-    absl::Duration duration = absl::Milliseconds(kMaxThreads * 100);
     absl::MutexLock lock(&mutex);
     while (count > 0) {
-      absl::Time start = absl::Now();
-      if (test_cond.WaitWithTimeout(&mutex, duration)) break;
-      duration -= absl::Now() - start;
+      if (test_cond.WaitWithTimeout(&mutex, absl::Seconds(30))) break;
     }
   }
   EXPECT_EQ(count, 0);
@@ -135,4 +127,3 @@ TEST(MultiThreadExecutorTest, ThreadCheck_SubmitCallable) {
   EXPECT_EQ(future.Get().result(), 0);
 }
 }  // namespace nearby
-}  // namespace location

@@ -13,6 +13,7 @@
 #include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/common/platform/api/quiche_lower_case_string.h"
+#include "quiche/common/quiche_callbacks.h"
 
 namespace quiche {
 
@@ -36,7 +37,7 @@ namespace quiche {
 // already lowercaseified. It's faster to avoid converting them to and from
 // lowercase. Additionally, some implementations of ConstHeaderApi might take
 // advantage of a constant-time lookup for inlined headers.
-class QUICHE_EXPORT_PRIVATE ConstHeaderApi {
+class QUICHE_EXPORT ConstHeaderApi {
  public:
   virtual ~ConstHeaderApi() {}
 
@@ -116,9 +117,10 @@ class QUICHE_EXPORT_PRIVATE ConstHeaderApi {
   // Applies the argument function to each header line.  If the argument
   // function returns false, iteration stops and ForEachHeader returns false;
   // otherwise, ForEachHeader returns true.
-  virtual bool ForEachHeader(std::function<bool(const absl::string_view key,
-                                                const absl::string_view value)>
-                                 fn) const = 0;
+  virtual bool ForEachHeader(
+      quiche::UnretainedCallback<bool(const absl::string_view key,
+                                      const absl::string_view value)>
+          fn) const = 0;
 
   // Returns the upper bound byte size of the headers. This can be used to size
   // a Buffer when serializing headers.
@@ -167,7 +169,7 @@ class QUICHE_EXPORT_PRIVATE ConstHeaderApi {
   // cookie.data() will be nullptr. The lifetime of the cookie isn't guaranteed
   // to extend beyond this call.
   virtual void ApplyToCookie(
-      std::function<void(absl::string_view cookie)> f) const = 0;
+      quiche::UnretainedCallback<void(absl::string_view cookie)> f) const = 0;
 
   virtual size_t content_length() const = 0;
   virtual bool content_length_valid() const = 0;
@@ -186,7 +188,7 @@ class QUICHE_EXPORT_PRIVATE ConstHeaderApi {
 //
 // Operations on header keys are case-insensitive while operations on header
 // values are case-sensitive.
-class QUICHE_EXPORT_PRIVATE HeaderApi : public virtual ConstHeaderApi {
+class QUICHE_EXPORT HeaderApi : public virtual ConstHeaderApi {
  public:
   // Replaces header entries with key |key| if they exist, or appends
   // a new header if none exist.

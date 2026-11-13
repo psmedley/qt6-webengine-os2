@@ -1,16 +1,29 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dawn/native/metal/UtilsMetal.h"
 
@@ -111,23 +124,6 @@ ResultOrError<SavedMetalAttachment> PatchAttachmentWithTemporary(
     return result;
 }
 
-// Same as PatchAttachmentWithTemporary but for the resolve attachment.
-ResultOrError<SavedMetalAttachment> PatchResolveAttachmentWithTemporary(
-    Device* device,
-    MTLRenderPassAttachmentDescriptor* attachment) {
-    SavedMetalAttachment result;
-    DAWN_TRY_ASSIGN(
-        result, SaveAttachmentCreateTemporary(device, attachment.resolveTexture,
-                                              attachment.resolveLevel, attachment.resolveSlice));
-
-    // Replace the resolve attachment with the tempoary.
-    attachment.resolveTexture = result.temporary.Get();
-    attachment.resolveLevel = 0;
-    attachment.resolveSlice = 0;
-
-    return result;
-}
-
 // Helper function for Toggle EmulateStoreAndMSAAResolve
 void ResolveInAnotherRenderPass(
     CommandRecordingContext* commandContext,
@@ -157,7 +153,436 @@ void ResolveInAnotherRenderPass(
     commandContext->BeginRender(mtlRenderPassForResolve);
     commandContext->EndRender();
 }
+
 }  // anonymous namespace
+
+MTLPixelFormat MetalPixelFormat(const DeviceBase* device, wgpu::TextureFormat format) {
+    switch (format) {
+        case wgpu::TextureFormat::R8Unorm:
+            return MTLPixelFormatR8Unorm;
+        case wgpu::TextureFormat::R8Snorm:
+            return MTLPixelFormatR8Snorm;
+        case wgpu::TextureFormat::R8Uint:
+            return MTLPixelFormatR8Uint;
+        case wgpu::TextureFormat::R8Sint:
+            return MTLPixelFormatR8Sint;
+
+        case wgpu::TextureFormat::R16Unorm:
+            return MTLPixelFormatR16Unorm;
+        case wgpu::TextureFormat::R16Snorm:
+            return MTLPixelFormatR16Snorm;
+        case wgpu::TextureFormat::R16Uint:
+            return MTLPixelFormatR16Uint;
+        case wgpu::TextureFormat::R16Sint:
+            return MTLPixelFormatR16Sint;
+        case wgpu::TextureFormat::R16Float:
+            return MTLPixelFormatR16Float;
+        case wgpu::TextureFormat::RG8Unorm:
+            return MTLPixelFormatRG8Unorm;
+        case wgpu::TextureFormat::RG8Snorm:
+            return MTLPixelFormatRG8Snorm;
+        case wgpu::TextureFormat::RG8Uint:
+            return MTLPixelFormatRG8Uint;
+        case wgpu::TextureFormat::RG8Sint:
+            return MTLPixelFormatRG8Sint;
+
+        case wgpu::TextureFormat::R32Uint:
+            return MTLPixelFormatR32Uint;
+        case wgpu::TextureFormat::R32Sint:
+            return MTLPixelFormatR32Sint;
+        case wgpu::TextureFormat::R32Float:
+            return MTLPixelFormatR32Float;
+        case wgpu::TextureFormat::RG16Unorm:
+            return MTLPixelFormatRG16Unorm;
+        case wgpu::TextureFormat::RG16Snorm:
+            return MTLPixelFormatRG16Snorm;
+        case wgpu::TextureFormat::RG16Uint:
+            return MTLPixelFormatRG16Uint;
+        case wgpu::TextureFormat::RG16Sint:
+            return MTLPixelFormatRG16Sint;
+        case wgpu::TextureFormat::RG16Float:
+            return MTLPixelFormatRG16Float;
+        case wgpu::TextureFormat::RGBA8Unorm:
+            return MTLPixelFormatRGBA8Unorm;
+        case wgpu::TextureFormat::RGBA8UnormSrgb:
+            return MTLPixelFormatRGBA8Unorm_sRGB;
+        case wgpu::TextureFormat::RGBA8Snorm:
+            return MTLPixelFormatRGBA8Snorm;
+        case wgpu::TextureFormat::RGBA8Uint:
+            return MTLPixelFormatRGBA8Uint;
+        case wgpu::TextureFormat::RGBA8Sint:
+            return MTLPixelFormatRGBA8Sint;
+        case wgpu::TextureFormat::BGRA8Unorm:
+            return MTLPixelFormatBGRA8Unorm;
+        case wgpu::TextureFormat::BGRA8UnormSrgb:
+            return MTLPixelFormatBGRA8Unorm_sRGB;
+        case wgpu::TextureFormat::RGB10A2Uint:
+            return MTLPixelFormatRGB10A2Uint;
+        case wgpu::TextureFormat::RGB10A2Unorm:
+            return MTLPixelFormatRGB10A2Unorm;
+        case wgpu::TextureFormat::RG11B10Ufloat:
+            return MTLPixelFormatRG11B10Float;
+        case wgpu::TextureFormat::RGB9E5Ufloat:
+            return MTLPixelFormatRGB9E5Float;
+
+        case wgpu::TextureFormat::RG32Uint:
+            return MTLPixelFormatRG32Uint;
+        case wgpu::TextureFormat::RG32Sint:
+            return MTLPixelFormatRG32Sint;
+        case wgpu::TextureFormat::RG32Float:
+            return MTLPixelFormatRG32Float;
+        case wgpu::TextureFormat::RGBA16Unorm:
+            return MTLPixelFormatRGBA16Unorm;
+        case wgpu::TextureFormat::RGBA16Snorm:
+            return MTLPixelFormatRGBA16Snorm;
+        case wgpu::TextureFormat::RGBA16Uint:
+            return MTLPixelFormatRGBA16Uint;
+        case wgpu::TextureFormat::RGBA16Sint:
+            return MTLPixelFormatRGBA16Sint;
+        case wgpu::TextureFormat::RGBA16Float:
+            return MTLPixelFormatRGBA16Float;
+
+        case wgpu::TextureFormat::RGBA32Uint:
+            return MTLPixelFormatRGBA32Uint;
+        case wgpu::TextureFormat::RGBA32Sint:
+            return MTLPixelFormatRGBA32Sint;
+        case wgpu::TextureFormat::RGBA32Float:
+            return MTLPixelFormatRGBA32Float;
+
+        case wgpu::TextureFormat::Depth32Float:
+            return MTLPixelFormatDepth32Float;
+        case wgpu::TextureFormat::Depth24Plus:
+            return MTLPixelFormatDepth32Float;
+        case wgpu::TextureFormat::Depth24PlusStencil8:
+        case wgpu::TextureFormat::Depth32FloatStencil8:
+            return MTLPixelFormatDepth32Float_Stencil8;
+        case wgpu::TextureFormat::Depth16Unorm:
+            if (@available(macOS 10.12, iOS 13.0, *)) {
+                return MTLPixelFormatDepth16Unorm;
+            }
+            DAWN_UNREACHABLE();
+        case wgpu::TextureFormat::Stencil8:
+            if (device->IsToggleEnabled(Toggle::MetalUseCombinedDepthStencilFormatForStencil8)) {
+                return MTLPixelFormatDepth32Float_Stencil8;
+            }
+            return MTLPixelFormatStencil8;
+
+#if DAWN_PLATFORM_IS(MACOS)
+        case wgpu::TextureFormat::BC1RGBAUnorm:
+            return MTLPixelFormatBC1_RGBA;
+        case wgpu::TextureFormat::BC1RGBAUnormSrgb:
+            return MTLPixelFormatBC1_RGBA_sRGB;
+        case wgpu::TextureFormat::BC2RGBAUnorm:
+            return MTLPixelFormatBC2_RGBA;
+        case wgpu::TextureFormat::BC2RGBAUnormSrgb:
+            return MTLPixelFormatBC2_RGBA_sRGB;
+        case wgpu::TextureFormat::BC3RGBAUnorm:
+            return MTLPixelFormatBC3_RGBA;
+        case wgpu::TextureFormat::BC3RGBAUnormSrgb:
+            return MTLPixelFormatBC3_RGBA_sRGB;
+        case wgpu::TextureFormat::BC4RSnorm:
+            return MTLPixelFormatBC4_RSnorm;
+        case wgpu::TextureFormat::BC4RUnorm:
+            return MTLPixelFormatBC4_RUnorm;
+        case wgpu::TextureFormat::BC5RGSnorm:
+            return MTLPixelFormatBC5_RGSnorm;
+        case wgpu::TextureFormat::BC5RGUnorm:
+            return MTLPixelFormatBC5_RGUnorm;
+        case wgpu::TextureFormat::BC6HRGBFloat:
+            return MTLPixelFormatBC6H_RGBFloat;
+        case wgpu::TextureFormat::BC6HRGBUfloat:
+            return MTLPixelFormatBC6H_RGBUfloat;
+        case wgpu::TextureFormat::BC7RGBAUnorm:
+            return MTLPixelFormatBC7_RGBAUnorm;
+        case wgpu::TextureFormat::BC7RGBAUnormSrgb:
+            return MTLPixelFormatBC7_RGBAUnorm_sRGB;
+#else
+        case wgpu::TextureFormat::BC1RGBAUnorm:
+        case wgpu::TextureFormat::BC1RGBAUnormSrgb:
+        case wgpu::TextureFormat::BC2RGBAUnorm:
+        case wgpu::TextureFormat::BC2RGBAUnormSrgb:
+        case wgpu::TextureFormat::BC3RGBAUnorm:
+        case wgpu::TextureFormat::BC3RGBAUnormSrgb:
+        case wgpu::TextureFormat::BC4RSnorm:
+        case wgpu::TextureFormat::BC4RUnorm:
+        case wgpu::TextureFormat::BC5RGSnorm:
+        case wgpu::TextureFormat::BC5RGUnorm:
+        case wgpu::TextureFormat::BC6HRGBFloat:
+        case wgpu::TextureFormat::BC6HRGBUfloat:
+        case wgpu::TextureFormat::BC7RGBAUnorm:
+        case wgpu::TextureFormat::BC7RGBAUnormSrgb:
+#endif
+
+        case wgpu::TextureFormat::ETC2RGB8Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatETC2_RGB8;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ETC2RGB8UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatETC2_RGB8_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ETC2RGB8A1Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatETC2_RGB8A1;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ETC2RGB8A1UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatETC2_RGB8A1_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ETC2RGBA8Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatEAC_RGBA8;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ETC2RGBA8UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatEAC_RGBA8_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::EACR11Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatEAC_R11Unorm;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::EACR11Snorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatEAC_R11Snorm;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::EACRG11Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatEAC_RG11Unorm;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::EACRG11Snorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatEAC_RG11Snorm;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+
+        case wgpu::TextureFormat::ASTC4x4Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_4x4_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC4x4UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_4x4_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC5x4Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_5x4_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC5x4UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_5x4_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC5x5Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_5x5_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC5x5UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_5x5_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC6x5Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_6x5_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC6x5UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_6x5_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC6x6Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_6x6_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC6x6UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_6x6_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC8x5Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_8x5_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC8x5UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_8x5_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC8x6Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_8x6_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC8x6UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_8x6_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC8x8Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_8x8_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC8x8UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_8x8_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC10x5Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_10x5_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC10x5UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_10x5_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC10x6Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_10x6_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC10x6UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_10x6_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC10x8Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_10x8_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC10x8UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_10x8_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC10x10Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_10x10_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC10x10UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_10x10_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC12x10Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_12x10_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC12x10UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_12x10_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC12x12Unorm:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_12x12_LDR;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+        case wgpu::TextureFormat::ASTC12x12UnormSrgb:
+            if (@available(macOS 11.0, iOS 8.0, *)) {
+                return MTLPixelFormatASTC_12x12_sRGB;
+            } else {
+                DAWN_UNREACHABLE();
+            }
+
+        case wgpu::TextureFormat::R8BG8Biplanar420Unorm:
+        case wgpu::TextureFormat::R10X6BG10X6Biplanar420Unorm:
+        case wgpu::TextureFormat::R8BG8A8Triplanar420Unorm:
+        case wgpu::TextureFormat::Undefined:
+            DAWN_UNREACHABLE();
+    }
+}
+
+NSRef<NSString> MakeDebugName(DeviceBase* device, const char* prefix, std::string label) {
+    std::ostringstream objectNameStream;
+    objectNameStream << prefix;
+
+    if (!label.empty() && device->IsToggleEnabled(Toggle::UseUserDefinedLabelsInBackend)) {
+        objectNameStream << "_" << label;
+    }
+    const std::string debugName = objectNameStream.str();
+    NSRef<NSString> nsDebugName =
+        AcquireNSRef([[NSString alloc] initWithUTF8String:debugName.c_str()]);
+    return nsDebugName;
+}
+
+Aspect GetDepthStencilAspects(MTLPixelFormat format) {
+    switch (format) {
+        case MTLPixelFormatDepth16Unorm:
+        case MTLPixelFormatDepth32Float:
+            return Aspect::Depth;
+
+#if DAWN_PLATFORM_IS(MACOS)
+        case MTLPixelFormatDepth24Unorm_Stencil8:
+#endif
+        case MTLPixelFormatDepth32Float_Stencil8:
+            return Aspect::Depth | Aspect::Stencil;
+
+        case MTLPixelFormatStencil8:
+            return Aspect::Stencil;
+
+        default:
+            DAWN_UNREACHABLE();
+    }
+}
 
 MTLCompareFunction ToMetalCompareFunction(wgpu::CompareFunction compareFunction) {
     switch (compareFunction) {
@@ -179,7 +604,7 @@ MTLCompareFunction ToMetalCompareFunction(wgpu::CompareFunction compareFunction)
             return MTLCompareFunctionAlways;
 
         case wgpu::CompareFunction::Undefined:
-            UNREACHABLE();
+            DAWN_UNREACHABLE();
     }
 }
 
@@ -196,12 +621,15 @@ TextureBufferCopySplit ComputeTextureBufferCopySplit(const Texture* texture,
     const Format textureFormat = texture->GetFormat();
     const TexelBlockInfo& blockInfo = textureFormat.GetAspectInfo(aspect).block;
 
-    // When copying textures from/to an unpacked buffer, the Metal validation layer doesn't
-    // compute the correct range when checking if the buffer is big enough to contain the
-    // data for the whole copy. Instead of looking at the position of the last texel in the
-    // buffer, it computes the volume of the 3D box with bytesPerRow * (rowsPerImage /
-    // format.blockHeight) * copySize.depthOrArrayLayers. For example considering the pixel
-    // buffer below where in memory, each row data (D) of the texture is followed by some
+    // When copying textures from/to an unpacked buffer, the Metal validation layer has 3
+    // issues.
+    //
+    // 1. The metal validation layer doesn't compute the correct range when checking if the
+    // buffer is big enough to contain the data for the whole copy. Instead of looking at
+    // the position of the last texel in the buffer, it computes the volume of the 3D box
+    // with bytesPerRow * (rowsPerImage / format.blockHeight) * copySize.depthOrArrayLayers.
+    // For example considering the pixel buffer below where in memory, each row data (D) of
+    // the texture is followed by some
     // padding data (P):
     //     |DDDDDDD|PP|
     //     |DDDDDDD|PP|
@@ -213,6 +641,28 @@ TextureBufferCopySplit ComputeTextureBufferCopySplit(const Texture* texture,
 
     // We work around this limitation by detecting when Metal would complain and copy the
     // last image and row separately using tight sourceBytesPerRow or sourceBytesPerImage.
+
+    // 2. Metal requires `destinationBytesPerRow` is less than or equal to the size
+    // of the maximum texture dimension in bytes.
+
+    // 3. Some Metal Drivers (Intel Pre MacOS 13.1?) Incorrectly calculation the size
+    // needed for the destination buffer. Their calculation is something like
+    //
+    //   sizeNeeded = bufferOffset + desintationBytesPerImage * numImages +
+    //                destinationBytesPerRow * (numRows - 1) +
+    //                bytesPerPixel * width
+    //
+    // where as it should be
+    //
+    //   sizeNeeded = bufferOffset + desintationBytesPerImage * (numImages - 1) +
+    //                destinationBytesPerRow * (numRows - 1) +
+    //                bytesPerPixel * width
+    //
+    // since you won't actually go to the next image if there is only 1 image.
+    //
+    // The workaround is if you're only copying a single row then pass 0 for
+    // destinationBytesPerImage
+
     uint32_t bytesPerImage = bytesPerRow * rowsPerImage;
 
     // Metal validation layer requires that if the texture's pixel format is a compressed
@@ -220,34 +670,65 @@ TextureBufferCopySplit ComputeTextureBufferCopySplit(const Texture* texture,
     // clamped to the edge of the texture if the block extends outside the bounds of a
     // texture.
     const Extent3D clampedCopyExtent =
-        texture->ClampToMipLevelVirtualSize(mipLevel, origin, copyExtent);
+        texture->ClampToMipLevelVirtualSize(mipLevel, aspect, origin, copyExtent);
 
-    // Check whether buffer size is big enough.
-    bool needWorkaround = bufferSize - bufferOffset < bytesPerImage * copyExtent.depthOrArrayLayers;
-    if (!needWorkaround) {
-        copy.count = 1;
-        copy.copies[0].bufferOffset = bufferOffset;
-        copy.copies[0].bytesPerRow = bytesPerRow;
-        copy.copies[0].bytesPerImage = bytesPerImage;
-        copy.copies[0].textureOrigin = origin;
-        copy.copies[0].copyExtent = {clampedCopyExtent.width, clampedCopyExtent.height,
-                                     copyExtent.depthOrArrayLayers};
+    // Note: all current GPUs have a 3D texture size limit of 2048 and otherwise 16348
+    // for non-3D textures except for Apple2 GPUs (iPhone6) which has a non-3D texture
+    // limit of 8192. Dawn doesn't support Apple2 GPUs
+    // See: https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
+    const uint32_t kMetalMax3DTextureDimensions = 2048u;
+    const uint32_t kMetalMaxNon3DTextureDimensions = 16384u;
+    uint32_t maxTextureDimension = texture->GetDimension() == wgpu::TextureDimension::e3D
+                                       ? kMetalMax3DTextureDimensions
+                                       : kMetalMaxNon3DTextureDimensions;
+    uint32_t bytesPerPixel = blockInfo.byteSize;
+    uint32_t maxBytesPerRow = maxTextureDimension * bytesPerPixel;
+
+    bool needCopyRowByRow = bytesPerRow > maxBytesPerRow;
+    if (needCopyRowByRow) {
+        // handle workaround case 2
+        // Since we're copying a row at a time bytesPerRow shouldn't matter but just to
+        // try to have it make sense, pass correct or max valid value
+        const uint32_t localBytesPerRow = std::min(bytesPerRow, maxBytesPerRow);
+        const uint32_t localBytesPerImage = 0;  // workaround case 3
+        DAWN_ASSERT(copyExtent.height % blockInfo.height == 0);
+        DAWN_ASSERT(copyExtent.width % blockInfo.width == 0);
+        const uint32_t blockRows = copyExtent.height / blockInfo.height;
+        for (uint32_t slice = 0; slice < copyExtent.depthOrArrayLayers; ++slice) {
+            for (uint32_t blockRow = 0; blockRow < blockRows; ++blockRow) {
+                copy.push_back(TextureBufferCopySplit::CopyInfo(
+                    bufferOffset + slice * rowsPerImage * bytesPerRow + blockRow * bytesPerRow,
+                    localBytesPerRow, localBytesPerImage,
+                    {origin.x, origin.y + blockRow * blockInfo.height, origin.z + slice},
+                    {clampedCopyExtent.width, blockInfo.height, 1}));
+            }
+        }
         return copy;
     }
 
+    // Check whether buffer size is big enough.
+    bool needCopyLastImageAndLastRowSeparately =
+        bufferSize - bufferOffset < bytesPerImage * copyExtent.depthOrArrayLayers;
+    if (!needCopyLastImageAndLastRowSeparately) {
+        const uint32_t localBytesPerImage =
+            copyExtent.depthOrArrayLayers == 1 ? 0 : bytesPerImage;  // workaround case 3
+        copy.push_back(TextureBufferCopySplit::CopyInfo(
+            bufferOffset, bytesPerRow, localBytesPerImage, origin,
+            {clampedCopyExtent.width, clampedCopyExtent.height, copyExtent.depthOrArrayLayers}));
+        return copy;
+    }
+
+    // handle workaround case 1
     uint64_t currentOffset = bufferOffset;
 
     // Doing all the copy except the last image.
     if (copyExtent.depthOrArrayLayers > 1) {
-        copy.copies[copy.count].bufferOffset = currentOffset;
-        copy.copies[copy.count].bytesPerRow = bytesPerRow;
-        copy.copies[copy.count].bytesPerImage = bytesPerImage;
-        copy.copies[copy.count].textureOrigin = origin;
-        copy.copies[copy.count].copyExtent = {clampedCopyExtent.width, clampedCopyExtent.height,
-                                              copyExtent.depthOrArrayLayers - 1};
-
-        ++copy.count;
-
+        const uint32_t localDepthOrArrayLayers = copyExtent.depthOrArrayLayers - 1;
+        const uint32_t localBytesPerImage =
+            localDepthOrArrayLayers == 1 ? 0 : bytesPerImage;  // workaround case 3
+        copy.push_back(TextureBufferCopySplit::CopyInfo(
+            currentOffset, bytesPerRow, localBytesPerImage, origin,
+            {clampedCopyExtent.width, clampedCopyExtent.height, localDepthOrArrayLayers}));
         // Update offset to copy to the last image.
         currentOffset += (copyExtent.depthOrArrayLayers - 1) * bytesPerImage;
     }
@@ -255,18 +736,13 @@ TextureBufferCopySplit ComputeTextureBufferCopySplit(const Texture* texture,
     // Doing all the copy in last image except the last row.
     uint32_t copyBlockRowCount = copyExtent.height / blockInfo.height;
     if (copyBlockRowCount > 1) {
-        copy.copies[copy.count].bufferOffset = currentOffset;
-        copy.copies[copy.count].bytesPerRow = bytesPerRow;
-        copy.copies[copy.count].bytesPerImage = bytesPerRow * (copyBlockRowCount - 1);
-        copy.copies[copy.count].textureOrigin = {origin.x, origin.y,
-                                                 origin.z + copyExtent.depthOrArrayLayers - 1};
-
-        ASSERT(copyExtent.height - blockInfo.height <
-               texture->GetMipLevelSingleSubresourceVirtualSize(mipLevel).height);
-        copy.copies[copy.count].copyExtent = {clampedCopyExtent.width,
-                                              copyExtent.height - blockInfo.height, 1};
-
-        ++copy.count;
+        DAWN_ASSERT(copyExtent.height - blockInfo.height <
+                    texture->GetMipLevelSingleSubresourceVirtualSize(mipLevel, aspect).height);
+        const uint32_t localBytesPerImage = 0;  // workaround case 3
+        copy.push_back(TextureBufferCopySplit::CopyInfo(
+            currentOffset, bytesPerRow, localBytesPerImage,
+            {origin.x, origin.y, origin.z + copyExtent.depthOrArrayLayers - 1},
+            {clampedCopyExtent.width, copyExtent.height - blockInfo.height, 1}));
 
         // Update offset to copy to the last row.
         currentOffset += (copyBlockRowCount - 1) * bytesPerRow;
@@ -275,52 +751,32 @@ TextureBufferCopySplit ComputeTextureBufferCopySplit(const Texture* texture,
     // Doing the last row copy with the exact number of bytes in last row.
     // Workaround this issue in a way just like the copy to a 1D texture.
     uint32_t lastRowDataSize = (copyExtent.width / blockInfo.width) * blockInfo.byteSize;
+    uint32_t lastImageDataSize = 0;  // workaround case 3
     uint32_t lastRowCopyExtentHeight =
         blockInfo.height + clampedCopyExtent.height - copyExtent.height;
-    ASSERT(lastRowCopyExtentHeight <= blockInfo.height);
+    DAWN_ASSERT(lastRowCopyExtentHeight <= blockInfo.height);
 
-    copy.copies[copy.count].bufferOffset = currentOffset;
-    copy.copies[copy.count].bytesPerRow = lastRowDataSize;
-    copy.copies[copy.count].bytesPerImage = lastRowDataSize;
-    copy.copies[copy.count].textureOrigin = {origin.x,
-                                             origin.y + copyExtent.height - blockInfo.height,
-                                             origin.z + copyExtent.depthOrArrayLayers - 1};
-    copy.copies[copy.count].copyExtent = {clampedCopyExtent.width, lastRowCopyExtentHeight, 1};
-    ++copy.count;
+    copy.push_back(
+        TextureBufferCopySplit::CopyInfo(currentOffset, lastRowDataSize, lastImageDataSize,
+                                         {origin.x, origin.y + copyExtent.height - blockInfo.height,
+                                          origin.z + copyExtent.depthOrArrayLayers - 1},
+                                         {clampedCopyExtent.width, lastRowCopyExtentHeight, 1}));
 
     return copy;
 }
 
-void EnsureDestinationTextureInitialized(CommandRecordingContext* commandContext,
-                                         Texture* texture,
-                                         const TextureCopy& dst,
-                                         const Extent3D& size) {
-    ASSERT(texture == dst.texture.Get());
+MaybeError EnsureDestinationTextureInitialized(CommandRecordingContext* commandContext,
+                                               Texture* texture,
+                                               const TextureCopy& dst,
+                                               const Extent3D& size) {
+    DAWN_ASSERT(texture == dst.texture.Get());
     SubresourceRange range = GetSubresourcesAffectedByCopy(dst, size);
-    if (IsCompleteSubresourceCopiedTo(dst.texture.Get(), size, dst.mipLevel)) {
+    if (IsCompleteSubresourceCopiedTo(dst.texture.Get(), size, dst.mipLevel, dst.aspect)) {
         texture->SetIsSubresourceContentInitialized(true, range);
     } else {
-        texture->EnsureSubresourceContentInitialized(commandContext, range);
+        DAWN_TRY(texture->EnsureSubresourceContentInitialized(commandContext, range));
     }
-}
-
-MTLBlitOption ComputeMTLBlitOption(const Format& format, Aspect aspect) {
-    ASSERT(HasOneBit(aspect));
-    ASSERT(format.aspects & aspect);
-
-    if (IsSubset(Aspect::Depth | Aspect::Stencil, format.aspects)) {
-        // We only provide a blit option if the format has both depth and stencil.
-        // It is invalid to provide a blit option otherwise.
-        switch (aspect) {
-            case Aspect::Depth:
-                return MTLBlitOptionDepthFromDepthStencil;
-            case Aspect::Stencil:
-                return MTLBlitOptionStencilFromDepthStencil;
-            default:
-                UNREACHABLE();
-        }
-    }
-    return MTLBlitOptionNone;
+    return {};
 }
 
 MaybeError EncodeMetalRenderPass(Device* device,
@@ -334,42 +790,31 @@ MaybeError EncodeMetalRenderPass(Device* device,
     // workarounds to happen at the same time, it handles workarounds one by one and calls
     // itself recursively to handle the next workaround if needed.
 
-    // Handle Toggle AlwaysResolveIntoZeroLevelAndLayer. We must handle this before applying
-    // the store + MSAA resolve workaround, otherwise this toggle will never be handled because
-    // the resolve texture is removed when applying the store + MSAA resolve workaround.
-    if (device->IsToggleEnabled(Toggle::AlwaysResolveIntoZeroLevelAndLayer)) {
-        std::array<SavedMetalAttachment, kMaxColorAttachments> trueResolveAttachments = {};
-        bool workaroundUsed = false;
-        for (uint32_t i = 0; i < kMaxColorAttachments; ++i) {
-            if (mtlRenderPass.colorAttachments[i].resolveTexture == nullptr) {
-                continue;
+    // Handle the workaround where both depth and stencil attachments must be set for a
+    // combined depth-stencil format, not just one.
+    if (device->IsToggleEnabled(
+            Toggle::MetalUseBothDepthAndStencilAttachmentsForCombinedDepthStencilFormats)) {
+        const bool hasDepthAttachment = mtlRenderPass.depthAttachment.texture != nil;
+        const bool hasStencilAttachment = mtlRenderPass.stencilAttachment.texture != nil;
+
+        if (hasDepthAttachment && !hasStencilAttachment) {
+            if (GetDepthStencilAspects([mtlRenderPass.depthAttachment.texture pixelFormat]) &
+                Aspect::Stencil) {
+                mtlRenderPass.stencilAttachment.texture = mtlRenderPass.depthAttachment.texture;
+                mtlRenderPass.stencilAttachment.level = mtlRenderPass.depthAttachment.level;
+                mtlRenderPass.stencilAttachment.slice = mtlRenderPass.depthAttachment.slice;
+                mtlRenderPass.stencilAttachment.loadAction = MTLLoadActionLoad;
+                mtlRenderPass.stencilAttachment.storeAction = MTLStoreActionStore;
             }
-
-            if (mtlRenderPass.colorAttachments[i].resolveLevel == 0 &&
-                mtlRenderPass.colorAttachments[i].resolveSlice == 0) {
-                continue;
+        } else if (hasStencilAttachment && !hasDepthAttachment) {
+            if (GetDepthStencilAspects([mtlRenderPass.stencilAttachment.texture pixelFormat]) &
+                Aspect::Depth) {
+                mtlRenderPass.depthAttachment.texture = mtlRenderPass.stencilAttachment.texture;
+                mtlRenderPass.depthAttachment.level = mtlRenderPass.stencilAttachment.level;
+                mtlRenderPass.depthAttachment.slice = mtlRenderPass.stencilAttachment.slice;
+                mtlRenderPass.depthAttachment.loadAction = MTLLoadActionLoad;
+                mtlRenderPass.depthAttachment.storeAction = MTLStoreActionStore;
             }
-
-            DAWN_TRY_ASSIGN(
-                trueResolveAttachments[i],
-                PatchResolveAttachmentWithTemporary(device, mtlRenderPass.colorAttachments[i]));
-            workaroundUsed = true;
-        }
-
-        // If we need to use a temporary resolve texture we need to copy the result of MSAA
-        // resolve back to the true resolve targets.
-        if (workaroundUsed) {
-            DAWN_TRY(EncodeMetalRenderPass(device, commandContext, mtlRenderPass, width, height,
-                                           std::move(encodeInside), renderPassCmd));
-
-            for (uint32_t i = 0; i < kMaxColorAttachments; ++i) {
-                if (trueResolveAttachments[i].texture == nullptr) {
-                    continue;
-                }
-
-                trueResolveAttachments[i].CopyFromTemporaryToAttachment(commandContext);
-            }
-            return {};
         }
     }
 
@@ -428,7 +873,7 @@ MaybeError EncodeMetalRenderPass(Device* device,
         std::array<id<MTLTexture>, kMaxColorAttachments> resolveTextures = {};
         for (uint32_t i = 0; i < kMaxColorAttachments; ++i) {
             if (mtlRenderPass.colorAttachments[i].storeAction ==
-                kMTLStoreActionStoreAndMultisampleResolve) {
+                MTLStoreActionStoreAndMultisampleResolve) {
                 hasStoreAndMSAAResolve = true;
                 resolveTextures[i] = mtlRenderPass.colorAttachments[i].resolveTexture;
 
@@ -463,7 +908,7 @@ MaybeError EncodeEmptyMetalRenderPass(Device* device,
         [&](id<MTLRenderCommandEncoder>, BeginRenderPassCmd*) -> MaybeError { return {}; });
 }
 
-DAWN_NOINLINE bool SupportCounterSamplingAtCommandBoundary(id<MTLDevice> device)
+bool SupportCounterSamplingAtCommandBoundary(id<MTLDevice> device)
     API_AVAILABLE(macos(11.0), ios(14.0)) {
     bool isBlitBoundarySupported =
         [device supportsCounterSampling:MTLCounterSamplingPointAtBlitBoundary];
@@ -475,9 +920,49 @@ DAWN_NOINLINE bool SupportCounterSamplingAtCommandBoundary(id<MTLDevice> device)
     return isBlitBoundarySupported && isDispatchBoundarySupported && isDrawBoundarySupported;
 }
 
-DAWN_NOINLINE bool SupportCounterSamplingAtStageBoundary(id<MTLDevice> device)
+bool SupportCounterSamplingAtStageBoundary(id<MTLDevice> device)
     API_AVAILABLE(macos(11.0), ios(14.0)) {
     return [device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary];
+}
+
+MTLStorageMode IOSurfaceStorageMode() {
+#if DAWN_PLATFORM_IS(MACOS)
+    return MTLStorageModeManaged;
+#elif DAWN_PLATFORM_IS(IOS)
+    return MTLStorageModePrivate;
+#else
+#error "Unsupported Apple platform."
+#endif
+}
+
+id<MTLTexture> CreateTextureMtlForPlane(MTLTextureUsage mtlUsage,
+                                        const Format& format,
+                                        size_t plane,
+                                        Device* device,
+                                        uint32_t sampleCount,
+                                        IOSurfaceRef ioSurface) {
+    Aspect aspect = GetPlaneAspect(format, plane);
+    const auto& aspectInfo = format.GetAspectInfo(aspect);
+
+    NSRef<MTLTextureDescriptor> mtlDescRef = AcquireNSRef([MTLTextureDescriptor new]);
+    MTLTextureDescriptor* mtlDesc = mtlDescRef.Get();
+
+    mtlDesc.sampleCount = sampleCount;
+    mtlDesc.usage = mtlUsage;
+    mtlDesc.pixelFormat = MetalPixelFormat(device, aspectInfo.format);
+    mtlDesc.storageMode = IOSurfaceStorageMode();
+
+    mtlDesc.width = IOSurfaceGetWidthOfPlane(ioSurface, plane);
+    mtlDesc.height = IOSurfaceGetHeightOfPlane(ioSurface, plane);
+
+    // Multiplanar texture is validated to only have single layer, single mipLevel
+    // and 2d textures (depth == 1)
+    mtlDesc.mipmapLevelCount = 1;
+    mtlDesc.arrayLength = 1;
+    mtlDesc.depth = 1;
+    return [device->GetMTLDevice() newTextureWithDescriptor:mtlDesc
+                                                  iosurface:ioSurface
+                                                      plane:plane];
 }
 
 }  // namespace dawn::native::metal

@@ -77,7 +77,7 @@ struct I18nTestParam {
   const int buffer_size;
   const int read_size;
   const net::MockSourceStream::Mode mode;
-  const I18nTest* test;
+  raw_ptr<const I18nTest> test;
 };
 
 }  // namespace
@@ -88,7 +88,8 @@ class I18nSourceStreamTest : public ::testing::TestWithParam<I18nTestParam> {
 
   // Helpful function to initialize the test fixture.
   void Init() {
-    output_buffer_ = base::MakeRefCounted<net::IOBuffer>(output_buffer_size_);
+    output_buffer_ =
+        base::MakeRefCounted<net::IOBufferWithSize>(output_buffer_size_);
     std::unique_ptr<net::MockSourceStream> source(new net::MockSourceStream());
     source_ = source.get();
 
@@ -158,8 +159,8 @@ class I18nSourceStreamTest : public ::testing::TestWithParam<I18nTestParam> {
   scoped_refptr<net::IOBuffer> output_buffer_;
   const int output_buffer_size_;
 
+  std::unique_ptr<I18nSourceStream> stream_;  // Must outlive `source_`.
   raw_ptr<net::MockSourceStream> source_;
-  std::unique_ptr<I18nSourceStream> stream_;
 
   TemplateReplacements replacements_;
 };

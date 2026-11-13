@@ -1,4 +1,4 @@
-// Copyright 2022 PDFium Authors. All rights reserved.
+// Copyright 2022 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,12 @@
 
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_number.h"
-#include "core/fpdfapi/parser/cpdf_stream.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 TEST(DictionaryTest, Iterators) {
   auto dict = pdfium::MakeRetain<CPDF_Dictionary>();
   dict->SetNewFor<CPDF_Dictionary>("the-dictionary");
   dict->SetNewFor<CPDF_Array>("the-array");
-  dict->SetNewFor<CPDF_Stream>("the-stream");
   dict->SetNewFor<CPDF_Number>("the-number", 42);
 
   CPDF_DictionaryLocker locked_dict(dict);
@@ -33,11 +31,6 @@ TEST(DictionaryTest, Iterators) {
   EXPECT_NE(it, locked_dict.end());
   EXPECT_EQ(it->first, ByteString("the-number"));
   EXPECT_TRUE(it->second->IsNumber());
-
-  ++it;
-  EXPECT_NE(it, locked_dict.end());
-  EXPECT_EQ(it->first, ByteString("the-stream"));
-  EXPECT_TRUE(it->second->IsStream());
 
   ++it;
   EXPECT_EQ(it, locked_dict.end());

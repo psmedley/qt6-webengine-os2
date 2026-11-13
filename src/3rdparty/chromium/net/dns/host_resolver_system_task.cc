@@ -5,23 +5,28 @@
 #include "net/dns/host_resolver_system_task.h"
 
 #include <memory>
+#include <optional>
 
+#include "base/dcheck_is_on.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/no_destructor.h"
+#include "base/sequence_checker.h"
+#include "base/sequence_checker_impl.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
-#include "base/trace_event/trace_event.h"
 #include "base/types/pass_key.h"
 #include "dns_reloader.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_interfaces.h"
 #include "net/base/sys_addrinfo.h"
 #include "net/base/trace_constants.h"
+#include "net/base/tracing.h"
 #include "net/dns/address_info.h"
-#include "net/dns/dns_util.h"
+#include "net/dns/dns_names_util.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "net/base/winsock_init.h"
@@ -30,21 +35,6 @@
 namespace net {
 
 namespace {
-
-const base::FeatureParam<base::TaskPriority>::Option prio_modes[] = {
-    {base::TaskPriority::USER_VISIBLE, "default"},
-    {base::TaskPriority::USER_BLOCKING, "user_blocking"}};
-BASE_FEATURE(kSystemResolverPriorityExperiment,
-             "SystemResolverPriorityExperiment",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-const base::FeatureParam<base::TaskPriority> priority_mode{
-    &kSystemResolverPriorityExperiment, "mode",
-    base::TaskPriority::USER_VISIBLE, &prio_modes};
-
-base::TaskTraits GetSystemDnsResolutionTaskTraits() {
-  return {base::MayBlock(), priority_mode.Get(),
-          base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN};
-}
 
 // Returns nullptr in the common case, or a task runner if the default has
 // been overridden.
@@ -55,13 +45,14 @@ scoped_refptr<base::TaskRunner>& GetSystemDnsResolutionTaskRunnerOverride() {
 }
 
 // Posts a synchronous callback to a thread pool task runner created with
-// GetSystemDnsResolutionTaskTraits(). This task runner can be overridden by
-// assigning to GetSystemDnsResolutionTaskRunnerOverride(). `results_cb` will be
-// called later on the current sequence with the results of the DNS resolution.
+// MayBlock, USER_BLOCKING, and CONTINUE_ON_SHUTDOWN. This task runner can be
+// overridden by assigning to GetSystemDnsResolutionTaskRunnerOverride().
+// `results_cb` will be called later on the current sequence with the results of
+// the DNS resolution.
 void PostSystemDnsResolutionTaskAndReply(
     base::OnceCallback<int(AddressList* addrlist, int* os_error)>
         system_dns_resolution_callback,
-    HostResolverSystemTask::SystemDnsResultsCallback results_cb) {
+    SystemDnsResultsCallback results_cb) {
   auto addr_list = std::make_unique<net::AddressList>();
   net::AddressList* addr_list_ptr = addr_list.get();
   auto os_error = std::make_unique<int>();
@@ -70,7 +61,7 @@ void PostSystemDnsResolutionTaskAndReply(
   // This callback owns |addr_list| and |os_error| and just calls |results_cb|
   // with the results.
   auto call_with_results_cb = base::BindOnce(
-      [](HostResolverSystemTask::SystemDnsResultsCallback results_cb,
+      [](SystemDnsResultsCallback results_cb,
          std::unique_ptr<net::AddressList> addr_list,
          std::unique_ptr<int> os_error, int net_error) {
         std::move(results_cb).Run(std::move(*addr_list), *os_error, net_error);
@@ -84,8 +75,9 @@ void PostSystemDnsResolutionTaskAndReply(
     // leave a stale task runner around after tearing down their task
     // environment. This should not be less performant than the regular
     // base::ThreadPool::PostTask().
-    system_dns_resolution_task_runner =
-        base::ThreadPool::CreateTaskRunner(GetSystemDnsResolutionTaskTraits());
+    system_dns_resolution_task_runner = base::ThreadPool::CreateTaskRunner(
+        {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
   }
   system_dns_resolution_task_runner->PostTaskAndReplyWithResult(
       FROM_HERE,
@@ -95,7 +87,7 @@ void PostSystemDnsResolutionTaskAndReply(
 }
 
 int ResolveOnWorkerThread(scoped_refptr<HostResolverProc> resolver_proc,
-                          absl::optional<std::string> hostname,
+                          std::optional<std::string> hostname,
                           AddressFamily address_family,
                           HostResolverFlags flags,
                           handles::NetworkHandle network,
@@ -112,9 +104,10 @@ int ResolveOnWorkerThread(scoped_refptr<HostResolverProc> resolver_proc,
 }
 
 // Creates NetLog parameters when the resolve failed.
-base::Value NetLogHostResolverSystemTaskFailedParams(uint32_t attempt_number,
-                                                     int net_error,
-                                                     int os_error) {
+base::Value::Dict NetLogHostResolverSystemTaskFailedParams(
+    uint32_t attempt_number,
+    int net_error,
+    int os_error) {
   base::Value::Dict dict;
   if (attempt_number)
     dict.Set("attempt_number", base::saturated_cast<int>(attempt_number));
@@ -140,10 +133,40 @@ base::Value NetLogHostResolverSystemTaskFailedParams(uint32_t attempt_number,
 #endif
   }
 
-  return base::Value(std::move(dict));
+  return dict;
+}
+
+using SystemDnsResolverOverrideCallback =
+    base::RepeatingCallback<void(const std::optional<std::string>& host,
+                                 AddressFamily address_family,
+                                 HostResolverFlags host_resolver_flags,
+                                 SystemDnsResultsCallback results_cb,
+                                 handles::NetworkHandle network)>;
+
+SystemDnsResolverOverrideCallback& GetSystemDnsResolverOverride() {
+  static base::NoDestructor<SystemDnsResolverOverrideCallback> dns_override;
+
+#if DCHECK_IS_ON()
+  if (*dns_override) {
+    // This should only be called on the main thread, so DCHECK that it is.
+    // However, in unittests this may be called on different task environments
+    // in the same process so only bother sequence checking if an override
+    // exists.
+    static base::NoDestructor<base::SequenceCheckerImpl> sequence_checker;
+    base::ScopedValidateSequenceChecker scoped_validated_sequence_checker(
+        *sequence_checker);
+  }
+#endif
+
+  return *dns_override;
 }
 
 }  // namespace
+
+void SetSystemDnsResolverOverride(
+    SystemDnsResolverOverrideCallback dns_override) {
+  GetSystemDnsResolverOverride() = std::move(dns_override);
+}
 
 HostResolverSystemTask::Params::Params(
     scoped_refptr<HostResolverProc> resolver_proc,
@@ -170,8 +193,7 @@ std::unique_ptr<HostResolverSystemTask> HostResolverSystemTask::Create(
     const NetLogWithSource& job_net_log,
     handles::NetworkHandle network) {
   return std::make_unique<HostResolverSystemTask>(
-      base::PassKey<HostResolverSystemTask>(), hostname, address_family, flags,
-      params, job_net_log, network);
+      hostname, address_family, flags, params, job_net_log, network);
 }
 
 // static
@@ -183,13 +205,11 @@ HostResolverSystemTask::CreateForOwnHostname(
     const NetLogWithSource& job_net_log,
     handles::NetworkHandle network) {
   return std::make_unique<HostResolverSystemTask>(
-      base::PassKey<HostResolverSystemTask>(), absl::nullopt, address_family,
-      flags, params, job_net_log, network);
+      std::nullopt, address_family, flags, params, job_net_log, network);
 }
 
 HostResolverSystemTask::HostResolverSystemTask(
-    base::PassKey<HostResolverSystemTask>,
-    absl::optional<std::string> hostname,
+    std::optional<std::string> hostname,
     AddressFamily address_family,
     HostResolverFlags flags,
     const Params& params,
@@ -202,9 +222,10 @@ HostResolverSystemTask::HostResolverSystemTask(
       net_log_(job_net_log),
       network_(network) {
   if (hostname_) {
-    // |host| should be a valid domain name. HostResolverImpl::Resolve has
-    // checks to fail early if this is not the case.
-    DCHECK(IsValidDNSDomain(*hostname_)) << "Invalid hostname: " << *hostname_;
+    // |host| should be a valid domain name. HostResolverManager has checks to
+    // fail early if this is not the case.
+    DCHECK(dns_names_util::IsValidDnsName(*hostname_))
+        << "Invalid hostname: " << *hostname_;
   }
   // If a resolver_proc has not been specified, try to use a default if one is
   // set, as it may be in tests.
@@ -238,14 +259,6 @@ void HostResolverSystemTask::StartLookupAttempt() {
   DCHECK(!was_completed());
   ++attempt_number_;
 
-  base::OnceCallback<int(AddressList * addrlist, int* os_error)> resolve_cb =
-      base::BindOnce(&ResolveOnWorkerThread, params_.resolver_proc, hostname_,
-                     address_family_, flags_, network_);
-  PostSystemDnsResolutionTaskAndReply(
-      std::move(resolve_cb),
-      base::BindOnce(&HostResolverSystemTask::OnLookupComplete,
-                     weak_ptr_factory_.GetWeakPtr(), attempt_number_));
-
   net_log_.AddEventWithIntParams(
       NetLogEventType::HOST_RESOLVER_MANAGER_ATTEMPT_STARTED, "attempt_number",
       attempt_number_);
@@ -256,12 +269,31 @@ void HostResolverSystemTask::StartLookupAttempt() {
   // Use a WeakPtr to avoid keeping the HostResolverSystemTask alive after
   // completion or cancellation.
   if (attempt_number_ <= params_.max_retry_attempts) {
-    base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&HostResolverSystemTask::StartLookupAttempt,
                        weak_ptr_factory_.GetWeakPtr()),
         params_.unresponsive_delay *
             std::pow(params_.retry_factor, attempt_number_ - 1));
+  }
+
+  auto lookup_complete_cb =
+      base::BindOnce(&HostResolverSystemTask::OnLookupComplete,
+                     weak_ptr_factory_.GetWeakPtr(), attempt_number_);
+
+  // If a hook has been installed, call it instead of posting a resolution task
+  // to a worker thread.
+  if (GetSystemDnsResolverOverride()) {
+    GetSystemDnsResolverOverride().Run(hostname_, address_family_, flags_,
+                                       std::move(lookup_complete_cb), network_);
+    // Do not add code below. `lookup_complete_cb` may have already deleted
+    // `this`.
+  } else {
+    base::OnceCallback<int(AddressList * addrlist, int* os_error)> resolve_cb =
+        base::BindOnce(&ResolveOnWorkerThread, params_.resolver_proc, hostname_,
+                       address_family_, flags_, network_);
+    PostSystemDnsResolutionTaskAndReply(std::move(resolve_cb),
+                                        std::move(lookup_complete_cb));
   }
 }
 
@@ -310,10 +342,8 @@ void HostResolverSystemTask::OnLookupComplete(const uint32_t attempt_number,
 }
 
 void EnsureSystemHostResolverCallReady() {
-#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OPENBSD) && \
-    !BUILDFLAG(IS_ANDROID)
   EnsureDnsReloaderInit();
-#elif BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN)
   EnsureWinsockInit();
 #endif
 }
@@ -367,14 +397,23 @@ int SystemHostResolverCall(const std::string& host,
   // OpenBSD does not support it, either.
   hints.ai_flags = 0;
 #else
+  // On other operating systems, AI_ADDRCONFIG may reduce the amount of
+  // unnecessary DNS lookups, e.g. getaddrinfo() will not send a request for
+  // AAAA records if the current machine has no IPv6 addresses configured and
+  // therefore could not use the resulting AAAA record anyway. On some ancient
+  // routers, AAAA DNS queries won't be handled correctly and will cause
+  // multiple retransmitions and large latency spikes.
   hints.ai_flags = AI_ADDRCONFIG;
 #endif
 
   // On Linux AI_ADDRCONFIG doesn't consider loopback addresses, even if only
   // loopback addresses are configured. So don't use it when there are only
-  // loopback addresses.
-  if (host_resolver_flags & HOST_RESOLVER_LOOPBACK_ONLY)
+  // loopback addresses. See loopback_only.h and
+  // https://fedoraproject.org/wiki/QA/Networking/NameResolution/ADDRCONFIG for
+  // a description of some of the issues AI_ADDRCONFIG can cause.
+  if (host_resolver_flags & HOST_RESOLVER_LOOPBACK_ONLY) {
     hints.ai_flags &= ~AI_ADDRCONFIG;
+  }
 
   if (host_resolver_flags & HOST_RESOLVER_CANONNAME)
     hints.ai_flags |= AI_CANONNAME;
@@ -395,11 +434,8 @@ int SystemHostResolverCall(const std::string& host,
   // current process during that time.
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::WILL_BLOCK);
-
-#if BUILDFLAG(IS_POSIX) && \
-    !(BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_ANDROID))
   DnsReloaderMaybeReload();
-#endif
+
   auto [ai, err, os_error] = AddressInfo::Get(host, hints, nullptr, network);
   bool should_retry = false;
   // If the lookup was restricted (either by address family, or address

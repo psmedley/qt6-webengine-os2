@@ -10,7 +10,6 @@ devtools_module("formatter") {
   sources = [
     "FormatterWorkerPool.ts",
     "ScriptFormatter.ts",
-    "SourceFormatter.ts",
   ]
 
   deps = [
@@ -35,29 +34,18 @@ devtools_entrypoint("bundle") {
   visibility = [
     ":*",
     "../../../test/unittests/front_end/models/formatter/*",
+    "../../../test/unittests/front_end/models/source_map_scopes/*",
     "../../entrypoints/formatter_worker/*",
+    "../../models/breakpoints/*",
     "../../models/source_map_scopes/*",
     "../../models/workspace_diff/*",
     "../../panels/coverage/*",
     "../../panels/sources/*",
     "../../panels/utils/*",
-
-    # TODO(crbug.com/1202788): Remove invalid dependents
     "../../ui/components/text_editor/*",
     "../../ui/legacy/components/object_ui/*",
     "../../ui/legacy/components/source_frame/*",
   ]
 
   visibility += devtools_models_visibility
-}
-
-devtools_entrypoint("legacy") {
-  entrypoint = "formatter-legacy.ts"
-
-  deps = [ ":bundle" ]
-
-  visibility = [
-    "../..:legacy_entrypoints",
-    "../../legacy_test_runner/*",
-  ]
 }

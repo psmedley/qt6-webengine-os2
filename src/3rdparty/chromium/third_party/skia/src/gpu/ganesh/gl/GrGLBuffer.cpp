@@ -122,7 +122,7 @@ GrGLBuffer::GrGLBuffer(GrGLGpu* gpu,
             fBufferID = 0;
         }
     }
-    this->registerWithCache(SkBudgeted::kYes);
+    this->registerWithCache(skgpu::Budgeted::kYes);
     if (!fBufferID) {
         this->resourcePriv().removeScratchKey();
     }
@@ -158,11 +158,11 @@ void GrGLBuffer::onAbandon() {
     INHERITED::onAbandon();
 }
 
-static inline GrGLenum SK_WARN_UNUSED_RESULT invalidate_buffer(GrGLGpu* gpu,
-                                                               GrGLenum target,
-                                                               GrGLenum usage,
-                                                               GrGLuint bufferID,
-                                                               size_t bufferSize) {
+[[nodiscard]] static inline GrGLenum invalidate_buffer(GrGLGpu* gpu,
+                                                       GrGLenum target,
+                                                       GrGLenum usage,
+                                                       GrGLuint bufferID,
+                                                       size_t bufferSize) {
     switch (gpu->glCaps().invalidateBufferType()) {
         case GrGLCaps::InvalidateBufferType::kNone:
             return GR_GL_NO_ERROR;

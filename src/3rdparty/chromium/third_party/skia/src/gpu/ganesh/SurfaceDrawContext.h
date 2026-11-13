@@ -13,7 +13,9 @@
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkSurface.h"
 #include "include/core/SkSurfaceProps.h"
+#include "include/private/base/SkTArray.h"
 #include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkDevice.h"
 #include "src/gpu/ganesh/GrPaint.h"
 #include "src/gpu/ganesh/GrRenderTargetProxy.h"
 #include "src/gpu/ganesh/GrSurfaceProxyView.h"
@@ -40,7 +42,6 @@ struct SkDrawShadowRec;
 struct SkIPoint;
 struct SkIRect;
 class SkLatticeIter;
-class SkMatrixProvider;
 class SkMatrix;
 class SkPaint;
 class SkPath;
@@ -56,7 +57,7 @@ namespace sktext {
 class GlyphRunList;
 }
 
-namespace skgpu::v1 {
+namespace skgpu::ganesh {
 
 /**
  * A helper object to orchestrate commands (draws, etc...) for GrSurfaces that are GrRenderTargets.
@@ -79,10 +80,10 @@ public:
                                                     const SkSurfaceProps&,
                                                     std::string_view label,
                                                     int sampleCnt = 1,
-                                                    GrMipmapped = GrMipmapped::kNo,
-                                                    GrProtected = GrProtected::kNo,
+                                                    skgpu::Mipmapped = skgpu::Mipmapped::kNo,
+                                                    skgpu::Protected = skgpu::Protected::kNo,
                                                     GrSurfaceOrigin = kBottomLeft_GrSurfaceOrigin,
-                                                    SkBudgeted = SkBudgeted::kYes);
+                                                    skgpu::Budgeted = skgpu::Budgeted::kYes);
 
     /**
      * Takes custom swizzles rather than determining swizzles from color type and format.
@@ -94,12 +95,12 @@ public:
                                                     SkISize dimensions,
                                                     const GrBackendFormat&,
                                                     int sampleCnt,
-                                                    GrMipmapped,
-                                                    GrProtected,
+                                                    skgpu::Mipmapped,
+                                                    skgpu::Protected,
                                                     skgpu::Swizzle readSwizzle,
                                                     skgpu::Swizzle writeSwizzle,
                                                     GrSurfaceOrigin,
-                                                    SkBudgeted,
+                                                    skgpu::Budgeted,
                                                     const SkSurfaceProps&,
                                                     std::string_view label);
 
@@ -114,11 +115,11 @@ public:
             SkBackingFit,
             SkISize dimensions,
             const SkSurfaceProps&,
-            int sampleCnt = 1,
-            GrMipmapped = GrMipmapped::kNo,
-            GrProtected = GrProtected::kNo,
+            int sampleCnt,
+            skgpu::Mipmapped,
+            skgpu::Protected,
             GrSurfaceOrigin = kBottomLeft_GrSurfaceOrigin,
-            SkBudgeted = SkBudgeted::kYes);
+            skgpu::Budgeted = skgpu::Budgeted::kYes);
 
     // Creates a SurfaceDrawContext that wraps the passed in GrBackendTexture.
     static std::unique_ptr<SurfaceDrawContext> MakeFromBackendTexture(
@@ -372,7 +373,7 @@ public:
      */
     void drawVertices(const GrClip*,
                       GrPaint&& paint,
-                      const SkMatrixProvider& matrixProvider,
+                      const SkMatrix& viewMatrix,
                       sk_sp<SkVertices> vertices,
                       GrPrimitiveType* overridePrimType = nullptr,
                       bool skipColorXform = false);
@@ -380,14 +381,16 @@ public:
     /**
      * Draws a custom mesh with a paint.
      *
-     * @param   paint            describes how to color pixels.
-     * @param   matrixProvider   provides the transformation matrix
-     * @param   mesh             the mesh to draw.
+     * @param   paint      describes how to color pixels.
+     * @param   viewMatrix transformation matrix
+     * @param   mesh       the mesh to draw.
+     * @param   children   child effects referenced by SkMesh shaders
      */
     void drawMesh(const GrClip*,
                   GrPaint&& paint,
-                  const SkMatrixProvider& matrixProvider,
-                  const SkMesh& mesh);
+                  const SkMatrix& viewMatrix,
+                  const SkMesh& mesh,
+                  skia_private::TArray<std::unique_ptr<GrFragmentProcessor>> children);
 
     /**
      * Draws textured sprites from an atlas with a paint. This currently does not support AA for the
@@ -483,12 +486,12 @@ public:
     /**
      * Draw the text specified by the GlyphRunList.
      *
-     * @param viewMatrix      transformationMatrix
+     * @param viewMatrix      transformation matrix
      * @param glyphRunList    text, text positions, and paint.
      */
     void drawGlyphRunList(SkCanvas*,
                           const GrClip*,
-                          const SkMatrixProvider& viewMatrix,
+                          const SkMatrix& viewMatrix,
                           const sktext::GlyphRunList& glyphRunList,
                           SkStrikeDeviceInfo strikeDeviceInfo,
                           const SkPaint& paint);
@@ -553,7 +556,7 @@ public:
                             const SkMatrix& viewMatrix,
                             const SkPath&);
 
-    SkBudgeted isBudgeted() const;
+    skgpu::Budgeted isBudgeted() const;
 
     int maxWindowRectangles() const;
 
@@ -612,7 +615,7 @@ public:
     // instantiated.
     GrRenderTarget* accessRenderTarget() { return this->asSurfaceProxy()->peekRenderTarget(); }
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     void testingOnly_SetPreserveOpsOnFullClear() { fPreserveOpsOnFullClear_TestingOnly = true; }
 #endif
 
@@ -679,9 +682,9 @@ private:
     // value is false then a texture copy could not be made.
     //
     // The op should have already had setClippedBounds called on it.
-    bool SK_WARN_UNUSED_RESULT setupDstProxyView(const SkRect& opBounds,
-                                                 bool opRequiresMSAA,
-                                                 GrDstProxyView* result);
+    [[nodiscard]] bool setupDstProxyView(const SkRect& opBounds,
+                                         bool opRequiresMSAA,
+                                         GrDstProxyView* result);
 
     OpsTask* replaceOpsTaskIfModifiesColor();
 
@@ -690,11 +693,11 @@ private:
 
     bool fNeedsStencil = false;
 
-#if GR_TEST_UTILS
+#if defined(GR_TEST_UTILS)
     bool fPreserveOpsOnFullClear_TestingOnly = false;
 #endif
 };
 
-} // namespace skgpu::v1
+}  // namespace skgpu::ganesh
 
 #endif // SurfaceDrawContext_v1_DEFINED

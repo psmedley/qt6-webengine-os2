@@ -1,16 +1,29 @@
-// Copyright 2019 The Dawn Authors
+// Copyright 2019 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // Trace events are for tracking application performance and resource usage.
 // Macros are provided to track:
@@ -152,9 +165,11 @@
 #ifndef SRC_DAWN_PLATFORM_TRACING_TRACEEVENT_H_
 #define SRC_DAWN_PLATFORM_TRACING_TRACEEVENT_H_
 
+#include <atomic>
 #include <string>
 
 #include "dawn/platform/tracing/EventTracer.h"
+#include "partition_alloc/pointers/raw_ptr.h"
 
 // Records a pair of begin and end events called "name" for the current
 // scope, with 0, 1 or 2 associated arguments. If the category is not
@@ -645,7 +660,7 @@
 // for best performance when tracing is disabled.
 // const unsigned char*
 //     TRACE_EVENT_API_GET_CATEGORY_ENABLED(const char* category_name)
-#define TRACE_EVENT_API_GET_CATEGORY_ENABLED dawn::platform::tracing::GetTraceCategoryEnabledFlag
+#define TRACE_EVENT_API_GET_CATEGORY_ENABLED ::dawn::platform::tracing::GetTraceCategoryEnabledFlag
 
 // Add a trace event to the platform tracing system.
 // void TRACE_EVENT_API_ADD_TRACE_EVENT(
@@ -658,7 +673,7 @@
 //                    const unsigned char* arg_types,
 //                    const unsigned long long* arg_values,
 //                    unsigned char flags)
-#define TRACE_EVENT_API_ADD_TRACE_EVENT dawn::platform::tracing::AddTraceEvent
+#define TRACE_EVENT_API_ADD_TRACE_EVENT ::dawn::platform::tracing::AddTraceEvent
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -670,10 +685,16 @@
 #define INTERNALTRACEEVENTUID(name_prefix) INTERNAL_TRACE_EVENT_UID2(name_prefix, __LINE__)
 
 // Implementation detail: internal macro to create static category.
-#define INTERNAL_TRACE_EVENT_GET_CATEGORY_INFO(platform, category)    \
-    static const unsigned char* INTERNALTRACEEVENTUID(catstatic) = 0; \
-    if (!INTERNALTRACEEVENTUID(catstatic))                            \
-        INTERNALTRACEEVENTUID(catstatic) = TRACE_EVENT_API_GET_CATEGORY_ENABLED(platform, category);
+#define INTERNAL_TRACE_EVENT_GET_CATEGORY_INFO(platform, category)                            \
+    static std::atomic<const unsigned char*> INTERNALTRACEEVENTUID(atomicCatstatic)(nullptr); \
+    const unsigned char* INTERNALTRACEEVENTUID(catstatic) =                                   \
+        INTERNALTRACEEVENTUID(atomicCatstatic).load(std::memory_order_acquire);               \
+    if (!INTERNALTRACEEVENTUID(catstatic)) {                                                  \
+        INTERNALTRACEEVENTUID(catstatic) =                                                    \
+            TRACE_EVENT_API_GET_CATEGORY_ENABLED(platform, category);                         \
+        INTERNALTRACEEVENTUID(atomicCatstatic)                                                \
+            .store(INTERNALTRACEEVENTUID(catstatic), std::memory_order_release);              \
+    }
 
 // Implementation detail: internal macro to create static category and add
 // event if the category is enabled.
@@ -861,8 +882,8 @@ static inline void setTraceValue(const std::string& arg, unsigned char* type, ui
 // store pointers to the internal c_str and pass through to the tracing API, the
 // arg values must live throughout these procedures.
 
-static inline dawn::platform::tracing::TraceEventHandle addTraceEvent(
-    dawn::platform::Platform* platform,
+static inline tracing::TraceEventHandle addTraceEvent(
+    Platform* platform,
     char phase,
     const unsigned char* categoryEnabled,
     const char* name,
@@ -874,16 +895,15 @@ static inline dawn::platform::tracing::TraceEventHandle addTraceEvent(
 }
 
 template <class ARG1_TYPE>
-static inline dawn::platform::tracing::TraceEventHandle addTraceEvent(
-    dawn::platform::Platform* platform,
-    char phase,
-    const unsigned char* categoryEnabled,
-    const char* name,
-    uint64_t id,
-    unsigned char flags,
-    int /*unused, helps avoid empty __VA_ARGS__*/,
-    const char* arg1Name,
-    const ARG1_TYPE& arg1Val) {
+static inline tracing::TraceEventHandle addTraceEvent(Platform* platform,
+                                                      char phase,
+                                                      const unsigned char* categoryEnabled,
+                                                      const char* name,
+                                                      uint64_t id,
+                                                      unsigned char flags,
+                                                      int /*unused, helps avoid empty __VA_ARGS__*/,
+                                                      const char* arg1Name,
+                                                      const ARG1_TYPE& arg1Val) {
     const int numArgs = 1;
     unsigned char argTypes[1];
     uint64_t argValues[1];
@@ -893,18 +913,17 @@ static inline dawn::platform::tracing::TraceEventHandle addTraceEvent(
 }
 
 template <class ARG1_TYPE, class ARG2_TYPE>
-static inline dawn::platform::tracing::TraceEventHandle addTraceEvent(
-    dawn::platform::Platform* platform,
-    char phase,
-    const unsigned char* categoryEnabled,
-    const char* name,
-    uint64_t id,
-    unsigned char flags,
-    int /*unused, helps avoid empty __VA_ARGS__*/,
-    const char* arg1Name,
-    const ARG1_TYPE& arg1Val,
-    const char* arg2Name,
-    const ARG2_TYPE& arg2Val) {
+static inline tracing::TraceEventHandle addTraceEvent(Platform* platform,
+                                                      char phase,
+                                                      const unsigned char* categoryEnabled,
+                                                      const char* name,
+                                                      uint64_t id,
+                                                      unsigned char flags,
+                                                      int /*unused, helps avoid empty __VA_ARGS__*/,
+                                                      const char* arg1Name,
+                                                      const ARG1_TYPE& arg1Val,
+                                                      const char* arg2Name,
+                                                      const ARG2_TYPE& arg2Val) {
     const int numArgs = 2;
     const char* argNames[2] = {arg1Name, arg2Name};
     unsigned char argTypes[2];
@@ -919,16 +938,14 @@ static inline dawn::platform::tracing::TraceEventHandle addTraceEvent(
 class TraceEndOnScopeClose {
   public:
     // Note: members of m_data intentionally left uninitialized. See initialize.
-    TraceEndOnScopeClose() : m_pdata(0) {}
+    TraceEndOnScopeClose() = default;
     ~TraceEndOnScopeClose() {
         if (m_pdata) {
             addEventIfEnabled();
         }
     }
 
-    void initialize(dawn::platform::Platform* platform,
-                    const unsigned char* categoryEnabled,
-                    const char* name) {
+    void initialize(Platform* platform, const unsigned char* categoryEnabled, const char* name) {
         m_data.platform = platform;
         m_data.categoryEnabled = categoryEnabled;
         m_data.name = name;
@@ -952,11 +969,11 @@ class TraceEndOnScopeClose {
     // members of this class instead, compiler warnings occur about potential
     // uninitialized accesses.
     struct Data {
-        dawn::platform::Platform* platform;
+        raw_ptr<Platform> platform;
         const unsigned char* categoryEnabled;
         const char* name;
     };
-    Data* m_pdata;
+    raw_ptr<Data> m_pdata = nullptr;
     Data m_data;
 };
 

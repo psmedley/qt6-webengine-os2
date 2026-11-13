@@ -22,14 +22,54 @@
 
 // This code generates an assembly file which provides offsets to get struct members from assembly code.
 
+// __USE_MINGW_ANSI_STDIO is needed to use the %zu format specifier with mingw-w64.
+// Otherwise the compiler will complain about an unknown format specifier.
+#if defined(__MINGW32__) && !defined(__USE_MINGW_ANSI_STDIO)
+#define __USE_MINGW_ANSI_STDIO 1
+#endif
+
 #include <stdio.h>
 #include "loader_common.h"
 #include "log.h"
 
+#if defined(__GNUC__) || defined(__clang__)
+void produce_asm_define() {
+    // GCC and clang make it easy to print easy to regex for values
+    __asm__("# VULKAN_LOADER_ERROR_BIT = %c0" : : "i"(VULKAN_LOADER_ERROR_BIT));
+    __asm__("# PTR_SIZE = %c0" : : "i"(sizeof(void *)));
+    __asm__("# CHAR_PTR_SIZE = %c0" : : "i"(sizeof(char *)));
+    __asm__("# FUNCTION_OFFSET_INSTANCE = %c0" : : "i"(offsetof(struct loader_instance, phys_dev_ext_disp_functions)));
+    __asm__("# PHYS_DEV_OFFSET_INST_DISPATCH = %c0" : : "i"(offsetof(struct loader_instance_dispatch_table, phys_dev_ext)));
+    __asm__("# PHYS_DEV_OFFSET_PHYS_DEV_TRAMP = %c0" : : "i"(offsetof(struct loader_physical_device_tramp, phys_dev)));
+    __asm__("# ICD_TERM_OFFSET_PHYS_DEV_TERM = %c0" : : "i"(offsetof(struct loader_physical_device_term, this_icd_term)));
+    __asm__("# PHYS_DEV_OFFSET_PHYS_DEV_TERM = %c0" : : "i"(offsetof(struct loader_physical_device_term, phys_dev)));
+    __asm__("# INSTANCE_OFFSET_ICD_TERM = %c0" : : "i"(offsetof(struct loader_icd_term, this_instance)));
+    __asm__("# DISPATCH_OFFSET_ICD_TERM = %c0" : : "i"(offsetof(struct loader_icd_term, phys_dev_ext)));
+    __asm__("# EXT_OFFSET_DEVICE_DISPATCH = %c0" : : "i"(offsetof(struct loader_dev_dispatch_table, ext_dispatch)));
+}
+#elif defined(_WIN32)
+// MSVC will print the name of the value and the value in hex
+// Must disable optimization for this translation unit, otherwise the compiler strips out the variables
+static const uint32_t PTR_SIZE = sizeof(void *);
+static const uint32_t CHAR_PTR_SIZE = sizeof(char *);
+static const uint32_t FUNCTION_OFFSET_INSTANCE = offsetof(struct loader_instance, phys_dev_ext_disp_functions);
+static const uint32_t PHYS_DEV_OFFSET_INST_DISPATCH = offsetof(struct loader_instance_dispatch_table, phys_dev_ext);
+static const uint32_t PHYS_DEV_OFFSET_PHYS_DEV_TRAMP = offsetof(struct loader_physical_device_tramp, phys_dev);
+static const uint32_t ICD_TERM_OFFSET_PHYS_DEV_TERM = offsetof(struct loader_physical_device_term, this_icd_term);
+static const uint32_t PHYS_DEV_OFFSET_PHYS_DEV_TERM = offsetof(struct loader_physical_device_term, phys_dev);
+static const uint32_t INSTANCE_OFFSET_ICD_TERM = offsetof(struct loader_icd_term, this_instance);
+static const uint32_t DISPATCH_OFFSET_ICD_TERM = offsetof(struct loader_icd_term, phys_dev_ext);
+static const uint32_t EXT_OFFSET_DEVICE_DISPATCH = offsetof(struct loader_dev_dispatch_table, ext_dispatch);
+#else
+#warning asm_offset.c variable declarations need to be defined for this platform
+#endif
+
 #if !defined(_MSC_VER) || (_MSC_VER >= 1900)
 #define SIZE_T_FMT "%-8zu"
-#else
+#elif defined(__GNUC__) || defined(__clang__)
 #define SIZE_T_FMT "%-8lu"
+#else
+#warning asm_offset.c SIZE_T_FMT must be defined for this platform
 #endif
 
 struct ValueInfo {
@@ -38,6 +78,8 @@ struct ValueInfo {
     const char *comment;
 };
 
+// This file can both be executed to produce gen_defines.asm and contains all the relevant data which
+// the parse_asm_values.py script needs to write gen_defines.asm, necessary for cross compilation
 int main(int argc, char **argv) {
     const char *assembler = NULL;
     for (int i = 0; i < argc; ++i) {
@@ -78,7 +120,7 @@ int main(int argc, char **argv) {
         // clang-format on
     };
 
-    FILE *file = fopen("gen_defines.asm", "w");
+    FILE *file = loader_fopen("gen_defines.asm", "w");
     fprintf(file, "\n");
     if (!strcmp(assembler, "MASM")) {
         for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i) {

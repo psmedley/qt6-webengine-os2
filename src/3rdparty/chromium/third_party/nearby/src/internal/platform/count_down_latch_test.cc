@@ -17,7 +17,6 @@
 #include "gtest/gtest.h"
 #include "internal/platform/single_thread_executor.h"
 
-namespace location {
 namespace nearby {
 namespace {
 
@@ -53,8 +52,7 @@ TEST(CountDownLatch, LatchAwaitWithTimeoutCanExpire) {
   CountDownLatch latch(1);
   SingleThreadExecutor executor;
   auto response = latch.Await(absl::Milliseconds(100));
-  EXPECT_TRUE(response.ok());
-  EXPECT_FALSE(response.result());
+  EXPECT_FALSE(response);
 }
 
 TEST(CountDownLatch, InitialCountZero_AwaitDoesNotBlock) {
@@ -67,4 +65,3 @@ TEST(CountDownLatch, InitialCountZero_AwaitDoesNotBlock) {
 
 }  // namespace
 }  // namespace nearby
-}  // namespace location

@@ -113,8 +113,12 @@ $pure $es3 $genType  roundEven($genType  x);
 $pure $es3 $genHType roundEven($genHType x);
 $pure $es3 $genIType min($genIType x, $genIType y);
 $pure $es3 $genIType min($genIType x, int y);
+$pure $es3 $genUType min($genUType x, $genUType y);
+$pure $es3 $genUType min($genUType x, uint y);
 $pure $es3 $genIType max($genIType x, $genIType y);
 $pure $es3 $genIType max($genIType x, int y);
+$pure $es3 $genUType max($genUType x, $genUType y);
+$pure $es3 $genUType max($genUType x, uint y);
 $pure $es3 $genIType clamp($genIType x, $genIType minVal, $genIType maxVal);
 $pure $es3 $genIType clamp($genIType x, int minVal, int maxVal);
 $pure $es3 $genUType clamp($genUType x, $genUType minVal, $genUType maxVal);
@@ -127,8 +131,8 @@ $pure $es3 $genBType isnan($genType  x);
 $pure $es3 $genBType isnan($genHType x);
 $pure $es3 $genBType isinf($genType  x);
 $pure $es3 $genBType isinf($genHType x);
-$pure $es3 $genType  modf($genType  x, out $genType  i);
-$pure $es3 $genHType modf($genHType x, out $genHType i);
+      $es3 $genType  modf($genType  x, out $genType  i);
+      $es3 $genHType modf($genHType x, out $genHType i);
 
 // 8.4 : Floating-Point Pack and Unpack Functions (GLSL ES 3.0)
 $pure $es3 uint packUnorm2x16(float2 v);
@@ -198,23 +202,42 @@ $pure $es3 half4x3     outerProduct(half3  c, half4  r);
 $pure $bvec lessThan($vec  x, $vec  y);
 $pure $bvec lessThan($hvec x, $hvec y);
 $pure $bvec lessThan($ivec x, $ivec y);
+$pure $bvec lessThan($svec x, $svec y);
 $pure $bvec lessThanEqual($vec  x, $vec  y);
 $pure $bvec lessThanEqual($hvec x, $hvec y);
 $pure $bvec lessThanEqual($ivec x, $ivec y);
+$pure $bvec lessThanEqual($svec x, $svec y);
 $pure $bvec greaterThan($vec  x, $vec  y);
 $pure $bvec greaterThan($hvec x, $hvec y);
 $pure $bvec greaterThan($ivec x, $ivec y);
+$pure $bvec greaterThan($svec x, $svec y);
 $pure $bvec greaterThanEqual($vec  x, $vec  y);
 $pure $bvec greaterThanEqual($hvec x, $hvec y);
 $pure $bvec greaterThanEqual($ivec x, $ivec y);
+$pure $bvec greaterThanEqual($svec x, $svec y);
 $pure $bvec equal($vec  x, $vec  y);
 $pure $bvec equal($hvec x, $hvec y);
 $pure $bvec equal($ivec x, $ivec y);
+$pure $bvec equal($svec x, $svec y);
 $pure $bvec equal($bvec x, $bvec y);
 $pure $bvec notEqual($vec  x, $vec  y);
 $pure $bvec notEqual($hvec x, $hvec y);
 $pure $bvec notEqual($ivec x, $ivec y);
+$pure $bvec notEqual($svec x, $svec y);
 $pure $bvec notEqual($bvec x, $bvec y);
+
+$pure $es3 $bvec lessThan($usvec x, $usvec y);
+$pure $es3 $bvec lessThan($uvec x, $uvec y);
+$pure $es3 $bvec lessThanEqual($uvec x, $uvec y);
+$pure $es3 $bvec lessThanEqual($usvec x, $usvec y);
+$pure $es3 $bvec greaterThan($uvec x, $uvec y);
+$pure $es3 $bvec greaterThan($usvec x, $usvec y);
+$pure $es3 $bvec greaterThanEqual($uvec x, $uvec y);
+$pure $es3 $bvec greaterThanEqual($usvec x, $usvec y);
+$pure $es3 $bvec equal($uvec x, $uvec y);
+$pure $es3 $bvec equal($usvec x, $usvec y);
+$pure $es3 $bvec notEqual($uvec x, $uvec y);
+$pure $es3 $bvec notEqual($usvec x, $usvec y);
 
 $pure bool  any($bvec x);
 $pure bool  all($bvec x);
@@ -234,6 +257,11 @@ $pure $es3 $genHType fwidth($genHType p);
 // The max() guards against division by zero when the incoming color is transparent black
 $pure half4  unpremul(half4  color) { return half4 (color.rgb / max(color.a, 0.0001), color.a); }
 $pure float4 unpremul(float4 color) { return float4(color.rgb / max(color.a, 0.0001), color.a); }
+
+// Similar, but used for polar-space CSS colors
+$export $pure half4 $unpremul_polar(half4 color) {
+    return half4(color.r, color.gb / max(color.a, 0.0001), color.a);
+}
 
 // Convert RGBA -> HSLA (including unpremul).
 //
@@ -294,4 +322,233 @@ $export $pure half3 $hsl_to_rgb(half3 hsl) {
 
 $export $pure half4 $hsl_to_rgb(half3 hsl, half a) {
     return saturate(half4($hsl_to_rgb(hsl) * a, a));
+}
+
+// Color conversion functions used in gradient interpolation, based on
+// https://www.w3.org/TR/css-color-4/#color-conversion-code
+// TODO(skia:13108): For all of these, we can eliminate any linear math at the beginning
+// (by removing the corresponding linear math at the end of the CPU code).
+$export $pure half3 $css_lab_to_xyz(half3 lab) {
+    const half k = 24389 / 27.0;
+    const half e = 216 / 24389.0;
+
+    half3 f;
+    f[1] = (lab[0] + 16) / 116;
+    f[0] = (lab[1] / 500) + f[1];
+    f[2] = f[1] - (lab[2] / 200);
+
+    half3 f_cubed = pow(f, half3(3));
+
+    half3 xyz = half3(
+        f_cubed[0] > e ? f_cubed[0] : (116 * f[0] - 16) / k,
+        lab[0] > k * e ? f_cubed[1] : lab[0] / k,
+        f_cubed[2] > e ? f_cubed[2] : (116 * f[2] - 16) / k
+    );
+
+    const half3 D50 = half3(0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585);
+    return xyz * D50;
+}
+
+// Skia stores all polar colors with hue in the first component, so this "LCH -> Lab" transform
+// actually takes "HCL". This is also used to do the same polar transform for OkHCL to OkLAB.
+// See similar comments & logic in SkGradientShaderBase.cpp.
+$pure half3 $css_hcl_to_lab(half3 hcl) {
+    return half3(
+        hcl[2],
+        hcl[1] * cos(radians(hcl[0])),
+        hcl[1] * sin(radians(hcl[0]))
+    );
+}
+
+$export $pure half3 $css_hcl_to_xyz(half3 hcl) {
+    return $css_lab_to_xyz($css_hcl_to_lab(hcl));
+}
+
+$export $pure half3 $css_oklab_to_linear_srgb(half3 oklab) {
+    half l_ = oklab.x + 0.3963377774 * oklab.y + 0.2158037573 * oklab.z,
+         m_ = oklab.x - 0.1055613458 * oklab.y - 0.0638541728 * oklab.z,
+         s_ = oklab.x - 0.0894841775 * oklab.y - 1.2914855480 * oklab.z;
+
+    half l = l_*l_*l_,
+         m = m_*m_*m_,
+         s = s_*s_*s_;
+
+    return half3(
+        +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    );
+}
+
+$export $pure half3 $css_okhcl_to_linear_srgb(half3 okhcl) {
+    return $css_oklab_to_linear_srgb($css_hcl_to_lab(okhcl));
+}
+
+$export $pure half3 $css_oklab_gamut_map_to_linear_srgb(half3 oklab) {
+    // Constants for the normal vector of the plane formed by white, black, and
+    // the specified vertex of the gamut.
+    const half2 normal_R = half2(0.409702, -0.912219);
+    const half2 normal_M = half2(-0.397919, -0.917421);
+    const half2 normal_B = half2(-0.906800, 0.421562);
+    const half2 normal_C = half2(-0.171122, 0.985250);
+    const half2 normal_G = half2(0.460276, 0.887776);
+    const half2 normal_Y = half2(0.947925, 0.318495);
+
+    // For the triangles formed by white (W) or black (K) with the vertices
+    // of Yellow and Red (YR), Red and Magenta (RM), etc, the constants to be
+    // used to compute the intersection of a line of constant hue and luminance
+    // with that plane.
+    const half  c0_YR = 0.091132;
+    const half2 cW_YR = half2(0.070370, 0.034139);
+    const half2 cK_YR = half2(0.018170, 0.378550);
+    const half  c0_RM = 0.113902;
+    const half2 cW_RM = half2(0.090836, 0.036251);
+    const half2 cK_RM = half2(0.226781, 0.018764);
+    const half  c0_MB = 0.161739;
+    const half2 cW_MB = half2(-0.008202, -0.264819);
+    const half2 cK_MB = half2( 0.187156, -0.284304);
+    const half  c0_BC = 0.102047;
+    const half2 cW_BC = half2(-0.014804, -0.162608);
+    const half2 cK_BC = half2(-0.276786,  0.004193);
+    const half  c0_CG = 0.092029;
+    const half2 cW_CG = half2(-0.038533, -0.001650);
+    const half2 cK_CG = half2(-0.232572, -0.094331);
+    const half  c0_GY = 0.081709;
+    const half2 cW_GY = half2(-0.034601, -0.002215);
+    const half2 cK_GY = half2( 0.012185,  0.338031);
+
+    half2 ab = oklab.yz;
+
+    // Find the planes to intersect with and set the constants based on those
+    // planes.
+    half c0;
+    half2 cW;
+    half2 cK;
+    if (dot(ab, normal_R) < 0.0) {
+        if (dot(ab, normal_G) < 0.0) {
+            if (dot(ab, normal_C) < 0.0) {
+                c0 = c0_BC; cW = cW_BC; cK = cK_BC;
+            } else {
+                c0 = c0_CG; cW = cW_CG; cK = cK_CG;
+            }
+        } else {
+            if (dot(ab, normal_Y) < 0.0) {
+                c0 = c0_GY; cW = cW_GY; cK = cK_GY;
+            } else {
+                c0 = c0_YR; cW = cW_YR; cK = cK_YR;
+            }
+        }
+    } else {
+        if (dot(ab, normal_B) < 0.0) {
+            if (dot(ab, normal_M) < 0.0) {
+                c0 = c0_RM; cW = cW_RM; cK = cK_RM;
+            } else {
+                c0 = c0_MB; cW = cW_MB; cK = cK_MB;
+            }
+        } else {
+            c0 = c0_BC; cW = cW_BC; cK = cK_BC;
+        }
+    }
+
+    // Perform the intersection.
+    half alpha = 1.0;
+
+    // Intersect with the plane with white.
+    half w_denom = dot(cW, ab);
+    if (w_denom > 0.0) {
+        half one_minus_L = 1.0 - oklab.r;
+        half w_num = c0*one_minus_L;
+        if (w_num < w_denom) {
+            alpha = min(alpha, w_num / w_denom);
+        }
+    }
+
+    // Intersect with the plane with black.
+    half k_denom = dot(cK, ab);
+    if (k_denom > 0.0) {
+        half L = oklab.r;
+        half k_num = c0*L;
+        if (k_num < k_denom) {
+            alpha = min(alpha,  k_num / k_denom);
+        }
+    }
+
+    // Attenuate the ab coordinate by alpha.
+    oklab.yz *= alpha;
+
+    return $css_oklab_to_linear_srgb(oklab);
+}
+
+$export $pure half3 $css_okhcl_gamut_map_to_linear_srgb(half3 okhcl) {
+    return $css_oklab_gamut_map_to_linear_srgb($css_hcl_to_lab(okhcl));
+}
+
+// TODO(skia:13108): Use our optimized version (though it has different range)
+// Doing so might require fixing (re-deriving?) the math for the HWB version below
+$export $pure half3 $css_hsl_to_srgb(half3 hsl) {
+    hsl.x = mod(hsl.x, 360);
+    if (hsl.x < 0) {
+        hsl.x += 360;
+    }
+
+    hsl.yz /= 100;
+
+    half3 k = mod(half3(0, 8, 4) + hsl.x/30, 12);
+    half a = hsl.y * min(hsl.z, 1 - hsl.z);
+    return hsl.z - a * clamp(min(k - 3, 9 - k), -1, 1);
+}
+
+$export $pure half3 $css_hwb_to_srgb(half3 hwb) {
+    hwb.yz /= 100;
+    if (hwb.y + hwb.z >= 1) {
+        half gray = hwb.y / (hwb.y + hwb.z);
+        return half3(gray);
+    }
+    half3 rgb = $css_hsl_to_srgb(half3(hwb.x, 100, 50));
+    rgb *= (1 - hwb.y - hwb.z);
+    rgb += hwb.y;
+    return rgb;
+}
+
+/*
+ * The actual output color space of this function depends on the input color space
+ * (it might be sRGB, linear sRGB, or linear XYZ). The actual space is what's stored
+ * in the gradient/SkColor4fXformer's fIntermediateColorSpace.
+ */
+$export $pure half4 $interpolated_to_rgb_unpremul(half4 color, int colorSpace, int doUnpremul) {
+    const int kDestination   = 0;
+    const int kSRGBLinear    = 1;
+    const int kLab           = 2;
+    const int kOKLab         = 3;
+    const int kOKLabGamutMap = 4;
+    const int kLCH           = 5;
+    const int kOKLCH         = 6;
+    const int kOKLCHGamutMap = 7;
+    const int kSRGB          = 8;
+    const int kHSL           = 9;
+    const int kHWB           = 10;
+
+    if (bool(doUnpremul)) {
+        switch (colorSpace) {
+            case kLab:
+            case kOKLab:
+            case kOKLabGamutMap: color = unpremul(color); break;
+            case kLCH:
+            case kOKLCH:
+            case kOKLCHGamutMap:
+            case kHSL:
+            case kHWB: color = $unpremul_polar(color); break;
+        }
+    }
+    switch (colorSpace) {
+        case kLab:           color.rgb = $css_lab_to_xyz(color.rgb); break;
+        case kOKLab:         color.rgb = $css_oklab_to_linear_srgb(color.rgb); break;
+        case kOKLabGamutMap: color.rgb = $css_oklab_gamut_map_to_linear_srgb(color.rgb); break;
+        case kLCH:           color.rgb = $css_hcl_to_xyz(color.rgb); break;
+        case kOKLCH:         color.rgb = $css_okhcl_to_linear_srgb(color.rgb); break;
+        case kOKLCHGamutMap: color.rgb = $css_okhcl_gamut_map_to_linear_srgb(color.rgb); break;
+        case kHSL:           color.rgb = $css_hsl_to_srgb(color.rgb); break;
+        case kHWB:           color.rgb = $css_hwb_to_srgb(color.rgb); break;
+    }
+    return color;
 }

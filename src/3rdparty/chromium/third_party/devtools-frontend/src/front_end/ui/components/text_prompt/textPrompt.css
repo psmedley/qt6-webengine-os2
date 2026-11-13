@@ -10,9 +10,13 @@
   display: flex;
 }
 
+input {
+  font-size: 14px;
+}
+
 .prefix {
   flex: none;
-  color: var(--color-primary);
+  color: var(--sys-color-primary);
 }
 
 .text-prompt-input {
@@ -32,7 +36,7 @@
 }
 
 .text-prompt-input .suggestion {
-  color: var(--color-background-highlight);
+  color: var(--sys-color-state-disabled);
   position: absolute;
   left: 0;
   z-index: 1;

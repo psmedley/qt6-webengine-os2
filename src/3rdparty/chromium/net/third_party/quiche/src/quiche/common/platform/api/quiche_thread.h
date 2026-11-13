@@ -8,12 +8,13 @@
 #include <string>
 
 #include "quiche_platform_impl/quiche_thread_impl.h"
+
 #include "quiche/common/platform/api/quiche_export.h"
 
 namespace quiche {
 
 // A class representing a thread of execution in QUIC.
-class QUICHE_EXPORT_PRIVATE QuicheThread : public QuicheThreadImpl {
+class QUICHE_EXPORT QuicheThread : public QuicheThreadImpl {
  public:
   QuicheThread(const std::string& string) : QuicheThreadImpl(string) {}
   QuicheThread(const QuicheThread&) = delete;

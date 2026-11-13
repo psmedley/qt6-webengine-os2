@@ -242,12 +242,10 @@ Constants::Constants()
 	for(int i = 0; i < 16; i++)
 	{
 		mask5551Q[i] = word4((i & 0x1 ? 0x001F : 0) | (i & 0x2 ? 0x03E0 : 0) | (i & 0x4 ? 0x7C00 : 0) | (i & 8 ? 0x8000 : 0));
-		maskr5g5b5a1Q[i] = word4((i & 0x1 ? 0x003E : 0) | (i & 0x2 ? 0x07C0 : 0) | (i & 0x4 ? 0xF800 : 0) | (i & 8 ? 0x0001 : 0));
-		maskb5g5r5a1Q[i] = word4((i & 0x1 ? 0xF800 : 0) | (i & 0x2 ? 0x07C0 : 0) | (i & 0x4 ? 0x003E : 0) | (i & 8 ? 0x0001 : 0));
-		mask4rgbaQ[i] = word4((i & 0x1 ? 0x00F0 : 0) | (i & 0x2 ? 0x0F00 : 0) | (i & 0x4 ? 0xF000 : 0) | (i & 8 ? 0x000F : 0));
-		mask4bgraQ[i] = word4((i & 0x1 ? 0xF000 : 0) | (i & 0x2 ? 0x0F00 : 0) | (i & 0x4 ? 0x00F0 : 0) | (i & 8 ? 0x000F : 0));
-		mask4abgrQ[i] = word4((i & 0x1 ? 0x0F00 : 0) | (i & 0x2 ? 0x00F0 : 0) | (i & 0x4 ? 0x000F : 0) | (i & 8 ? 0xF000 : 0));
-		mask4argbQ[i] = word4((i & 0x1 ? 0x000F : 0) | (i & 0x2 ? 0x00F0 : 0) | (i & 0x4 ? 0x0F00 : 0) | (i & 8 ? 0xF000 : 0));
+		maskr5g5b5a1Q[i] = word4((i & 0x1 ? 0xF800 : 0) | (i & 0x2 ? 0x07C0 : 0) | (i & 0x4 ? 0x003E : 0) | (i & 8 ? 0x0001 : 0));
+		maskb5g5r5a1Q[i] = word4((i & 0x1 ? 0x003E : 0) | (i & 0x2 ? 0x07C0 : 0) | (i & 0x4 ? 0xF800 : 0) | (i & 8 ? 0x0001 : 0));
+		mask4argbQ[i] = word4((i & 0x1 ? 0x00F0 : 0) | (i & 0x2 ? 0x0F00 : 0) | (i & 0x4 ? 0xF000 : 0) | (i & 8 ? 0x000F : 0));
+		mask4rgbaQ[i] = word4((i & 0x1 ? 0x000F : 0) | (i & 0x2 ? 0x00F0 : 0) | (i & 0x4 ? 0x0F00 : 0) | (i & 8 ? 0xF000 : 0));
 	}
 
 	for(int i = 0; i < 4; i++)
@@ -277,12 +275,6 @@ Constants::Constants()
 		sRGBtoLinearFF_FF00[i] = (unsigned short)(sRGBtoLinear((float)i / 0xFF) * 0xFF00 + 0.5f);
 	}
 
-	for(int i = 0; i < 0x1000; i++)
-	{
-		linearToSRGB12_16[i] = (unsigned short)(clamp(linearToSRGB((float)i / 0x0FFF) * 0xFFFF + 0.5f, 0.0f, (float)0xFFFF));
-		sRGBtoLinear12_16[i] = (unsigned short)(clamp(sRGBtoLinear((float)i / 0x0FFF) * 0xFFFF + 0.5f, 0.0f, (float)0xFFFF));
-	}
-
 	for(int q = 0; q < 4; q++)
 	{
 		for(int c = 0; c < 16; c++)
@@ -306,7 +298,7 @@ Constants::Constants()
 
 	for(int i = 0; i <= 0xFFFF; i++)
 	{
-		half2float[i] = (float)reinterpret_cast<half &>(i);
+		half2float[i] = static_cast<float>(bit_cast<half>(i));
 	}
 }
 

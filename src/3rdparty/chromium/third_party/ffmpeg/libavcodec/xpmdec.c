@@ -354,11 +354,17 @@ static int xpm_decode_frame(AVCodecContext *avctx, AVFrame *p,
         return AVERROR_INVALIDDATA;
     }
 
+    if (size > SIZE_MAX / 4)
+        return AVERROR(ENOMEM);
+
     size *= 4;
 
     ptr += mod_strcspn(ptr, ",") + 1;
     if (end - ptr < 1)
         return AVERROR_INVALIDDATA;
+
+    if (avctx->skip_frame >= AVDISCARD_ALL)
+        return avpkt->size;
 
     if ((ret = ff_get_buffer(avctx, p, 0)) < 0)
         return ret;
@@ -416,7 +422,7 @@ static int xpm_decode_frame(AVCodecContext *avctx, AVFrame *p,
         ptr += mod_strcspn(ptr, ",") + 1;
     }
 
-    p->key_frame = 1;
+    p->flags |= AV_FRAME_FLAG_KEY;
     p->pict_type = AV_PICTURE_TYPE_I;
 
     *got_frame = 1;
@@ -443,5 +449,6 @@ const FFCodec ff_xpm_decoder = {
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(XPMDecContext),
     .close          = xpm_decode_close,
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     FF_CODEC_DECODE_CB(xpm_decode_frame),
 };

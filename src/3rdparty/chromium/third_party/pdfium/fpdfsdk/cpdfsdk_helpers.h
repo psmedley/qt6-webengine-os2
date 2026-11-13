@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "core/fpdfapi/parser/cpdf_parser.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxge/cfx_path.h"
-#include "core/fxge/dib/cfx_dibitmap.h"
 #include "public/fpdf_doc.h"
 #include "public/fpdf_ext.h"
 #include "public/fpdfview.h"
@@ -39,6 +38,7 @@ class CPDF_TextPage;
 class CPDF_TextPageFind;
 class CPDFSDK_FormFillEnvironment;
 class CPDFSDK_InteractiveForm;
+class CFX_DIBitmap;
 struct CPDF_JavaScript;
 struct XObjectContext;
 
@@ -276,19 +276,19 @@ unsigned long Utf16EncodeMaybeCopyAndReturnLength(const WideString& text,
 
 // Returns the length of the raw stream data from |stream|. The raw data is the
 // stream's data as stored in the PDF without applying any filters. If |buffer|
-// is non-nullptr and |buflen| is large enough to contain the raw data, then
+// is non-empty and its length is large enough to contain the raw data, then
 // the raw data is copied into |buffer|.
-unsigned long GetRawStreamMaybeCopyAndReturnLength(const CPDF_Stream* stream,
-                                                   void* buffer,
-                                                   unsigned long buflen);
+unsigned long GetRawStreamMaybeCopyAndReturnLength(
+    RetainPtr<const CPDF_Stream> stream,
+    pdfium::span<uint8_t> buffer);
 
 // Return the length of the decoded stream data of |stream|. The decoded data is
 // the uncompressed stream data, i.e. the raw stream data after having all
-// filters applied. If |buffer| is non-nullptr and |buflen| is large enough to
+// filters applied. If |buffer| is non-empty and its length is large enough to
 // contain the decoded data, then the decoded data is copied into |buffer|.
-unsigned long DecodeStreamMaybeCopyAndReturnLength(const CPDF_Stream* stream,
-                                                   void* buffer,
-                                                   unsigned long buflen);
+unsigned long DecodeStreamMaybeCopyAndReturnLength(
+    RetainPtr<const CPDF_Stream> stream,
+    pdfium::span<uint8_t> buffer);
 
 void SetPDFSandboxPolicy(FPDF_DWORD policy, FPDF_BOOL enable);
 FPDF_BOOL IsPDFSandboxPolicyEnabled(FPDF_DWORD policy);

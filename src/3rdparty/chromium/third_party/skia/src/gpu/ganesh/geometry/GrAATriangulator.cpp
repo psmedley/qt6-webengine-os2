@@ -13,6 +13,8 @@
 #include <vector>
 #include <unordered_map>
 
+#if !defined(SK_ENABLE_OPTIMIZE_SIZE)
+
 #if TRIANGULATOR_LOGGING
 #define TESS_LOG SkDebugf
 #define DUMP_MESH(MESH) (MESH).dump()
@@ -149,7 +151,7 @@ void GrAATriangulator::removeNonBoundaryEdges(const VertexList& mesh) const {
         }
         Edge* leftEnclosingEdge;
         Edge* rightEnclosingEdge;
-        FindEnclosingEdges(v, &activeEdges, &leftEnclosingEdge, &rightEnclosingEdge);
+        FindEnclosingEdges(*v, activeEdges, &leftEnclosingEdge, &rightEnclosingEdge);
         bool prevFilled = leftEnclosingEdge && this->applyFillType(leftEnclosingEdge->fWinding);
         for (Edge* e = v->fFirstEdgeAbove; e;) {
             Edge* next = e->fNextEdgeAbove;
@@ -319,7 +321,7 @@ bool GrAATriangulator::collapseOverlapRegions(VertexList* mesh, const Comparator
         }
         Edge* leftEnclosingEdge;
         Edge* rightEnclosingEdge;
-        FindEnclosingEdges(v, &activeEdges, &leftEnclosingEdge, &rightEnclosingEdge);
+        FindEnclosingEdges(*v, activeEdges, &leftEnclosingEdge, &rightEnclosingEdge);
         for (Edge* e = v->fLastEdgeAbove; e && e != leftEnclosingEdge;) {
             Edge* prev = e->fPrevEdgeAbove ? e->fPrevEdgeAbove : leftEnclosingEdge;
             activeEdges.remove(e);
@@ -710,3 +712,5 @@ int GrAATriangulator::polysToAATriangles(Poly* polys,
     vertexAllocator->unlock(actualCount);
     return actualCount;
 }
+
+#endif // SK_ENABLE_OPTIMIZE_SIZE

@@ -6,17 +6,21 @@
 #define QUICHE_QUIC_CORE_HTTP_WEB_TRANSPORT_HTTP3_H_
 
 #include <memory>
+#include <optional>
 
 #include "absl/base/attributes.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/types/optional.h"
+#include "absl/time/time.h"
 #include "quiche/quic/core/http/quic_spdy_session.h"
 #include "quiche/quic/core/http/web_transport_stream_adapter.h"
 #include "quiche/quic/core/quic_error_codes.h"
 #include "quiche/quic/core/quic_stream.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/core/web_transport_interface.h"
+#include "quiche/quic/core/web_transport_stats.h"
 #include "quiche/common/platform/api/quiche_mem_slice.h"
+#include "quiche/common/quiche_callbacks.h"
+#include "quiche/web_transport/web_transport.h"
 #include "quiche/spdy/core/http2_header_block.h"
 
 namespace quic {
@@ -37,7 +41,7 @@ enum class WebTransportHttp3RejectionReason {
 //
 // WebTransport over HTTP/3 specification:
 // <https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3>
-class QUIC_EXPORT_PRIVATE WebTransportHttp3
+class QUICHE_EXPORT WebTransportHttp3
     : public WebTransportSession,
       public QuicSpdyStream::Http3DatagramVisitor {
  public:
@@ -80,18 +84,38 @@ class QUIC_EXPORT_PRIVATE WebTransportHttp3
   WebTransportStream* OpenOutgoingBidirectionalStream() override;
   WebTransportStream* OpenOutgoingUnidirectionalStream() override;
 
-  MessageStatus SendOrQueueDatagram(quiche::QuicheMemSlice datagram) override;
+  webtransport::Stream* GetStreamById(webtransport::StreamId id) override;
+
+  webtransport::DatagramStatus SendOrQueueDatagram(
+      absl::string_view datagram) override;
   QuicByteCount GetMaxDatagramSize() const override;
-  void SetDatagramMaxTimeInQueue(QuicTime::Delta max_time_in_queue) override;
+  void SetDatagramMaxTimeInQueue(absl::Duration max_time_in_queue) override;
+
+  webtransport::DatagramStats GetDatagramStats() override {
+    return WebTransportDatagramStatsForQuicSession(*session_);
+  }
+  webtransport::SessionStats GetSessionStats() override {
+    return WebTransportStatsForQuicSession(*session_);
+  }
+
+  void NotifySessionDraining() override;
+  void SetOnDraining(quiche::SingleUseCallback<void()> callback) override {
+    drain_callback_ = std::move(callback);
+  }
 
   // From QuicSpdyStream::Http3DatagramVisitor.
   void OnHttp3Datagram(QuicStreamId stream_id,
                        absl::string_view payload) override;
+  void OnUnknownCapsule(QuicStreamId /*stream_id*/,
+                        const quiche::UnknownCapsule& /*capsule*/) override {}
 
   bool close_received() const { return close_received_; }
   WebTransportHttp3RejectionReason rejection_reason() const {
     return rejection_reason_;
   }
+
+  void OnGoAwayReceived();
+  void OnDrainSessionReceived();
 
  private:
   // Notifies the visitor that the connection has been closed.  Ensures that the
@@ -112,16 +136,18 @@ class QUIC_EXPORT_PRIVATE WebTransportHttp3
   bool close_received_ = false;
   bool close_notified_ = false;
 
+  quiche::SingleUseCallback<void()> drain_callback_ = nullptr;
+
   WebTransportHttp3RejectionReason rejection_reason_ =
       WebTransportHttp3RejectionReason::kNone;
+  bool drain_sent_ = false;
   // Those are set to default values, which are used if the session is not
   // closed cleanly using an appropriate capsule.
   WebTransportSessionError error_code_ = 0;
   std::string error_message_ = "";
 };
 
-class QUIC_EXPORT_PRIVATE WebTransportHttp3UnidirectionalStream
-    : public QuicStream {
+class QUICHE_EXPORT WebTransportHttp3UnidirectionalStream : public QuicStream {
  public:
   // Incoming stream.
   WebTransportHttp3UnidirectionalStream(PendingStream* pending,
@@ -148,7 +174,7 @@ class QUIC_EXPORT_PRIVATE WebTransportHttp3UnidirectionalStream
  private:
   QuicSpdySession* session_;
   WebTransportStreamAdapter adapter_;
-  absl::optional<WebTransportSessionId> session_id_;
+  std::optional<WebTransportSessionId> session_id_;
   bool needs_to_send_preamble_;
 
   bool ReadSessionId();
@@ -158,16 +184,16 @@ class QUIC_EXPORT_PRIVATE WebTransportHttp3UnidirectionalStream
 
 // Remaps HTTP/3 error code into a WebTransport error code.  Returns nullopt if
 // the provided code is outside of valid range.
-QUIC_EXPORT_PRIVATE absl::optional<WebTransportStreamError>
-Http3ErrorToWebTransport(uint64_t http3_error_code);
+QUICHE_EXPORT std::optional<WebTransportStreamError> Http3ErrorToWebTransport(
+    uint64_t http3_error_code);
 
 // Same as above, but returns default error value (zero) when none could be
 // mapped.
-QUIC_EXPORT_PRIVATE WebTransportStreamError
+QUICHE_EXPORT WebTransportStreamError
 Http3ErrorToWebTransportOrDefault(uint64_t http3_error_code);
 
 // Remaps WebTransport error code into an HTTP/3 error code.
-QUIC_EXPORT_PRIVATE uint64_t
+QUICHE_EXPORT uint64_t
 WebTransportErrorToHttp3(WebTransportStreamError webtransport_error_code);
 
 }  // namespace quic

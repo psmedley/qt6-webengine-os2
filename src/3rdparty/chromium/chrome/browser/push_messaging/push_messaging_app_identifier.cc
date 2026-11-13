@@ -7,11 +7,11 @@
 #include <string.h>
 
 #include "base/check_op.h"
-#include "base/guid.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/uuid.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
@@ -38,11 +38,11 @@ std::string FromTimeToString(base::Time time) {
 }
 
 bool FromStringToTime(const std::string& time_string,
-                      absl::optional<base::Time>* time) {
+                      std::optional<base::Time>* time) {
   DCHECK(!time_string.empty());
   int64_t milliseconds;
   if (base::StringToInt64(time_string, &milliseconds) && milliseconds > 0) {
-    *time = absl::make_optional(base::Time::FromDeltaSinceWindowsEpoch(
+    *time = std::make_optional(base::Time::FromDeltaSinceWindowsEpoch(
         base::Milliseconds(milliseconds)));
     return true;
   }
@@ -52,7 +52,7 @@ bool FromStringToTime(const std::string& time_string,
 std::string MakePrefValue(
     const GURL& origin,
     int64_t service_worker_registration_id,
-    const absl::optional<base::Time>& expiration_time = absl::nullopt) {
+    const std::optional<base::Time>& expiration_time = std::nullopt) {
   std::string result = origin.spec() + kPrefValueSeparator +
                        base::NumberToString(service_worker_registration_id);
   if (expiration_time)
@@ -63,7 +63,7 @@ std::string MakePrefValue(
 bool DisassemblePrefValue(const std::string& pref_value,
                           GURL* origin,
                           int64_t* service_worker_registration_id,
-                          absl::optional<base::Time>* expiration_time) {
+                          std::optional<base::Time>* expiration_time) {
   std::vector<std::string> parts =
       base::SplitString(pref_value, std::string(1, kPrefValueSeparator),
                         base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
@@ -106,7 +106,7 @@ bool PushMessagingAppIdentifier::UseInstanceID(const std::string& app_id) {
 PushMessagingAppIdentifier PushMessagingAppIdentifier::Generate(
     const GURL& origin,
     int64_t service_worker_registration_id,
-    const absl::optional<base::Time>& expiration_time) {
+    const std::optional<base::Time>& expiration_time) {
   // All new push subscriptions use Instance ID tokens.
   return GenerateInternal(origin, service_worker_registration_id,
                           true /* use_instance_id */, expiration_time);
@@ -116,7 +116,7 @@ PushMessagingAppIdentifier PushMessagingAppIdentifier::Generate(
 PushMessagingAppIdentifier PushMessagingAppIdentifier::LegacyGenerateForTesting(
     const GURL& origin,
     int64_t service_worker_registration_id,
-    const absl::optional<base::Time>& expiration_time) {
+    const std::optional<base::Time>& expiration_time) {
   return GenerateInternal(origin, service_worker_registration_id,
                           false /* use_instance_id */, expiration_time);
 }
@@ -126,10 +126,11 @@ PushMessagingAppIdentifier PushMessagingAppIdentifier::GenerateInternal(
     const GURL& origin,
     int64_t service_worker_registration_id,
     bool use_instance_id,
-    const absl::optional<base::Time>& expiration_time) {
+    const std::optional<base::Time>& expiration_time) {
   // Use uppercase GUID for consistency with GUIDs Push has already sent to GCM.
   // Also allows detecting case mangling; see code commented "crbug.com/461867".
-  std::string guid = base::ToUpperASCII(base::GenerateGUID());
+  std::string guid =
+      base::ToUpperASCII(base::Uuid::GenerateRandomV4().AsLowercaseString());
   if (use_instance_id) {
     guid.replace(guid.size() - kGuidSuffixLength, kGuidSuffixLength,
                  kInstanceIDGuidSuffix);
@@ -169,7 +170,7 @@ PushMessagingAppIdentifier PushMessagingAppIdentifier::FindByAppId(
 
   GURL origin;
   int64_t service_worker_registration_id;
-  absl::optional<base::Time> expiration_time;
+  std::optional<base::Time> expiration_time;
   // Try disassemble the pref value, return an invalid app identifier if the
   // pref value is corrupted
   if (!DisassemblePrefValue(*map_value, &origin,
@@ -242,7 +243,7 @@ PushMessagingAppIdentifier::PushMessagingAppIdentifier(
     const std::string& app_id,
     const GURL& origin,
     int64_t service_worker_registration_id,
-    const absl::optional<base::Time>& expiration_time)
+    const std::optional<base::Time>& expiration_time)
     : app_id_(app_id),
       origin_(origin),
       service_worker_registration_id_(service_worker_registration_id),
@@ -308,12 +309,12 @@ void PushMessagingAppIdentifier::DCheckValid() const {
   // kInstanceIDGuidSuffix (which contains non-hex characters invalid in GUIDs).
   std::string guid = app_id_.substr(app_id_.size() - kGuidLength);
   if (UseInstanceID(app_id_)) {
-    DCHECK(!base::IsValidGUID(guid));
+    DCHECK(!base::Uuid::ParseCaseInsensitive(guid).is_valid());
 
     // Replace suffix with valid hex so we can validate the rest of the string.
     guid = guid.replace(guid.size() - kGuidSuffixLength, kGuidSuffixLength,
                         kGuidSuffixLength, 'C');
   }
-  DCHECK(base::IsValidGUID(guid));
+  DCHECK(base::Uuid::ParseCaseInsensitive(guid).is_valid());
 #endif  // DCHECK_IS_ON()
 }

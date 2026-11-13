@@ -8,3 +8,9 @@ include_rules = [
   '+xfa/fwl',
   '+xfa/fxfa',
 ]
+
+specific_include_rules = {
+  'fpdf_view_embeddertest\.cpp': [
+    '+third_party/skia/include',
+  ],
+}

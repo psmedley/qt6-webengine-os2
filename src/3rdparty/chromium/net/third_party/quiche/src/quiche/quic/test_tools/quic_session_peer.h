@@ -51,7 +51,8 @@ class QuicSessionPeer {
                                                       uint32_t max_streams);
 
   static QuicCryptoStream* GetMutableCryptoStream(QuicSession* session);
-  static QuicWriteBlockedList* GetWriteBlockedStreams(QuicSession* session);
+  static QuicWriteBlockedListInterface* GetWriteBlockedStreams(
+      QuicSession* session);
   static QuicStream* GetOrCreateStream(QuicSession* session,
                                        QuicStreamId stream_id);
   static absl::flat_hash_map<QuicStreamId, QuicStreamOffset>&
@@ -86,6 +87,7 @@ class QuicSessionPeer {
                                                     bool unidirectional) {
     return session->GetLargestPeerCreatedStreamId(unidirectional);
   }
+  static QuicAlarm* GetStreamCountResetAlarm(QuicSession* session);
 };
 
 }  // namespace test

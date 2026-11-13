@@ -72,8 +72,10 @@ enum WebCryptoAlgorithmId {
   kWebCryptoAlgorithmIdEcdh,
   kWebCryptoAlgorithmIdHkdf,
   kWebCryptoAlgorithmIdPbkdf2,
+  kWebCryptoAlgorithmIdEd25519,
+  kWebCryptoAlgorithmIdX25519,
 #if INSIDE_BLINK
-  kWebCryptoAlgorithmIdLast = kWebCryptoAlgorithmIdPbkdf2,
+  kWebCryptoAlgorithmIdLast = kWebCryptoAlgorithmIdX25519,
 #endif
 };
 
@@ -211,7 +213,7 @@ class BLINK_PLATFORM_EXPORT WebCryptoAlgorithm {
   void Assign(const WebCryptoAlgorithm& other);
   void Reset();
 
-  WebPrivatePtr<WebCryptoAlgorithmPrivate> private_;
+  WebPrivatePtrForRefCounted<WebCryptoAlgorithmPrivate> private_;
 };
 
 }  // namespace blink

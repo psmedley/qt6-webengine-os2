@@ -11,6 +11,7 @@
 #include "quiche/quic/core/quic_config.h"
 #include "quiche/quic/core/quic_framer.h"
 #include "quiche/quic/core/quic_packets.h"
+#include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/platform/api/quic_export.h"
 
 namespace quic {
@@ -26,7 +27,7 @@ class UberReceivedPacketManagerPeer;
 struct QuicConnectionStats;
 
 // Records all received packets by a connection.
-class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
+class QUICHE_EXPORT QuicReceivedPacketManager {
  public:
   QuicReceivedPacketManager();
   explicit QuicReceivedPacketManager(QuicConnectionStats* stats);
@@ -41,7 +42,8 @@ class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
   // header: the packet header.
   // timestamp: the arrival time of the packet.
   virtual void RecordPacketReceived(const QuicPacketHeader& header,
-                                    QuicTime receipt_time);
+                                    QuicTime receipt_time,
+                                    QuicEcnCodepoint ecn);
 
   // Checks whether |packet_number| is missing and less than largest observed.
   virtual bool IsMissing(QuicPacketNumber packet_number);
@@ -77,10 +79,6 @@ class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
   // Returns true when there are new missing packets to be reported within 3
   // packets of the largest observed.
   virtual bool HasNewMissingPackets() const;
-
-  QuicPacketNumber peer_least_packet_awaiting_ack() const {
-    return peer_least_packet_awaiting_ack_;
-  }
 
   virtual bool ack_frame_updated() const;
 
@@ -146,6 +144,8 @@ class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
   bool AckFrequencyFrameReceived() const {
     return last_ack_frequency_frame_sequence_number_ >= 0;
   }
+
+  void MaybeTrimAckRanges();
 
   // Least packet number of the the packet sent by the peer for which it
   // hasn't received an ack.

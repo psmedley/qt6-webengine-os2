@@ -11,6 +11,10 @@ It follows the example of:
  - https://github.com/emscripten-core/emsdk/blob/7f39d100d8cd207094decea907121df72065517e/bazel/emscripten_toolchain/crosstool.bzl
 """
 
+# https://github.com/bazelbuild/bazel/blob/master/tools/build_defs/cc/action_names.bzl
+load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
+
+# https://github.com/bazelbuild/bazel/blob/master/tools/cpp/cc_toolchain_config_lib.bzl
 load(
     "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
     "action_config",
@@ -20,9 +24,7 @@ load(
     "tool",
     "variable_with_value",
 )
-
-# https://github.com/bazelbuild/bazel/blob/master/tools/build_defs/cc/action_names.bzl
-load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
+load(":clang_layering_check.bzl", "make_layering_check_features")
 
 # The location of the created clang toolchain.
 EXTERNAL_TOOLCHAIN = "external/clang_linux_amd64"
@@ -31,6 +33,7 @@ def _linux_amd64_toolchain_info(ctx):
     action_configs = _make_action_configs()
     features = []
     features += _make_default_flags()
+    features += make_layering_check_features()
     features += _make_diagnostic_flags()
     features += _make_iwyu_flags()
 
@@ -79,7 +82,6 @@ def _make_action_configs():
 
     # https://cs.opensource.google/bazel/bazel/+/master:tools/cpp/cc_toolchain_config_lib.bzl;l=435;drc=3b9e6f201a9a3465720aad8712ab7bcdeaf2e5da
     clang_tool = tool(path = "linux_trampolines/clang_trampoline_linux.sh")
-    lld_tool = tool(path = "linux_trampolines/lld_trampoline_linux.sh")
     ar_tool = tool(path = "linux_trampolines/ar_trampoline_linux.sh")
 
     # https://cs.opensource.google/bazel/bazel/+/master:tools/cpp/cc_toolchain_config_lib.bzl;l=488;drc=3b9e6f201a9a3465720aad8712ab7bcdeaf2e5da
@@ -106,7 +108,7 @@ def _make_action_configs():
 
     cpp_link_dynamic_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_dynamic_library,
-        tools = [lld_tool],
+        tools = [clang_tool],
     )
     cpp_link_executable_action = action_config(
         action_name = ACTION_NAMES.cpp_link_executable,
@@ -116,14 +118,14 @@ def _make_action_configs():
     )
     cpp_link_nodeps_dynamic_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-        tools = [lld_tool],
+        tools = [clang_tool],
     )
 
     # This is the same rule as
     # https://github.com/emscripten-core/emsdk/blob/7f39d100d8cd207094decea907121df72065517e/bazel/emscripten_toolchain/crosstool.bzl#L143
     # By default, there are no flags or libraries passed to the llvm-ar tool, so
     # we need to specify them. The variables mentioned by expand_if_available are defined
-    # https://docs.bazel.build/versions/main/cc-toolchain-config-reference.html#cctoolchainconfiginfo-build-variables
+    # https://bazel.build/docs/cc-toolchain-config-reference#cctoolchainconfiginfo-build-variables
     cpp_link_static_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_static_library,
         flag_sets = [
@@ -216,10 +218,13 @@ def _make_default_flags():
                     # are included with an absolute path and fail the build).
                     "-isystem",
                     EXTERNAL_TOOLCHAIN + "/include/c++/v1",
+                    # https://github.com/llvm/llvm-project/issues/57104
+                    "-isystem",
+                    EXTERNAL_TOOLCHAIN + "/include/x86_64-unknown-linux-gnu/c++/v1/",
                     "-isystem",
                     EXTERNAL_TOOLCHAIN + "/usr/include",
                     "-isystem",
-                    EXTERNAL_TOOLCHAIN + "/lib/clang/13.0.0/include",
+                    EXTERNAL_TOOLCHAIN + "/lib/clang/15.0.1/include",
                     "-isystem",
                     EXTERNAL_TOOLCHAIN + "/usr/include/x86_64-linux-gnu",
                     # We do not want clang to search in absolute paths for files. This makes
@@ -245,7 +250,11 @@ def _make_default_flags():
     )
 
     link_exe_flags = flag_set(
-        actions = [ACTION_NAMES.cpp_link_executable],
+        actions = [
+            ACTION_NAMES.cpp_link_executable,
+            ACTION_NAMES.cpp_link_dynamic_library,
+            ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+        ],
         flag_groups = [
             flag_group(
                 flags = [
@@ -257,9 +266,9 @@ def _make_default_flags():
                     "-stdlib=libc++",
                     # We statically include these libc++ libraries so they do not need to be
                     # on a developer's machine (they can be tricky to get).
-                    EXTERNAL_TOOLCHAIN + "/lib/libc++.a",
-                    EXTERNAL_TOOLCHAIN + "/lib/libc++abi.a",
-                    EXTERNAL_TOOLCHAIN + "/lib/libunwind.a",
+                    EXTERNAL_TOOLCHAIN + "/lib/x86_64-unknown-linux-gnu/libc++.a",
+                    EXTERNAL_TOOLCHAIN + "/lib/x86_64-unknown-linux-gnu/libc++abi.a",
+                    EXTERNAL_TOOLCHAIN + "/lib/x86_64-unknown-linux-gnu/libunwind.a",
                     # Dynamically Link in the other parts of glibc (not needed in glibc 2.34+)
                     "-lpthread",
                     "-lm",
@@ -371,12 +380,29 @@ def _make_iwyu_flags():
         ],
     )
 
+    skip_linking_when_iwyu = flag_set(
+        actions = [
+            ACTION_NAMES.cpp_link_executable,
+            ACTION_NAMES.cpp_link_static_library,
+        ],
+        flag_groups = [
+            flag_group(
+                flags = [
+                    # IWYU is generally a compile-only check, so we can skip the linking step
+                    # to reduce the work needed, especially when enforcing IWYU on the executables.
+                    "-DSKIA_SKIP_LINKING",
+                ],
+            ),
+        ],
+    )
+
     return [
         feature(
             "skia_enforce_iwyu",
             enabled = False,
             flag_sets = [
                 opt_file_into_iwyu,
+                skip_linking_when_iwyu,
             ],
         ),
     ]

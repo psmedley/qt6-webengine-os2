@@ -11,6 +11,9 @@ It follows the example of:
  - linux_amd64_toolchain_config.bzl
 """
 
+# https://github.com/bazelbuild/bazel/blob/master/tools/build_defs/cc/action_names.bzl
+load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
+
 # https://github.com/bazelbuild/bazel/blob/master/tools/cpp/cc_toolchain_config_lib.bzl
 load(
     "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
@@ -21,15 +24,13 @@ load(
     "tool",
     "variable_with_value",
 )
-
-# https://github.com/bazelbuild/bazel/blob/master/tools/build_defs/cc/action_names.bzl
-load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
+load(":clang_layering_check.bzl", "make_layering_check_features")
 
 # The location of the created clang toolchain.
 EXTERNAL_TOOLCHAIN = "external/clang_mac"
 
 # Root of our symlinks. These symlinks are created in download_mac_toolchain.bzl
-XCODE_SYMLINK = EXTERNAL_TOOLCHAIN + "/symlinks/xcode/MacSDK"
+XCODE_MACSDK_SYMLINK = EXTERNAL_TOOLCHAIN + "/symlinks/xcode/MacSDK"
 
 _platform_constraints_to_import = {
     "@platforms//cpu:arm64": "_arm64_cpu",
@@ -40,6 +41,7 @@ def _mac_toolchain_info(ctx):
     action_configs = _make_action_configs()
     features = []
     features += _make_default_flags()
+    features += make_layering_check_features()
     features += _make_diagnostic_flags()
     features += _make_target_specific_flags(ctx)
 
@@ -58,9 +60,11 @@ def _mac_toolchain_info(ctx):
             # https://bazel.build/rules/lib/cc_common#create_cc_toolchain_config_info.cxx_builtin_include_directories
             "%sysroot%/symlinks/xcode/MacSDK/Frameworks/",
         ],
+        # If `ctx.attr.cpu` is blank (which is declared as optional below), this config will target
+        # the host CPU. Specifying a target_cpu allows this config to be used for cross compilation.
+        target_cpu = ctx.attr.cpu,
         # These are required, but do nothing
         compiler = "",
-        target_cpu = "",
         target_libc = "",
         target_system_name = "",
         toolchain_identifier = "",
@@ -79,6 +83,13 @@ def _import_platform_constraints():
     for constraint in _platform_constraints_to_import:
         private_attr = _platform_constraints_to_import[constraint]
         rule_attributes[private_attr] = attr.label(default = constraint)
+
+    # Define an optional attribute to allow the target architecture to be explicitly specified (e.g.
+    # when selecting a cross-compilation toolchain).
+    rule_attributes["cpu"] = attr.string(
+        mandatory = False,
+        values = ["arm64", "x64"],
+    )
     return rule_attributes
 
 def _has_platform_constraint(ctx, official_constraint_name):
@@ -111,7 +122,6 @@ def _make_action_configs():
 
     # https://cs.opensource.google/bazel/bazel/+/master:tools/cpp/cc_toolchain_config_lib.bzl;l=435;drc=3b9e6f201a9a3465720aad8712ab7bcdeaf2e5da
     clang_tool = tool(path = "mac_trampolines/clang_trampoline_mac.sh")
-    lld_tool = tool(path = "mac_trampolines/lld_trampoline_mac.sh")
     ar_tool = tool(path = "mac_trampolines/ar_trampoline_mac.sh")
 
     # https://cs.opensource.google/bazel/bazel/+/master:tools/cpp/cc_toolchain_config_lib.bzl;l=488;drc=3b9e6f201a9a3465720aad8712ab7bcdeaf2e5da
@@ -146,7 +156,7 @@ def _make_action_configs():
 
     cpp_link_dynamic_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_dynamic_library,
-        tools = [lld_tool],
+        tools = [clang_tool],
     )
     cpp_link_executable_action = action_config(
         action_name = ACTION_NAMES.cpp_link_executable,
@@ -156,7 +166,7 @@ def _make_action_configs():
     )
     cpp_link_nodeps_dynamic_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-        tools = [lld_tool],
+        tools = [clang_tool],
     )
 
     # objc archiver and cpp archiver actions use the same base flags
@@ -215,7 +225,7 @@ def _make_action_configs():
     # https://github.com/emscripten-core/emsdk/blob/7f39d100d8cd207094decea907121df72065517e/bazel/emscripten_toolchain/crosstool.bzl#L143
     # By default, there are no flags or libraries passed to the llvm-ar tool, so
     # we need to specify them. The variables mentioned by expand_if_available are defined
-    # https://docs.bazel.build/versions/main/cc-toolchain-config-reference.html#cctoolchainconfiginfo-build-variables
+    # https://bazel.build/docs/cc-toolchain-config-reference#cctoolchainconfiginfo-build-variables
     cpp_link_static_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_static_library,
         flag_sets = common_archive_flags,
@@ -276,15 +286,15 @@ def _make_default_flags():
                     "-isystem",
                     EXTERNAL_TOOLCHAIN + "/include/c++/v1",
                     "-isystem",
-                    XCODE_SYMLINK + "/usr/include",
+                    XCODE_MACSDK_SYMLINK + "/usr/include",
                     "-isystem",
-                    EXTERNAL_TOOLCHAIN + "/lib/clang/13.0.0/include",
+                    EXTERNAL_TOOLCHAIN + "/lib/clang/15.0.1/include",
                     # Set the framework path to the Mac SDK framework directory. This has
                     # subfolders like OpenGL.framework
                     # We want -iframework so Clang hides diagnostic warnings from those header
                     # files we include. -F does not hide those.
                     "-iframework",
-                    XCODE_SYMLINK + "/Frameworks",
+                    XCODE_MACSDK_SYMLINK + "/Frameworks",
                     # We do not want clang to search in absolute paths for files. This makes
                     # Bazel think we are using an outside resource and fail the compile.
                     "-no-canonical-prefixes",
@@ -329,7 +339,11 @@ def _make_default_flags():
     )
 
     link_exe_flags = flag_set(
-        actions = [ACTION_NAMES.cpp_link_executable],
+        actions = [
+            ACTION_NAMES.cpp_link_executable,
+            ACTION_NAMES.cpp_link_dynamic_library,
+            ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+        ],
         flag_groups = [
             flag_group(
                 flags = [
@@ -340,13 +354,13 @@ def _make_default_flags():
                     # -syslibroot appends to the beginning of the dylib dependency path.
                     # https://github.com/llvm/llvm-project/blob/d61341768cf0cff7ceeaddecc2f769b5c1b901c4/lld/MachO/InputFiles.cpp#L1418-L1420
                     "-Wl,-syslibroot",
-                    "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/",
+                    XCODE_MACSDK_SYMLINK,
                     "-fuse-ld=lld",
-                    # We chose to use the llvm runtime, not the gcc one because it is already
-                    # included in the clang binary
-                    "--rtlib=compiler-rt",
                     "-std=c++17",
-                    "-lstdc++",
+                    "-stdlib=libc++",
+                    EXTERNAL_TOOLCHAIN + "/lib/libc++.a",
+                    EXTERNAL_TOOLCHAIN + "/lib/libc++abi.a",
+                    EXTERNAL_TOOLCHAIN + "/lib/libunwind.a",
                 ],
             ),
         ],
@@ -440,7 +454,7 @@ def _make_target_specific_flags(ctx):
         flag_groups = [
             flag_group(
                 flags = [
-                    "--target=arm64-apple-macos11",
+                    "--target=arm64-apple-macos12",
                 ],
             ),
         ],
@@ -459,7 +473,7 @@ def _make_target_specific_flags(ctx):
         flag_groups = [
             flag_group(
                 flags = [
-                    "--target=x86_64-apple-macos11",
+                    "--target=x86_64-apple-macos12",
                 ],
             ),
         ],

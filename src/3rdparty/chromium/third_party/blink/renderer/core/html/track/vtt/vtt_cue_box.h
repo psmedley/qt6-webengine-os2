@@ -62,7 +62,7 @@ class VTTCueBox final : public HTMLDivElement {
                               base::PassKey<VttCueLayoutAlgorithm>) const;
 
  private:
-  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
   InsertionNotificationRequest InsertedInto(
       ContainerNode& insertion_point) override;
   void RemovedFrom(ContainerNode& insertion_point) override;
@@ -72,7 +72,7 @@ class VTTCueBox final : public HTMLDivElement {
   Member<ResizeObserver> box_size_observer_;
   // The computed line position for snap-to-lines layout, and NaN for
   // non-snap-to-lines layout where no adjustment should take place.
-  // This is set in applyCSSProperties and propagated to LayoutVTTCue.
+  // This is set in applyCSSProperties and propagated to VttCueLayoutAlgorithm.
   float snap_to_lines_position_;
 
   // Percentage position before adjustment.

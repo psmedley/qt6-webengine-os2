@@ -15,11 +15,11 @@
  */
 
 #include "src/traced/probes/android_system_property/android_system_property_data_source.h"
+#include <optional>
 
 #include "perfetto/base/task_runner.h"
 #include "perfetto/base/time.h"
 #include "perfetto/ext/base/android_utils.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/tracing/core/data_source_config.h"
 
@@ -100,7 +100,7 @@ void AndroidSystemPropertyDataSource::WriteState() {
   packet->set_timestamp(static_cast<uint64_t>(base::GetBootTimeNs().count()));
   auto* properties = packet->set_android_system_property();
   for (const auto& name : property_names_) {
-    const base::Optional<std::string> value = ReadProperty(name);
+    const std::optional<std::string> value = ReadProperty(name);
     if (value) {
       auto* property = properties->add_values();
       property->set_name(name);
@@ -108,23 +108,30 @@ void AndroidSystemPropertyDataSource::WriteState() {
     }
   }
   packet->Finalize();
+  // For most data sources we would not want to flush every time we have
+  // something to write. However this source tends to emit very slowly and it is
+  // very possible that it would only flush at the end of the trace - at which
+  // point it might not be able to write anything (e.g. DISCARD buffer might be
+  // full). Taking the hit of 4kB each time we write seems reasonable to make
+  // this behave more predictably.
+  writer_->Flush();
 }
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-const base::Optional<std::string> AndroidSystemPropertyDataSource::ReadProperty(
+const std::optional<std::string> AndroidSystemPropertyDataSource::ReadProperty(
     const std::string& name) {
   std::string value = base::GetAndroidProp(name.c_str());
   if (value.empty()) {
     PERFETTO_LOG("Unable to read %s", name.c_str());
-    return base::nullopt;
+    return std::nullopt;
   }
-  return base::make_optional(value);
+  return std::make_optional(value);
 }
 #else
-const base::Optional<std::string> AndroidSystemPropertyDataSource::ReadProperty(
+const std::optional<std::string> AndroidSystemPropertyDataSource::ReadProperty(
     const std::string&) {
   PERFETTO_ELOG("Android System Properties only supported on Android.");
-  return base::nullopt;
+  return std::nullopt;
 }
 #endif
 

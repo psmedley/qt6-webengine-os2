@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include "core/fxcrt/unowned_ptr.h"
 #include "fxjs/cjs_runtime.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CFXJS_Engine;
 

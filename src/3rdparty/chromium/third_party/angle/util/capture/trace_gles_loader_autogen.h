@@ -500,6 +500,7 @@
 #define glMultiDrawArraysInstancedANGLE t_glMultiDrawArraysInstancedANGLE
 #define glMultiDrawElementsANGLE t_glMultiDrawElementsANGLE
 #define glMultiDrawElementsInstancedANGLE t_glMultiDrawElementsInstancedANGLE
+#define glPolygonModeANGLE t_glPolygonModeANGLE
 #define glProvokingVertexANGLE t_glProvokingVertexANGLE
 #define glDisableExtensionANGLE t_glDisableExtensionANGLE
 #define glRequestExtensionANGLE t_glRequestExtensionANGLE
@@ -573,7 +574,20 @@
 #define glEndPixelLocalStorageANGLE t_glEndPixelLocalStorageANGLE
 #define glFramebufferMemorylessPixelLocalStorageANGLE \
     t_glFramebufferMemorylessPixelLocalStorageANGLE
+#define glFramebufferPixelLocalClearValuefvANGLE t_glFramebufferPixelLocalClearValuefvANGLE
+#define glFramebufferPixelLocalClearValueivANGLE t_glFramebufferPixelLocalClearValueivANGLE
+#define glFramebufferPixelLocalClearValueuivANGLE t_glFramebufferPixelLocalClearValueuivANGLE
+#define glFramebufferPixelLocalStorageInterruptANGLE t_glFramebufferPixelLocalStorageInterruptANGLE
+#define glFramebufferPixelLocalStorageRestoreANGLE t_glFramebufferPixelLocalStorageRestoreANGLE
 #define glFramebufferTexturePixelLocalStorageANGLE t_glFramebufferTexturePixelLocalStorageANGLE
+#define glGetFramebufferPixelLocalStorageParameterfvANGLE \
+    t_glGetFramebufferPixelLocalStorageParameterfvANGLE
+#define glGetFramebufferPixelLocalStorageParameterfvRobustANGLE \
+    t_glGetFramebufferPixelLocalStorageParameterfvRobustANGLE
+#define glGetFramebufferPixelLocalStorageParameterivANGLE \
+    t_glGetFramebufferPixelLocalStorageParameterivANGLE
+#define glGetFramebufferPixelLocalStorageParameterivRobustANGLE \
+    t_glGetFramebufferPixelLocalStorageParameterivRobustANGLE
 #define glPixelLocalStorageBarrierANGLE t_glPixelLocalStorageBarrierANGLE
 #define glInvalidateTextureANGLE t_glInvalidateTextureANGLE
 #define glTexImage2DExternalANGLE t_glTexImage2DExternalANGLE
@@ -658,6 +672,7 @@
 #define glMultiDrawElementsIndirectEXT t_glMultiDrawElementsIndirectEXT
 #define glFramebufferTexture2DMultisampleEXT t_glFramebufferTexture2DMultisampleEXT
 #define glRenderbufferStorageMultisampleEXT t_glRenderbufferStorageMultisampleEXT
+#define glPolygonOffsetClampEXT t_glPolygonOffsetClampEXT
 #define glPrimitiveBoundingBoxEXT t_glPrimitiveBoundingBoxEXT
 #define glGetGraphicsResetStatusEXT t_glGetGraphicsResetStatusEXT
 #define glGetnUniformfvEXT t_glGetnUniformfvEXT
@@ -753,6 +768,7 @@
 #define glSetFenceNV t_glSetFenceNV
 #define glTestFenceNV t_glTestFenceNV
 #define glBlitFramebufferNV t_glBlitFramebufferNV
+#define glPolygonModeNV t_glPolygonModeNV
 #define glEGLImageTargetRenderbufferStorageOES t_glEGLImageTargetRenderbufferStorageOES
 #define glEGLImageTargetTexture2DOES t_glEGLImageTargetTexture2DOES
 #define glCopyImageSubDataOES t_glCopyImageSubDataOES
@@ -797,7 +813,10 @@
 #define glGenVertexArraysOES t_glGenVertexArraysOES
 #define glIsVertexArrayOES t_glIsVertexArrayOES
 #define glFramebufferTextureMultiviewOVR t_glFramebufferTextureMultiviewOVR
+#define glFramebufferFoveationConfigQCOM t_glFramebufferFoveationConfigQCOM
+#define glFramebufferFoveationParametersQCOM t_glFramebufferFoveationParametersQCOM
 #define glShadingRateQCOM t_glShadingRateQCOM
+#define glTextureFoveationParametersQCOM t_glTextureFoveationParametersQCOM
 #define glDrawTexfOES t_glDrawTexfOES
 #define glDrawTexfvOES t_glDrawTexfvOES
 #define glDrawTexiOES t_glDrawTexiOES
@@ -836,6 +855,10 @@
 #define glTexGenivOES t_glTexGenivOES
 #define glTexGenxOES t_glTexGenxOES
 #define glTexGenxvOES t_glTexGenxvOES
+
+#if defined(__cplusplus)
+extern "C" {
+#endif  // defined(__cplusplus)
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLALPHAFUNCPROC t_glAlphaFunc;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLCLIPPLANEFPROC t_glClipPlanef;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLCOLOR4FPROC t_glColor4f;
@@ -1338,6 +1361,7 @@ ANGLE_TRACE_LOADER_EXPORT extern PFNGLMULTIDRAWARRAYSINSTANCEDANGLEPROC
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLMULTIDRAWELEMENTSANGLEPROC t_glMultiDrawElementsANGLE;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLMULTIDRAWELEMENTSINSTANCEDANGLEPROC
     t_glMultiDrawElementsInstancedANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLPOLYGONMODEANGLEPROC t_glPolygonModeANGLE;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLPROVOKINGVERTEXANGLEPROC t_glProvokingVertexANGLE;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLDISABLEEXTENSIONANGLEPROC t_glDisableExtensionANGLE;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLREQUESTEXTENSIONANGLEPROC t_glRequestExtensionANGLE;
@@ -1451,8 +1475,26 @@ ANGLE_TRACE_LOADER_EXPORT extern PFNGLBEGINPIXELLOCALSTORAGEANGLEPROC
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLENDPIXELLOCALSTORAGEANGLEPROC t_glEndPixelLocalStorageANGLE;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERMEMORYLESSPIXELLOCALSTORAGEANGLEPROC
     t_glFramebufferMemorylessPixelLocalStorageANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERPIXELLOCALCLEARVALUEFVANGLEPROC
+    t_glFramebufferPixelLocalClearValuefvANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERPIXELLOCALCLEARVALUEIVANGLEPROC
+    t_glFramebufferPixelLocalClearValueivANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERPIXELLOCALCLEARVALUEUIVANGLEPROC
+    t_glFramebufferPixelLocalClearValueuivANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERPIXELLOCALSTORAGEINTERRUPTANGLEPROC
+    t_glFramebufferPixelLocalStorageInterruptANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERPIXELLOCALSTORAGERESTOREANGLEPROC
+    t_glFramebufferPixelLocalStorageRestoreANGLE;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERTEXTUREPIXELLOCALSTORAGEANGLEPROC
     t_glFramebufferTexturePixelLocalStorageANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLGETFRAMEBUFFERPIXELLOCALSTORAGEPARAMETERFVANGLEPROC
+    t_glGetFramebufferPixelLocalStorageParameterfvANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLGETFRAMEBUFFERPIXELLOCALSTORAGEPARAMETERFVROBUSTANGLEPROC
+    t_glGetFramebufferPixelLocalStorageParameterfvRobustANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLGETFRAMEBUFFERPIXELLOCALSTORAGEPARAMETERIVANGLEPROC
+    t_glGetFramebufferPixelLocalStorageParameterivANGLE;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLGETFRAMEBUFFERPIXELLOCALSTORAGEPARAMETERIVROBUSTANGLEPROC
+    t_glGetFramebufferPixelLocalStorageParameterivRobustANGLE;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLPIXELLOCALSTORAGEBARRIERANGLEPROC
     t_glPixelLocalStorageBarrierANGLE;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLINVALIDATETEXTUREANGLEPROC t_glInvalidateTextureANGLE;
@@ -1558,6 +1600,7 @@ ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERTEXTURE2DMULTISAMPLEEXTPROC
     t_glFramebufferTexture2DMultisampleEXT;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLRENDERBUFFERSTORAGEMULTISAMPLEEXTPROC
     t_glRenderbufferStorageMultisampleEXT;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLPOLYGONOFFSETCLAMPEXTPROC t_glPolygonOffsetClampEXT;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLPRIMITIVEBOUNDINGBOXEXTPROC t_glPrimitiveBoundingBoxEXT;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLGETGRAPHICSRESETSTATUSEXTPROC t_glGetGraphicsResetStatusEXT;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLGETNUNIFORMFVEXTPROC t_glGetnUniformfvEXT;
@@ -1663,6 +1706,7 @@ ANGLE_TRACE_LOADER_EXPORT extern PFNGLISFENCENVPROC t_glIsFenceNV;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLSETFENCENVPROC t_glSetFenceNV;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLTESTFENCENVPROC t_glTestFenceNV;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLBLITFRAMEBUFFERNVPROC t_glBlitFramebufferNV;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLPOLYGONMODENVPROC t_glPolygonModeNV;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC
     t_glEGLImageTargetRenderbufferStorageOES;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLEGLIMAGETARGETTEXTURE2DOESPROC t_glEGLImageTargetTexture2DOES;
@@ -1711,7 +1755,13 @@ ANGLE_TRACE_LOADER_EXPORT extern PFNGLGENVERTEXARRAYSOESPROC t_glGenVertexArrays
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLISVERTEXARRAYOESPROC t_glIsVertexArrayOES;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERTEXTUREMULTIVIEWOVRPROC
     t_glFramebufferTextureMultiviewOVR;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERFOVEATIONCONFIGQCOMPROC
+    t_glFramebufferFoveationConfigQCOM;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLFRAMEBUFFERFOVEATIONPARAMETERSQCOMPROC
+    t_glFramebufferFoveationParametersQCOM;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLSHADINGRATEQCOMPROC t_glShadingRateQCOM;
+ANGLE_TRACE_LOADER_EXPORT extern PFNGLTEXTUREFOVEATIONPARAMETERSQCOMPROC
+    t_glTextureFoveationParametersQCOM;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLDRAWTEXFOESPROC t_glDrawTexfOES;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLDRAWTEXFVOESPROC t_glDrawTexfvOES;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLDRAWTEXIOESPROC t_glDrawTexiOES;
@@ -1754,8 +1804,12 @@ ANGLE_TRACE_LOADER_EXPORT extern PFNGLTEXGENIVOESPROC t_glTexGenivOES;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLTEXGENXOESPROC t_glTexGenxOES;
 ANGLE_TRACE_LOADER_EXPORT extern PFNGLTEXGENXVOESPROC t_glTexGenxvOES;
 
-using GenericProc = void (*)();
-using LoadProc    = GenericProc(KHRONOS_APIENTRY *)(const char *);
+typedef void (*GenericProc)(void);
+typedef GenericProc(KHRONOS_APIENTRY *LoadProc)(const char *);
 ANGLE_TRACE_LOADER_EXPORT void LoadTraceGLES(LoadProc loadProc);
+
+#if defined(__cplusplus)
+}       // extern "C"
+#endif  // defined(__cplusplus)
 
 #endif  // ANGLE_TRACES_UTIL_GLES_LOADER_AUTOGEN_H_

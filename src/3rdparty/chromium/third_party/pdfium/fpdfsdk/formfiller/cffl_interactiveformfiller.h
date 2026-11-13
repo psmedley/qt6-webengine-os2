@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,6 @@ class CFFL_InteractiveFormFiller final : public IPWL_FillerNotify {
   explicit CFFL_InteractiveFormFiller(CallbackIface* pCallbackIface);
   ~CFFL_InteractiveFormFiller() override;
 
-  CallbackIface* GetCallbackIface() const { return m_pCallbackIface.Get(); }
   bool Annot_HitTest(const CPDFSDK_Widget* pWidget, const CFX_PointF& point);
   FX_RECT GetViewBBox(const CPDFSDK_PageView* pPageView,
                       CPDFSDK_Widget* pWidget);
@@ -113,12 +112,21 @@ class CFFL_InteractiveFormFiller final : public IPWL_FillerNotify {
   bool OnKillFocus(ObservedPtr<CPDFSDK_Widget>& pWidget,
                    Mask<FWL_EVENTFLAG> nFlag);
 
+  // Wrapper methods for CallbackIface
+  void OnSetFieldInputFocus(const WideString& text);
+  void Invalidate(IPDF_Page* pPage, const FX_RECT& rect);
+  CPDFSDK_PageView* GetOrCreatePageView(IPDF_Page* pPage);
+  CPDFSDK_PageView* GetPageView(IPDF_Page* pPage);
+  CFX_Timer::HandlerIface* GetTimerHandler();
+  void OnChange();
+
   CFFL_FormField* GetFormFieldForTesting(CPDFSDK_Widget* pAnnot) {
     return GetFormField(pAnnot);
   }
 
   WideString GetText(CPDFSDK_Widget* pWidget);
   WideString GetSelectedText(CPDFSDK_Widget* pWidget);
+  void ReplaceAndKeepSelection(CPDFSDK_Widget* pWidget, const WideString& text);
   void ReplaceSelection(CPDFSDK_Widget* pWidget, const WideString& text);
   bool SelectAllText(CPDFSDK_Widget* pWidget);
 
@@ -165,8 +173,7 @@ class CFFL_InteractiveFormFiller final : public IPWL_FillerNotify {
                        float fPopupMax,
                        bool* bBottom,
                        float* fPopupRet) override;
-  // Returns {bRC, bExit}.
-  std::pair<bool, bool> OnBeforeKeyStroke(const PerWindowData* pAttached,
+  BeforeKeystrokeResult OnBeforeKeyStroke(const PerWindowData* pAttached,
                                           WideString& strChange,
                                           const WideString& strChangeEx,
                                           int nSelStart,
@@ -195,7 +202,7 @@ class CFFL_InteractiveFormFiller final : public IPWL_FillerNotify {
 #endif  // PDF_ENABLE_XFA
 
   bool IsFillingAllowed(CPDFSDK_Widget* pWidget) const;
-  CFFL_FormField* GetFormField(CPDFSDK_Widget* pAnnot);
+  CFFL_FormField* GetFormField(CPDFSDK_Widget* pWidget);
   CFFL_FormField* GetOrCreateFormField(CPDFSDK_Widget* pWidget);
   void UnregisterFormField(CPDFSDK_Widget* pWidget);
 

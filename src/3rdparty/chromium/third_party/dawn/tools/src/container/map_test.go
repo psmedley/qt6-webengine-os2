@@ -1,20 +1,34 @@
-// Copyright 2022 The Dawn Authors
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package container_test
 
 import (
+	"sync"
 	"testing"
 
 	"dawn.googlesource.com/dawn/tools/src/container"
@@ -111,4 +125,45 @@ func TestMapValues(t *testing.T) {
 
 	m.Add("b", 3)
 	expectEq(t, `m.Values()`, m.Values(), []int{2, 3, 1})
+}
+
+func TestMapGetOrCreate(t *testing.T) {
+	m := container.NewMap[string, int]()
+
+	A := m.GetOrCreate("1", func() int { return 1 })
+	expectEq(t, "A", A, 1)
+
+	B := m.GetOrCreate("2", func() int { return 2 })
+	expectEq(t, "B", B, 2)
+
+	C := m.GetOrCreate("1", func() int { t.Error("should not be called"); return 0 })
+	expectEq(t, "C", C, 1)
+
+	D := m.GetOrCreate("2", func() int { t.Error("should not be called"); return 0 })
+	expectEq(t, "D", D, 2)
+}
+
+func TestMapGetOrCreateLocked(t *testing.T) {
+	m := container.NewMap[string, int]()
+
+	mtx := &sync.RWMutex{}
+	wg := sync.WaitGroup{}
+	wg.Add(100)
+	for i := 0; i < 100; i++ {
+		go func() {
+			defer wg.Done()
+			A := m.GetOrCreateLocked(mtx, "1", func() int { return 1 })
+			expectEq(t, "A", A, 1)
+
+			B := m.GetOrCreateLocked(mtx, "2", func() int { return 2 })
+			expectEq(t, "B", B, 2)
+
+			C := m.GetOrCreateLocked(mtx, "1", func() int { t.Error("should not be called"); return 0 })
+			expectEq(t, "C", C, 1)
+
+			D := m.GetOrCreateLocked(mtx, "2", func() int { t.Error("should not be called"); return 0 })
+			expectEq(t, "D", D, 2)
+		}()
+	}
+	wg.Wait()
 }

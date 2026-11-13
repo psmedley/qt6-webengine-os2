@@ -8,12 +8,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <algorithm>
 #include <array>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/check_op.h"
-#include "base/strings/string_piece.h"
+#include "base/containers/span.h"
+#include "base/values.h"
 #include "net/base/net_export.h"
 
 namespace net {
@@ -72,6 +76,9 @@ class NET_EXPORT IPAddressBytes {
     bytes_[size_++] = val;
   }
 
+  // Appends the range [`first`, `last`) to the end and increments the size.
+  void Append(const uint8_t* first, const uint8_t* last);
+
   // Returns a reference to the byte at index |pos|.
   uint8_t& operator[](size_t pos) {
     DCHECK_LT(pos, size_);
@@ -86,6 +93,8 @@ class NET_EXPORT IPAddressBytes {
   bool operator!=(const IPAddressBytes& other) const;
   bool operator==(const IPAddressBytes& other) const;
 
+  size_t EstimateMemoryUsage() const;
+
  private:
   // Underlying sequence of bytes
   std::array<uint8_t, 16> bytes_;
@@ -99,6 +108,13 @@ class NET_EXPORT IPAddress {
  public:
   enum : size_t { kIPv4AddressSize = 4, kIPv6AddressSize = 16 };
 
+  // Nullopt if `value` is malformed to be deserialized to IPAddress.
+  static std::optional<IPAddress> FromValue(const base::Value& value);
+
+  // Parses an IP address literal (either IPv4 or IPv6). Returns the resulting
+  // IPAddress on success, or nullopt on error.
+  static std::optional<IPAddress> FromIPLiteral(std::string_view ip_literal);
+
   // Creates a zero-sized, invalid address.
   IPAddress();
 
@@ -109,8 +125,8 @@ class NET_EXPORT IPAddress {
 
   // Copies the input address to |ip_address_|. The input is expected to be in
   // network byte order.
-  template <size_t N>
-  explicit IPAddress(const uint8_t (&address)[N]) : IPAddress(address, N) {}
+  explicit IPAddress(base::span<const uint8_t> address)
+      : IPAddress(address.data(), address.size()) {}
 
   // Copies the input address to |ip_address_| taking an additional length
   // parameter. The input is expected to be in network byte order.
@@ -169,6 +185,9 @@ class NET_EXPORT IPAddress {
   // ::ffff:169.254.0.0/112 (IPv4 mapped IPv6 link-local).
   bool IsLinkLocal() const;
 
+  // Returns true if `ip_address_` is a unique local IPv6 address (fc00::/7).
+  bool IsUniqueLocalIPv6() const;
+
   // The size in bytes of |ip_address_|.
   size_t size() const { return ip_address_.size(); }
 
@@ -185,7 +204,7 @@ class NET_EXPORT IPAddress {
   //
   // When parsing fails, the original value of |this| will be overwritten such
   // that |this->empty()| and |!this->IsValid()|.
-  [[nodiscard]] bool AssignFromIPLiteral(const base::StringPiece& ip_literal);
+  [[nodiscard]] bool AssignFromIPLiteral(std::string_view ip_literal);
 
   // Returns the underlying bytes.
   const IPAddressBytes& bytes() const { return ip_address_; }
@@ -214,6 +233,11 @@ class NET_EXPORT IPAddress {
   bool operator==(const IPAddress& that) const;
   bool operator!=(const IPAddress& that) const;
   bool operator<(const IPAddress& that) const;
+
+  // Must be a valid address (per IsValid()).
+  base::Value ToValue() const;
+
+  size_t EstimateMemoryUsage() const;
 
  private:
   IPAddressBytes ip_address_;
@@ -264,7 +288,7 @@ NET_EXPORT bool IPAddressMatchesPrefix(const IPAddress& ip_address,
 //    10.10.3.1/20
 //    a:b:c::/46
 //    ::1/128
-NET_EXPORT bool ParseCIDRBlock(base::StringPiece cidr_literal,
+NET_EXPORT bool ParseCIDRBlock(std::string_view cidr_literal,
                                IPAddress* ip_address,
                                size_t* prefix_length_in_bits);
 
@@ -274,7 +298,7 @@ NET_EXPORT bool ParseCIDRBlock(base::StringPiece cidr_literal,
 // surrounded by brackets as in [::1]. On failure |ip_address| may have been
 // overwritten and could contain an invalid IPAddress.
 [[nodiscard]] NET_EXPORT bool ParseURLHostnameToAddress(
-    const base::StringPiece& hostname,
+    std::string_view hostname,
     IPAddress* ip_address);
 
 // Returns number of matching initial bits between the addresses |a1| and |a2|.

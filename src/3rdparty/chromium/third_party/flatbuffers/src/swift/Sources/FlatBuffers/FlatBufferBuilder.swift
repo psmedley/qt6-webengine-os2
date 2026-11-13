@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Google Inc. All rights reserved.
+ * Copyright 2023 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
+#if !os(WASI)
 import Foundation
+#else
+import SwiftOverlayShims
+#endif
 
 /// ``FlatBufferBuilder`` builds a `FlatBuffer` through manipulating its internal state.
 ///
@@ -55,6 +59,7 @@ public struct FlatBufferBuilder {
   /// Gives a read access to the buffer's size
   public var size: UOffset { _bb.size }
 
+  #if !os(WASI)
   /// Data representation of the buffer
   ///
   /// Should only be used after ``finish(offset:addPrefix:)`` is called
@@ -64,6 +69,7 @@ public struct FlatBufferBuilder {
       bytes: _bb.memory.advanced(by: _bb.writerIndex),
       count: _bb.capacity &- _bb.writerIndex)
   }
+  #endif
 
   /// Returns the underlying bytes in the ``ByteBuffer``
   ///

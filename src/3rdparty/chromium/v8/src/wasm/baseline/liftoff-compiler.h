@@ -56,9 +56,8 @@ enum LiftoffBailoutReason : int8_t {
 
 struct LiftoffOptions {
   int func_index = -1;
-  ForDebugging for_debugging = kNoDebugging;
+  ForDebugging for_debugging = kNotForDebugging;
   Counters* counters = nullptr;
-  AssemblerBufferCache* assembler_buffer_cache = nullptr;
   WasmFeatures* detected_features = nullptr;
   base::Vector<const int> breakpoints = {};
   std::unique_ptr<DebugSideTable>* debug_sidetable = nullptr;
@@ -79,7 +78,6 @@ struct LiftoffOptions {
   SETTER(func_index)
   SETTER(for_debugging)
   SETTER(counters)
-  SETTER(assembler_buffer_cache)
   SETTER(detected_features)
   SETTER(breakpoints)
   SETTER(debug_sidetable)

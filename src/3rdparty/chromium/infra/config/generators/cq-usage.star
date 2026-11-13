@@ -11,6 +11,7 @@ would impact the CQ for all users.
 """
 
 load("@stdlib//internal/luci/proto.star", "cq_pb")
+load("//lib/try.star", "location_filters_without_defaults")
 load("//subprojects/chromium/fallback-cq.star", "fallback_cq")
 
 def _remove_none(l):
@@ -20,10 +21,13 @@ def _trim_builder(builder, include_path_based):
     if builder.includable_only or builder.experiment_percentage:
         return None
 
+    if builder.mode_allowlist and "FULL_RUN" not in builder.mode_allowlist:
+        return None
+
     # The majority of CQ builders will exclude something because we don't
     # trigger most builders on changes to non-code directories (e.g. docs), so
     # only consider them path-based if they have an include filter
-    if not include_path_based and any([not f.exclude for f in builder.location_filters]):
+    if not include_path_based and location_filters_without_defaults(builder):
         return None
     trimmed = cq_pb.Verifiers.Tryjob.Builder(
         name = builder.name,

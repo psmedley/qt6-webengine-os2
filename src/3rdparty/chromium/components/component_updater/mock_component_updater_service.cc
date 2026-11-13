@@ -4,6 +4,8 @@
 
 #include "components/component_updater/mock_component_updater_service.h"
 
+#include "components/component_updater/component_installer.h"
+
 namespace component_updater {
 
 MockComponentUpdateService::MockComponentUpdateService() = default;

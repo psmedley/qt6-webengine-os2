@@ -15,54 +15,68 @@
 #ifndef THIRD_PARTY_NEARBY_PRESENCE_PRESENCE_CLIENT_H_
 #define THIRD_PARTY_NEARBY_PRESENCE_PRESENCE_CLIENT_H_
 
-#include <functional>
-#include <memory>
-#include <vector>
+#include <optional>
 
+#include "absl/status/statusor.h"
+#include "internal/platform/borrowable.h"
 #include "presence/broadcast_request.h"
 #include "presence/data_types.h"
+#include "presence/presence_device.h"
 #include "presence/scan_request.h"
 
 namespace nearby {
 namespace presence {
 
+class PresenceService;
 /**
  * Interface for detecting and interacting with nearby devices that are also
  * part of the Presence ecosystem.
  */
 class PresenceClient {
  public:
-  /**
-   * Starts a Nearby Presence scan and registers {@link ScanCallback}
-   * which will be invoked when a matching {@link PresenceDevice} is detected,
-   * lost, and status changed.
-   *
-   * <p>The {@link ScanCallback} is kept at the Nearby Presence service.
-   * Returning unique_ptr of ScanSession including stop scan callback
-   * for client to invoke later.
-   *
-   * <p>The {@link ScanRequest} contains the options like scan power mode
-   * and type; the filters including credentials, actions and extended
-   * properties.
-   */
+  using BorrowablePresenceService = ::nearby::Borrowable<PresenceService*>;
 
-  std::unique_ptr<ScanSession> StartScan(ScanRequest scan_request,
-                                         ScanCallback callback);
+  virtual ~PresenceClient() = default;
 
-  /**
-   * Starts a Nearby Presence broadcast and registers {@link BroadcastCallback}
-   * which will be invoked after broadcast is started.
-   *
-   * <p>The {@link BroadcastCallback} is kept at the Nearby Presence service.
-   * Returning unique_ptr of BroadcastSession including stop broadcast callback
-   * for the client to invoke later.
-   *
-   * <p>The {@link BroadcastRequest} contains the options like tx_power,
-   * the credential info like salt and private credential, the actions and
-   * extended properties.
-   */
-  std::unique_ptr<BroadcastSession> StartBroadcast(
-      BroadcastRequest broadcast_request, BroadcastCallback callback);
+  // Starts a Nearby Presence scan and registers `ScanCallback`
+  // which will be invoked when a matching `PresenceDevice` is detected,
+  // lost, and status changed.
+  // The session can be terminated with `StopScan()`.
+  //
+  // `ScanCallback` is kept in the Nearby Presence service until `StopScan()` is
+  // called.
+  //
+  // `ScanRequest` contains the options like scan power mode
+  // and type; the filters including credentials, actions and extended
+  // properties.
+  virtual absl::StatusOr<ScanSessionId> StartScan(ScanRequest scan_request,
+                                          ScanCallback callback) = 0;
+
+  // Terminates the scan session. Does nothing if the session is already
+  // terminated.
+  virtual void StopScan(ScanSessionId session_id) = 0;
+
+  // Starts a Nearby Presence broadcast and registers `BroadcastCallback`
+  // which will be invoked after broadcast is started.
+  // The session can be terminated with `StopBroadcast()`.
+  //
+  // `BroadcastCallback` is kept in the Nearby Presence service until
+  // `StopBroadcast()` is called.
+  //
+  // `BroadcastRequest` contains the options like tx_power,
+  // the credential info like salt and private credential, the actions and
+  // extended properties.
+  virtual absl::StatusOr<BroadcastSessionId> StartBroadcast(
+      BroadcastRequest broadcast_request, BroadcastCallback callback) = 0;
+
+  // Terminates a broadcast session. Does nothing if the session is already
+  // terminated.
+  virtual void StopBroadcast(BroadcastSessionId session_id) = 0;
+
+  // Returns the local PresenceDevice describing the current device's actions,
+  // connectivity info and unique identifier for use in Connections and
+  // Presence.
+  virtual std::optional<PresenceDevice> GetLocalDevice() = 0;
 };
 
 }  // namespace presence

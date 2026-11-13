@@ -160,6 +160,9 @@ RepresentationChanger::RepresentationChanger(
 Node* RepresentationChanger::GetRepresentationFor(
     Node* node, MachineRepresentation output_rep, Type output_type,
     Node* use_node, UseInfo use_info) {
+  // We are currently not inserting conversions in machine graphs.
+  // We might add that, though.
+  DCHECK_IMPLIES(!output_type.IsNone(), !output_type.Is(Type::Machine()));
   if (output_rep == MachineRepresentation::kNone && !output_type.IsNone()) {
     // The output representation should be set if the type is inhabited (i.e.,
     // if the value is possible).
@@ -250,6 +253,7 @@ Node* RepresentationChanger::GetRepresentationFor(
     case MachineRepresentation::kCompressed:
     case MachineRepresentation::kCompressedPointer:
     case MachineRepresentation::kSandboxedPointer:
+    case MachineRepresentation::kIndirectPointer:
     case MachineRepresentation::kMapWord:
       UNREACHABLE();
   }
@@ -487,28 +491,29 @@ Node* RepresentationChanger::GetTaggedPointerRepresentationFor(
       return TypeError(node, output_rep, output_type,
                        MachineRepresentation::kTaggedPointer);
     }
-  } else if (CanBeTaggedSigned(output_rep) &&
-             use_info.type_check() == TypeCheckKind::kHeapObject) {
-    if (!output_type.Maybe(Type::SignedSmall())) {
-      return node;
-    }
-    // TODO(turbofan): Consider adding a Bailout operator that just deopts
-    // for TaggedSigned output representation.
-    op = simplified()->CheckedTaggedToTaggedPointer(use_info.feedback());
   } else if (IsAnyTagged(output_rep)) {
     if (use_info.type_check() == TypeCheckKind::kBigInt) {
       if (output_type.Is(Type::BigInt())) {
+        DCHECK_NE(output_rep, MachineRepresentation::kTaggedSigned);
         return node;
       }
       op = simplified()->CheckBigInt(use_info.feedback());
     } else if (use_info.type_check() == TypeCheckKind::kBigInt64) {
       if (output_type.Is(Type::SignedBigInt64())) {
+        DCHECK_NE(output_rep, MachineRepresentation::kTaggedSigned);
         return node;
       }
-      op = simplified()->CheckBigInt64(use_info.feedback());
+      if (!output_type.Is(Type::BigInt())) {
+        node = InsertConversion(
+            node, simplified()->CheckBigInt(use_info.feedback()), use_node);
+      }
+      op = simplified()->CheckedBigIntToBigInt64(use_info.feedback());
+    } else if (output_rep == MachineRepresentation::kTaggedPointer ||
+               !output_type.Maybe(Type::SignedSmall())) {
+      DCHECK_NE(output_rep, MachineRepresentation::kTaggedSigned);
+      return node;
     } else {
-      return TypeError(node, output_rep, output_type,
-                       MachineRepresentation::kTaggedPointer);
+      op = simplified()->CheckedTaggedToTaggedPointer(use_info.feedback());
     }
   } else {
     return TypeError(node, output_rep, output_type,
@@ -943,7 +948,7 @@ Node* RepresentationChanger::GetWord32RepresentationFor(
     } else if (output_type.Is(Type::Unsigned32())) {
       op = simplified()->ChangeTaggedToUint32();
     } else if (use_info.truncation().IsUsedAsWord32()) {
-      if (output_type.Is(Type::NumberOrOddball())) {
+      if (output_type.Is(Type::NumberOrOddballOrHole())) {
         op = simplified()->TruncateTaggedToWord32();
       } else if (use_info.type_check() == TypeCheckKind::kNumber) {
         op = simplified()->CheckedTruncateTaggedToWord32(
@@ -1039,9 +1044,13 @@ Node* RepresentationChanger::GetBitRepresentationFor(
     case IrOpcode::kHeapConstant: {
       HeapObjectMatcher m(node);
       if (m.Is(factory()->false_value())) {
-        return jsgraph()->Int32Constant(0);
+        return InsertTypeOverrideForVerifier(
+            Type::Constant(broker_, broker_->false_value(), jsgraph()->zone()),
+            jsgraph()->Int32Constant(0));
       } else if (m.Is(factory()->true_value())) {
-        return jsgraph()->Int32Constant(1);
+        return InsertTypeOverrideForVerifier(
+            Type::Constant(broker_, broker_->true_value(), jsgraph()->zone()),
+            jsgraph()->Int32Constant(1));
       }
       break;
     }
@@ -1188,7 +1197,9 @@ Node* RepresentationChanger::GetWord64RepresentationFor(
                        MachineRepresentation::kWord64);
     }
   } else if (output_rep == MachineRepresentation::kFloat32) {
-    if (output_type.Is(cache_->kDoubleRepresentableInt64)) {
+    if (output_type.Is(cache_->kDoubleRepresentableInt64) ||
+        (output_type.Is(cache_->kDoubleRepresentableInt64OrMinusZero) &&
+         use_info.truncation().IdentifiesZeroAndMinusZero())) {
       // float32 -> float64 -> int64
       node = InsertChangeFloat32ToFloat64(node);
       op = machine()->ChangeFloat64ToInt64();
@@ -1210,7 +1221,9 @@ Node* RepresentationChanger::GetWord64RepresentationFor(
                        MachineRepresentation::kWord64);
     }
   } else if (output_rep == MachineRepresentation::kFloat64) {
-    if (output_type.Is(cache_->kDoubleRepresentableInt64)) {
+    if (output_type.Is(cache_->kDoubleRepresentableInt64) ||
+        (output_type.Is(cache_->kDoubleRepresentableInt64OrMinusZero) &&
+         use_info.truncation().IdentifiesZeroAndMinusZero())) {
       op = machine()->ChangeFloat64ToInt64();
     } else if (output_type.Is(cache_->kDoubleRepresentableUint64)) {
       op = machine()->ChangeFloat64ToUint64();
@@ -1227,7 +1240,12 @@ Node* RepresentationChanger::GetWord64RepresentationFor(
     }
   } else if (output_rep == MachineRepresentation::kTaggedSigned) {
     if (output_type.Is(Type::SignedSmall())) {
-      op = simplified()->ChangeTaggedSignedToInt64();
+      if (output_type.IsRange() && output_type.AsRange()->Min() >= 0) {
+        node = InsertChangeTaggedSignedToInt32(node);
+        op = machine()->ChangeUint32ToUint64();
+      } else {
+        op = simplified()->ChangeTaggedSignedToInt64();
+      }
     } else {
       return TypeError(node, output_rep, output_type,
                        MachineRepresentation::kWord64);
@@ -1241,7 +1259,9 @@ Node* RepresentationChanger::GetWord64RepresentationFor(
                                              use_node, use_info);
     op = simplified()->TruncateBigIntToWord64();
   } else if (CanBeTaggedPointer(output_rep)) {
-    if (output_type.Is(cache_->kDoubleRepresentableInt64)) {
+    if (output_type.Is(cache_->kDoubleRepresentableInt64) ||
+        (output_type.Is(cache_->kDoubleRepresentableInt64OrMinusZero) &&
+         use_info.truncation().IdentifiesZeroAndMinusZero())) {
       op = simplified()->ChangeTaggedToInt64();
     } else if (use_info.type_check() == TypeCheckKind::kSigned64) {
       op = simplified()->CheckedTaggedToInt64(
@@ -1353,11 +1373,79 @@ const Operator* RepresentationChanger::Int64OperatorFor(
     case IrOpcode::kSpeculativeNumberAdd:  // Fall through.
     case IrOpcode::kSpeculativeSafeIntegerAdd:
     case IrOpcode::kNumberAdd:
+    case IrOpcode::kSpeculativeBigIntAdd:
       return machine()->Int64Add();
     case IrOpcode::kSpeculativeNumberSubtract:  // Fall through.
     case IrOpcode::kSpeculativeSafeIntegerSubtract:
     case IrOpcode::kNumberSubtract:
+    case IrOpcode::kSpeculativeBigIntSubtract:
       return machine()->Int64Sub();
+    case IrOpcode::kSpeculativeBigIntMultiply:
+      return machine()->Int64Mul();
+    case IrOpcode::kSpeculativeBigIntBitwiseAnd:
+      return machine()->Word64And();
+    case IrOpcode::kSpeculativeBigIntBitwiseOr:
+      return machine()->Word64Or();
+    case IrOpcode::kSpeculativeBigIntBitwiseXor:
+      return machine()->Word64Xor();
+    case IrOpcode::kSpeculativeBigIntEqual:
+      return machine()->Word64Equal();
+    case IrOpcode::kSpeculativeBigIntLessThan:
+      return machine()->Int64LessThan();
+    case IrOpcode::kSpeculativeBigIntLessThanOrEqual:
+      return machine()->Int64LessThanOrEqual();
+    default:
+      UNREACHABLE();
+  }
+}
+
+const Operator* RepresentationChanger::Int64OverflowOperatorFor(
+    IrOpcode::Value opcode) {
+  switch (opcode) {
+    case IrOpcode::kSpeculativeBigIntAdd:
+      return simplified()->CheckedInt64Add();
+    case IrOpcode::kSpeculativeBigIntSubtract:
+      return simplified()->CheckedInt64Sub();
+    case IrOpcode::kSpeculativeBigIntMultiply:
+      return simplified()->CheckedInt64Mul();
+    case IrOpcode::kSpeculativeBigIntDivide:
+      return simplified()->CheckedInt64Div();
+    case IrOpcode::kSpeculativeBigIntModulus:
+      return simplified()->CheckedInt64Mod();
+    default:
+      UNREACHABLE();
+  }
+}
+
+const Operator* RepresentationChanger::BigIntOperatorFor(
+    IrOpcode::Value opcode) {
+  switch (opcode) {
+    case IrOpcode::kSpeculativeBigIntAdd:
+      return simplified()->BigIntAdd();
+    case IrOpcode::kSpeculativeBigIntSubtract:
+      return simplified()->BigIntSubtract();
+    case IrOpcode::kSpeculativeBigIntMultiply:
+      return simplified()->BigIntMultiply();
+    case IrOpcode::kSpeculativeBigIntDivide:
+      return simplified()->BigIntDivide();
+    case IrOpcode::kSpeculativeBigIntModulus:
+      return simplified()->BigIntModulus();
+    case IrOpcode::kSpeculativeBigIntBitwiseAnd:
+      return simplified()->BigIntBitwiseAnd();
+    case IrOpcode::kSpeculativeBigIntBitwiseOr:
+      return simplified()->BigIntBitwiseOr();
+    case IrOpcode::kSpeculativeBigIntBitwiseXor:
+      return simplified()->BigIntBitwiseXor();
+    case IrOpcode::kSpeculativeBigIntShiftLeft:
+      return simplified()->BigIntShiftLeft();
+    case IrOpcode::kSpeculativeBigIntShiftRight:
+      return simplified()->BigIntShiftRight();
+    case IrOpcode::kSpeculativeBigIntEqual:
+      return simplified()->BigIntEqual();
+    case IrOpcode::kSpeculativeBigIntLessThan:
+      return simplified()->BigIntLessThan();
+    case IrOpcode::kSpeculativeBigIntLessThanOrEqual:
+      return simplified()->BigIntLessThanOrEqual();
     default:
       UNREACHABLE();
   }

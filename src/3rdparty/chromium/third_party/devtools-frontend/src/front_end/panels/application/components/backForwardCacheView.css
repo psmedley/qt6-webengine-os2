@@ -9,7 +9,7 @@
 }
 
 .gray-text {
-  color: var(--color-text-secondary);
+  color: var(--sys-color-token-subtle);
   margin: 0 0 5px 56px;
   display: flex;
   flex-direction: row;
@@ -19,7 +19,7 @@
   overflow: hidden;
 }
 
-.explanation-frames {
+.details-list {
   margin-left: 56px;
   grid-column-start: span 2;
 }
@@ -34,7 +34,7 @@
 }
 
 .status {
-  margin-right: 15px;
+  margin-right: 11px;
   flex-shrink: 0;
 }
 
@@ -47,7 +47,7 @@
 }
 
 .report-key {
-  color: var(--color-text-secondary);
+  color: var(--sys-color-token-subtle);
   min-width: auto;
   overflow-wrap: break-word;
   align-self: start;
@@ -55,17 +55,27 @@
 
 .report-value {
   padding: 0 6px;
-  overflow-wrap: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .link,
 .devtools-link {
-  color: var(--color-link);
+  color: var(--sys-color-primary);
   text-decoration: underline;
   cursor: pointer;
-  padding: 2px 0; /* adjust focus ring size */
+  outline-offset: 2px;
 }
 
 .tree-outline li .selection {
   margin-left: -5px;
+}
+
+@media (forced-colors: active) {
+  .link,
+  .devtools-link {
+    color: linktext;
+    text-decoration-color: linktext;
+  }
 }

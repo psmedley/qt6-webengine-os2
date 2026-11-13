@@ -1,16 +1,29 @@
-// Copyright 2022 The Tint Authors.
+// Copyright 2022 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package main
 
@@ -134,16 +147,17 @@ func run(cfgPath string) error {
 
 // Config holds the root configuration options for the perfmon tool
 type Config struct {
-	WorkingDir           string
-	RootChange           git.Hash
-	Dawn                 GitConfig
-	Results              GitConfig
-	Gerrit               GerritConfig
-	Timeouts             TimeoutsConfig
-	ExternalAccounts     []string
-	BenchmarkRepetitions int
-	BenchmarkMaxTemp     float32 // celsius
-	CPUTempSensorName    string  // Name of the sensor to use for CPU temp
+	WorkingDir              string
+	RootChange              git.Hash
+	Dawn                    GitConfig
+	Results                 GitConfig
+	Gerrit                  GerritConfig
+	Timeouts                TimeoutsConfig
+	ExternalAccounts        []string
+	BenchmarkRepetitions    int
+	BenchmarkMaxTemp        float32 // celsius
+	CPUTempSensorName       string  // Name of the sensor to use for CPU temp
+	ExternalBenchmarkCorpus string
 }
 
 // GitConfig holds the configuration options for accessing a git repo
@@ -222,10 +236,10 @@ func (cfg *GitConfig) setDefaults() {
 // setDefaults assigns default values to unassigned fields of cfg
 func (cfg *TimeoutsConfig) setDefaults() {
 	if cfg.Sync == 0 {
-		cfg.Sync = time.Minute * 10
+		cfg.Sync = time.Minute * 30
 	}
 	if cfg.Build == 0 {
-		cfg.Build = time.Minute * 10
+		cfg.Build = time.Minute * 30
 	}
 	if cfg.Benchmark == 0 {
 		cfg.Benchmark = time.Minute * 30
@@ -326,12 +340,12 @@ func (e env) doSomeWork() (bool, error) {
 					log.Printf("benchmarked %v changes", i)
 					return true, nil
 				}
-				benchRes, err := e.benchmarkTintChange(c)
+				benchRes, err := e.benchmarkTintChange(c.hash, c.desc)
 				if err != nil {
 					log.Printf("benchmarking failed: %v", err)
 					benchRes = &bench.Run{}
 				}
-				commitRes, err := e.benchmarksToCommitResults(c, *benchRes)
+				commitRes, err := e.benchmarksToCommitResults(c.hash, *benchRes)
 				if err != nil {
 					return true, err
 				}
@@ -352,13 +366,13 @@ func (e env) doSomeWork() (bool, error) {
 		}
 
 		if changeToBenchmark != nil {
-			log.Printf("re-benchmarking change '%v'", *changeToBenchmark)
-			benchRes, err := e.benchmarkTintChange(*changeToBenchmark)
+			log.Printf("re-benchmarking change '%v'", changeToBenchmark.hash)
+			benchRes, err := e.benchmarkTintChange(changeToBenchmark.hash, changeToBenchmark.desc)
 			if err != nil {
 				log.Printf("benchmarking failed: %v", err)
 				benchRes = &bench.Run{}
 			}
-			commitRes, err := e.benchmarksToCommitResults(*changeToBenchmark, *benchRes)
+			commitRes, err := e.benchmarksToCommitResults(changeToBenchmark.hash, *benchRes)
 			if err != nil {
 				return true, err
 			}
@@ -372,9 +386,15 @@ func (e env) doSomeWork() (bool, error) {
 	return false, nil
 }
 
+// HashAndDesc describes a single change to benchmark
+type HashAndDesc struct {
+	hash git.Hash
+	desc string
+}
+
 // changesToBenchmark fetches the list of changes that do not currently have
 // benchmark results, which should be benchmarked.
-func (e env) changesToBenchmark() ([]git.Hash, error) {
+func (e env) changesToBenchmark() ([]HashAndDesc, error) {
 	log.Println("syncing dawn repo...")
 	latest, err := e.dawnRepo.Fetch(e.cfg.Dawn.Branch, &git.FetchOptions{
 		Credentials: e.cfg.Dawn.Credentials,
@@ -389,20 +409,18 @@ func (e env) changesToBenchmark() ([]git.Hash, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to obtain dawn log:\n  %w", err)
 	}
+	log.Println(len(allChanges), "changes between", e.cfg.RootChange.String(), "and", latest.String())
 	changesWithBenchmarks, err := e.changesWithBenchmarks()
 	if err != nil {
 		return nil, fmt.Errorf("failed to gather changes with existing benchmarks:\n  %w", err)
 	}
-	changesToBenchmark := make([]git.Hash, 0, len(allChanges))
+	log.Println(len(changesWithBenchmarks), "changes with existing benchmarks")
+
+	changesToBenchmark := make([]HashAndDesc, 0, len(allChanges))
 	for _, c := range allChanges {
 		if _, exists := changesWithBenchmarks[c.Hash]; !exists {
-			changesToBenchmark = append(changesToBenchmark, c.Hash)
+			changesToBenchmark = append(changesToBenchmark, HashAndDesc{c.Hash, c.Subject})
 		}
-	}
-	// Reverse the order of changesToBenchmark, so that the oldest comes first.
-	for i := len(changesToBenchmark)/2 - 1; i >= 0; i-- {
-		j := len(changesToBenchmark) - 1 - i
-		changesToBenchmark[i], changesToBenchmark[j] = changesToBenchmark[j], changesToBenchmark[i]
 	}
 
 	return changesToBenchmark, nil
@@ -411,7 +429,7 @@ func (e env) changesToBenchmark() ([]git.Hash, error) {
 // changeToRefineBenchmarks scans for the most suitable historic commit to
 // re-benchmark and refine the results. Returns nil if there are no suitable
 // changes.
-func (e env) changeToRefineBenchmarks() (*git.Hash, error) {
+func (e env) changeToRefineBenchmarks() (*HashAndDesc, error) {
 	log.Println("syncing results repo...")
 	if err := fetchAndCheckoutLatest(e.resultsRepo, e.cfg.Results); err != nil {
 		return nil, err
@@ -432,11 +450,11 @@ func (e env) changeToRefineBenchmarks() (*git.Hash, error) {
 		return nil, nil
 	}
 
-	type hashDelta struct {
-		hash  git.Hash
-		delta float64
+	type changeDelta struct {
+		change HashAndDesc
+		delta  float64
 	}
-	hashDeltas := make([]hashDelta, 0, len(results.Commits))
+	hashDeltas := make([]changeDelta, 0, len(results.Commits))
 	for i, c := range results.Commits {
 		hash, err := git.ParseHash(c.Commit)
 		if err != nil {
@@ -464,31 +482,32 @@ func (e env) changeToRefineBenchmarks() (*git.Hash, error) {
 		}
 		if count > 0 {
 			delta = delta / float64(count)
-			hashDeltas = append(hashDeltas, hashDelta{hash, delta})
+			desc := strings.Split(c.CommitDescription, "\n")[0]
+			hashDeltas = append(hashDeltas, changeDelta{HashAndDesc{hash, desc}, delta})
 		}
 	}
 
 	sort.Slice(hashDeltas, func(i, j int) bool { return hashDeltas[i].delta > hashDeltas[j].delta })
 
-	return &hashDeltas[0].hash, nil
+	return &hashDeltas[0].change, nil
 }
 
 // benchmarkTintChangeIfNotCached first checks the results cache for existing
 // benchmark values for the given change, returning those cached values if hit.
 // If the cache does not contain results for the change, then
 // e.benchmarkTintChange() is called.
-func (e env) benchmarkTintChangeIfNotCached(hash git.Hash) (*bench.Run, error) {
+func (e env) benchmarkTintChangeIfNotCached(hash git.Hash, desc string) (*bench.Run, error) {
 	if cached, ok := e.benchmarkCache[hash]; ok {
 		log.Printf("reusing cached benchmark results of '%v'...", hash)
 		return cached, nil
 	}
-	return e.benchmarkTintChange(hash)
+	return e.benchmarkTintChange(hash, desc)
 }
 
 // benchmarkTintChange checks out the given commit, fetches the dawn third party
 // dependencies, builds tint, then runs the benchmarks, returning the results.
-func (e env) benchmarkTintChange(hash git.Hash) (*bench.Run, error) {
-	log.Printf("checking out dawn at '%v'...", hash)
+func (e env) benchmarkTintChange(hash git.Hash, desc string) (*bench.Run, error) {
+	log.Printf("checking out dawn at '%v': %v...", hash, desc)
 	if err := checkout(hash, e.dawnRepo); err != nil {
 		return nil, err
 	}
@@ -708,7 +727,7 @@ func (e env) fetchDawnDeps() error {
 		"sync",
 		"--force",
 	); err != nil {
-		return fmt.Errorf("failed to fetch dawn dependencies:\n  %w", err)
+		return errFailedToBuild{reason: fmt.Errorf("failed to fetch dawn dependencies:\n  %w", err)}
 	}
 	return nil
 }
@@ -718,6 +737,11 @@ func (e env) buildTint() error {
 	if err := os.MkdirAll(e.buildDir, 0777); err != nil {
 		return fmt.Errorf("failed to create build directory at '%v':\n  %w", e.buildDir, err)
 	}
+
+	// Delete any existing tint benchmark executables to ensure we're not using a stale binary
+	os.Remove(filepath.Join(e.buildDir, "tint_benchmark"))
+	os.Remove(filepath.Join(e.buildDir, "tint-benchmark"))
+
 	if _, err := call(tools.cmake, e.buildDir, e.cfg.Timeouts.Build,
 		e.dawnDir,
 		"-GNinja",
@@ -725,8 +749,9 @@ func (e env) buildTint() error {
 		"-DCMAKE_BUILD_TYPE=Release",
 		"-DCMAKE_BUILD_TESTS=0",
 		"-DCMAKE_BUILD_SAMPLES=0",
+		"-DTINT_EXTERNAL_BENCHMARK_CORPUS_DIR="+e.cfg.ExternalBenchmarkCorpus,
 		"-DTINT_BUILD_DOCS=0",
-		"-DTINT_BUILD_SAMPLES=0",
+		"-DTINT_BUILD_CMD_TOOLS=0",
 		"-DTINT_BUILD_TESTS=0",
 		"-DTINT_BUILD_SPV_READER=1",
 		"-DTINT_BUILD_WGSL_READER=1",
@@ -736,7 +761,7 @@ func (e env) buildTint() error {
 		"-DTINT_BUILD_SPV_WRITER=1",
 		"-DTINT_BUILD_WGSL_WRITER=1",
 		"-DTINT_BUILD_BENCHMARKS=1",
-		"-DDAWN_BUILD_SAMPLES=0",
+		"-DDAWN_BUILD_CMD_TOOLS=0",
 	); err != nil {
 		return errFailedToBuild{fmt.Errorf("failed to generate dawn build config:\n  %w", err)}
 	}
@@ -767,15 +792,10 @@ func (e errFailedToBenchmark) Error() string {
 }
 
 // benchmarkTint runs the tint benchmarks e.cfg.BenchmarkRepetitions times,
-// returning the averaged results.
+// returning the median timing.
 func (e env) repeatedlyBenchmarkTint() (*bench.Run, error) {
-	type durationAndCount struct {
-		duration time.Duration
-		count    int
-	}
-
 	var ctx *bench.Context
-	acc := map[string]durationAndCount{}
+	testTimes := map[string][]time.Duration{}
 	for i := 0; i < e.cfg.BenchmarkRepetitions; i++ {
 		if err := e.waitForTempsToSettle(); err != nil {
 			return nil, err
@@ -786,10 +806,7 @@ func (e env) repeatedlyBenchmarkTint() (*bench.Run, error) {
 			return nil, err
 		}
 		for _, b := range run.Benchmarks {
-			v := acc[b.Name]
-			v.duration += b.Duration
-			v.count++
-			acc[b.Name] = v
+			testTimes[b.Name] = append(testTimes[b.Name], b.Duration)
 		}
 		if ctx == nil {
 			ctx = run.Context
@@ -797,10 +814,11 @@ func (e env) repeatedlyBenchmarkTint() (*bench.Run, error) {
 	}
 
 	out := bench.Run{Context: ctx}
-	for name, dc := range acc {
+	for name, times := range testTimes {
+		sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
 		out.Benchmarks = append(out.Benchmarks, bench.Benchmark{
 			Name:     name,
-			Duration: dc.duration / time.Duration(dc.count),
+			Duration: times[len(times)/2], // Median
 		})
 	}
 
@@ -809,18 +827,25 @@ func (e env) repeatedlyBenchmarkTint() (*bench.Run, error) {
 
 // benchmarkTint runs the tint benchmarks once, returning the results.
 func (e env) benchmarkTint() (*bench.Run, error) {
-	exe := filepath.Join(e.buildDir, "tint-benchmark")
+	exe := filepath.Join(e.buildDir, "tint_benchmark")
+	if _, err := os.Stat(exe); err != nil {
+		exe = filepath.Join(e.buildDir, "tint-benchmark")
+	}
+	if _, err := os.Stat(exe); err != nil {
+		return nil, fmt.Errorf("failed to find tint benchmark executable")
+	}
+
 	out, err := call(exe, e.buildDir, e.cfg.Timeouts.Benchmark,
 		"--benchmark_format=json",
 		"--benchmark_enable_random_interleaving=true",
 	)
 	if err != nil {
-		return nil, errFailedToBenchmark{err}
+		return nil, errFailedToBenchmark{fmt.Errorf("failed to run benchmarks: %w\noutput: %v", err, out)}
 	}
 
 	results, err := bench.Parse(out)
 	if err != nil {
-		return nil, errFailedToBenchmark{err}
+		return nil, errFailedToBenchmark{fmt.Errorf("failed to parse benchmark results: %w\noutput: %v", err, out)}
 	}
 	return &results, nil
 }
@@ -861,6 +886,11 @@ func (e env) findGerritChangeToBenchmark() (*gerrit.ChangeInfo, error) {
 		}
 
 		canBenchmark := func() bool {
+			// Don't benchmark changes on non-main branches
+			if change.Branch != "main" {
+				return false
+			}
+
 			// Is the change from a Googler, reviewed by a Googler or is from a allow-listed external developer?
 			if !(strings.HasSuffix(current.Commit.Committer.Email, "@google.com") ||
 				strings.HasSuffix(change.Labels["Code-Review"].Approved.Email, "@google.com") ||
@@ -928,6 +958,7 @@ func (e env) findGerritChangeToBenchmark() (*gerrit.ChangeInfo, error) {
 // benchmarks the gerrit change, posting the findings to the change
 func (e env) benchmarkGerritChange(change gerrit.ChangeInfo) error {
 	current := change.Revisions[change.CurrentRevision]
+	fmt.Println("benchmarking", change.URL)
 	log.Printf("fetching '%v'...", current.Ref)
 	currentHash, err := e.dawnRepo.Fetch(current.Ref, &git.FetchOptions{
 		Credentials: e.cfg.Dawn.Credentials,
@@ -935,8 +966,8 @@ func (e env) benchmarkGerritChange(change gerrit.ChangeInfo) error {
 	if err != nil {
 		return err
 	}
-	parent := current.Commit.Parents[0].Commit
-	parentHash, err := git.ParseHash(parent)
+	parent := current.Commit.Parents[0]
+	parentHash, err := git.ParseHash(parent.Commit)
 	if err != nil {
 		return fmt.Errorf("failed to parse parent hash '%v':\n  %v", parent, err)
 	}
@@ -953,7 +984,7 @@ func (e env) benchmarkGerritChange(change gerrit.ChangeInfo) error {
 		return nil
 	}
 
-	newRun, err := e.benchmarkTintChange(currentHash)
+	newRun, err := e.benchmarkTintChange(currentHash, change.Subject)
 	if err != nil {
 		log.Printf("ERROR: %v", err)
 		buildErr := errFailedToBuild{}
@@ -966,12 +997,13 @@ func (e env) benchmarkGerritChange(change gerrit.ChangeInfo) error {
 		}
 		return err
 	}
-	if _, err := e.dawnRepo.Fetch(parent, &git.FetchOptions{
+	if _, err := e.dawnRepo.Fetch(parent.Commit, &git.FetchOptions{
 		Credentials: e.cfg.Dawn.Credentials,
 	}); err != nil {
 		return err
 	}
-	parentRun, err := e.benchmarkTintChangeIfNotCached(parentHash)
+	parentRun, err := e.benchmarkTintChangeIfNotCached(parentHash,
+		fmt.Sprintf("[parent of %v] %v", currentHash.String()[:7], parent.Subject))
 	if err != nil {
 		return err
 	}
@@ -991,7 +1023,7 @@ func (e env) benchmarkGerritChange(change gerrit.ChangeInfo) error {
 	fmt.Fprintln(msg, "Perfmon analysis:")
 	fmt.Fprintln(msg)
 	fmt.Fprintln(msg, "```")
-	fmt.Fprintf(msg, "A: parent change (%v) -> B: patchset %v\n", parent[:7], current.Number)
+	fmt.Fprintf(msg, "A: parent change (%v) -> B: patchset %v\n", parent.Commit[:7], current.Number)
 	fmt.Fprintln(msg)
 	for _, line := range strings.Split(diff.Format(diffFmt), "\n") {
 		fmt.Fprintf(msg, "  %v\n", line)
@@ -1041,6 +1073,7 @@ func createOrOpenGitRepo(g *git.Git, filepath string, cfg GitConfig) (*git.Repos
 		repo, err = g.Clone(filepath, cfg.URL, &git.CloneOptions{
 			Branch:      cfg.Branch,
 			Credentials: cfg.Credentials,
+			Timeout:     time.Minute * 30,
 		})
 	}
 	if err != nil {
@@ -1101,6 +1134,9 @@ func fetchAndCheckoutLatest(repo *git.Repository, cfg GitConfig) error {
 // Note: call fetch() to ensure that this is the latest change on the
 // branch.
 func checkout(hash git.Hash, repo *git.Repository) error {
+	if err := repo.Clean(nil); err != nil {
+		return fmt.Errorf("failed to clean repo '%v':\n  %w", hash, err)
+	}
 	if err := repo.Checkout(hash.String(), nil); err != nil {
 		return fmt.Errorf("failed to checkout '%v':\n  %w", hash, err)
 	}
@@ -1197,10 +1233,15 @@ func maxTemp(sensorName string) (float32, error) {
 func call(exe, wd string, timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, exe, args...)
+	args = append([]string{"-n", "-20", exe}, args...)
+	cmd := exec.CommandContext(ctx, "nice", args...)
 	cmd.Dir = wd
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		// Note: If you get a permission error with 'nice', then you either need
+		// to run as sudo (not recommended), or update your ulimits:
+		// Append to /etc/security/limits.conf:
+		//  <user>              -       nice       -20
 		return string(out), fmt.Errorf("'%v %v' failed:\n  %w\n%v", exe, args, err, string(out))
 	}
 	return string(out), nil

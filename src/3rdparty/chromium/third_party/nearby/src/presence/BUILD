@@ -13,21 +13,51 @@
 # limitations under the License.
 licenses(["notice"])
 
-package(default_visibility = ["//third_party/nearby:__subpackages__"])
+package(default_visibility = ["//:__subpackages__"])
 
 cc_library(
     name = "presence",
     srcs = [
-        "presence_client.cc",
+        "presence_client_impl.cc",
+        "presence_service_impl.cc",
     ],
     hdrs = [
         "presence_client.h",
+        "presence_client_impl.h",
+        "presence_device_provider.h",
         "presence_service.h",
+        "presence_service_impl.h",
     ],
     deps = [
         ":types",
+        "//internal/interop:device",
+        "//internal/platform:types",
+        "//internal/proto:metadata_cc_proto",
         "//presence/implementation:internal",  # build_cleaner: keep
-        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:variant",
+    ],
+)
+
+cc_library(
+    name = "test_support",
+    testonly = 1,
+    srcs = [
+        "fake_presence_client.cc",
+        "fake_presence_service.cc",
+    ],
+    hdrs = [
+        "fake_presence_client.h",
+        "fake_presence_service.h",
+    ],
+    compatible_with = ["//buildenv/target:non_prod"],
+    deps = [
+        ":presence",
+        ":types",
+        "//internal/platform:types",
+        "//internal/proto:metadata_cc_proto",
+        "@com_google_absl//absl/status:statusor",
     ],
 )
 
@@ -49,22 +79,27 @@ cc_library(
         "device_motion.h",
         "discovery_filter.h",
         "discovery_options.h",
-        "listeners.h",
         "power_mode.h",
         "presence_action.h",
         "presence_device.h",
         "presence_zone.h",
         "scan_request.h",
         "scan_request_builder.h",
-        "status.h",
     ],
     deps = [
+        "//connections/implementation/proto:offline_wire_formats_cc_proto",
+        "//internal/interop:device",
         "//internal/platform:base",
+        "//internal/platform:connection_info",
+        "//internal/platform:types",
+        "//internal/platform/implementation:types",
         "//internal/proto:credential_cc_proto",
+        "//internal/proto:metadata_cc_proto",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:variant",
-        "@com_google_glog//:glog",
     ],
 )
 
@@ -81,16 +116,27 @@ cc_test(
         "presence_identity_test.cc",
         "presence_zone_test.cc",
         "scan_request_builder_test.cc",
-        "status_test.cc",
     ],
     shard_count = 6,
     deps = [
         ":types",
+        "//connections/implementation/proto:offline_wire_formats_cc_proto",
+        "//internal/platform:connection_info",
+        "//internal/platform:types",
         "//internal/proto:credential_cc_proto",
+        "//internal/proto:metadata_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:variant",
         "@com_google_googletest//:gtest_main",
-    ],
+    ] + select({
+        "@platforms//os:windows": [
+            "//internal/platform/implementation/windows",
+        ],
+        "//conditions:default": [
+            "//internal/platform/implementation/g3",
+        ],
+    }),
 )
 
 cc_test(
@@ -103,11 +149,18 @@ cc_test(
     shard_count = 6,
     deps = [
         "//internal/platform:uuid",
-        "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//internal/proto:credential_cc_proto",
+        "//internal/proto:local_credential_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
-    ],
+    ] + select({
+        "@platforms//os:windows": [
+            "//internal/platform/implementation/windows",
+        ],
+        "//conditions:default": [
+            "//internal/platform/implementation/g3",
+        ],
+    }),
 )
 
 cc_test(
@@ -115,14 +168,26 @@ cc_test(
     size = "small",
     srcs = [
         "presence_client_test.cc",
+        "presence_device_provider_test.cc",
         "presence_service_test.cc",
     ],
     shard_count = 6,
     deps = [
         ":presence",
         ":types",
-        "//internal/platform/implementation/g3",  # build_cleaner: keep
+        "//internal/platform:test_util",
+        "//internal/platform:types",
+        "//internal/proto:metadata_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
-    ],
+    ] + select({
+        "@platforms//os:windows": [
+            "//internal/platform/implementation/windows",
+        ],
+        "//conditions:default": [
+            "//internal/platform/implementation/g3",
+        ],
+    }),
 )

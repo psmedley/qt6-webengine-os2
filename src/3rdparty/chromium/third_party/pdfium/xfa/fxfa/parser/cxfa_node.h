@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,12 @@
 #include "core/fxcrt/mask.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "core/fxcrt/unowned_ptr_exclusion.h"
 #include "core/fxcrt/widestring.h"
 #include "core/fxge/dib/fx_dib.h"
 #include "fxjs/gc/gced_tree_node_mixin.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 #include "v8/include/cppgc/member.h"
 #include "v8/include/cppgc/visitor.h"
 #include "xfa/fxfa/cxfa_ffwidget_type.h"
@@ -108,7 +109,12 @@ class CXFA_Node : public CXFA_Object, public GCedTreeNodeMixin<CXFA_Node> {
   struct AttributeData {
     XFA_Attribute attribute;
     XFA_AttributeType type;
-    void* default_value;
+    UNOWNED_PTR_EXCLUSION void* default_value;  // POD type.
+  };
+
+  struct BoolScriptResult {
+    XFA_EventError xfa_event_result;
+    bool script_result;
   };
 
   // Node is created from cppgc heap.
@@ -175,7 +181,7 @@ class CXFA_Node : public CXFA_Object, public GCedTreeNodeMixin<CXFA_Node> {
   }
 
   void SetXMLMappingNode(CFX_XMLNode* node) { xml_node_ = node; }
-  CFX_XMLNode* GetXMLMappingNode() const { return xml_node_.Get(); }
+  CFX_XMLNode* GetXMLMappingNode() const { return xml_node_; }
   CFX_XMLNode* CreateXMLMappingNode();
   bool IsNeedSavingXMLNode() const;
 
@@ -300,10 +306,9 @@ class CXFA_Node : public CXFA_Object, public GCedTreeNodeMixin<CXFA_Node> {
   XFA_EventError ExecuteScript(CXFA_FFDocView* pDocView,
                                CXFA_Script* script,
                                CXFA_EventParam* pEventParam);
-  std::pair<XFA_EventError, bool> ExecuteBoolScript(
-      CXFA_FFDocView* pDocView,
-      CXFA_Script* script,
-      CXFA_EventParam* pEventParam);
+  BoolScriptResult ExecuteBoolScript(CXFA_FFDocView* pDocView,
+                                     CXFA_Script* script,
+                                     CXFA_EventParam* pEventParam);
 
   CXFA_Node* GetUIChildNode();
 
@@ -530,9 +535,9 @@ class CXFA_Node : public CXFA_Object, public GCedTreeNodeMixin<CXFA_Node> {
   Mask<XFA_NodeFlag> m_uNodeFlags = XFA_NodeFlag::kNone;
   uint32_t m_dwNameHash = 0;
   cppgc::Member<CXFA_Node> m_pAuxNode;
-  std::vector<cppgc::Member<CXFA_Node>> binding_nodes_;
   cppgc::Member<CXFA_WidgetLayoutData> m_pLayoutData;
   cppgc::Member<CXFA_Ui> ui_;
+  std::vector<cppgc::Member<CXFA_Node>> binding_nodes_;
 };
 
 #endif  // XFA_FXFA_PARSER_CXFA_NODE_H_

@@ -373,6 +373,11 @@ void QuicFixedSocketAddress::SetSendValue(const QuicSocketAddress& value) {
   send_value_ = value;
 }
 
+void QuicFixedSocketAddress::ClearSendValue() {
+  has_send_value_ = false;
+  send_value_ = QuicSocketAddress();
+}
+
 bool QuicFixedSocketAddress::HasReceivedValue() const {
   return has_receive_value_;
 }
@@ -467,6 +472,15 @@ void QuicConfig::SetConnectionOptionsToSend(
   connection_options_.SetSendValues(connection_options);
 }
 
+void QuicConfig::SetGoogleHandshakeMessageToSend(std::string message) {
+  google_handshake_message_to_send_ = std::move(message);
+}
+
+const std::optional<std::string>&
+QuicConfig::GetReceivedGoogleHandshakeMessage() const {
+  return received_google_handshake_message_;
+}
+
 bool QuicConfig::HasReceivedConnectionOptions() const {
   return connection_options_.HasReceivedValues();
 }
@@ -542,7 +556,7 @@ QuicTime::Delta QuicConfig::IdleNetworkTimeout() const {
   if (!received_max_idle_timeout_.has_value()) {
     return max_idle_timeout_to_send_;
   }
-  return received_max_idle_timeout_.value();
+  return *received_max_idle_timeout_;
 }
 
 void QuicConfig::SetMaxBidirectionalStreamsToSend(uint32_t max_streams) {
@@ -841,28 +855,13 @@ bool QuicConfig::DisableConnectionMigration() const {
 
 void QuicConfig::SetIPv6AlternateServerAddressToSend(
     const QuicSocketAddress& alternate_server_address_ipv6) {
-  if (!alternate_server_address_ipv6.host().IsIPv6()) {
+  if (!alternate_server_address_ipv6.Normalized().host().IsIPv6()) {
     QUIC_BUG(quic_bug_10575_9)
         << "Cannot use SetIPv6AlternateServerAddressToSend with "
         << alternate_server_address_ipv6;
     return;
   }
   alternate_server_address_ipv6_.SetSendValue(alternate_server_address_ipv6);
-}
-
-void QuicConfig::SetIPv6AlternateServerAddressToSend(
-    const QuicSocketAddress& alternate_server_address_ipv6,
-    const QuicConnectionId& connection_id,
-    const StatelessResetToken& stateless_reset_token) {
-  if (!alternate_server_address_ipv6.host().IsIPv6()) {
-    QUIC_BUG(quic_bug_10575_10)
-        << "Cannot use SetIPv6AlternateServerAddressToSend with "
-        << alternate_server_address_ipv6;
-    return;
-  }
-  alternate_server_address_ipv6_.SetSendValue(alternate_server_address_ipv6);
-  preferred_address_connection_id_and_token_ =
-      std::make_pair(connection_id, stateless_reset_token);
 }
 
 bool QuicConfig::HasReceivedIPv6AlternateServerAddress() const {
@@ -885,21 +884,6 @@ void QuicConfig::SetIPv4AlternateServerAddressToSend(
   alternate_server_address_ipv4_.SetSendValue(alternate_server_address_ipv4);
 }
 
-void QuicConfig::SetIPv4AlternateServerAddressToSend(
-    const QuicSocketAddress& alternate_server_address_ipv4,
-    const QuicConnectionId& connection_id,
-    const StatelessResetToken& stateless_reset_token) {
-  if (!alternate_server_address_ipv4.host().IsIPv4()) {
-    QUIC_BUG(quic_bug_10575_12)
-        << "Cannot use SetIPv4AlternateServerAddressToSend with "
-        << alternate_server_address_ipv4;
-    return;
-  }
-  alternate_server_address_ipv4_.SetSendValue(alternate_server_address_ipv4);
-  preferred_address_connection_id_and_token_ =
-      std::make_pair(connection_id, stateless_reset_token);
-}
-
 bool QuicConfig::HasReceivedIPv4AlternateServerAddress() const {
   return alternate_server_address_ipv4_.HasReceivedValue();
 }
@@ -907,6 +891,20 @@ bool QuicConfig::HasReceivedIPv4AlternateServerAddress() const {
 const QuicSocketAddress& QuicConfig::ReceivedIPv4AlternateServerAddress()
     const {
   return alternate_server_address_ipv4_.GetReceivedValue();
+}
+
+void QuicConfig::SetPreferredAddressConnectionIdAndTokenToSend(
+    const QuicConnectionId& connection_id,
+    const StatelessResetToken& stateless_reset_token) {
+  if ((!alternate_server_address_ipv4_.HasSendValue() &&
+       !alternate_server_address_ipv6_.HasSendValue()) ||
+      preferred_address_connection_id_and_token_.has_value()) {
+    QUIC_BUG(quic_bug_10575_17)
+        << "Can not send connection ID and token for preferred address";
+    return;
+  }
+  preferred_address_connection_id_and_token_ =
+      std::make_pair(connection_id, stateless_reset_token);
 }
 
 bool QuicConfig::HasReceivedPreferredAddressConnectionIdAndToken() const {
@@ -936,7 +934,7 @@ QuicConnectionId QuicConfig::ReceivedOriginalConnectionId() const {
     QUIC_BUG(quic_bug_10575_13) << "No received original connection ID";
     return EmptyQuicConnectionId();
   }
-  return received_original_destination_connection_id_.value();
+  return *received_original_destination_connection_id_;
 }
 
 void QuicConfig::SetInitialSourceConnectionIdToSend(
@@ -953,7 +951,7 @@ QuicConnectionId QuicConfig::ReceivedInitialSourceConnectionId() const {
     QUIC_BUG(quic_bug_10575_14) << "No received initial source connection ID";
     return EmptyQuicConnectionId();
   }
-  return received_initial_source_connection_id_.value();
+  return *received_initial_source_connection_id_;
 }
 
 void QuicConfig::SetRetrySourceConnectionIdToSend(
@@ -970,12 +968,16 @@ QuicConnectionId QuicConfig::ReceivedRetrySourceConnectionId() const {
     QUIC_BUG(quic_bug_10575_15) << "No received retry source connection ID";
     return EmptyQuicConnectionId();
   }
-  return received_retry_source_connection_id_.value();
+  return *received_retry_source_connection_id_;
 }
 
 void QuicConfig::SetStatelessResetTokenToSend(
     const StatelessResetToken& stateless_reset_token) {
   stateless_reset_token_.SetSendValue(stateless_reset_token);
+}
+
+bool QuicConfig::HasStatelessResetTokenToSend() const {
+  return stateless_reset_token_.HasSendValue();
 }
 
 bool QuicConfig::HasReceivedStatelessResetToken() const {
@@ -1159,7 +1161,7 @@ QuicErrorCode QuicConfig::ProcessPeerHello(
 bool QuicConfig::FillTransportParameters(TransportParameters* params) const {
   if (original_destination_connection_id_to_send_.has_value()) {
     params->original_destination_connection_id =
-        original_destination_connection_id_to_send_.value();
+        *original_destination_connection_id_to_send_;
   }
 
   params->max_idle_timeout_ms.set_value(
@@ -1236,12 +1238,11 @@ bool QuicConfig::FillTransportParameters(TransportParameters* params) const {
 
   if (initial_source_connection_id_to_send_.has_value()) {
     params->initial_source_connection_id =
-        initial_source_connection_id_to_send_.value();
+        *initial_source_connection_id_to_send_;
   }
 
   if (retry_source_connection_id_to_send_.has_value()) {
-    params->retry_source_connection_id =
-        retry_source_connection_id_to_send_.value();
+    params->retry_source_connection_id = *retry_source_connection_id_to_send_;
   }
 
   if (initial_round_trip_time_us_.HasSendValue()) {
@@ -1251,6 +1252,10 @@ bool QuicConfig::FillTransportParameters(TransportParameters* params) const {
   if (connection_options_.HasSendValues() &&
       !connection_options_.GetSendValues().empty()) {
     params->google_connection_options = connection_options_.GetSendValues();
+  }
+
+  if (google_handshake_message_to_send_.has_value()) {
+    params->google_handshake_message = google_handshake_message_to_send_;
   }
 
   params->custom_parameters = custom_transport_parameters_to_send_;
@@ -1263,7 +1268,7 @@ QuicErrorCode QuicConfig::ProcessTransportParameters(
     std::string* error_details) {
   if (!is_resumption && params.original_destination_connection_id.has_value()) {
     received_original_destination_connection_id_ =
-        params.original_destination_connection_id.value();
+        *params.original_destination_connection_id;
   }
 
   if (params.max_idle_timeout_ms.value() > 0 &&
@@ -1368,11 +1373,10 @@ QuicErrorCode QuicConfig::ProcessTransportParameters(
   if (!is_resumption) {
     if (params.initial_source_connection_id.has_value()) {
       received_initial_source_connection_id_ =
-          params.initial_source_connection_id.value();
+          *params.initial_source_connection_id;
     }
     if (params.retry_source_connection_id.has_value()) {
-      received_retry_source_connection_id_ =
-          params.retry_source_connection_id.value();
+      received_retry_source_connection_id_ = *params.retry_source_connection_id;
     }
   }
 
@@ -1381,8 +1385,10 @@ QuicErrorCode QuicConfig::ProcessTransportParameters(
         params.initial_round_trip_time_us.value());
   }
   if (params.google_connection_options.has_value()) {
-    connection_options_.SetReceivedValues(
-        params.google_connection_options.value());
+    connection_options_.SetReceivedValues(*params.google_connection_options);
+  }
+  if (params.google_handshake_message.has_value()) {
+    received_google_handshake_message_ = params.google_handshake_message;
   }
 
   received_custom_transport_parameters_ = params.custom_parameters;
@@ -1392,6 +1398,34 @@ QuicErrorCode QuicConfig::ProcessTransportParameters(
   }
   *error_details = "";
   return QUIC_NO_ERROR;
+}
+
+void QuicConfig::ClearGoogleHandshakeMessage() {
+  google_handshake_message_to_send_.reset();
+  received_google_handshake_message_.reset();
+}
+
+std::optional<QuicSocketAddress> QuicConfig::GetPreferredAddressToSend(
+    quiche::IpAddressFamily address_family) const {
+  if (alternate_server_address_ipv6_.HasSendValue() &&
+      address_family == quiche::IpAddressFamily::IP_V6) {
+    return alternate_server_address_ipv6_.GetSendValue();
+  }
+
+  if (alternate_server_address_ipv4_.HasSendValue() &&
+      address_family == quiche::IpAddressFamily::IP_V4) {
+    return alternate_server_address_ipv4_.GetSendValue();
+  }
+  return std::nullopt;
+}
+
+void QuicConfig::ClearAlternateServerAddressToSend(
+    quiche::IpAddressFamily address_family) {
+  if (address_family == quiche::IpAddressFamily::IP_V4) {
+    alternate_server_address_ipv4_.ClearSendValue();
+  } else if (address_family == quiche::IpAddressFamily::IP_V6) {
+    alternate_server_address_ipv6_.ClearSendValue();
+  }
 }
 
 }  // namespace quic

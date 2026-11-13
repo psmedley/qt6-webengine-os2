@@ -26,16 +26,16 @@ constexpr int kSftpServerPort = 7780;
 
 constexpr int kLmkdKillDecisionPort = 7781;
 
+// Used by vm_tools::concierge::mm::ReclaimServer.
+constexpr int kVmMemoryManagementReclaimServerPort = 7782;
+// Used by vm_tools::concierge::mm::KillsServer.
+constexpr int kVmMemoryManagementKillsServerPort = 7783;
+
 // All ports above this value are reserved for seneschal servers.
 constexpr uint32_t kFirstSeneschalServerPort = 16384;
 
 // Name of the user that runs unstrusted operating systems on Chrome OS.
 constexpr char kCrosVmUser[] = "crosvm";
-
-// Name of the directory under /run/wayland where VM wayland sockets should be
-// created. In Exo parlance this is called the "Security Context". See
-// go/secure-exo-ids for more details.
-constexpr char kConciergeSecurityContext[] = "concierge";
 
 }  // namespace vm_tools
 

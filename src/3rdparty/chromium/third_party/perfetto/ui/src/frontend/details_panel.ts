@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
-import {QueryResponse} from 'src/common/queries';
+import m from 'mithril';
 
+import {Trash} from '../base/disposable';
+import {Gate} from '../base/mithril_utils';
+import {exists} from '../base/utils';
 import {Actions} from '../common/actions';
 import {isEmptyData} from '../common/aggregation_data';
 import {LogExists, LogExistsKey} from '../common/logs';
+import {addSelectionChangeObserver} from '../common/selection_observer';
+import {Selection} from '../common/state';
+import {raf} from '../core/raf_scheduler';
 
 import {AggregationPanel} from './aggregation_panel';
-import {ChromeSliceDetailsPanel} from './chrome_slice_panel';
+import {ChromeSliceDetailsTab} from './chrome_slice_details_tab';
 import {CounterDetailsPanel} from './counter_panel';
 import {CpuProfileDetailsPanel} from './cpu_profile_panel';
 import {DEFAULT_DETAILS_CONTENT_HEIGHT} from './css_constants';
@@ -30,18 +35,19 @@ import {
   FlowEventsAreaSelectedPanel,
   FlowEventsPanel,
 } from './flow_events_panel';
+import {FtracePanel} from './ftrace_panel';
 import {globals} from './globals';
 import {LogPanel} from './logs_panel';
-import {NotesEditorPanel} from './notes_panel';
-import {AnyAttrsVnode, PanelContainer} from './panel_container';
-import {PivotTableRedux} from './pivot_table_redux';
-import {QueryTable} from './query_table';
+import {NotesEditorTab} from './notes_panel';
+import {PivotTable} from './pivot_table';
 import {SliceDetailsPanel} from './slice_details_panel';
-import {ThreadStatePanel} from './thread_state_panel';
+import {ThreadStateTab} from './thread_state_tab';
 
 const UP_ICON = 'keyboard_arrow_up';
 const DOWN_ICON = 'keyboard_arrow_down';
 const DRAG_HANDLE_HEIGHT_PX = 28;
+
+export const CURRENT_SELECTION_TAG = 'current_selection';
 
 function getDetailsHeight() {
   // This needs to be a function instead of a const to ensure the CSS constants
@@ -60,8 +66,9 @@ function getFullScreenHeight() {
 }
 
 function hasLogs(): boolean {
-  const data = globals.trackDataStore.get(LogExistsKey) as LogExists;
-  return data && data.exists;
+  const data =
+      globals.trackDataStore.get(LogExistsKey) as LogExists | undefined;
+  return Boolean(data?.exists);
 }
 
 interface Tab {
@@ -81,37 +88,42 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
   private height = 0;
   private previousHeight = this.height;
   private resize: (height: number) => void = () => {};
-  private isClosed = this.height <= DRAG_HANDLE_HEIGHT_PX;
+  private isClosed = this.height <= 0;
   private isFullscreen = false;
   // We can't get real fullscreen height until the pan_and_zoom_handler exists.
   private fullscreenHeight = getDetailsHeight();
+  private trash: Trash = new Trash();
 
   oncreate({dom, attrs}: m.CVnodeDOM<DragHandleAttrs>) {
     this.resize = attrs.resize;
     this.height = attrs.height;
-    this.isClosed = this.height <= DRAG_HANDLE_HEIGHT_PX;
+    this.isClosed = this.height <= 0;
     this.fullscreenHeight = getFullScreenHeight();
     const elem = dom as HTMLElement;
-    new DragGestureHandler(
+    this.trash.add(new DragGestureHandler(
         elem,
         this.onDrag.bind(this),
         this.onDragStart.bind(this),
-        this.onDragEnd.bind(this));
+        this.onDragEnd.bind(this)));
   }
 
   onupdate({attrs}: m.CVnodeDOM<DragHandleAttrs>) {
     this.resize = attrs.resize;
     this.height = attrs.height;
-    this.isClosed = this.height <= DRAG_HANDLE_HEIGHT_PX;
+    this.isClosed = this.height <= 0;
+  }
+
+  onremove(_: m.CVnodeDOM<DragHandleAttrs>) {
+    this.trash.dispose();
   }
 
   onDrag(_x: number, y: number) {
     const newHeight =
         Math.floor(this.dragStartHeight + (DRAG_HANDLE_HEIGHT_PX / 2) - y);
-    this.isClosed = newHeight <= DRAG_HANDLE_HEIGHT_PX;
+    this.isClosed = newHeight <= 0;
     this.isFullscreen = newHeight >= this.fullscreenHeight;
     this.resize(newHeight);
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
   }
 
   onDragStart(_x: number, _y: number) {
@@ -146,7 +158,7 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
                 this.isClosed = false;
                 this.isFullscreen = true;
                 this.resize(this.fullscreenHeight);
-                globals.rafScheduler.scheduleFullRedraw();
+                raf.scheduleFullRedraw();
               },
               title: 'Open fullscreen',
               disabled: this.isFullscreen,
@@ -155,7 +167,7 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
           m('i.material-icons',
             {
               onclick: () => {
-                if (this.height === DRAG_HANDLE_HEIGHT_PX) {
+                if (this.height === 0) {
                   this.isClosed = false;
                   if (this.previousHeight === 0) {
                     this.previousHeight = getDetailsHeight();
@@ -165,9 +177,9 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
                   this.isFullscreen = false;
                   this.isClosed = true;
                   this.previousHeight = this.height;
-                  this.resize(DRAG_HANDLE_HEIGHT_PX);
+                  this.resize(0);
                 }
-                globals.rafScheduler.scheduleFullRedraw();
+                raf.scheduleFullRedraw();
               },
               title,
             },
@@ -175,29 +187,72 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
   }
 }
 
-// For queries that are supposed to be displayed in the bottom bar, return a
-// name for a tab. Otherwise, return null.
-function userVisibleQueryName(id: string): string|null {
-  if (id === 'command') {
-    return 'Omnibox Query';
+function handleSelectionChange(
+    newSelection: Selection|undefined, openCurrentSelectionTab: boolean): void {
+  const currentSelectionTag = CURRENT_SELECTION_TAG;
+  const bottomTabList = globals.bottomTabList;
+  if (!bottomTabList) return;
+  if (newSelection === undefined) {
+    bottomTabList.closeTabByTag(currentSelectionTag);
+    return;
   }
-  if (id === 'analyze-page-query') {
-    return 'Standalone Query';
+  switch (newSelection.kind) {
+    case 'NOTE':
+      bottomTabList.addTab({
+        kind: NotesEditorTab.kind,
+        tag: currentSelectionTag,
+        config: {
+          id: newSelection.id,
+        },
+        select: openCurrentSelectionTab,
+      });
+      break;
+    case 'AREA':
+      if (newSelection.noteId !== undefined) {
+        bottomTabList.addTab({
+          kind: NotesEditorTab.kind,
+          tag: currentSelectionTag,
+          config: {
+            id: newSelection.noteId,
+          },
+          select: openCurrentSelectionTab,
+        });
+      }
+      break;
+    case 'THREAD_STATE':
+      bottomTabList.addTab({
+        kind: ThreadStateTab.kind,
+        tag: currentSelectionTag,
+        config: {
+          id: newSelection.id,
+        },
+        select: openCurrentSelectionTab,
+      });
+      break;
+    case 'GENERIC_SLICE':
+      bottomTabList.addTab({
+        kind: newSelection.detailsPanelConfig.kind,
+        tag: currentSelectionTag,
+        config: newSelection.detailsPanelConfig.config,
+        select: openCurrentSelectionTab,
+      });
+      break;
+    case 'CHROME_SLICE':
+      bottomTabList.addTab({
+        kind: ChromeSliceDetailsTab.kind,
+        tag: currentSelectionTag,
+        config: {
+          id: newSelection.id,
+          table: newSelection.table,
+        },
+        select: openCurrentSelectionTab,
+      });
+      break;
+    default:
+      bottomTabList.closeTabByTag(currentSelectionTag);
   }
-  if (id.startsWith('command_')) {
-    return 'Pinned Query';
-  }
-  if (id.startsWith('pivot_table_details_')) {
-    return 'Pivot Table Details';
-  }
-  if (id.startsWith('slices_with_arg_value_')) {
-    return `Arg: ${id.substr('slices_with_arg_value_'.length)}`;
-  }
-  if (id === 'chrome_scroll_jank_long_tasks') {
-    return 'Scroll Jank: long tasks';
-  }
-  return null;
 }
+addSelectionChangeObserver(handleSelectionChange);
 
 export class DetailsPanel implements m.ClassComponent {
   private detailsHeight = getDetailsHeight();
@@ -206,34 +261,28 @@ export class DetailsPanel implements m.ClassComponent {
     interface DetailsPanel {
       key: string;
       name: string;
-      vnode: AnyAttrsVnode;
+      vnode: m.Children;
     }
 
     const detailsPanels: DetailsPanel[] = [];
+
+    if (globals.bottomTabList) {
+      for (const tab of globals.bottomTabList.getTabs()) {
+        detailsPanels.push({
+          key: tab.tag ?? tab.uuid,
+          name: tab.getTitle(),
+          vnode: tab.renderPanel(),
+        });
+      }
+    }
+
     const curSelection = globals.state.currentSelection;
     if (curSelection) {
       switch (curSelection.kind) {
         case 'NOTE':
-          detailsPanels.push({
-            key: 'current_selection',
-            name: 'Current Selection',
-            vnode: m(NotesEditorPanel, {
-              key: 'notes',
-              id: curSelection.id,
-            }),
-          });
+          // Handled in handleSelectionChange.
           break;
         case 'AREA':
-          if (curSelection.noteId !== undefined) {
-            detailsPanels.push({
-              key: 'current_selection',
-              name: 'Current Selection',
-              vnode: m(NotesEditorPanel, {
-                key: 'area_notes',
-                id: curSelection.noteId,
-              }),
-            });
-          }
           if (globals.flamegraphDetails.isInAreaSelection) {
             detailsPanels.push({
               key: 'flamegraph_selection',
@@ -277,20 +326,6 @@ export class DetailsPanel implements m.ClassComponent {
             }),
           });
           break;
-        case 'CHROME_SLICE':
-          detailsPanels.push({
-            key: 'current_selection',
-            name: 'Current Selection',
-            vnode: m(ChromeSliceDetailsPanel, {key: 'chrome_slice'}),
-          });
-          break;
-        case 'THREAD_STATE':
-          detailsPanels.push({
-            key: 'current_selection',
-            name: 'Current Selection',
-            vnode: m(ThreadStatePanel, {key: 'thread_state'}),
-          });
-          break;
         default:
           break;
       }
@@ -303,34 +338,28 @@ export class DetailsPanel implements m.ClassComponent {
       });
     }
 
-    const queryResults = [];
-    for (const queryId of globals.queryResults.keys()) {
-      const readableName = userVisibleQueryName(queryId);
-      if (readableName !== null) {
-        queryResults.push({queryId, name: readableName});
+    const trackGroup = globals.state.trackGroups['ftrace-track-group'];
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+    if (trackGroup) {
+      const {collapsed} = trackGroup;
+      if (!collapsed) {
+        detailsPanels.push({
+          key: 'ftrace_events',
+          name: 'Ftrace Events',
+          vnode: m(FtracePanel, {key: 'ftrace_panel'}),
+        });
       }
     }
 
-    for (const {queryId, name} of queryResults) {
-      const count =
-          (globals.queryResults.get(queryId) as QueryResponse).rows.length;
-      detailsPanels.push({
-        key: `query_result_${queryId}`,
-        name: `${name} (${count})`,
-        vnode: m(QueryTable, {key: `query_${queryId}`, queryId}),
-      });
-    }
-
-
-    if (globals.state.nonSerializableState.pivotTableRedux.selectionArea !==
+    if (globals.state.nonSerializableState.pivotTable.selectionArea !==
         undefined) {
       detailsPanels.push({
-        key: 'pivot_table_redux',
+        key: 'pivot_table',
         name: 'Pivot Table',
-        vnode: m(PivotTableRedux, {
-          key: 'pivot_table_redux',
+        vnode: m(PivotTable, {
+          key: 'pivot_table',
           selectionArea:
-              globals.state.nonSerializableState.pivotTableRedux.selectionArea,
+              globals.state.nonSerializableState.pivotTable.selectionArea,
         }),
       });
     }
@@ -369,27 +398,32 @@ export class DetailsPanel implements m.ClassComponent {
     }
 
     const panel = currentTabDetails?.vnode;
-    const panels = panel ? [panel] : [];
 
-    return m(
-        '.details-content',
-        {
-          style: {
-            height: `${this.detailsHeight}px`,
-            display: detailsPanels.length > 0 ? null : 'none',
-          },
+    if (!exists(panel)) {
+      return null;
+    }
+
+    return [
+      m(DragHandle, {
+        resize: (height: number) => {
+          this.detailsHeight = Math.max(height, 0);
         },
-        m(DragHandle, {
-          resize: (height: number) => {
-            this.detailsHeight = Math.max(height, DRAG_HANDLE_HEIGHT_PX);
-          },
-          height: this.detailsHeight,
-          tabs: detailsPanels.map((tab) => {
-            return {key: tab.key, name: tab.name};
-          }),
-          currentTabKey: currentTabDetails?.key,
+        height: this.detailsHeight,
+        tabs: detailsPanels.map((tab) => {
+          return {key: tab.key, name: tab.name};
         }),
-        m('.details-panel-container.x-scrollable',
-          m(PanelContainer, {doesScroll: true, panels, kind: 'DETAILS'})));
+        currentTabKey: currentTabDetails?.key,
+      }),
+      m(
+          '.details-panel-container',
+          {
+            style: {height: `${this.detailsHeight}px`},
+          },
+          detailsPanels.map((tab) => {
+            const active = tab === currentTabDetails;
+            return m(Gate, {open: active}, tab.vnode);
+          }),
+          ),
+    ];
   }
 }

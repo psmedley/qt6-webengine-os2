@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
@@ -79,11 +79,9 @@ class VIEWS_EXPORT ViewsAXTreeManager : public ui::AXTreeManager,
   void UnsetGeneratedEventCallbackForTesting();
 
   // AXTreeManager implementation.
-  ui::AXNode* GetNodeFromTree(const ui::AXTreeID& tree_id,
-                              const ui::AXNodeID node_id) const override;
   ui::AXNode* GetNode(const ui::AXNodeID node_id) const override;
   ui::AXTreeID GetParentTreeID() const override;
-  ui::AXNode* GetParentNodeFromParentTreeAsAXNode() const override;
+  ui::AXNode* GetParentNodeFromParentTree() const override;
 
   // AXActionHandlerBase implementation.
   void PerformAction(const ui::AXActionData& data) override;
@@ -95,8 +93,9 @@ class VIEWS_EXPORT ViewsAXTreeManager : public ui::AXTreeManager,
   void OnWidgetDestroyed(Widget* widget) override;
 
  private:
-  using ViewsAXTreeSerializer =
-      ui::AXTreeSerializer<AXAuraObjWrapper*, std::vector<AXAuraObjWrapper*>>;
+  using ViewsAXTreeSerializer = ui::AXTreeSerializer<
+      AXAuraObjWrapper*,
+      std::vector<raw_ptr<AXAuraObjWrapper, VectorExperimental>>>;
 
   void SerializeTreeUpdates();
   void UnserializeTreeUpdates(const std::vector<ui::AXTreeUpdate>& updates);

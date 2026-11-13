@@ -11,9 +11,9 @@
 #include <memory>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/process/process_handle.h"
 #include "base/strings/escape.h"
@@ -36,8 +36,6 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view_aura.h"
 #include "content/public/browser/ax_inspect_factory.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -46,14 +44,15 @@
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/scoped_accessibility_mode_override.h"
 #include "content/shell/browser/shell.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
 #include "third_party/isimpledom/ISimpleDOMNode.h"
 #include "ui/accessibility/accessibility_features.h"
-#include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/ax_event_generator.h"
 #include "ui/accessibility/platform/ax_fragment_root_win.h"
 #include "ui/accessibility/platform/inspect/ax_inspect_utils_win.h"
@@ -80,6 +79,12 @@ class AccessibilityWinBrowserTest : public AccessibilityBrowserTest {
       delete;
 
   ~AccessibilityWinBrowserTest() override;
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    AccessibilityBrowserTest::SetUpCommandLine(command_line);
+    // Some of these tests assume a device scale factor of 1.0.
+    command_line->AppendSwitchASCII(switches::kForceDeviceScaleFactor, "1");
+  }
 
  protected:
   class AccessibleChecker;
@@ -177,16 +182,8 @@ void AccessibilityWinBrowserTest::SetUpInputField(
 void AccessibilityWinBrowserTest::SetUpScrollableInputField(
     Microsoft::WRL::ComPtr<IAccessibleText>* input_text) {
   ASSERT_NE(nullptr, input_text);
-  LoadInitialAccessibilityTreeFromHtml(
-      std::string(
-          R"HTML(<!DOCTYPE html>
-          <html>
-          <body>
-            <input type="text" style="width: 150px;" value=")HTML") +
-      base::EscapeForHTML(InputContentsString()) + std::string(R"HTML(">
-          </body>
-          </html>)HTML"));
 
+  LoadScrollableInputField("text");
   SetUpInputFieldHelper(input_text);
 }
 
@@ -195,16 +192,7 @@ void AccessibilityWinBrowserTest::SetUpScrollableInputField(
 void AccessibilityWinBrowserTest::SetUpScrollableInputTypeSearchField(
     Microsoft::WRL::ComPtr<IAccessibleText>* input_text) {
   ASSERT_NE(nullptr, input_text);
-  LoadInitialAccessibilityTreeFromHtml(
-      std::string(
-          R"HTML(<!DOCTYPE html>
-          <html>
-          <body>
-            <input type="search" style="width: 150px;" value=")HTML") +
-      base::EscapeForHTML(InputContentsString()) + std::string(R"HTML(">
-          </body>
-          </html>)HTML"));
-
+  LoadScrollableInputField("search");
   SetUpInputFieldHelper(input_text);
 }
 
@@ -660,7 +648,8 @@ class AccessibilityWinBrowserTest::AccessibleChecker {
   void SetExpectedState(LONG expected_state);
 
  private:
-  typedef std::vector<AccessibleChecker*> AccessibleCheckerVector;
+  typedef std::vector<raw_ptr<AccessibleChecker, VectorExperimental>>
+      AccessibleCheckerVector;
 
   void CheckAccessibleName(IAccessible* accessible);
   void CheckAccessibleRole(IAccessible* accessible);
@@ -926,7 +915,7 @@ class WebContentsUIAParentNavigationInDestroyedWatcher
 
 IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
                        TestAlwaysFireFocusEventAfterNavigationComplete) {
-  testing::ScopedContentAXModeSetter ax_mode_setter(ui::kAXModeBasic.mode());
+  ScopedAccessibilityModeOverride ax_mode_override(ui::kAXModeBasic.flags());
 
   ASSERT_TRUE(NavigateToURL(shell(), GURL(url::kAboutBlankURL)));
 
@@ -962,17 +951,38 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
                        TestLoadingAccessibilityTree) {
-  testing::ScopedContentAXModeSetter ax_mode_setter(ui::kAXModeBasic.mode());
+  ScopedAccessibilityModeOverride ax_mode_override(ui::kAXModeBasic.flags());
 
-  ASSERT_TRUE(NavigateToURL(shell(), GURL(url::kAboutBlankURL)));
-
-  // The initial accessible returned should have state STATE_SYSTEM_BUSY while
-  // the accessibility tree is being requested from the renderer.
   AccessibleChecker document1_checker(std::wstring(), ROLE_SYSTEM_DOCUMENT,
                                       std::wstring());
-  document1_checker.SetExpectedState(STATE_SYSTEM_READONLY |
-                                     STATE_SYSTEM_FOCUSABLE |
-                                     STATE_SYSTEM_FOCUSED | STATE_SYSTEM_BUSY);
+
+  {
+    AccessibilityNotificationWaiter preload_waiter(
+        shell()->web_contents(), ui::kAXModeComplete, ax::mojom::Event::kNone);
+
+    GURL html_data_url(
+        "data:text/html," +
+        base::EscapeQueryParamValue(R"HTML(<body></body>)HTML", false));
+    ASSERT_TRUE(NavigateToURL(shell(), html_data_url));
+
+    // It's possible to receive accessibility data from the new document before
+    // NavigateToURL returns, in which case it's too late to verify anything
+    // about the initial state of browser accessibility.
+    if (!preload_waiter.notification_received()) {
+      // The initial accessible returned should have state STATE_SYSTEM_BUSY
+      // while the accessibility tree is being requested from the renderer.
+      document1_checker.SetExpectedState(
+          STATE_SYSTEM_READONLY | STATE_SYSTEM_FOCUSED | STATE_SYSTEM_BUSY);
+      document1_checker.CheckAccessible(GetRendererAccessible());
+    }
+  }
+
+  AccessibilityNotificationWaiter waiter(shell()->web_contents(),
+                                         ui::kAXModeComplete,
+                                         ax::mojom::Event::kLoadComplete);
+  ASSERT_TRUE(waiter.WaitForNotification());
+  document1_checker.SetExpectedState(
+      STATE_SYSTEM_READONLY | STATE_SYSTEM_FOCUSABLE | STATE_SYSTEM_FOCUSED);
   document1_checker.CheckAccessible(GetRendererAccessible());
 }
 
@@ -1071,9 +1081,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   document_checker.CheckAccessible(GetRendererAccessible());
 
   // Change the children of the document body.
-  AccessibilityNotificationWaiter waiter(shell()->web_contents(),
-                                         ui::kAXModeComplete,
-                                         ax::mojom::Event::kChildrenChanged);
+  AccessibilityNotificationWaiter waiter(
+      shell()->web_contents(), ui::kAXModeComplete,
+      ui::AXEventGenerator::Event::CHILDREN_CHANGED);
   ExecuteScript(u"document.body.innerHTML='<b>new text</b>'");
   ASSERT_TRUE(waiter.WaitForNotification());
 
@@ -1096,9 +1106,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   document_checker.CheckAccessible(GetRendererAccessible());
 
   // Change the children of the document body.
-  AccessibilityNotificationWaiter waiter(shell()->web_contents(),
-                                         ui::kAXModeComplete,
-                                         ax::mojom::Event::kChildrenChanged);
+  AccessibilityNotificationWaiter waiter(
+      shell()->web_contents(), ui::kAXModeComplete,
+      ui::AXEventGenerator::Event::CHILDREN_CHANGED);
   ExecuteScript(u"document.body.children[0].style.visibility='visible'");
   ASSERT_TRUE(waiter.WaitForNotification());
 
@@ -1169,11 +1179,16 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest, FocusEventOnPageLoad) {
   AccessibilityNotificationWaiter waiter(shell()->web_contents(),
                                          ui::kAXModeComplete,
                                          ax::mojom::Event::kLoadComplete);
-  GURL html_data_url(
-      "data:text/html," +
-      base::EscapeQueryParamValue(R"HTML(<p> Hello</ p>)HTML", false));
-  EXPECT_TRUE(NavigateToURL(shell(), html_data_url));
-  WaitForAccessibilityFocusChange();
+  {
+    base::RunLoop run_loop;
+    GURL html_data_url(
+        "data:text/html," +
+        base::EscapeQueryParamValue(R"HTML(<p> Hello</ p>)HTML", false));
+    BrowserAccessibilityManager::SetFocusChangeCallbackForTesting(
+        run_loop.QuitClosure());
+    EXPECT_TRUE(NavigateToURL(shell(), html_data_url));
+    run_loop.Run();  // Wait for the focus change.
+  }
   // TODO(https://crbug.com/1332468): Investigate why this does not return
   // true.
   ASSERT_TRUE(waiter.WaitForNotification());
@@ -2093,9 +2108,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   }
 
   // Delete the character in the input field.
-  AccessibilityNotificationWaiter waiter(shell()->web_contents(),
-                                         ui::kAXModeComplete,
-                                         ax::mojom::Event::kChildrenChanged);
+  AccessibilityNotificationWaiter waiter(
+      shell()->web_contents(), ui::kAXModeComplete,
+      ui::AXEventGenerator::Event::CHILDREN_CHANGED);
   ExecuteScript(u"document.querySelector('[contenteditable]').innerText='';");
   ASSERT_TRUE(waiter.WaitForNotification());
 
@@ -2291,6 +2306,57 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   EXPECT_LT(0, y);
   EXPECT_LT(1, width);
   EXPECT_LT(1, height);
+}
+
+IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
+                       TestBasicMSAAAccessibilityModeChange) {
+  LoadInitialAccessibilityTreeFromHtml(R"HTML(
+      <p>Hello world.</p>
+      )HTML");
+  // Get the accessibility object for the window tree host.
+  aura::Window* window = shell()->window();
+  CHECK(window);
+  aura::WindowTreeHost* window_tree_host = window->GetHost();
+  CHECK(window_tree_host);
+  HWND hwnd = window_tree_host->GetAcceleratedWidget();
+  CHECK(hwnd);
+  Microsoft::WRL::ComPtr<IAccessible> browser_accessible;
+  HRESULT hr = AccessibleObjectFromWindow(hwnd, OBJID_WINDOW,
+                                          IID_PPV_ARGS(&browser_accessible));
+  ASSERT_EQ(S_OK, hr);
+
+  // Ensure that we can find accessibility nodes in web contents.
+  bool found = false;
+  FindNodeInAccessibilityTree(browser_accessible.Get(), ROLE_SYSTEM_STATICTEXT,
+                              L"Hello world.", 0, &found);
+  EXPECT_TRUE(found);
+
+  // Remove all accessibility modes.
+  content::BrowserAccessibilityStateImpl::GetInstance()
+      ->RemoveAccessibilityModeFlags(ui::kAXModeComplete);
+
+  // Ensure accessibility is not enabled before we begin the test.
+  EXPECT_TRUE(content::BrowserAccessibilityStateImpl::GetInstance()
+                  ->GetAccessibilityMode()
+                  .is_mode_off());
+
+  // Search for the document, we should be able to find it.
+  found = false;
+  FindNodeInAccessibilityTree(browser_accessible.Get(), ROLE_SYSTEM_DOCUMENT,
+                              L"", 0, &found);
+  EXPECT_TRUE(found);
+
+  // The act of searching for the document should enable kNativeAPIs
+  EXPECT_EQ(ui::AXMode(ui::AXMode::kNativeAPIs),
+            content::BrowserAccessibilityStateImpl::GetInstance()
+                ->GetAccessibilityMode());
+
+  // Even with kNativeAPIs, we still shouldn't be able to find the node in web
+  // contents.
+  found = false;
+  FindNodeInAccessibilityTree(browser_accessible.Get(), ROLE_SYSTEM_STATICTEXT,
+                              L"Hello world.", 0, &found);
+  EXPECT_FALSE(found);
 }
 
 IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest, TestScrollToPoint) {
@@ -2568,9 +2634,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest, TestPutAccValueInEditable) {
 
   base::win::ScopedVariant childid_self(CHILDID_SELF);
   base::win::ScopedBstr new_value(L"New value");
-  AccessibilityNotificationWaiter waiter(shell()->web_contents(),
-                                         ui::kAXModeComplete,
-                                         ax::mojom::Event::kChildrenChanged);
+  AccessibilityNotificationWaiter waiter(
+      shell()->web_contents(), ui::kAXModeComplete,
+      ui::AXEventGenerator::Event::CHILDREN_CHANGED);
   EXPECT_HRESULT_SUCCEEDED(
       paragraph->put_accValue(childid_self, new_value.Get()));
   ASSERT_TRUE(waiter.WaitForNotification());
@@ -4335,6 +4401,12 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest, TestIAccessibleAction) {
       image_action->get_localizedName(2, localized_name.Receive()));
   EXPECT_EQ(nullptr, localized_name.Get());
 
+  LONG n_key_bindings = -1;
+  BSTR* key_bindings[n_actions];
+  EXPECT_HRESULT_SUCCEEDED(
+      image_action->get_keyBinding(0, 100, key_bindings, &n_key_bindings));
+  EXPECT_EQ(0, n_key_bindings);
+
   base::win::ScopedVariant childid_self(CHILDID_SELF);
   base::win::ScopedBstr image_name;
   EXPECT_HRESULT_SUCCEEDED(
@@ -4626,14 +4698,26 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest, TestScrollTo) {
 
 IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
                        TestPageIsAccessibleAfterCancellingReload) {
-  LoadInitialAccessibilityTreeFromHtml(
-      "data:text/html,"
-      "<script>"
-      "window.onbeforeunload = function () {"
-      "  return '';"
-      "};"
-      "</script>"
-      "<input value='Test'>");
+  if (base::FeatureList::IsEnabled(
+          blink::features::kBeforeunloadEventCancelByPreventDefault)) {
+    LoadInitialAccessibilityTreeFromHtml(
+        "data:text/html,"
+        "<script>"
+        "window.onbeforeunload = function (e) {"
+        "  e.preventDefault()"
+        "};"
+        "</script>"
+        "<input value='Test'>");
+  } else {
+    LoadInitialAccessibilityTreeFromHtml(
+        "data:text/html,"
+        "<script>"
+        "window.onbeforeunload = function () {"
+        "  return 'Not empty string';"
+        "};"
+        "</script>"
+        "<input value='Test'>");
+  }
 
   // When the before unload dialog shows, simulate the user clicking
   // cancel on that dialog.
@@ -4701,13 +4785,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
 }
 
 class AccessibilityWinUIABrowserTest : public AccessibilityWinBrowserTest {
- protected:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    AccessibilityWinBrowserTest::SetUpCommandLine(command_line);
-
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        ::switches::kEnableExperimentalUIAutomation);
-  }
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_{::features::kUiaProvider};
 };
 
 IN_PROC_BROWSER_TEST_F(AccessibilityWinUIABrowserTest, TestIScrollProvider) {
@@ -4876,6 +4955,67 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinUIABrowserTest,
                                           result.Receive());
   EXPECT_EQ(VT_BOOL, result.type());
   EXPECT_EQ(VARIANT_FALSE, result.ptr()->boolVal);
+}
+
+IN_PROC_BROWSER_TEST_F(AccessibilityWinUIABrowserTest,
+                       OffscreenNodeNotClickable) {
+  LoadInitialAccessibilityTreeFromHtml(
+      R"HTML(<!DOCTYPE html>
+      <html>
+        <div style="height:200vh"></div>
+        <button>offscreen</button>
+      </html>)HTML");
+
+  BrowserAccessibility* target =
+      FindNode(ax::mojom::Role::kButton, "offscreen");
+  EXPECT_NE(nullptr, target);
+  BrowserAccessibilityComWin* accessibility_com_win =
+      ToBrowserAccessibilityWin(target)->GetCOM();
+  EXPECT_NE(nullptr, accessibility_com_win);
+
+  base::win::ScopedVariant result;
+
+  accessibility_com_win->GetPropertyValue(UIA_IsOffscreenPropertyId,
+                                          result.Receive());
+
+  EXPECT_EQ(VARIANT_TRUE, result.ptr()->boolVal);
+
+  result.Release();
+
+  accessibility_com_win->GetPropertyValue(UIA_ClickablePointPropertyId,
+                                          result.Receive());
+
+  EXPECT_EQ(VT_EMPTY, result.type());
+}
+
+IN_PROC_BROWSER_TEST_F(AccessibilityWinUIABrowserTest,
+                       OnscreenNodeClickable) {
+  LoadInitialAccessibilityTreeFromHtml(
+      R"HTML(<!DOCTYPE html>
+      <html>
+        <button>onscreen</button>
+      </html>)HTML");
+
+  BrowserAccessibility* target =
+      FindNode(ax::mojom::Role::kButton, "onscreen");
+  EXPECT_NE(nullptr, target);
+  BrowserAccessibilityComWin* accessibility_com_win =
+      ToBrowserAccessibilityWin(target)->GetCOM();
+  EXPECT_NE(nullptr, accessibility_com_win);
+
+  base::win::ScopedVariant result;
+
+  accessibility_com_win->GetPropertyValue(UIA_IsOffscreenPropertyId,
+                                          result.Receive());
+
+  EXPECT_EQ(VARIANT_FALSE, result.ptr()->boolVal);
+
+  result.Release();
+
+  accessibility_com_win->GetPropertyValue(UIA_ClickablePointPropertyId,
+                                          result.Receive());
+
+  EXPECT_NE(VT_EMPTY, result.type());
 }
 
 IN_PROC_BROWSER_TEST_F(AccessibilityWinUIABrowserTest,
@@ -5317,7 +5457,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinUIASelectivelyEnabledBrowserTest,
 
   // Start with AXMode::kWebContents. Later, a UIA call will cause kNativeAPIs
   // to be added to the AXMode.
-  testing::ScopedContentAXModeSetter ax_mode_setter(ui::AXMode::kWebContents);
+  ScopedAccessibilityModeOverride ax_mode_override(ui::AXMode::kWebContents);
 
   // Request an automation element for the top-level window.
   Microsoft::WRL::ComPtr<IUIAutomation> uia;
@@ -5335,7 +5475,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinUIASelectivelyEnabledBrowserTest,
   // (kAXModeBasic includes both kNativeAPIs and kWebContents). Importantly,
   // this combination of AXModes allows RenderFrameHostImpl to create
   // BrowserAccessibilityManagers.
-  ui::AXMode expected_mode = ui::kAXModeBasic.mode();
+  ui::AXMode expected_mode = ui::kAXModeBasic.flags();
   EXPECT_EQ(expected_mode, content::BrowserAccessibilityStateImpl::GetInstance()
                                ->GetAccessibilityMode());
 
@@ -5468,8 +5608,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinUIABrowserTest,
   EXPECT_NE(nullptr, text_pattern_unknown.Get());
 }
 
+// TODO(crbug.com/1432289): Fix this failing test.
 IN_PROC_BROWSER_TEST_F(AccessibilityWinUIABrowserTest,
-                       AsyncContentLoadedEventOnDocumentLoad) {
+                       DISABLED_AsyncContentLoadedEventOnDocumentLoad) {
   // Load the page.
   AccessibilityNotificationWaiter waiter(shell()->web_contents(),
                                          ui::kAXModeComplete,

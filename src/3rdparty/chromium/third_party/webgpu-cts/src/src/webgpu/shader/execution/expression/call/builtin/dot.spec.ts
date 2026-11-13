@@ -4,17 +4,15 @@ Execution tests for the 'dot' builtin function
 T is AbstractInt, AbstractFloat, i32, u32, f32, or f16
 @const fn dot(e1: vecN<T>,e2: vecN<T>) -> T
 Returns the dot product of e1 and e2.
-
 `;
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { TypeF32, TypeVec } from '../../../../../util/conversion.js';
-import { dotInterval } from '../../../../../util/f32_interval.js';
-import { kVectorTestValues } from '../../../../../util/math.js';
-import { allInputSources, Case, makeVectorPairToF32IntervalCase, run } from '../../expression.js';
+import { TypeF16, TypeF32, TypeVec } from '../../../../../util/conversion.js';
+import { allInputSources, run } from '../../expression.js';
 
 import { builtin } from './builtin.js';
+import { d } from './dot.cache.js';
 
 export const g = makeTestGroup(GPUTest);
 
@@ -47,16 +45,9 @@ g.test('f32_vec2')
   .desc(`f32 tests using vec2s`)
   .params(u => u.combine('inputSource', allInputSources))
   .fn(async t => {
-    const makeCase = (x: number[], y: number[]): Case => {
-      return makeVectorPairToF32IntervalCase(x, y, dotInterval);
-    };
-
-    const cases: Case[] = kVectorTestValues[2].flatMap(i => {
-      return kVectorTestValues[2].map(j => {
-        return makeCase(i, j);
-      });
-    });
-
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f32_vec2_const' : 'f32_vec2_non_const'
+    );
     await run(
       t,
       builtin('dot'),
@@ -72,16 +63,9 @@ g.test('f32_vec3')
   .desc(`f32 tests using vec3s`)
   .params(u => u.combine('inputSource', allInputSources))
   .fn(async t => {
-    const makeCase = (x: number[], y: number[]): Case => {
-      return makeVectorPairToF32IntervalCase(x, y, dotInterval);
-    };
-
-    const cases: Case[] = kVectorTestValues[3].flatMap(i => {
-      return kVectorTestValues[3].map(j => {
-        return makeCase(i, j);
-      });
-    });
-
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f32_vec3_const' : 'f32_vec3_non_const'
+    );
     await run(
       t,
       builtin('dot'),
@@ -97,16 +81,9 @@ g.test('f32_vec4')
   .desc(`f32 tests using vec4s`)
   .params(u => u.combine('inputSource', allInputSources))
   .fn(async t => {
-    const makeCase = (x: number[], y: number[]): Case => {
-      return makeVectorPairToF32IntervalCase(x, y, dotInterval);
-    };
-
-    const cases: Case[] = kVectorTestValues[4].flatMap(i => {
-      return kVectorTestValues[4].map(j => {
-        return makeCase(i, j);
-      });
-    });
-
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f32_vec4_const' : 'f32_vec4_non_const'
+    );
     await run(
       t,
       builtin('dot'),
@@ -117,8 +94,65 @@ g.test('f32_vec4')
     );
   });
 
-g.test('f16')
+g.test('f16_vec2')
   .specURL('https://www.w3.org/TR/WGSL/#vector-builtin-functions')
-  .desc(`f16 tests`)
+  .desc(`f16 tests using vec2s`)
   .params(u => u.combine('inputSource', allInputSources))
-  .unimplemented();
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f16_vec2_const' : 'f16_vec2_non_const'
+    );
+    await run(
+      t,
+      builtin('dot'),
+      [TypeVec(2, TypeF16), TypeVec(2, TypeF16)],
+      TypeF16,
+      t.params,
+      cases
+    );
+  });
+
+g.test('f16_vec3')
+  .specURL('https://www.w3.org/TR/WGSL/#vector-builtin-functions')
+  .desc(`f16 tests using vec3s`)
+  .params(u => u.combine('inputSource', allInputSources))
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f16_vec3_const' : 'f16_vec3_non_const'
+    );
+    await run(
+      t,
+      builtin('dot'),
+      [TypeVec(3, TypeF16), TypeVec(3, TypeF16)],
+      TypeF16,
+      t.params,
+      cases
+    );
+  });
+
+g.test('f16_vec4')
+  .specURL('https://www.w3.org/TR/WGSL/#vector-builtin-functions')
+  .desc(`f16 tests using vec4s`)
+  .params(u => u.combine('inputSource', allInputSources))
+  .beforeAllSubcases(t => {
+    t.selectDeviceOrSkipTestCase('shader-f16');
+  })
+  .fn(async t => {
+    const cases = await d.get(
+      t.params.inputSource === 'const' ? 'f16_vec4_const' : 'f16_vec4_non_const'
+    );
+    await run(
+      t,
+      builtin('dot'),
+      [TypeVec(4, TypeF16), TypeVec(4, TypeF16)],
+      TypeF16,
+      t.params,
+      cases
+    );
+  });

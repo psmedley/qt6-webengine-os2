@@ -50,8 +50,27 @@ class StylePropertyMap {
 /** @type {!StylePropertyMap} */
 HTMLElement.prototype.attributeStyleMap;
 
+/**
+ * @see https://drafts.css-houdini.org/css-typed-om/#stylepropertymapreadonly
+ */
+class StylePropertyMapReadOnly {
+  /** @param {string} property */
+  get(property) {}
+}
+
+/** @return {!StylePropertyMapReadOnly} */
+HTMLElement.prototype.computedStyleMap = function() {};
+
 /** @return {!AnimationEffectTimingProperties} */
 AnimationEffect.prototype.getTiming = function() {};
 
 /** @return {!Array<!Object>} */
 AnimationEffect.prototype.getKeyframes = function() {};
+
+/**
+ * https://developer.mozilla.org/en-US/docs/Web/API/structuredClone
+ * @param {T} obj
+ * @return {T}
+ * @template T
+ */
+function structuredClone(obj) {}

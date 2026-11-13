@@ -8,7 +8,7 @@
 #include <map>
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/time/time.h"
 #include "components/download/public/background_service/clients.h"
 #include "net/base/isolation_info.h"
@@ -17,6 +17,7 @@
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace download {
 
@@ -132,6 +133,14 @@ struct RequestParams {
   // considered a main frame navigation. However, this is not true for
   // background fetch.
   bool update_first_party_url_on_redirect = true;
+
+
+  // The origin that initiated the request. This is used to perform
+  // security checks. Normally, these checks aren't required for downloads,
+  // but necessary for background fetch.
+  // See |request_initiator| in url_request.mojom for a more detailed
+  // explanation.
+  absl::optional<url::Origin> initiator;
 };
 
 // The parameters that describe a download request made to the DownloadService.
@@ -178,7 +187,8 @@ struct DownloadParams {
   // The feature that is requesting this download.
   DownloadClient client;
 
-  // A unique GUID that represents this download.  See |base::GenerateGUID()|.
+  // A unique GUID that represents this download.  See
+  // `base::Uuid::GenerateRandomV4().AsLowercaseString()`.
   std::string guid;
 
   // A callback that will be notified if this download has been accepted and

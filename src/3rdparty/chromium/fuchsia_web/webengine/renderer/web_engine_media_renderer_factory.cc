@@ -8,7 +8,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
+#include "base/task/sequenced_task_runner.h"
 #include "fuchsia_web/webengine/renderer/web_engine_audio_renderer.h"
 #include "media/base/decoder_factory.h"
 #include "media/renderers/renderer_impl.h"
@@ -32,7 +33,7 @@ WebEngineMediaRendererFactory::~WebEngineMediaRendererFactory() = default;
 
 std::vector<std::unique_ptr<media::VideoDecoder>>
 WebEngineMediaRendererFactory::CreateVideoDecoders(
-    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
+    const scoped_refptr<base::SequencedTaskRunner>& media_task_runner,
     media::RequestOverlayInfoCB request_overlay_info_cb,
     const gfx::ColorSpace& target_color_space,
     media::GpuVideoAcceleratorFactories* gpu_factories) {
@@ -44,7 +45,7 @@ WebEngineMediaRendererFactory::CreateVideoDecoders(
 }
 
 std::unique_ptr<media::Renderer> WebEngineMediaRendererFactory::CreateRenderer(
-    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
+    const scoped_refptr<base::SequencedTaskRunner>& media_task_runner,
     const scoped_refptr<base::TaskRunner>& worker_task_runner,
     media::AudioRendererSink* audio_renderer_sink,
     media::VideoRendererSink* video_renderer_sink,

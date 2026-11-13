@@ -13,11 +13,13 @@
 #include "web_engine_settings.h"
 
 #include "base/strings/strcat.h"
+#include "blink/public/common/page/page_zoom.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/desktop_streams_registry.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/media_capture_devices.h"
 #include "content/public/browser/render_process_host.h"
 #include "media/audio/audio_device_description.h"
@@ -107,6 +109,27 @@ media::mojom::CaptureHandlePtr CreateCaptureHandle(content::WebContents *capture
     return result;
 }
 
+absl::optional<int> GetZoomLevel(content::WebContents *capturer,
+                                 const content::DesktopMediaID &captured_id)
+{
+    content::RenderFrameHost *const captured_rfh =
+            content::RenderFrameHost::FromID(captured_id.web_contents_id.render_process_id,
+                                             captured_id.web_contents_id.main_render_frame_id);
+    if (!captured_rfh || !captured_rfh->IsActive()) {
+        return absl::nullopt;
+    }
+
+    content::WebContents *const captured_wc =
+            content::WebContents::FromRenderFrameHost(captured_rfh);
+    if (!captured_wc) {
+        return absl::nullopt;
+    }
+
+    double zoom_level =
+            blink::PageZoomLevelToZoomFactor(content::HostZoomMap::GetZoomLevel(captured_wc));
+    return std::round(100 * zoom_level);
+}
+
 // Based on chrome/browser/media/webrtc/desktop_capture_devices_util.cc:
 media::mojom::DisplayMediaInformationPtr DesktopMediaIDToDisplayMediaInformation(content::WebContents *capturer,
                                                                                  const url::Origin &capturer_origin,
@@ -122,6 +145,7 @@ media::mojom::DisplayMediaInformationPtr DesktopMediaIDToDisplayMediaInformation
 #endif  // defined(USE_AURA)
 
     media::mojom::CaptureHandlePtr capture_handle;
+    int zoom_level = 100;
     switch (media_id.type) {
     case content::DesktopMediaID::TYPE_SCREEN:
         display_surface = media::mojom::DisplayCaptureSurfaceType::MONITOR;
@@ -137,12 +161,16 @@ media::mojom::DisplayMediaInformationPtr DesktopMediaIDToDisplayMediaInformation
         display_surface = media::mojom::DisplayCaptureSurfaceType::BROWSER;
         cursor = media::mojom::CursorCaptureType::MOTION;
         capture_handle = CreateCaptureHandle(capturer, capturer_origin, media_id);
+        if (base::FeatureList::IsEnabled(features::kCapturedSurfaceControlKillswitch)) {
+            zoom_level = GetZoomLevel(capturer, media_id).value_or(zoom_level);
+        }
         break;
     case content::DesktopMediaID::TYPE_NONE:
         break;
     }
 
-    return media::mojom::DisplayMediaInformation::New(display_surface, logical_surface, cursor, std::move(capture_handle));
+    return media::mojom::DisplayMediaInformation::New(display_surface, logical_surface, cursor,
+                                                      std::move(capture_handle), zoom_level);
 }
 
 
@@ -219,91 +247,6 @@ void getDevicesForDesktopCapture(const content::MediaStreamRequest &request,
                         "System Audio");
         }
     }
-}
-
-content::DesktopMediaID getDefaultScreenId()
-{
-#if QT_CONFIG(webengine_webrtc)
-    // Source id patterns are different across platforms.
-    // On Linux and macOS, the source ids are randomish numbers assigned by the OS.
-    // On Windows, the screens are enumerated consecutively in increasing order from 0.
-
-    // In order to provide a correct screen id, we query for the available screen ids, and
-    // select the first one as the main display id.
-#if !defined(WEBRTC_USE_X11)
-    // The code is based on the file
-    // chrome/browser/media/webrtc/native_desktop_media_list.cc.
-    webrtc::DesktopCaptureOptions options =
-            webrtc::DesktopCaptureOptions::CreateDefault();
-    options.set_disable_effects(false);
-    std::unique_ptr<webrtc::DesktopCapturer> screen_capturer(
-            webrtc::DesktopCapturer::CreateScreenCapturer(options));
-
-    if (screen_capturer) {
-        webrtc::DesktopCapturer::SourceList screens;
-        if (screen_capturer->GetSourceList(&screens)) {
-            if (screens.size() > 0) {
-                return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, screens[0].id);
-            }
-        }
-    }
-#else
-    // This is a workaround to avoid thread issues with DesktopCapturer [1]. Unfortunately,
-    // creating a DesktopCapturer is not thread safe on X11 due to the use of webrtc::XErrorTrap.
-    // Can be removed if https://crbug.com/2022 and/or https://crbug.com/570852 are fixed.
-    // The code is based on the file
-    // third_party/webrtc/modules/desktop_capture/linux/screen_capturer_x11.cc.
-    //
-    // [1]: webrtc::InProcessVideoCaptureDeviceLauncher::DoStartDesktopCaptureOnDeviceThread
-    Display *display = XOpenDisplay(nullptr);
-    if (!display) {
-        qWarning("Unable to open display.");
-        return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, 0);
-    }
-
-    int randrEventBase = 0;
-    int errorBaseIgnored = 0;
-    if (!XRRQueryExtension(display, &randrEventBase, &errorBaseIgnored)) {
-        qWarning("X server does not support XRandR.");
-        return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, 0);
-    }
-
-    int majorVersion = 0;
-    int minorVersion = 0;
-    if (!XRRQueryVersion(display, &majorVersion, &minorVersion)) {
-        qWarning("X server does not support XRandR.");
-        return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, 0);
-    }
-
-    if (majorVersion < 1 || (majorVersion == 1 && minorVersion < 5)) {
-        qWarning("XRandR entension is older than v1.5.");
-        return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, 0);
-    }
-
-    typedef XRRMonitorInfo *(*GetMonitorsFunc)(Display *, Window, Bool, int *);
-    GetMonitorsFunc getMonitors = reinterpret_cast<GetMonitorsFunc>(dlsym(RTLD_DEFAULT, "XRRGetMonitors"));
-    typedef void (*FreeMonitorsFunc)(XRRMonitorInfo*);
-    FreeMonitorsFunc freeMonitors = reinterpret_cast<FreeMonitorsFunc>(dlsym(RTLD_DEFAULT, "XRRFreeMonitors"));
-    if (!getMonitors || !freeMonitors) {
-        qWarning("Unable to link XRandR monitor functions.");
-        return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, 0);
-    }
-
-    Window rootWindow = RootWindow(display, DefaultScreen(display));
-    if (rootWindow == BadValue) {
-        qWarning("Unable to get the root window.");
-        return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, 0);
-    }
-
-    int numMonitors = 0;
-    XRRMonitorInfo *monitors = getMonitors(display, rootWindow, true, &numMonitors);
-    auto cleanup = qScopeGuard([&] () { freeMonitors(monitors); });
-    if (numMonitors > 0)
-        return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, monitors[0].name);
-#endif // !defined(WEBRTC_USE_X11)
-#endif // QT_CONFIG(webengine_webrtc)
-
-    return content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN, 0);
 }
 
 WebContentsAdapterClient::MediaRequestFlags mediaRequestFlagsForRequest(const content::MediaStreamRequest &request)
@@ -389,13 +332,12 @@ private:
     bool m_started = false;
     base::RepeatingClosure m_onStop; // currently unused
 };
-
 } // namespace
 
-MediaCaptureDevicesDispatcher::PendingAccessRequest::PendingAccessRequest(const content::MediaStreamRequest &request,
-                                                                          content::MediaResponseCallback callback)
-        : request(request)
-        , callback(std::move(callback))
+MediaCaptureDevicesDispatcher::PendingAccessRequest::PendingAccessRequest(
+        const content::MediaStreamRequest &request, content::MediaResponseCallback callback,
+        content::DesktopMediaID id)
+    : request(request), callback(std::move(callback)), mediaId(id)
 {
 }
 
@@ -419,8 +361,12 @@ void MediaCaptureDevicesDispatcher::handleMediaAccessPermissionResponse(content:
     bool securityOriginsMatch = (requestSecurityOrigin.host() == securityOrigin.host()
                                  && requestSecurityOrigin.scheme() == securityOrigin.scheme()
                                  && requestSecurityOrigin.port() == securityOrigin.port());
-    if (!securityOriginsMatch)
-        qWarning("Security origin mismatch for media access permission: %s requested and %s provided\n", qPrintable(requestSecurityOrigin.toString()), qPrintable(securityOrigin.toString()));
+    if (!securityOriginsMatch) {
+        qWarning("Security origin mismatch for media access permission: %ls requested "
+                 "and %ls provided\n",
+                 qUtf16Printable(requestSecurityOrigin.toString()),
+                 qUtf16Printable(securityOrigin.toString()));
+    }
 
     WebContentsAdapterClient::MediaRequestFlags requestFlags = mediaRequestFlagsForRequest(request);
     WebContentsAdapterClient::MediaRequestFlags finalFlags = requestFlags & authorizationFlags;
@@ -431,6 +377,8 @@ void MediaCaptureDevicesDispatcher::handleMediaAccessPermissionResponse(content:
     bool desktopVideoRequested = finalFlags.testFlag(WebContentsAdapterClient::MediaDesktopVideoCapture);
 
     if (securityOriginsMatch) {
+        content::DesktopMediaID &id = queue.front()->mediaId;
+
         if (microphoneRequested || webcamRequested) {
             switch (request.request_type) {
             case blink::MEDIA_OPEN_DEVICE_PEPPER_ONLY:
@@ -444,11 +392,11 @@ void MediaCaptureDevicesDispatcher::handleMediaAccessPermissionResponse(content:
                                   microphoneRequested, webcamRequested, deviceSet);
                 break;
             }
-        } else if (desktopVideoRequested) {
+        } else if (desktopVideoRequested && !id.is_null()) {
             deviceSet.stream_devices.emplace_back(blink::mojom::StreamDevices::New());
             bool captureAudio = desktopAudioRequested && m_loopbackAudioSupported;
             blink::mojom::StreamDevices &stream_devices = *deviceSet.stream_devices[0];
-            getDevicesForDesktopCapture(request, webContents, getDefaultScreenId(), captureAudio,
+            getDevicesForDesktopCapture(request, webContents, id, captureAudio,
                                         request.disable_local_echo, stream_devices);
         }
     }
@@ -497,7 +445,9 @@ void MediaCaptureDevicesDispatcher::WebContentsDestroyed(content::WebContents *w
     m_pendingRequests.erase(webContents);
 }
 
-void MediaCaptureDevicesDispatcher::processMediaAccessRequest(content::WebContents *webContents, const content::MediaStreamRequest &request, content::MediaResponseCallback callback)
+void MediaCaptureDevicesDispatcher::processMediaAccessRequest(
+        content::WebContents *webContents, const content::MediaStreamRequest &request,
+        content::MediaResponseCallback callback, content::DesktopMediaID id)
 {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     // Ensure we are observing the deletion of |webContents|.
@@ -516,7 +466,7 @@ void MediaCaptureDevicesDispatcher::processMediaAccessRequest(content::WebConten
         const bool screenCaptureEnabled = adapterClient->webEngineSettings()->testAttribute(
                 QWebEngineSettings::ScreenCaptureEnabled);
         const bool originIsSecure = network::IsUrlPotentiallyTrustworthy(request.security_origin);
-        if (!screenCaptureEnabled || !originIsSecure) {
+        if (!screenCaptureEnabled || !originIsSecure || (id.is_null() && request.requested_video_device_id.empty())) {
             std::move(callback).Run(blink::mojom::StreamDevicesSet(), MediaStreamRequestResult::INVALID_STATE, std::unique_ptr<content::MediaStreamUI>());
             return;
         }
@@ -528,7 +478,7 @@ void MediaCaptureDevicesDispatcher::processMediaAccessRequest(content::WebConten
         }
     }
 
-    enqueueMediaAccessRequest(webContents, request, std::move(callback));
+    enqueueMediaAccessRequest(webContents, request, std::move(callback), id);
     // We might not require this approval for pepper requests.
     adapterClient->runMediaAccessPermissionRequest(toQt(request.security_origin), flags);
 }
@@ -543,13 +493,11 @@ void MediaCaptureDevicesDispatcher::processDesktopCaptureAccessRequest(content::
 
     content::DesktopMediaID mediaId;
     if (main_frame) {
-        // The extension name that the stream is registered with.
-        std::string originalExtensionName;
         // Resolve DesktopMediaID for the specified device id.
         mediaId = content::DesktopStreamsRegistry::GetInstance()->RequestMediaForStreamId(
                 request.requested_video_device_id, main_frame->GetProcess()->GetID(),
                 main_frame->GetRoutingID(), url::Origin::Create(request.security_origin),
-                &originalExtensionName, content::kRegistryStreamTypeDesktop);
+                content::kRegistryStreamTypeDesktop);
     }
 
     // Received invalid device id.
@@ -576,14 +524,14 @@ void MediaCaptureDevicesDispatcher::processDesktopCaptureAccessRequest(content::
                                 std::make_unique<MediaStreamUIQt>(webContents, *deviceSet.stream_devices[0]));
 }
 
-void MediaCaptureDevicesDispatcher::enqueueMediaAccessRequest(content::WebContents *webContents,
-                                                              const content::MediaStreamRequest &request,
-                                                              content::MediaResponseCallback callback)
+void MediaCaptureDevicesDispatcher::enqueueMediaAccessRequest(
+        content::WebContents *webContents, const content::MediaStreamRequest &request,
+        content::MediaResponseCallback callback, content::DesktopMediaID id)
 {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     RequestsQueue &queue = m_pendingRequests[webContents];
-    queue.push_back(std::make_unique<PendingAccessRequest>(request, std::move(callback)));
+    queue.push_back(std::make_unique<PendingAccessRequest>(request, std::move(callback), id));
 }
 
 void MediaCaptureDevicesDispatcher::ProcessQueuedAccessRequest(content::WebContents *webContents)

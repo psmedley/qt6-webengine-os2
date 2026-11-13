@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,13 +22,10 @@
 #include "core/fxge/fx_font.h"
 #include "core/fxge/text_char_pos.h"
 #include "third_party/base/check.h"
+#include "third_party/base/check_op.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "xfa/fgas/font/cfgas_gefont.h"
 #include "xfa/fgas/layout/cfgas_txtbreak.h"
-
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-#include "core/fxge/cfx_defaultrenderdevice.h"
-#endif
 
 namespace {
 
@@ -76,7 +73,7 @@ bool CFDE_TextOut::DrawString(CFX_RenderDevice* device,
 
   RetainPtr<CFGAS_GEFont> pCurFont;
   TextCharPos* pCurCP = nullptr;
-  int32_t iCurCount = 0;
+  size_t count = 0;
   static constexpr CFX_TextRenderOptions kOptions(CFX_TextRenderOptions::kLcd);
   for (auto& pos : pCharPos) {
     RetainPtr<CFGAS_GEFont> pSTFont =
@@ -96,19 +93,19 @@ bool CFDE_TextOut::DrawString(CFX_RenderDevice* device,
         font = pFxFont;
 #endif
 
-        device->DrawNormalText(pdfium::make_span(pCurCP, iCurCount), font,
+        device->DrawNormalText(pdfium::make_span(pCurCP, count), font,
                                -fFontSize, matrix, color, kOptions);
       }
       pCurFont = pSTFont;
       pCurCP = &pos;
-      iCurCount = 1;
+      count = 1;
     } else {
-      ++iCurCount;
+      ++count;
     }
   }
 
   bool bRet = true;
-  if (pCurFont && iCurCount) {
+  if (pCurFont && count) {
     pFxFont = pCurFont->GetDevFont();
     CFX_Font* font;
 #if !BUILDFLAG(IS_WIN)
@@ -119,13 +116,9 @@ bool CFDE_TextOut::DrawString(CFX_RenderDevice* device,
     font = pFxFont;
 #endif
 
-    bRet = device->DrawNormalText(pdfium::make_span(pCurCP, iCurCount), font,
+    bRet = device->DrawNormalText(pdfium::make_span(pCurCP, count), font,
                                   -fFontSize, matrix, color, kOptions);
   }
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-  if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
-    device->Flush(false);
-#endif
 
   return bRet;
 }
@@ -137,7 +130,7 @@ CFDE_TextOut::Piece::Piece(const Piece& that) = default;
 CFDE_TextOut::Piece::~Piece() = default;
 
 CFDE_TextOut::CFDE_TextOut()
-    : m_pTxtBreak(std::make_unique<CFGAS_TxtBreak>()), m_ttoLines(5) {}
+    : m_pTxtBreak(std::make_unique<CFGAS_TxtBreak>()) {}
 
 CFDE_TextOut::~CFDE_TextOut() = default;
 
@@ -352,6 +345,7 @@ void CFDE_TextOut::LoadText(const WideString& str, const CFX_RectF& rect) {
     }
     if (m_fLinePos + fLineStep > fLineStop) {
       size_t iCurLine = bEndofLine ? m_iCurLine - 1 : m_iCurLine;
+      CHECK_LT(m_iCurLine, m_ttoLines.size());
       m_ttoLines[iCurLine].set_new_reload(true);
       bRet = true;
       break;
@@ -402,6 +396,7 @@ bool CFDE_TextOut::RetrievePieces(CFGAS_Char::BreakType dwBreakStatus,
     }
 
     if (j == chars_to_skip && !bReload) {
+      CHECK_LT(m_iCurLine, m_ttoLines.size());
       m_ttoLines[m_iCurLine].set_new_reload(true);
     } else if (j > chars_to_skip) {
       Piece piece;
@@ -532,10 +527,7 @@ size_t CFDE_TextOut::GetDisplayPos(const Piece* pPiece) {
 
 CFDE_TextOut::Line::Line() = default;
 
-CFDE_TextOut::Line::Line(const Line& that) {
-  new_reload_ = that.new_reload_;
-  pieces_ = that.pieces_;
-}
+CFDE_TextOut::Line::Line(const Line& that) = default;
 
 CFDE_TextOut::Line::~Line() = default;
 

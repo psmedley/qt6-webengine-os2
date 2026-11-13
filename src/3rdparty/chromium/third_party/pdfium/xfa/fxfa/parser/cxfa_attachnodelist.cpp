@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "xfa/fxfa/parser/cxfa_attachnodelist.h"
 
-#include "third_party/base/numerics/safe_conversions.h"
 #include "xfa/fxfa/parser/cxfa_node.h"
 
 CXFA_AttachNodeList::CXFA_AttachNodeList(CXFA_Document* pDocument,

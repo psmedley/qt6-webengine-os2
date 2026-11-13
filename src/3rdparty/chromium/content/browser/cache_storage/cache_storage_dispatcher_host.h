@@ -56,7 +56,7 @@ class CacheStorageDispatcherHost {
       mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
           coep_reporter,
       const blink::StorageKey& storage_key,
-      const absl::optional<storage::BucketLocator>& bucket,
+      const std::optional<storage::BucketLocator>& bucket,
       storage::mojom::CacheStorageOwner owner,
       mojo::PendingReceiver<blink::mojom::CacheStorage> receiver);
 
@@ -81,7 +81,7 @@ class CacheStorageDispatcherHost {
   CacheStorageHandle OpenCacheStorage(
       const storage::BucketLocator& bucket_locator,
       storage::mojom::CacheStorageOwner owner);
-  void UpdateOrCreateBucket(
+  void UpdateOrCreateDefaultBucket(
       const blink::StorageKey& storage_key,
       base::OnceCallback<void(storage::QuotaErrorOr<storage::BucketInfo>)>
           callback);

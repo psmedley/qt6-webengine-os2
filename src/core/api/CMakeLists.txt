@@ -12,11 +12,14 @@ qt_internal_add_module(WebEngineCore
         qwebenginecertificateerror.cpp qwebenginecertificateerror.h
         qwebengineclientcertificateselection.cpp qwebengineclientcertificateselection.h
         qwebengineclientcertificatestore.cpp qwebengineclientcertificatestore.h
+        qwebengineclienthints.cpp qwebengineclienthints.h
         qwebenginecontextmenurequest.cpp qwebenginecontextmenurequest.h qwebenginecontextmenurequest_p.h
         qwebenginecookiestore.cpp qwebenginecookiestore.h qwebenginecookiestore_p.h
+        qwebenginedesktopmediarequest.cpp qwebenginedesktopmediarequest.h qwebenginedesktopmediarequest_p.h
         qwebenginedownloadrequest.cpp qwebenginedownloadrequest.h qwebenginedownloadrequest_p.h
         qwebenginefilesystemaccessrequest.cpp qwebenginefilesystemaccessrequest.h
         qwebenginefindtextresult.cpp qwebenginefindtextresult.h
+        qwebengineframe.cpp qwebengineframe.h
         qwebenginefullscreenrequest.cpp qwebenginefullscreenrequest.h
         qwebenginehistory.cpp qwebenginehistory.h qwebenginehistory_p.h
         qwebenginehttprequest.cpp qwebenginehttprequest.h
@@ -26,6 +29,7 @@ qt_internal_add_module(WebEngineCore
         qwebenginenewwindowrequest.cpp qwebenginenewwindowrequest.h qwebenginenewwindowrequest_p.h
         qwebenginenotification.cpp qwebenginenotification.h
         qwebenginepage.cpp qwebenginepage.h qwebenginepage_p.h
+        qwebenginepermission.cpp qwebenginepermission.h qwebenginepermission_p.h
         qwebengineprofile.cpp qwebengineprofile.h qwebengineprofile_p.h
         qwebenginequotarequest.cpp qwebenginequotarequest.h
         qwebengineregisterprotocolhandlerrequest.cpp qwebengineregisterprotocolhandlerrequest.h
@@ -33,18 +37,22 @@ qt_internal_add_module(WebEngineCore
         qwebenginescriptcollection.cpp qwebenginescriptcollection.h qwebenginescriptcollection_p.h
         qwebenginesettings.cpp qwebenginesettings.h
         qwebengineurlrequestinfo.cpp qwebengineurlrequestinfo.h qwebengineurlrequestinfo_p.h
-        qwebengineurlrequestinterceptor.h
+        qwebengineurlrequestinterceptor.h qwebengineurlrequestinterceptor.cpp
         qwebengineurlrequestjob.cpp qwebengineurlrequestjob.h
         qwebengineurlscheme.cpp qwebengineurlscheme.h
         qwebengineurlschemehandler.cpp qwebengineurlschemehandler.h
+        qwebengineglobalsettings.cpp qwebengineglobalsettings.h qwebengineglobalsettings_p.h
+        qwebenginewebauthuxrequest.cpp qwebenginewebauthuxrequest.h qwebenginewebauthuxrequest_p.h
     DEFINES
         BUILDING_CHROMIUM
-        NOMINMAX
+        TOOLKIT_QT
     INCLUDE_DIRECTORIES
         ../
         ../../3rdparty/chromium
         ../../3rdparty/chromium/third_party/abseil-cpp
         ../../3rdparty/chromium/third_party/perfetto/include
+        ../../3rdparty/chromium/third_party/boringssl/src/include
+        ../../3rdparty/chromium/base/allocator/partition_allocator/src
     LIBRARIES
         Qt::CorePrivate
         Qt::GuiPrivate
@@ -54,15 +62,36 @@ qt_internal_add_module(WebEngineCore
         Qt::Gui
         Qt::Network
         Qt::Quick
+    EXTRA_CMAKE_FILES
+        "${CMAKE_CURRENT_LIST_DIR}/${INSTALL_CMAKE_NAMESPACE}WebEngineCoreDeploySupport.cmake"
+    NO_GENERATE_CPP_EXPORTS
+    SBOM_INCOMPLETE_3RD_PARTY_DEPENDENCIES
 )
 
-set_target_properties(WebEngineCore PROPERTIES QTWEBENGINEPROCESS_NAME ${qtWebEngineProcessName})
+if(MSVC)
+    qt_internal_skip_intel_cet_hardening(WebEngineCore)
+endif()
 
+set_target_properties(WebEngineCore PROPERTIES QTWEBENGINEPROCESS_NAME ${qtWebEngineProcessName})
+set_target_properties(WebEngineCore PROPERTIES CXX_STANDARD 20)
 # Chromium included headers are not clean
 qt_skip_warnings_are_errors(WebEngineCore)
 
+if(MSVC AND NOT CLANG)
+    target_compile_options(WebEngineCore PRIVATE "/Zc:preprocessor")
+endif()
+
 if(CLANG OR GCC)
-    target_compile_options(WebEngineCore PRIVATE "-Wno-unused-parameter")
+    target_compile_options(WebEngineCore PRIVATE
+        "-Wno-unused-parameter"
+        "-Wno-expansion-to-defined"
+    )
+endif()
+
+if(GCC)
+    target_compile_options(WebEngineCore PRIVATE
+        "-Wno-packed-not-aligned"
+    )
 endif()
 
 qt_internal_extend_target(WebEngineCore CONDITION QT_FEATURE_webengine_webchannel
@@ -76,6 +105,7 @@ qt_internal_extend_target(WebEngineCore CONDITION QT_FEATURE_webengine_geolocati
 
 get_install_config(config)
 get_architectures(archs)
+get_configs(configs)
 list(GET archs 0 arch)
 
 ##
@@ -106,25 +136,61 @@ set(localeList am ar bg bn ca cs da de el en-GB en-US es-419 es et fa fi fil fr
     gu he hi hr hu id it ja kn ko lt lv ml mr ms nb nl pl pt-BR pt-PT ro ru sk
     sl sr sv sw ta te th tr uk vi zh-CN zh-TW)
 
-set(resourceList qtwebengine_resources.pak
-    qtwebengine_resources_100p.pak
-    qtwebengine_resources_200p.pak
-    qtwebengine_devtools_resources.pak)
+set(resourceList qtwebengine_resources
+    qtwebengine_resources_100p
+    qtwebengine_resources_200p
+    qtwebengine_devtools_resources)
 
+set(stamps ${buildDir}/${config}/${arch}/QtWebEngineCore.stamp)
 
+qt_internal_get_filename_path_mode(path_mode)
+
+if(QT_FEATURE_webengine_v8_context_snapshot)
+    foreach(arch ${archs})
+       foreach(config ${configs})
+           if(MACOS)
+               set(ext_arch ".${arch}")
+               # QTBUG-118120 gn does not support x86_64h
+               if(ext_arch STREQUAL "x86_64h")
+                   set(ext_arch "x86_64")
+               endif()
+           else()
+               unset(ext_arch)
+           endif()
+           if("${config}" STREQUAL "Debug")
+               set(ext_debug ".debug")
+           else()
+               unset(ext_debug)
+           endif()
+           get_filename_component(resSourcePath ${buildDir}/${config}/${arch}/v8_context_snapshot${ext_arch}${ext_debug}.bin ${path_mode})
+           list(APPEND resourceFiles ${resSourcePath})
+           if(MACOS)
+               set(stamps ${stamps} ${buildDir}/${config}/${arch}/obj/tools/v8_context_snapshot/v8_context_snapshot.stamp)
+           endif()
+       endforeach()
+    endforeach()
+endif()
 
 foreach(loc ${localeList})
-    get_filename_component(locSourcePath ${buildDir}/${config}/${arch}/qtwebengine_locales/${loc}.pak REALPATH)
+    get_filename_component(locSourcePath ${buildDir}/${config}/${arch}/qtwebengine_locales/${loc}.pak ${path_mode})
     list(APPEND localeFiles ${locSourcePath})
 endforeach()
 
-foreach(res ${resourceList})
-    get_filename_component(resSourcePath ${buildDir}/${config}/${arch}/${res} REALPATH)
-    list(APPEND resourceFiles ${resSourcePath})
+foreach(config ${configs})
+    if("${config}" STREQUAL "Debug")
+        set(ext_debug ".debug")
+    else()
+        unset(ext_debug)
+    endif()
+    foreach(res ${resourceList})
+        get_filename_component(resSourcePath ${buildDir}/${config}/${arch}/${res}${ext_debug}.pak ${path_mode})
+        list(APPEND resourceFiles ${resSourcePath})
+    endforeach()
 endforeach()
 
-if (NOT QT_FEATURE_webengine_system_icu)
-    get_filename_component(icuFile ${buildDir}/${config}/${arch}/icudtl.dat REALPATH)
+
+if(NOT QT_FEATURE_webengine_system_icu)
+    get_filename_component(icuFile ${buildDir}/${config}/${arch}/icudtl.dat ${path_mode})
     list(APPEND resourceFiles ${icuFile})
     set_target_properties(WebEngineCore PROPERTIES ICUDTL_FILE ${icuFile})
 endif()
@@ -144,7 +210,7 @@ if(QT_FEATURE_framework)
         GENERATED TRUE
     )
 
-    add_custom_command(OUTPUT ${allResourceFiles} DEPENDS ${buildDir}/${config}/${arch}/QtWebEngineCore.stamp)
+    add_custom_command(OUTPUT ${allResourceFiles} DEPENDS "${stamps}")
     add_custom_target(generate_resources_${config} DEPENDS ${allResourceFiles})
 
     addCopyCommand(WebEngineCore "${localeFiles}"

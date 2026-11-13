@@ -9,43 +9,24 @@
   flex-direction: column;
   flex: auto;
   border: 1px solid transparent;
-
-  --override-filtered-list-widget-highlight-text-background-color: rgb(255 255 255 / 25%);
 }
 
-.-theme-with-dark-background .filtered-list-widget,
-:host-context(.-theme-with-dark-background) .filtered-list-widget {
-  --override-filtered-list-widget-highlight-text-background-color: rgb(255 255 255 / 75%);
+.hbox {
+  flex: 0 0 40px;
+  align-items: center;
 }
 
-.filtered-list-widget-prompt-element {
-  flex: 0 0 34px;
-  border: 0;
-  margin: 0;
-  padding: 0 6px;
-  z-index: 1;
-  font-size: inherit;
+.filtered-list-widget-hint {
+  color: var(--sys-color-token-subtle);
+  padding: 12px;
 }
 
 devtools-text-prompt {
-  flex: 0 0 40px;
+  flex-grow: 1;
   font-size: 14px;
   font-family: ".SFNSDisplay-Regular", "Helvetica Neue", "Lucida Grande", sans-serif;
   line-height: 16px;
   padding: 12px;
-}
-
-.filtered-list-widget-hint {
-  width: 100%;
-  flex: 0 0 30px;
-  font-size: 12px;
-  line-height: 30px;
-  padding: 0 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--color-text-secondary);
-  background: var(--color-background-elevation-1);
-  border-top: 1px solid var(--color-details-hairline);
 }
 
 .filtered-list-widget-progress {
@@ -56,7 +37,7 @@ devtools-text-prompt {
 }
 
 .filtered-list-widget-progress-bar {
-  background-color: var(--color-primary-variant);
+  background-color: var(--sys-color-primary-bright);
   height: 2px;
   width: 100%;
   transform: scaleX(0);
@@ -77,9 +58,9 @@ devtools-text-prompt {
 }
 
 .filtered-list-widget-item-wrapper {
-  color: var(--color-text-primary);
+  color: var(--sys-color-on-surface);
   display: flex;
-  border-bottom: 1px solid var(--color-details-hairline-light);
+  border-bottom: 1px solid var(--sys-color-divider);
   font-family: ".SFNSDisplay-Regular", "Helvetica Neue", "Lucida Grande", sans-serif;
   padding-left: 8px;
   padding-right: 8px;
@@ -92,7 +73,7 @@ devtools-text-prompt {
 }
 
 .filtered-list-widget-item-wrapper.selected {
-  background-color: var(--color-primary);
+  background-color: var(--sys-color-tonal-container);
 }
 
 .filtered-list-widget-item {
@@ -104,8 +85,12 @@ devtools-text-prompt {
   flex: auto;
 }
 
+.filtered-list-widget-item.is-ignore-listed {
+  opacity: 50%;
+}
+
 .filtered-list-widget-item.two-rows span.highlight {
-  color: var(--color-primary);
+  color: var(--sys-color-primary);
 }
 
 .filtered-list-widget-item.one-row span.highlight {
@@ -122,7 +107,7 @@ devtools-text-prompt {
   flex: none;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--color-text-secondary);
+  color: var(--sys-color-token-subtle);
   display: flex;
   white-space: pre;
 }
@@ -142,47 +127,24 @@ devtools-text-prompt {
   flex-shrink: 0;
 }
 
+.filtered-list-widget-item-wrapper .deprecated-tag {
+  font-size: 11px;
+  color: var(--sys-color-token-subtle);
+}
+
+.filtered-list-widget-item-wrapper.selected .deprecated-tag {
+  color: var(--sys-color-on-tonal-container);
+}
+
 .filtered-list-widget-item-wrapper.selected .filtered-list-widget-item span.highlight {
-  color: var(--color-background);
-  background-color: var(--override-filtered-list-widget-highlight-text-background-color);
+  color: var(--sys-color-on-tonal-container);
+  background-color: var(--sys-color-state-focus-select);
 }
 
 .filtered-list-widget-item-wrapper.selected .filtered-list-widget-title,
 .filtered-list-widget-item-wrapper.selected .filtered-list-widget-subtitle,
 .filtered-list-widget-item-wrapper.selected .tag {
-  color: var(--color-background);
-}
-
-.filtered-list-widget-item-wrapper devtools-icon.ic_file_document {
-  --icon-color: var(--color-ic-file-document);
-}
-
-.filtered-list-widget-item-wrapper devtools-icon.ic_file_image {
-  --icon-color: var(--color-ic-file-image);
-}
-
-.filtered-list-widget-item-wrapper devtools-icon.ic_file_font {
-  --icon-color: var(--color-ic-file-font);
-}
-
-.filtered-list-widget-item-wrapper devtools-icon.ic_file_script {
-  --icon-color: var(--color-ic-file-script);
-}
-
-.filtered-list-widget-item-wrapper devtools-icon.ic_file_stylesheet {
-  --icon-color: var(--color-ic-file-stylesheet);
-}
-
-.filtered-list-widget-item-wrapper devtools-icon.ic_file_webbundle {
-  --icon-color: var(--color-ic-file-webbundle);
-}
-
-.filtered-list-widget-item-wrapper devtools-icon.ic_file_default {
-  --icon-color: var(--color-ic-file-default);
-}
-
-.filtered-list-widget-item-wrapper.selected devtools-icon {
-  --icon-color: var(--color-background);
+  color: var(--sys-color-on-tonal-container);
 }
 
 .filtered-list-widget-item.one-row {
@@ -212,15 +174,15 @@ devtools-text-prompt {
   line-height: 34px;
   padding-left: 8px;
   font-style: italic;
-  color: var(--color-text-disabled);
-  background: var(--color-background-elevation-0);
+  color: var(--sys-color-state-disabled);
+  background: var(--sys-color-state-disabled-container);
 }
 
 .quickpick-description {
   flex: none;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--color-text-disabled);
+  color: var(--sys-color-state-disabled);
   padding-left: 15px;
 }
 

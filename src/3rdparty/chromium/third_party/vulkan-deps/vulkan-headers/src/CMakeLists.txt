@@ -1,59 +1,73 @@
 # ~~~
-# Copyright (c) 2018 Valve Corporation
-# Copyright (c) 2018 LunarG, Inc.
+# Copyright 2018-2023 The Khronos Group Inc.
+# Copyright 2018-2023 Valve Corporation
+# Copyright 2018-2023 LunarG, Inc.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# SPDX-License-Identifier: Apache-2.0
 # ~~~
+cmake_minimum_required(VERSION 3.15...3.25)
 
-# CMake project initialization ---------------------------------------------------------------------------------------------------
-# This section contains pre-project() initialization, and ends with the project() command.
+# NOTE: Parsing the version like this is suboptimal but neccessary due to our release process:
+# https://github.com/KhronosGroup/Vulkan-Headers/pull/346
+#
+# As shown a more robust approach would be just to add basic test code to check the project version.
+function(vlk_get_header_version)
+    set(vulkan_core_header_file "${CMAKE_CURRENT_SOURCE_DIR}/include/vulkan/vulkan_core.h")
+    if (NOT EXISTS ${vulkan_core_header_file})
+        message(FATAL_ERROR "Couldn't find vulkan_core.h!")
+    endif()
 
-cmake_minimum_required(VERSION 3.10.2)
+    file(READ ${vulkan_core_header_file} ver)
 
-# NONE = this project has no language toolchain requirement.
-project(Vulkan-Headers NONE)
+    if (ver MATCHES "#define[ ]+VK_HEADER_VERSION_COMPLETE[ ]+VK_MAKE_API_VERSION\\([ ]*[0-9]+,[ ]*([0-9]+),[ ]*([0-9]+),[ ]*VK_HEADER_VERSION[ ]*\\)")
+        set(MAJOR_VERSION "${CMAKE_MATCH_1}")
+        set(MINOR_VERSION "${CMAKE_MATCH_2}")
+    else()
+        message(FATAL_ERROR "Couldn't get major/minor version")
+    endif()
 
-# User-interface declarations ----------------------------------------------------------------------------------------------------
-# This section contains variables that affect development GUIs (e.g. CMake GUI and IDEs), such as option(), folders, and variables
-# with the CACHE property.
+    if (ver MATCHES "#define[ ]+VK_HEADER_VERSION[ ]+([0-9]+)")
+        set(PATCH_VERSION "${CMAKE_MATCH_1}")
+    else()
+        message(FATAL_ERROR "Couldn't get the patch version")
+    endif()
 
-include(GNUInstallDirs)
+    set(VK_VERSION_STRING "${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}" PARENT_SCOPE)
+endfunction()
+vlk_get_header_version()
 
-if(WIN32 AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    # Windows: if install locations not set by user, set install prefix to "<build_dir>\install".
-    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install" CACHE PATH "default install path" FORCE)
+project(VULKAN_HEADERS LANGUAGES C VERSION ${VK_VERSION_STRING})
+
+add_library(Vulkan-Headers INTERFACE)
+add_library(Vulkan::Headers ALIAS Vulkan-Headers)
+target_include_directories(Vulkan-Headers INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
+if (CMAKE_VERSION VERSION_LESS "3.21")
+    # https://cmake.org/cmake/help/latest/variable/PROJECT_IS_TOP_LEVEL.html
+    string(COMPARE EQUAL ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR} PROJECT_IS_TOP_LEVEL)
 endif()
 
-# --------------------------------------------------------------------------------------------------------------------------------
+if (PROJECT_IS_TOP_LEVEL)
+    option(BUILD_TESTS "Build the tests")
+    if (BUILD_TESTS)
+        enable_testing()
+        add_subdirectory(tests)
+    endif()
 
-# define exported targets for nested project builds to consume
-add_library(Vulkan-Headers INTERFACE)
-target_include_directories(Vulkan-Headers INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-add_library(Vulkan::Headers ALIAS Vulkan-Headers)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
 
-add_library(Vulkan-Registry INTERFACE)
-target_include_directories(Vulkan-Registry INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/registry")
-add_library(Vulkan::Registry ALIAS Vulkan-Registry)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/vk_video" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/vulkan" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    # Preserve source permissions https://github.com/KhronosGroup/Vulkan-Headers/issues/336
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/registry" DESTINATION "${CMAKE_INSTALL_DATADIR}/vulkan" USE_SOURCE_PERMISSIONS)
 
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/vulkan" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/vk_video" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/registry" DESTINATION ${CMAKE_INSTALL_DATADIR}/vulkan)
+    set_target_properties(Vulkan-Headers PROPERTIES EXPORT_NAME "Headers")
 
-# uninstall target
-if(NOT TARGET uninstall)
-    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
-                   "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
-                   IMMEDIATE
-                   @ONLY)
-    add_custom_target(uninstall COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+    install(TARGETS Vulkan-Headers EXPORT VulkanHeadersConfig INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(EXPORT VulkanHeadersConfig NAMESPACE "Vulkan::" DESTINATION "share/cmake/VulkanHeaders")
+
+    set(version_config "${CMAKE_CURRENT_BINARY_DIR}/generated/VulkanHeadersConfigVersion.cmake")
+    write_basic_package_version_file("${version_config}" COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
+    install(FILES "${version_config}" DESTINATION "share/cmake/VulkanHeaders")
 endif()

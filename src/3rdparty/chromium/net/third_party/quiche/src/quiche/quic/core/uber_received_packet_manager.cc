@@ -48,14 +48,15 @@ const QuicFrame UberReceivedPacketManager::GetUpdatedAckFrame(
 
 void UberReceivedPacketManager::RecordPacketReceived(
     EncryptionLevel decrypted_packet_level, const QuicPacketHeader& header,
-    QuicTime receipt_time) {
+    QuicTime receipt_time, QuicEcnCodepoint ecn_codepoint) {
   if (!supports_multiple_packet_number_spaces_) {
-    received_packet_managers_[0].RecordPacketReceived(header, receipt_time);
+    received_packet_managers_[0].RecordPacketReceived(header, receipt_time,
+                                                      ecn_codepoint);
     return;
   }
   received_packet_managers_[QuicUtils::GetPacketNumberSpace(
                                 decrypted_packet_level)]
-      .RecordPacketReceived(header, receipt_time);
+      .RecordPacketReceived(header, receipt_time, ecn_codepoint);
 }
 
 void UberReceivedPacketManager::DontWaitForPacketsBefore(
@@ -182,12 +183,6 @@ bool UberReceivedPacketManager::IsAckFrameEmpty(
     return received_packet_managers_[0].IsAckFrameEmpty();
   }
   return received_packet_managers_[packet_number_space].IsAckFrameEmpty();
-}
-
-QuicPacketNumber UberReceivedPacketManager::peer_least_packet_awaiting_ack()
-    const {
-  QUICHE_DCHECK(!supports_multiple_packet_number_spaces_);
-  return received_packet_managers_[0].peer_least_packet_awaiting_ack();
 }
 
 size_t UberReceivedPacketManager::min_received_before_ack_decimation() const {

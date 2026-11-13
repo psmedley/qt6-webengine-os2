@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,11 @@
 #include <string>
 #include <vector>
 
-#include "absl/types/span.h"
 #include "cast/standalone_receiver/avcodec_glue.h"
 #include "cast/streaming/frame_id.h"
+#include "platform/base/span.h"
 
-namespace openscreen {
-namespace cast {
+namespace openscreen::cast {
 
 // Wraps libavcodec to decode audio or video.
 class Decoder {
@@ -28,8 +27,8 @@ class Decoder {
     ~Buffer();
 
     void Resize(int new_size);
-    absl::Span<const uint8_t> GetSpan() const;
-    absl::Span<uint8_t> GetSpan();
+    ByteView AsByteView() const;
+    ByteBuffer AsByteBuffer();
 
    private:
     std::vector<uint8_t> buffer_;
@@ -93,7 +92,6 @@ class Decoder {
   std::vector<FrameId> frames_decoding_;
 };
 
-}  // namespace cast
-}  // namespace openscreen
+}  // namespace openscreen::cast
 
 #endif  // CAST_STANDALONE_RECEIVER_DECODER_H_

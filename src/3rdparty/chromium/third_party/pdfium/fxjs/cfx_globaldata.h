@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "core/fxcrt/unowned_ptr.h"
 #include "fxjs/cfx_keyvalue.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CFX_GlobalData {
  public:
@@ -33,7 +33,7 @@ class CFX_GlobalData {
     ~Element();
 
     CFX_KeyValue data;
-    bool bPersistent;
+    bool bPersistent = false;
   };
 
   static CFX_GlobalData* GetRetainedInstance(Delegate* pDelegate);

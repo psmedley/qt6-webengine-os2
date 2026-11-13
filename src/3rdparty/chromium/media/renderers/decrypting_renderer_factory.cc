@@ -4,6 +4,7 @@
 
 #include "media/renderers/decrypting_renderer_factory.h"
 
+#include "base/task/sequenced_task_runner.h"
 #include "media/base/media_log.h"
 #include "media/renderers/decrypting_renderer.h"
 
@@ -17,7 +18,7 @@ DecryptingRendererFactory::DecryptingRendererFactory(
 DecryptingRendererFactory::~DecryptingRendererFactory() = default;
 
 std::unique_ptr<Renderer> DecryptingRendererFactory::CreateRenderer(
-    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
+    const scoped_refptr<base::SequencedTaskRunner>& media_task_runner,
     const scoped_refptr<base::TaskRunner>& worker_task_runner,
     AudioRendererSink* audio_renderer_sink,
     VideoRendererSink* video_renderer_sink,

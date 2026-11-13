@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,7 +110,7 @@ void CFFL_ListBox::SaveData(const CPDFSDK_PageView* pPageView) {
   }
   int32_t nNewTopIndex = pListBox->GetTopVisibleIndex();
   ObservedPtr<CPWL_ListBox> observed_box(pListBox);
-  ObservedPtr<CPDFSDK_Widget> observed_widget(m_pWidget.Get());
+  ObservedPtr<CPDFSDK_Widget> observed_widget(m_pWidget);
   m_pWidget->ClearSelection();
   if (!observed_box || !observed_widget) {
     return;

@@ -27,6 +27,7 @@
 #include "libANGLE/renderer/gl/FenceNVGL.h"
 #include "libANGLE/renderer/gl/FramebufferGL.h"
 #include "libANGLE/renderer/gl/FunctionsGL.h"
+#include "libANGLE/renderer/gl/PLSProgramCache.h"
 #include "libANGLE/renderer/gl/ProgramGL.h"
 #include "libANGLE/renderer/gl/QueryGL.h"
 #include "libANGLE/renderer/gl/RenderbufferGL.h"
@@ -158,11 +159,11 @@ RendererGL::RendererGL(std::unique_ptr<FunctionsGL> functions,
       mNeedsFlushBeforeDeleteTextures(false)
 {
     ASSERT(mFunctions);
+    ApplyFeatureOverrides(&mFeatures, display->getState());
     if (!display->getState().featuresAllDisabled)
     {
         nativegl_gl::InitializeFeatures(mFunctions.get(), &mFeatures);
     }
-    ApplyFeatureOverrides(&mFeatures, display->getState());
     mStateManager =
         new StateManagerGL(mFunctions.get(), getNativeCaps(), getNativeExtensions(), mFeatures);
     mBlitter          = new BlitGL(mFunctions.get(), mFeatures, mStateManager);
@@ -213,11 +214,7 @@ RendererGL::~RendererGL()
     SafeDelete(mBlitter);
     SafeDelete(mMultiviewClearer);
     SafeDelete(mStateManager);
-
-    std::lock_guard<std::mutex> lock(mWorkerMutex);
-
-    ASSERT(mCurrentWorkerContexts.empty());
-    mWorkerContextPool.clear();
+    SafeDelete(mPLSProgramCache);
 }
 
 angle::Result RendererGL::flush()
@@ -282,7 +279,7 @@ void RendererGL::generateCaps(gl::Caps *outCaps,
 {
     nativegl_gl::GenerateCaps(mFunctions.get(), mFeatures, outCaps, outTextureCaps, outExtensions,
                               outLimitations, &mMaxSupportedESVersion,
-                              &mMultiviewImplementationType);
+                              &mMultiviewImplementationType, &mNativePLSOptions);
 }
 
 GLint RendererGL::getGPUDisjoint()
@@ -331,30 +328,18 @@ const gl::Limitations &RendererGL::getNativeLimitations() const
     return mNativeLimitations;
 }
 
-ShPixelLocalStorageType RendererGL::getNativePixelLocalStorageType() const
+const ShPixelLocalStorageOptions &RendererGL::getNativePixelLocalStorageOptions() const
 {
-    if (!getNativeExtensions().shaderPixelLocalStorageANGLE)
+    return mNativePLSOptions;
+}
+
+PLSProgramCache *RendererGL::getPLSProgramCache()
+{
+    if (!mPLSProgramCache)
     {
-        return ShPixelLocalStorageType::NotSupported;
+        mPLSProgramCache = new PLSProgramCache(mFunctions.get(), mNativeCaps);
     }
-    if (mFeatures.supportsShaderFramebufferFetchEXT.enabled)
-    {
-        // We have coherent EXT_shader_framebuffer_fetch.
-        ASSERT(getNativeExtensions().shaderPixelLocalStorageCoherentANGLE);
-        return ShPixelLocalStorageType::FramebufferFetch;
-    }
-    if (getNativeExtensions().shaderPixelLocalStorageCoherentANGLE ||
-        !mFeatures.supportsShaderFramebufferFetchNonCoherentEXT.enabled)
-    {
-        // Use shader images with fragment synchronization extensions, instead of
-        // EXT_shader_framebuffer_fetch_non_coherent, if they're our only option to be coherent.
-        return getFunctions()->standard == StandardGL::STANDARD_GL_ES
-                   // OpenGL ES only allows read/write access to "r32*" images.
-                   ? ShPixelLocalStorageType::ImageStoreR32PackedFormats
-                   : ShPixelLocalStorageType::ImageStoreNativeFormats;
-    }
-    ASSERT(mFeatures.supportsShaderFramebufferFetchNonCoherentEXT.enabled);
-    return ShPixelLocalStorageType::FramebufferFetch;
+    return mPLSProgramCache;
 }
 
 MultiviewImplementationTypeGL RendererGL::getMultiviewImplementationType() const
@@ -405,57 +390,6 @@ void RendererGL::framebufferFetchBarrier()
     mWorkDoneSinceLastFlush = true;
 }
 
-bool RendererGL::bindWorkerContext(std::string *infoLog)
-{
-    if (mFeatures.disableWorkerContexts.enabled)
-    {
-        return false;
-    }
-
-    std::lock_guard<std::mutex> lock(mWorkerMutex);
-    std::unique_ptr<WorkerContext> workerContext;
-    if (!mWorkerContextPool.empty())
-    {
-        auto it       = mWorkerContextPool.begin();
-        workerContext = std::move(*it);
-        mWorkerContextPool.erase(it);
-    }
-    else
-    {
-        WorkerContext *newContext = createWorkerContext(infoLog);
-        if (newContext == nullptr)
-        {
-            return false;
-        }
-        workerContext.reset(newContext);
-    }
-
-    if (!workerContext->makeCurrent())
-    {
-        mWorkerContextPool.push_back(std::move(workerContext));
-        return false;
-    }
-    mCurrentWorkerContexts[angle::GetCurrentThreadUniqueId()] = std::move(workerContext);
-    return true;
-}
-
-void RendererGL::unbindWorkerContext()
-{
-    std::lock_guard<std::mutex> lock(mWorkerMutex);
-
-    auto it = mCurrentWorkerContexts.find(angle::GetCurrentThreadUniqueId());
-    ASSERT(it != mCurrentWorkerContexts.end());
-    (*it).second->unmakeCurrent();
-    mWorkerContextPool.push_back(std::move((*it).second));
-    mCurrentWorkerContexts.erase(it);
-}
-
-unsigned int RendererGL::getMaxWorkerContexts()
-{
-    // No more than 16 worker contexts.
-    return std::min(16u, std::thread::hardware_concurrency());
-}
-
 bool RendererGL::hasNativeParallelCompile()
 {
     if (mFeatures.disableNativeParallelCompile.enabled)
@@ -490,25 +424,6 @@ void RendererGL::flushIfNecessaryBeforeDeleteTextures()
     {
         (void)flush();
     }
-}
-
-ScopedWorkerContextGL::ScopedWorkerContextGL(RendererGL *renderer, std::string *infoLog)
-    : mRenderer(renderer)
-{
-    mValid = mRenderer->bindWorkerContext(infoLog);
-}
-
-ScopedWorkerContextGL::~ScopedWorkerContextGL()
-{
-    if (mValid)
-    {
-        mRenderer->unbindWorkerContext();
-    }
-}
-
-bool ScopedWorkerContextGL::operator()() const
-{
-    return mValid;
 }
 
 void RendererGL::handleGPUSwitch()

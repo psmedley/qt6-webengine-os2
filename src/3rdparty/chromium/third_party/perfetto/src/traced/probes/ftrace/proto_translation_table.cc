@@ -124,7 +124,7 @@ bool MergeFieldInfo(const FtraceEvent::Field& ftrace_field,
 
   if (!InferFtraceType(ftrace_field.type_and_name, ftrace_field.size,
                        ftrace_field.is_signed, &field->ftrace_type)) {
-    PERFETTO_FATAL(
+    PERFETTO_DFATAL(
         "Failed to infer ftrace field type for \"%s.%s\" (type:\"%s\" "
         "size:%d "
         "signed:%d)",
@@ -285,6 +285,20 @@ bool InferFtraceType(const std::string& type_and_name,
     }
     *out = kFtraceDataLoc;
     return true;
+  }
+
+  // Parsing of sys_enter argument field declared as
+  //    field:unsigned long args[6];
+  if (type_and_name == "unsigned long args[6]") {
+    if (size == 24) {
+      // 24 / 6 = 4 -> 32bit system
+      *out = kFtraceUint32;
+      return true;
+    } else if (size == 48) {
+      // 48 / 6 = 8 -> 64bit system
+      *out = kFtraceUint64;
+      return true;
+    }
   }
 
   if (Contains(type_and_name, "char[] ")) {
@@ -483,7 +497,8 @@ std::unique_ptr<ProtoTranslationTable> ProtoTranslationTable::Create(
 
   // Pre-parse certain scheduler events, and see if the compile-time assumptions
   // about their format hold for this kernel.
-  CompactSchedEventFormat compact_sched = ValidateFormatForCompactSched(events);
+  CompactSchedEventFormat compact_sched =
+      ValidateFormatForCompactSched(events, common_fields);
 
   std::string text = ftrace_procfs->ReadPrintkFormats();
   PrintkMap printk_formats = ParsePrintkFormats(text);
@@ -513,6 +528,11 @@ ProtoTranslationTable::ProtoTranslationTable(
         &events_.at(event.ftrace_event_id);
     name_to_events_[event.name].push_back(&events_.at(event.ftrace_event_id));
     group_to_events_[event.group].push_back(&events_.at(event.ftrace_event_id));
+  }
+  for (const Field& field : common_fields_) {
+    if (field.proto_field_id == protos::pbzero::FtraceEvent::kPidFieldNumber) {
+      common_pid_ = field;
+    }
   }
 }
 

@@ -30,19 +30,19 @@
 
 import * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
-import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as NetworkForward from '../../panels/network/forward/forward.js';
+import * as IconButton from '../../ui/components/icon_button/icon_button.js';
+import * as LegacyWrapper from '../../ui/components/legacy_wrapper/legacy_wrapper.js';
+import type * as SourceFrame from '../../ui/legacy/components/source_frame/source_frame.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
 import * as NetworkComponents from './components/components.js';
 import {EventSourceMessagesView} from './EventSourceMessagesView.js';
-
 import {type NetworkTimeCalculator} from './NetworkTimeCalculator.js';
 import {RequestCookiesView} from './RequestCookiesView.js';
-import {RequestHeadersView} from './RequestHeadersView.js';
-import {RequestPayloadView} from './RequestPayloadView.js';
 import {RequestInitiatorView} from './RequestInitiatorView.js';
+import {RequestPayloadView} from './RequestPayloadView.js';
 import {RequestPreviewView} from './RequestPreviewView.js';
 import {RequestResponseView} from './RequestResponseView.js';
 import {RequestTimingView} from './RequestTimingView.js';
@@ -50,88 +50,99 @@ import {ResourceWebSocketFrameView} from './ResourceWebSocketFrameView.js';
 
 const UIStrings = {
   /**
-  *@description Text for network request headers
-  */
+   *@description Text for network request headers
+   */
   headers: 'Headers',
   /**
-  *@description Text in Network Item View of the Network panel
-  */
+   *@description Text in Network Item View of the Network panel
+   */
   payload: 'Payload',
   /**
-  *@description Text in Network Item View of the Network panel
-  */
+   *@description Text in Network Item View of the Network panel
+   */
   messages: 'Messages',
   /**
-  *@description Text in Network Item View of the Network panel
-  */
+   *@description Text in Network Item View of the Network panel
+   */
   websocketMessages: 'WebSocket messages',
   /**
-  *@description Text in Network Item View of the Network panel
-  */
+   *@description Text in Network Item View of the Network panel
+   */
   eventstream: 'EventStream',
   /**
-  *@description Text for previewing items
-  */
+   *@description Text for previewing items
+   */
   preview: 'Preview',
   /**
-  *@description Text in Network Item View of the Network panel
-  */
+   *@description Text in Network Item View of the Network panel
+   */
   responsePreview: 'Response preview',
   /**
-  *@description Icon title in Network Item View of the Network panel
-  */
+   *@description Icon title in Network Item View of the Network panel
+   */
   signedexchangeError: 'SignedExchange error',
   /**
-  *@description Title of a tab in the Network panel. A Network response refers to the act of acknowledging a
+   *@description Title of a tab in the Network panel. A Network response refers to the act of acknowledging a
   network request. Should not be confused with answer.
-  */
+   */
   response: 'Response',
   /**
-  *@description Text in Network Item View of the Network panel
-  */
+   *@description Text in Network Item View of the Network panel
+   */
   rawResponseData: 'Raw response data',
   /**
-  *@description Text for the initiator of something
-  */
+   *@description Text for the initiator of something
+   */
   initiator: 'Initiator',
   /**
-  * @description Tooltip for initiator view in Network panel. An initiator is a piece of code/entity
-  * in the code that initiated/started the network request, i.e. caused the network request. The 'call
-  * stack' is the location in the code where the initiation happened.
-  */
+   * @description Tooltip for initiator view in Network panel. An initiator is a piece of code/entity
+   * in the code that initiated/started the network request, i.e. caused the network request. The 'call
+   * stack' is the location in the code where the initiation happened.
+   */
   requestInitiatorCallStack: 'Request initiator call stack',
   /**
-  *@description Title of a tab in Network Item View of the Network panel.
-  *The tab displays the duration breakdown of a network request.
-  */
+   *@description Title of a tab in Network Item View of the Network panel.
+   *The tab displays the duration breakdown of a network request.
+   */
   timing: 'Timing',
   /**
-  *@description Text in Network Item View of the Network panel
-  */
+   *@description Text in Network Item View of the Network panel
+   */
   requestAndResponseTimeline: 'Request and response timeline',
   /**
-  *@description Label of a tab in the network panel
-  */
-  trustTokens: 'Trust Tokens',
+   *@description Tooltip to explain the warning icon of the Cookies panel
+   */
+  thirdPartyPhaseout: 'Cookies blocked due to third-party cookie phaseout.',
   /**
-  *@description Title of the Trust token tab in the Network panel
-  */
-  trustTokenOperationDetails: 'Trust Token operation details',
+   *@description Label of a tab in the network panel. Previously known as 'Trust Tokens'.
+   */
+  trustTokens: 'Private state tokens',
   /**
-  *@description Text for web cookies
-  */
+   *@description Title of the Private State Token tab in the Network panel. Previously known as 'Trust Token tab'.
+   */
+  trustTokenOperationDetails: 'Private State Token operation details',
+  /**
+   *@description Text for web cookies
+   */
   cookies: 'Cookies',
   /**
-  *@description Text in Network Item View of the Network panel
-  */
+   *@description Text in Network Item View of the Network panel
+   */
   requestAndResponseCookies: 'Request and response cookies',
+  /**
+   *@description Tooltip text explaining that DevTools has overridden the response's headers
+   */
+  containsOverriddenHeaders: 'This response contains headers which are overridden by DevTools',
+  /**
+   *@description Tooltip text explaining that DevTools has overridden the response
+   */
+  responseIsOverridden: 'This response is overridden by DevTools',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/network/NetworkItemView.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 export class NetworkItemView extends UI.TabbedPane.TabbedPane {
   private requestInternal: SDK.NetworkRequest.NetworkRequest;
   private readonly resourceViewTabSetting: Common.Settings.Setting<NetworkForward.UIRequestLocation.UIRequestTabs>;
-  private readonly headersView: RequestHeadersView;
   private readonly headersViewComponent: NetworkComponents.RequestHeadersView.RequestHeadersView;
   private payloadView: RequestPayloadView|null;
   private readonly responseView: RequestResponseView|undefined;
@@ -145,18 +156,22 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
     this.requestInternal = request;
     this.element.classList.add('network-item-view');
 
+    const headersTab = NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent;
     this.resourceViewTabSetting = Common.Settings.Settings.instance().createSetting(
-        'resourceViewTab', NetworkForward.UIRequestLocation.UIRequestTabs.Headers);
+        'resourceViewTab', NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent);
 
-    this.headersView = new RequestHeadersView(request);
-    this.appendTab(
-        NetworkForward.UIRequestLocation.UIRequestTabs.Headers, i18nString(UIStrings.headers), this.headersView,
-        i18nString(UIStrings.headers));
     this.headersViewComponent = new NetworkComponents.RequestHeadersView.RequestHeadersView(request);
-    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.HEADER_OVERRIDES)) {
-      this.appendTab(
-          NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent, i18nString(UIStrings.headers),
-          this.headersViewComponent, i18nString(UIStrings.headers));
+    this.appendTab(
+        headersTab, i18nString(UIStrings.headers),
+        LegacyWrapper.LegacyWrapper.legacyWrapper(UI.Widget.VBox, this.headersViewComponent),
+        i18nString(UIStrings.headers));
+
+    if (this.requestInternal.hasOverriddenHeaders()) {
+      const icon = new IconButton.Icon.Icon();
+      icon.data =
+          {iconName: 'small-status-dot', color: 'var(--sys-color-purple-bright)', width: '16px', height: '16px'};
+      icon.title = i18nString(UIStrings.containsOverriddenHeaders);
+      this.setTabIcon(NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent, icon);
     }
 
     this.payloadView = null;
@@ -169,7 +184,7 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
       this.appendTab(
           NetworkForward.UIRequestLocation.UIRequestTabs.WsFrames, i18nString(UIStrings.messages), frameView,
           i18nString(UIStrings.websocketMessages));
-    } else if (request.mimeType === SDK.NetworkRequest.MIME_TYPE.EVENTSTREAM) {
+    } else if (request.mimeType === SDK.MimeType.MimeType.EVENTSTREAM) {
       this.appendTab(
           NetworkForward.UIRequestLocation.UIRequestTabs.EventSource, i18nString(UIStrings.eventstream),
           new EventSourceMessagesView(request));
@@ -181,13 +196,22 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
           i18nString(UIStrings.responsePreview));
       const signedExchangeInfo = request.signedExchangeInfo();
       if (signedExchangeInfo && signedExchangeInfo.errors && signedExchangeInfo.errors.length) {
-        const icon = UI.Icon.Icon.create('smallicon-error');
+        const icon = new IconButton.Icon.Icon();
+        icon.data = {iconName: 'cross-circle-filled', color: 'var(--icon-error)', width: '14px', height: '14px'};
         UI.Tooltip.Tooltip.install(icon, i18nString(UIStrings.signedexchangeError));
         this.setTabIcon(NetworkForward.UIRequestLocation.UIRequestTabs.Preview, icon);
       }
       this.appendTab(
           NetworkForward.UIRequestLocation.UIRequestTabs.Response, i18nString(UIStrings.response), this.responseView,
           i18nString(UIStrings.rawResponseData));
+
+      if (this.requestInternal.hasOverriddenContent) {
+        const icon = new IconButton.Icon.Icon();
+        icon.title = i18nString(UIStrings.responseIsOverridden);
+        icon.data =
+            {iconName: 'small-status-dot', color: 'var(--sys-color-purple-bright)', width: '16px', height: '16px'};
+        this.setTabIcon(NetworkForward.UIRequestLocation.UIRequestTabs.Response, icon);
+      }
     }
 
     this.appendTab(
@@ -201,7 +225,8 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
     if (request.trustTokenParams()) {
       this.appendTab(
           NetworkForward.UIRequestLocation.UIRequestTabs.TrustTokens, i18nString(UIStrings.trustTokens),
-          new NetworkComponents.RequestTrustTokensView.RequestTrustTokensView(request),
+          LegacyWrapper.LegacyWrapper.legacyWrapper(
+              UI.Widget.VBox, new NetworkComponents.RequestTrustTokensView.RequestTrustTokensView(request)),
           i18nString(UIStrings.trustTokenOperationDetails));
     }
 
@@ -212,7 +237,7 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
     this.setAutoSelectFirstItemOnShow(false);
   }
 
-  wasShown(): void {
+  override wasShown(): void {
     super.wasShown();
     this.requestInternal.addEventListener(
         SDK.NetworkRequest.Events.RequestHeadersChanged, this.requestHeadersChanged, this);
@@ -233,7 +258,7 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
     }
   }
 
-  willHide(): void {
+  override willHide(): void {
     this.requestInternal.removeEventListener(
         SDK.NetworkRequest.Events.RequestHeadersChanged, this.requestHeadersChanged, this);
     this.requestInternal.removeEventListener(
@@ -256,6 +281,12 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
           NetworkForward.UIRequestLocation.UIRequestTabs.Cookies, i18nString(UIStrings.cookies), this.cookiesView,
           i18nString(UIStrings.requestAndResponseCookies));
     }
+    if (this.requestInternal.hasThirdPartyCookiePhaseoutIssue()) {
+      const icon = new IconButton.Icon.Icon();
+      icon.data = {iconName: 'warning-filled', color: 'var(--icon-warning)', width: '14px', height: '14px'};
+      icon.title = i18nString(UIStrings.thirdPartyPhaseout);
+      this.setTabIcon(NetworkForward.UIRequestLocation.UIRequestTabs.Cookies, icon);
+    }
   }
 
   private async maybeAppendPayloadPanel(): Promise<void> {
@@ -275,8 +306,9 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
     const trustTokenResult = this.requestInternal.trustTokenOperationDoneEvent();
     if (trustTokenResult &&
         !NetworkComponents.RequestTrustTokensView.statusConsideredSuccess(trustTokenResult.status)) {
-      this.setTabIcon(
-          NetworkForward.UIRequestLocation.UIRequestTabs.TrustTokens, UI.Icon.Icon.create('smallicon-error'));
+      const icon = new IconButton.Icon.Icon();
+      icon.data = {iconName: 'cross-circle-filled', color: 'var(--icon-error)', width: '14px', height: '14px'};
+      this.setTabIcon(NetworkForward.UIRequestLocation.UIRequestTabs.TrustTokens, icon);
     }
   }
 
@@ -303,25 +335,14 @@ export class NetworkItemView extends UI.TabbedPane.TabbedPane {
     return this.requestInternal;
   }
 
-  async revealResponseBody(line?: number): Promise<void> {
+  async revealResponseBody(position: SourceFrame.SourceFrame.RevealPosition): Promise<void> {
     this.selectTabInternal(NetworkForward.UIRequestLocation.UIRequestTabs.Response);
-    if (this.responseView && typeof line === 'number') {
-      await this.responseView.revealLine((line as number));
-    }
+    await this.responseView?.revealPosition(position);
   }
 
   revealHeader(section: NetworkForward.UIRequestLocation.UIHeaderSection, header: string|undefined): void {
-    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.HEADER_OVERRIDES)) {
-      this.selectTabInternal(NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent);
-      this.headersViewComponent.revealHeader(section, header);
-    } else {
-      this.selectTabInternal(NetworkForward.UIRequestLocation.UIRequestTabs.Headers);
-      this.headersView.revealHeader(section, header);
-    }
-  }
-
-  getHeadersView(): RequestHeadersView {
-    return this.headersView;
+    this.selectTabInternal(NetworkForward.UIRequestLocation.UIRequestTabs.HeadersComponent);
+    this.headersViewComponent.revealHeader(section, header);
   }
 
   getHeadersViewComponent(): NetworkComponents.RequestHeadersView.RequestHeadersView {

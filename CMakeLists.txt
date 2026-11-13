@@ -9,10 +9,15 @@ cmake_minimum_required(VERSION 3.16)
 include(.cmake.conf)
 include(ExternalProject)
 include(cmake/Functions.cmake)
-include(src/core/api/Qt6WebEngineCoreMacros.cmake)
 
 project(QtWebEngineDummy)
-find_package(Qt6 6.2 CONFIG REQUIRED COMPONENTS BuildInternals Core)
+find_package(Qt6 6.5 CONFIG REQUIRED COMPONENTS BuildInternals Core)
+
+# Sepcial case of just doing gn build
+if(DEFINED BUILD_ONLY_GN)
+    qt_webengine_build_and_install_gn()
+    return()
+endif()
 
 project(QtWebEngine
     VERSION ${Qt6Core_VERSION}
@@ -20,15 +25,14 @@ project(QtWebEngine
     HOMEPAGE_URL "https://qt.io/"
     LANGUAGES CXX C
 )
-
-if(COMMAND qt_internal_project_setup)
-    qt_internal_project_setup()
-endif()
+qt_internal_project_setup()
 
 find_package(Qt6 ${PROJECT_VERSION} CONFIG QUIET OPTIONAL_COMPONENTS
     Gui Widgets Network OpenGL Quick Qml PrintSupport
-    WebChannel Positioning QuickControls2 Test QuickWidgets QuickTest WebSockets Designer
+    WebChannel WebChannelQuick Positioning QuickControls2
+    Test QuickWidgets QuickTest WebSockets Designer
     JpegPrivate PngPrivate HarfbuzzPrivate FreetypePrivate ZlibPrivate
+    HttpServer Svg
 )
 
 if(MATRIX_BUILD AND NOT MATRIX_SUBBUILD AND NOT QT_SUPERBUILD)
@@ -41,4 +45,7 @@ if(MATRIX_BUILD AND NOT MATRIX_SUBBUILD AND NOT QT_SUPERBUILD)
     return()
 endif()
 
+# Don't auto create the SBOM projects, they will be manually created
+# for each sub-project.
+set(QT_SKIP_SBOM_AUTO_PROJECT TRUE)
 qt_build_repo()

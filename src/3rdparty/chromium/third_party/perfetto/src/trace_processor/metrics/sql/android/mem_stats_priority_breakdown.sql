@@ -15,32 +15,23 @@
 --
 
 DROP TABLE IF EXISTS {{table_name}}_by_priority_stats;
-CREATE TABLE {{table_name}}_by_priority_stats (
-  process_name TEXT,
-  priority TEXT,
-  min_value REAL,
-  max_value REAL,
-  avg_value REAL,
-  PRIMARY KEY (process_name, priority)
-);
-
-INSERT INTO {{table_name}}_by_priority_stats
+CREATE PERFETTO TABLE {{table_name}}_by_priority_stats AS
 SELECT
   process.name AS process_name,
   CASE
     WHEN oom_score_val < -900 THEN 'native'
     WHEN oom_score_val < -800 THEN 'system'
     WHEN oom_score_val < -700 THEN 'persistent'
-    WHEN oom_score_val <  0   THEN 'persistent_service'
-    WHEN oom_score_val <  100 THEN 'foreground'
-    WHEN oom_score_val <  200 THEN 'visible'
-    WHEN oom_score_val <  300 THEN 'perceptible'
-    WHEN oom_score_val <  400 THEN 'backup'
-    WHEN oom_score_val <  500 THEN 'heavy_weight'
-    WHEN oom_score_val <  600 THEN 'service_a'
-    WHEN oom_score_val <  700 THEN 'home'
-    WHEN oom_score_val <  800 THEN 'prev'
-    WHEN oom_score_val <  900 THEN 'service_b'
+    WHEN oom_score_val < 0 THEN 'persistent_service'
+    WHEN oom_score_val < 100 THEN 'foreground'
+    WHEN oom_score_val < 200 THEN 'visible'
+    WHEN oom_score_val < 300 THEN 'perceptible'
+    WHEN oom_score_val < 400 THEN 'backup'
+    WHEN oom_score_val < 500 THEN 'heavy_weight'
+    WHEN oom_score_val < 600 THEN 'service_a'
+    WHEN oom_score_val < 700 THEN 'home'
+    WHEN oom_score_val < 800 THEN 'prev'
+    WHEN oom_score_val < 900 THEN 'service_b'
     ELSE 'cached'
   END AS priority,
   MIN(span.{{table_name}}_val) AS min_value,
@@ -52,7 +43,7 @@ GROUP BY 1, 2
 ORDER BY 1, 2;
 
 DROP VIEW IF EXISTS {{table_name}}_by_priority_stats_proto;
-CREATE VIEW {{table_name}}_by_priority_stats_proto AS
+CREATE PERFETTO VIEW {{table_name}}_by_priority_stats_proto AS
 SELECT
   process_name,
   priority,

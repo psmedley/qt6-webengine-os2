@@ -9,12 +9,12 @@ import type * as Emulation from './emulation.js';
 
 const UIStrings = {
   /**
-  *@description Title of the Devices tab/tool. Devices refers to e.g. phones/tablets.
-  */
+   *@description Title of the Devices tab/tool. Devices refers to e.g. phones/tablets.
+   */
   devices: 'Devices',
   /**
-  *@description Command that opens the device emulation view.
-  */
+   *@description Command that opens the device emulation view.
+   */
   showDevices: 'Show Devices',
 };
 
@@ -37,7 +37,7 @@ UI.ViewManager.registerViewExtension({
   order: 30,
   async loadView() {
     const Emulation = await loadEmulationModule();
-    return Emulation.DevicesSettingsTab.DevicesSettingsTab.instance();
+    return new Emulation.DevicesSettingsTab.DevicesSettingsTab();
   },
   id: 'devices',
   settings: [

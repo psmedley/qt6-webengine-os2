@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
-#include "ui/base/glib/glib_signal.h"
+#include "ui/base/glib/scoped_gsignal.h"
 #include "ui/gtk/settings_provider.h"
 #include "ui/linux/linux_ui.h"
 
@@ -33,11 +33,10 @@ class SettingsProviderGtk : public SettingsProvider {
  private:
   class FrameActionSettingWatcher {
    public:
-    FrameActionSettingWatcher(
-        SettingsProviderGtk* settings_provider,
-        const std::string& setting_name,
-        ui::LinuxUiTheme::WindowFrameActionSource action_type,
-        ui::LinuxUiTheme::WindowFrameAction default_action);
+    FrameActionSettingWatcher(SettingsProviderGtk* settings_provider,
+                              const std::string& setting_name,
+                              ui::LinuxUi::WindowFrameActionSource action_type,
+                              ui::LinuxUi::WindowFrameAction default_action);
 
     FrameActionSettingWatcher(const FrameActionSettingWatcher&) = delete;
     FrameActionSettingWatcher& operator=(const FrameActionSettingWatcher&) =
@@ -45,37 +44,24 @@ class SettingsProviderGtk : public SettingsProvider {
 
     ~FrameActionSettingWatcher();
 
-    CHROMEG_CALLBACK_1(FrameActionSettingWatcher,
-                       void,
-                       OnSettingChanged,
-                       GtkSettings*,
-                       GParamSpec*);
+    void OnSettingChanged(GtkSettings* settings, GParamSpec* param);
 
    private:
     raw_ptr<SettingsProviderGtk> settings_provider_;
     std::string setting_name_;
-    ui::LinuxUiTheme::WindowFrameActionSource action_type_;
-    ui::LinuxUiTheme::WindowFrameAction default_action_;
-    unsigned long signal_id_;
+    ui::LinuxUi::WindowFrameActionSource action_type_;
+    ui::LinuxUi::WindowFrameAction default_action_;
+    ScopedGSignal signal_;
   };
 
   void SetWindowButtonOrderingFromGtkLayout(const std::string& gtk_layout);
 
-  CHROMEG_CALLBACK_1(SettingsProviderGtk,
-                     void,
-                     OnDecorationButtonLayoutChanged,
-                     GtkSettings*,
-                     GParamSpec*);
-
-  CHROMEG_CALLBACK_1(SettingsProviderGtk,
-                     void,
-                     OnThemeChanged,
-                     GtkSettings*,
-                     GParamSpec*);
+  void OnDecorationButtonLayoutChanged(GtkSettings* settings,
+                                       GParamSpec* param);
 
   raw_ptr<GtkUi> delegate_;
 
-  unsigned long signal_id_decoration_layout_;
+  ScopedGSignal signal_;
 
   std::vector<std::unique_ptr<FrameActionSettingWatcher>>
       frame_action_setting_watchers_;

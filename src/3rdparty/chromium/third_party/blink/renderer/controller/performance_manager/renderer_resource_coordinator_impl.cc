@@ -6,8 +6,8 @@
 
 #include <utility>
 
-#include "base/bind.h"
 #include "base/check.h"
+#include "base/functional/bind.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
@@ -162,8 +162,8 @@ void RendererResourceCoordinatorImpl::OnScriptStateCreated(
     case DOMWrapperWorld::WorldType::kInspectorIsolated: {
       v8_desc->world_type = V8ContextWorldType::kInspector;
     } break;
-    case DOMWrapperWorld::WorldType::kRegExp: {
-      v8_desc->world_type = V8ContextWorldType::kRegExp;
+    case DOMWrapperWorld::WorldType::kBlinkInternalNonJSExposed: {
+      v8_desc->world_type = V8ContextWorldType::kBlinkInternalNonJSExposed;
     } break;
     case DOMWrapperWorld::WorldType::kForV8ContextSnapshotNonMain: {
       // This should not happen in the production browser.
@@ -172,11 +172,15 @@ void RendererResourceCoordinatorImpl::OnScriptStateCreated(
     case DOMWrapperWorld::WorldType::kWorker: {
       v8_desc->world_type = V8ContextWorldType::kWorkerOrWorklet;
     } break;
+    case DOMWrapperWorld::WorldType::kShadowRealm: {
+      v8_desc->world_type = V8ContextWorldType::kShadowRealm;
+    } break;
   }
 
   if (execution_context) {
-    // This should never happen for a regexp world.
-    DCHECK_NE(DOMWrapperWorld::WorldType::kRegExp, dom_wrapper.GetWorldType());
+    // This should never happen for an internal non-js exposed world.
+    DCHECK_NE(DOMWrapperWorld::WorldType::kBlinkInternalNonJSExposed,
+              dom_wrapper.GetWorldType());
 
     v8_desc->execution_context_token =
         execution_context->GetExecutionContextToken();

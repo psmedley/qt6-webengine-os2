@@ -1,13 +1,14 @@
-load("//bazel:macros.bzl", "exports_files_legacy", "skia_cc_deps", "split_srcs_and_hdrs")
+load("//bazel:skia_rules.bzl", "exports_files_legacy", "skia_cc_deps", "skia_cc_library", "skia_filegroup", "split_srcs_and_hdrs")
 
 licenses(["notice"])
 
 exports_files_legacy()
 
-filegroup(
+skia_filegroup(
     name = "core_srcs",
     srcs = [
-        "SkSLVMCodeGenerator.cpp",
+        "SkSLRasterPipelineBuilder.cpp",
+        "SkSLRasterPipelineCodeGenerator.cpp",
     ],
 )
 
@@ -17,6 +18,8 @@ GPU_SRCS = [
     "SkSLCodeGenerator.h",
     "SkSLGLSLCodeGenerator.cpp",
     "SkSLGLSLCodeGenerator.h",
+    "SkSLHLSLCodeGenerator.cpp",
+    "SkSLHLSLCodeGenerator.h",
     "SkSLMetalCodeGenerator.cpp",
     "SkSLMetalCodeGenerator.h",
     "SkSLPipelineStageCodeGenerator.cpp",
@@ -30,27 +33,41 @@ GPU_SRCS = [
 ]
 
 split_srcs_and_hdrs(
-    name = "gpu",
+    name = "legacy_gpu",
     files = GPU_SRCS,
 )
 
-filegroup(
+# TODO(kjlubick) delete after updating G3
+alias(
+    name = "gpu_hdrs",
+    actual = ":legacy_gpu_hdrs",
+    visibility = ["//:__pkg__"],
+)
+
+alias(
+    name = "gpu_srcs",
+    actual = ":legacy_gpu_srcs",
+    visibility = ["//:__pkg__"],
+)
+
+skia_filegroup(
     name = "srcs",
     srcs = [
         ":core_srcs",
     ] + select({
-        "//src/sksl:use_sksl_gpu_srcs": [":gpu_srcs"],
+        "//src/sksl:use_sksl_gpu_srcs": [":legacy_gpu_srcs"],
         "//conditions:default": [],
     }),
     visibility = ["//src/sksl:__pkg__"],
 )
 
-filegroup(
+skia_filegroup(
     name = "private_hdrs",
     srcs = [
-        "SkSLVMCodeGenerator.h",
+        "SkSLRasterPipelineBuilder.h",
+        "SkSLRasterPipelineCodeGenerator.h",
     ] + select({
-        "//src/sksl:use_sksl_gpu_srcs": [":gpu_hdrs"],
+        "//src/sksl:use_sksl_gpu_srcs": [":legacy_gpu_hdrs"],
         "//conditions:default": [],
     }),
     visibility = ["//src/sksl:__pkg__"],
@@ -63,4 +80,57 @@ skia_cc_deps(
         "//src/sksl:use_sksl_gpu_srcs": ["@spirv_cross"],
         "//conditions:default": [],
     }),
+)
+
+skia_filegroup(
+    name = "rasterpipeline_hdrs",
+    srcs = [
+        "SkSLRasterPipelineBuilder.h",
+        "SkSLRasterPipelineCodeGenerator.h",
+    ],
+    visibility = ["//src/core:__pkg__"],
+)
+
+skia_filegroup(
+    name = "rasterpipeline_srcs",
+    srcs = [
+        "SkSLRasterPipelineBuilder.cpp",
+        "SkSLRasterPipelineCodeGenerator.cpp",
+    ],
+    visibility = ["//src/core:__pkg__"],
+)
+
+skia_cc_library(
+    name = "gpu",
+    srcs = [
+        "SkSLPipelineStageCodeGenerator.cpp",
+    ],
+    hdrs = [
+        "SkSLPipelineStageCodeGenerator.h",
+    ],
+    features = ["layering_check"],
+    visibility = ["//src/gpu/ganesh:__pkg__"],
+    deps = [
+        "//:core",
+        "//src/base",
+        "//src/core:core_priv",
+        "//src/gpu",
+    ],
+)
+
+skia_cc_library(
+    name = "glsl",
+    srcs = [
+        "SkSLCodeGenerator.h",
+        "SkSLGLSLCodeGenerator.cpp",
+    ],
+    hdrs = ["SkSLGLSLCodeGenerator.h"],
+    features = ["layering_check"],
+    visibility = ["//src/gpu/ganesh/gl:__pkg__"],
+    deps = [
+        ":gpu",
+        "//:core",
+        "//src/base",
+        "//src/core:core_priv",
+    ],
 )

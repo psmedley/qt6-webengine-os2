@@ -4,19 +4,37 @@
 
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 
-#ifndef TOOLKIT_QT
+#if !BUILDFLAG(IS_QTWEBENGINE)
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/net/profile_network_context_service_factory.h"
 #endif
 #include "chrome/browser/profiles/profile.h"
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "extensions/browser/extension_registry_factory.h"
+#endif
+
 ChromeSigninClientFactory::ChromeSigninClientFactory()
-    : ProfileKeyedServiceFactory("ChromeSigninClient") {
-#ifndef TOOLKIT_QT
+    : ProfileKeyedServiceFactory(
+          "ChromeSigninClient",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/1418376): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kOriginalOnly)
+              .Build()) {
+#if !BUILDFLAG(IS_QTWEBENGINE)
   DependsOn(ProfileNetworkContextServiceFactory::GetInstance());
+  // Used to keep track of bookmark metrics on Signin/Sync.
+  DependsOn(BookmarkModelFactory::GetInstance());
+#endif
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  // Used to keep track of extensions metrics on Signin/Sync.
+  DependsOn(extensions::ExtensionRegistryFactory::GetInstance());
 #endif
 }
 
-ChromeSigninClientFactory::~ChromeSigninClientFactory() {}
+ChromeSigninClientFactory::~ChromeSigninClientFactory() = default;
 
 // static
 SigninClient* ChromeSigninClientFactory::GetForProfile(Profile* profile) {
@@ -26,7 +44,8 @@ SigninClient* ChromeSigninClientFactory::GetForProfile(Profile* profile) {
 
 // static
 ChromeSigninClientFactory* ChromeSigninClientFactory::GetInstance() {
-  return base::Singleton<ChromeSigninClientFactory>::get();
+  static base::NoDestructor<ChromeSigninClientFactory> instance;
+  return instance.get();
 }
 
 KeyedService* ChromeSigninClientFactory::BuildServiceInstanceFor(

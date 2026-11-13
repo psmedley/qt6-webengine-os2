@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "core/fxcrt/widestring.h"
 #include "fxjs/gc/heap.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 #include "v8/include/cppgc/garbage-collected.h"
 #include "v8/include/cppgc/member.h"
 #include "v8/include/cppgc/persistent.h"
@@ -95,7 +95,7 @@ class CXFA_Document final : public cppgc::GarbageCollected<CXFA_Document> {
   // won't have an isolate set into it.
   CFXJSE_Engine* GetScriptContext() const;
 
-  CXFA_FFNotify* GetNotify() const { return notify_.Get(); }
+  CXFA_FFNotify* GetNotify() const { return notify_; }
   CXFA_NodeOwner* GetNodeOwner() { return node_owner_; }
   cppgc::Heap* GetHeap() const;
   CXFA_LocaleMgr* GetLocaleMgr();
@@ -164,10 +164,10 @@ class CXFA_Document final : public cppgc::GarbageCollected<CXFA_Document> {
                 LayoutProcessorIface* pLayout);
 
   UnownedPtr<cppgc::Heap> heap_;
+  std::unique_ptr<CFXJSE_Engine> m_pScriptContext;
   cppgc::Member<CXFA_FFNotify> const notify_;
   cppgc::Member<CXFA_NodeOwner> const node_owner_;
   cppgc::Member<CXFA_Node> m_pRootNode;
-  std::unique_ptr<CFXJSE_Engine> m_pScriptContext;
   cppgc::Member<LayoutProcessorIface> m_pLayoutProcessor;
   cppgc::Member<CXFA_LocaleMgr> m_pLocaleMgr;
   cppgc::Member<CScript_DataWindow> m_pScriptDataWindow;

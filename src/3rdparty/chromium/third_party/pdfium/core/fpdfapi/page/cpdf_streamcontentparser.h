@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,12 @@
 #ifndef CORE_FPDFAPI_PAGE_CPDF_STREAMCONTENTPARSER_H_
 #define CORE_FPDFAPI_PAGE_CPDF_STREAMCONTENTPARSER_H_
 
-#include <map>
 #include <memory>
-#include <set>
 #include <stack>
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_contentmarks.h"
+#include "core/fpdfapi/page/cpdf_form.h"
 #include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_number.h"
@@ -21,7 +20,7 @@
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/cfx_fillrenderoptions.h"
 #include "core/fxge/cfx_path.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 class CPDF_AllStates;
 class CPDF_ColorSpace;
@@ -41,6 +40,9 @@ class CPDF_TextObject;
 
 class CPDF_StreamContentParser {
  public:
+  static void InitializeGlobals();
+  static void DestroyGlobals();
+
   CPDF_StreamContentParser(CPDF_Document* pDoc,
                            RetainPtr<CPDF_Dictionary> pPageResources,
                            RetainPtr<CPDF_Dictionary> pParentResources,
@@ -49,16 +51,14 @@ class CPDF_StreamContentParser {
                            RetainPtr<CPDF_Dictionary> pResources,
                            const CFX_FloatRect& rcBBox,
                            const CPDF_AllStates* pStates,
-                           std::set<const uint8_t*>* pParsedSet);
+                           CPDF_Form::RecursionState* parse_state);
   ~CPDF_StreamContentParser();
 
   uint32_t Parse(pdfium::span<const uint8_t> pData,
                  uint32_t start_offset,
                  uint32_t max_cost,
                  const std::vector<uint32_t>& stream_start_offsets);
-  CPDF_PageObjectHolder* GetPageObjectHolder() const {
-    return m_pObjectHolder.Get();
-  }
+  CPDF_PageObjectHolder* GetPageObjectHolder() const { return m_pObjectHolder; }
   CPDF_AllStates* GetCurStates() const { return m_pCurStates.get(); }
   bool IsColored() const { return m_bColored; }
   pdfium::span<const float> GetType3Data() const { return m_Type3Data; }
@@ -76,16 +76,13 @@ class CPDF_StreamContentParser {
     ContentParam();
     ~ContentParam();
 
-    Type m_Type;
+    Type m_Type = Type::kObject;
     FX_Number m_Number;
     ByteString m_Name;
     RetainPtr<CPDF_Object> m_pObject;
   };
 
   static constexpr int kParamBufSize = 16;
-
-  using OpCodes = std::map<uint32_t, void (CPDF_StreamContentParser::*)()>;
-  static OpCodes InitializeOpCodes();
 
   void AddNameParam(ByteStringView bsName);
   void AddNumberParam(ByteStringView str);
@@ -121,11 +118,13 @@ class CPDF_StreamContentParser {
   void AddPathRect(float x, float y, float w, float h);
   void AddPathObject(CFX_FillRenderOptions::FillType fill_type,
                      RenderType render_type);
-  CPDF_ImageObject* AddImage(RetainPtr<CPDF_Stream> pStream);
-  CPDF_ImageObject* AddImage(uint32_t streamObjNum);
-  CPDF_ImageObject* AddImage(const RetainPtr<CPDF_Image>& pImage);
+  CPDF_ImageObject* AddImageFromStream(RetainPtr<CPDF_Stream> pStream,
+                                       const ByteString& name);
+  CPDF_ImageObject* AddImageFromStreamObjNum(uint32_t stream_obj_num,
+                                             const ByteString& name);
+  CPDF_ImageObject* AddLastImage();
 
-  void AddForm(RetainPtr<CPDF_Stream> pStream);
+  void AddForm(RetainPtr<CPDF_Stream> pStream, const ByteString& name);
   void SetGraphicStates(CPDF_PageObject* pObj,
                         bool bColor,
                         bool bText,
@@ -222,7 +221,7 @@ class CPDF_StreamContentParser {
   RetainPtr<CPDF_Dictionary> const m_pParentResources;
   RetainPtr<CPDF_Dictionary> const m_pResources;
   UnownedPtr<CPDF_PageObjectHolder> const m_pObjectHolder;
-  UnownedPtr<std::set<const uint8_t*>> const m_ParsedSet;
+  UnownedPtr<CPDF_Form::RecursionState> const m_RecursionState;
   CFX_Matrix m_mtContentToUser;
   const CFX_FloatRect m_BBox;
   uint32_t m_ParamStartPos = 0;

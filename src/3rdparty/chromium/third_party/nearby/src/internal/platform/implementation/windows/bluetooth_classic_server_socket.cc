@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2020-2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 #include "internal/platform/implementation/windows/bluetooth_classic_server_socket.h"
 
 #include <codecvt>
-#include <functional>
+#include <exception>
 #include <locale>
 #include <memory>
 #include <string>
@@ -24,9 +24,16 @@
 #include "internal/platform/implementation/windows/bluetooth_classic_socket.h"
 #include "internal/platform/logging.h"
 
-namespace location {
 namespace nearby {
 namespace windows {
+namespace {
+using ::winrt::Windows::Networking::Sockets::StreamSocket;
+using ::winrt::Windows::Networking::Sockets::SocketProtectionLevel;
+using ::winrt::Windows::Networking::Sockets::SocketQualityOfService;
+using ::winrt::Windows::Networking::Sockets::StreamSocketListener;
+using ::winrt::Windows::Networking::Sockets::
+    StreamSocketListenerConnectionReceivedEventArgs;
+}  // namespace
 
 BluetoothServerSocket::BluetoothServerSocket(absl::string_view service_name)
     : service_name_(service_name) {}
@@ -55,7 +62,8 @@ std::unique_ptr<api::BluetoothSocket> BluetoothServerSocket::Accept() {
   return std::make_unique<BluetoothSocket>(bluetooth_socket);
 }
 
-void BluetoothServerSocket::SetCloseNotifier(std::function<void()> notifier) {
+void BluetoothServerSocket::SetCloseNotifier(
+    absl::AnyInvocable<void()> notifier) {
   close_notifier_ = std::move(notifier);
 }
 
@@ -89,37 +97,52 @@ Exception BluetoothServerSocket::Close() {
 
     NEARBY_LOGS(INFO) << __func__ << ": Close completed succesfully.";
     return {Exception::kSuccess};
+  } catch (std::exception exception) {
+    closed_ = true;
+    cond_.SignalAll();
+    NEARBY_LOGS(ERROR) << __func__ << ": Exception: " << exception.what();
+    return {Exception::kIo};
+  } catch (const winrt::hresult_error& error) {
+    closed_ = true;
+    cond_.SignalAll();
+    NEARBY_LOGS(ERROR) << __func__ << ": WinRT exception: " << error.code()
+                       << ": " << winrt::to_string(error.message());
+    return {Exception::kIo};
   } catch (...) {
     closed_ = true;
     cond_.SignalAll();
-
-    NEARBY_LOGS(INFO) << __func__ << ": Failed to close server socket.";
+    NEARBY_LOGS(ERROR) << __func__ << ": Unknown exeption.";
     return {Exception::kIo};
   }
 }
 
 bool BluetoothServerSocket::listen() {
-  // Setup stream socket listener.
-  stream_socket_listener_ = StreamSocketListener();
-
-  stream_socket_listener_.Control().QualityOfService(
-      SocketQualityOfService::LowLatency);
-
-  stream_socket_listener_.Control().KeepAlive(true);
-
-  // Setup socket event of ConnectionReceived.
-  listener_event_token_ = stream_socket_listener_.ConnectionReceived(
-      {this, &BluetoothServerSocket::Listener_ConnectionReceived});
-
   try {
+    // Setup stream socket listener.
+    stream_socket_listener_ = StreamSocketListener();
+
+    stream_socket_listener_.Control().QualityOfService(
+        SocketQualityOfService::LowLatency);
+
+    stream_socket_listener_.Control().KeepAlive(true);
+
+    // Setup socket event of ConnectionReceived.
+    listener_event_token_ = stream_socket_listener_.ConnectionReceived(
+        {this, &BluetoothServerSocket::Listener_ConnectionReceived});
+
     stream_socket_listener_
         .BindServiceNameAsync(winrt::to_hstring(service_name_),
                               SocketProtectionLevel::PlainSocket)
         .get();
 
     return true;
+  } catch (std::exception exception) {
+    NEARBY_LOGS(ERROR) << __func__ << ": Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    NEARBY_LOGS(ERROR) << __func__ << ": WinRT exception: " << error.code()
+                       << ": " << winrt::to_string(error.message());
   } catch (...) {
-    NEARBY_LOGS(WARNING) << "cannot accept connection on preferred port.";
+    NEARBY_LOGS(ERROR) << __func__ << ": Unknown exeption.";
   }
 
   return false;
@@ -142,4 +165,3 @@ bool BluetoothServerSocket::listen() {
 
 }  // namespace windows
 }  // namespace nearby
-}  // namespace location

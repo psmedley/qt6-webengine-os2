@@ -1,13 +1,16 @@
 {
   "$build/chromium_tests_builder_config": {
     "builder_config": {
+      "additional_exclusions": [
+        "infra/config/generated/builders/ci/fuchsia-arm64-rel/gn-args.json"
+      ],
       "builder_db": {
         "entries": [
           {
             "builder_id": {
               "bucket": "ci",
               "builder": "fuchsia-arm64-rel",
-              "project": "chromium"
+              "project": "chromium-m122"
             },
             "builder_spec": {
               "build_gs_bucket": "chromium-linux-archive",
@@ -38,27 +41,22 @@
         {
           "bucket": "ci",
           "builder": "fuchsia-arm64-rel",
-          "project": "chromium"
+          "project": "chromium-m122"
         }
       ],
       "mirroring_builder_group_and_names": [
         {
           "builder": "fuchsia-arm64-rel",
           "group": "tryserver.chromium.fuchsia"
-        },
-        {
-          "builder": "fuchsia_arm64",
-          "group": "tryserver.chromium.fuchsia"
         }
       ]
     }
   },
-  "$build/goma": {
-    "enable_ats": true,
+  "$build/reclient": {
+    "instance": "rbe-chromium-trusted",
     "jobs": 500,
-    "rpc_extra_params": "?prod",
-    "server_host": "goma.chromium.org",
-    "use_luci_auth": true
+    "metrics_project": "chromium-reclient-metrics",
+    "scandeps_server": true
   },
   "$recipe_engine/resultdb/test_presentation": {
     "column_keys": [],

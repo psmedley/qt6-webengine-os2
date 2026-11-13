@@ -1,5 +1,10 @@
 /// <reference types="node" />
-import { ConnectionTransport } from '../common/ConnectionTransport.js';
+/**
+ * @license
+ * Copyright 2018 Google Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import type { ConnectionTransport } from '../common/ConnectionTransport.js';
 /**
  * @internal
  */

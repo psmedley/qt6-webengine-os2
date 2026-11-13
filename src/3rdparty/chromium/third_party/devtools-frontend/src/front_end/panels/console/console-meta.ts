@@ -3,112 +3,132 @@
 // found in the LICENSE file.
 
 import * as Common from '../../core/common/common.js';
+import * as i18n from '../../core/i18n/i18n.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
 import type * as Console from './console.js';
 
-import * as i18n from '../../core/i18n/i18n.js';
 const UIStrings = {
   /**
-  *@description Title of the Console tool
-  */
+   *@description Title of the Console tool
+   */
   console: 'Console',
   /**
-  *@description Title of an action that shows the console.
-  */
+   *@description Title of an action that shows the console.
+   */
   showConsole: 'Show Console',
   /**
-  *@description Text to clear the console
-  */
+   *@description Title of an action that toggles the console.
+   */
+  toggleConsole: 'Toggle Console',
+  /**
+   *@description Text to clear the console
+   */
   clearConsole: 'Clear console',
   /**
-  *@description Title of an action in the console tool to clear
-  */
+   *@description Title of an action in the console tool to clear
+   */
   clearConsoleHistory: 'Clear console history',
   /**
-  *@description Title of an action in the console tool to create pin. A live expression is code that the user can enter into the console and it will be pinned in the UI. Live expressions are constantly evaluated as the user interacts with the console (hence 'live').
-  */
+   *@description Title of an action in the console tool to create pin. A live expression is code that the user can enter into the console and it will be pinned in the UI. Live expressions are constantly evaluated as the user interacts with the console (hence 'live').
+   */
   createLiveExpression: 'Create live expression',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   hideNetworkMessages: 'Hide network messages',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   showNetworkMessages: 'Show network messages',
   /**
-  *@description Alternative title text of a setting in Console View of the Console panel
-  */
+   *@description Alternative title text of a setting in Console View of the Console panel
+   */
   selectedContextOnly: 'Selected context only',
   /**
-  *@description Tooltip text that appears on the setting when hovering over it in Console View of the Console panel
-  */
+   *@description Tooltip text that appears on the setting when hovering over it in Console View of the Console panel
+   */
   onlyShowMessagesFromTheCurrent: 'Only show messages from the current context (`top`, `iframe`, `worker`, extension)',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   showMessagesFromAllContexts: 'Show messages from all contexts',
   /**
-  *@description Title of a setting under the Console category in Settings
-  */
+   *@description Title of a setting under the Console category in Settings
+   */
   logXmlhttprequests: 'Log XMLHttpRequests',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   showTimestamps: 'Show timestamps',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   hideTimestamps: 'Hide timestamps',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   autocompleteFromHistory: 'Autocomplete from history',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   doNotAutocompleteFromHistory: 'Do not autocomplete from history',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   * @description Title of a setting under the Console category that controls whether to accept autocompletion with Enter.
+   */
+  autocompleteOnEnter: 'Accept autocomplete suggestion on Enter',
+  /**
+   * @description Title of a setting under the Console category that controls whether to accept autocompletion with Enter.
+   */
+  doNotAutocompleteOnEnter: 'Do not accept autocomplete suggestion on Enter',
+  /**
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   groupSimilarMessagesInConsole: 'Group similar messages in console',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   doNotGroupSimilarMessagesIn: 'Do not group similar messages in console',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   showCorsErrorsInConsole: 'Show `CORS` errors in console',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   doNotShowCorsErrorsIn: 'Do not show `CORS` errors in console',
   /**
-  *@description Title of a setting under the Console category in Settings
-  */
+   *@description Title of a setting under the Console category in Settings
+   */
   eagerEvaluation: 'Eager evaluation',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   eagerlyEvaluateConsolePromptText: 'Eagerly evaluate console prompt text',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   doNotEagerlyEvaluateConsole: 'Do not eagerly evaluate console prompt text',
   /**
-  *@description Title of a setting under the Console category in Settings
-  */
-  evaluateTriggersUserActivation: 'Evaluate triggers user activation',
+   *@description Allows code that is executed in the console to do things that usually are only allowed if triggered by a user action
+   */
+  evaluateTriggersUserActivation: 'Treat code evaluation as user action',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   treatEvaluationAsUserActivation: 'Treat evaluation as user activation',
   /**
-  *@description Title of a setting under the Console category that can be invoked through the Command Menu
-  */
+   *@description Title of a setting under the Console category that can be invoked through the Command Menu
+   */
   doNotTreatEvaluationAsUser: 'Do not treat evaluation as user activation',
+  /**
+   * @description Title of a setting under the Console category in Settings that controls whether `console.trace()` messages appear expanded by default.
+   */
+  expandConsoleTraceMessagesByDefault: 'Automatically expand `console.trace()` messages',
+  /**
+   * @description Title of a setting under the Console category in Settings that controls whether `console.trace()` messages appear collapsed by default.
+   */
+  collapseConsoleTraceMessagesByDefault: 'Do not automatically expand `console.trace()` messages',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/console/console-meta.ts', UIStrings);
 const i18nLazyString = i18n.i18n.getLazilyComputedLocalizedString.bind(undefined, str_);
@@ -154,12 +174,12 @@ UI.ViewManager.registerViewExtension({
 });
 
 UI.ActionRegistration.registerActionExtension({
-  actionId: 'console.show',
+  actionId: 'console.toggle',
   category: UI.ActionRegistration.ActionCategory.CONSOLE,
-  title: i18nLazyString(UIStrings.showConsole),
+  title: i18nLazyString(UIStrings.toggleConsole),
   async loadActionDelegate() {
     const Console = await loadConsoleModule();
-    return Console.ConsoleView.ActionDelegate.instance();
+    return new Console.ConsoleView.ActionDelegate();
   },
   bindings: [
     {
@@ -176,10 +196,10 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'console.clear',
   category: UI.ActionRegistration.ActionCategory.CONSOLE,
   title: i18nLazyString(UIStrings.clearConsole),
-  iconClass: UI.ActionRegistration.IconClass.LARGEICON_CLEAR,
+  iconClass: UI.ActionRegistration.IconClass.CLEAR,
   async loadActionDelegate() {
     const Console = await loadConsoleModule();
-    return Console.ConsoleView.ActionDelegate.instance();
+    return new Console.ConsoleView.ActionDelegate();
   },
   contextTypes() {
     return maybeRetrieveContextTypes(Console => [Console.ConsoleView.ConsoleView]);
@@ -201,7 +221,7 @@ UI.ActionRegistration.registerActionExtension({
   title: i18nLazyString(UIStrings.clearConsoleHistory),
   async loadActionDelegate() {
     const Console = await loadConsoleModule();
-    return Console.ConsoleView.ActionDelegate.instance();
+    return new Console.ConsoleView.ActionDelegate();
   },
 });
 
@@ -209,10 +229,10 @@ UI.ActionRegistration.registerActionExtension({
   actionId: 'console.create-pin',
   category: UI.ActionRegistration.ActionCategory.CONSOLE,
   title: i18nLazyString(UIStrings.createLiveExpression),
-  iconClass: UI.ActionRegistration.IconClass.LARGEICON_VISIBILITY,
+  iconClass: UI.ActionRegistration.IconClass.EYE,
   async loadActionDelegate() {
     const Console = await loadConsoleModule();
-    return Console.ConsoleView.ActionDelegate.instance();
+    return new Console.ConsoleView.ActionDelegate();
   },
 });
 
@@ -303,6 +323,25 @@ Common.Settings.registerSettingExtension({
 Common.Settings.registerSettingExtension({
   category: Common.Settings.SettingCategory.CONSOLE,
   storageType: Common.Settings.SettingStorageType.Synced,
+  title: i18nLazyString(UIStrings.autocompleteOnEnter),
+  settingName: 'consoleAutocompleteOnEnter',
+  settingType: Common.Settings.SettingType.BOOLEAN,
+  defaultValue: false,
+  options: [
+    {
+      value: true,
+      title: i18nLazyString(UIStrings.autocompleteOnEnter),
+    },
+    {
+      value: false,
+      title: i18nLazyString(UIStrings.doNotAutocompleteOnEnter),
+    },
+  ],
+});
+
+Common.Settings.registerSettingExtension({
+  category: Common.Settings.SettingCategory.CONSOLE,
+  storageType: Common.Settings.SettingStorageType.Synced,
   title: i18nLazyString(UIStrings.groupSimilarMessagesInConsole),
   settingName: 'consoleGroupSimilar',
   settingType: Common.Settings.SettingType.BOOLEAN,
@@ -375,15 +414,34 @@ Common.Settings.registerSettingExtension({
   ],
 });
 
+Common.Settings.registerSettingExtension({
+  category: Common.Settings.SettingCategory.CONSOLE,
+  storageType: Common.Settings.SettingStorageType.Synced,
+  title: i18nLazyString(UIStrings.expandConsoleTraceMessagesByDefault),
+  settingName: 'consoleTraceExpand',
+  settingType: Common.Settings.SettingType.BOOLEAN,
+  defaultValue: true,
+  options: [
+    {
+      value: true,
+      title: i18nLazyString(UIStrings.expandConsoleTraceMessagesByDefault),
+    },
+    {
+      value: false,
+      title: i18nLazyString(UIStrings.collapseConsoleTraceMessagesByDefault),
+    },
+  ],
+});
+
 Common.Revealer.registerRevealer({
   contextTypes() {
     return [
       Common.Console.Console,
     ];
   },
+  destination: undefined,
   async loadRevealer() {
     const Console = await loadConsoleModule();
-    return Console.ConsolePanel.ConsoleRevealer.instance();
+    return new Console.ConsolePanel.ConsoleRevealer();
   },
-  destination: undefined,
 });

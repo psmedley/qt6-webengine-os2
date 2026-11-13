@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/views_export.h"
@@ -27,7 +28,7 @@ class VIEWS_EXPORT ViewModelBase {
   struct Entry {
     Entry() = default;
 
-    View* view = nullptr;
+    raw_ptr<View> view = nullptr;
     gfx::Rect ideal_bounds;
   };
   using Entries = std::vector<Entry>;

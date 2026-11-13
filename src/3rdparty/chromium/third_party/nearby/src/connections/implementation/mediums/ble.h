@@ -28,7 +28,6 @@
 #include "internal/platform/multi_thread_executor.h"
 #include "internal/platform/mutex.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 
@@ -52,6 +51,19 @@ class Ble {
 
   // Disables Ble advertising.
   bool StopAdvertising(const std::string& service_id)
+      ABSL_LOCKS_EXCLUDED(mutex_);
+
+  // (TODO:hais) remove this after ble_v2 refactor
+  // Sets custom advertisement data, and then enables Ble advertising.
+  // Returns true, if data is successfully set, and false otherwise.
+  bool StartLegacyAdvertising(
+      const std::string& service_id, const std::string& local_endpoint_id,
+      const std::string& fast_advertisement_service_uuid)
+      ABSL_LOCKS_EXCLUDED(mutex_);
+
+  // (TODO:hais) remove this after ble_v2 refactor
+  // Disables Ble advertising.
+  bool StopLegacyAdvertising(const std::string& service_id)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   bool IsAdvertising(const std::string& service_id) ABSL_LOCKS_EXCLUDED(mutex_);
@@ -183,6 +195,5 @@ class Ble {
 
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location
 
 #endif  // CORE_INTERNAL_MEDIUMS_BLE_H_

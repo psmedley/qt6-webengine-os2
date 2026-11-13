@@ -1,9 +1,10 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "cookie_monster_delegate_qt.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "net/cookies/cookie_util.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 
@@ -50,7 +51,7 @@ private:
 
 static GURL sourceUrlForCookie(const QNetworkCookie &cookie)
 {
-    QString urlFragment = QStringLiteral("%1%2").arg(cookie.domain()).arg(cookie.path());
+    const QString urlFragment = cookie.domain() % cookie.path();
     return net::cookie_util::CookieOriginToURL(urlFragment.toStdString(), /* is_https */ cookie.isSecure());
 }
 
@@ -97,8 +98,9 @@ void CookieMonsterDelegateQt::setCookie(const QNetworkCookie &cookie, const QUrl
     std::string cookie_line = cookie.toRawForm().toStdString();
 
     net::CookieInclusionStatus inclusion;
-    auto canonCookie = net::CanonicalCookie::Create(gurl, cookie_line, base::Time::Now(), absl::nullopt, absl::nullopt, &inclusion);
-    if (!inclusion.IsInclude()) {
+    auto canonCookie = net::CanonicalCookie::Create(gurl, cookie_line, base::Time::Now(),
+                                                    absl::nullopt, absl::nullopt, true, &inclusion);
+    if (!canonCookie || !inclusion.IsInclude()) {
         LOG(WARNING) << "QWebEngineCookieStore::setCookie() - Tried to set invalid cookie";
         return;
     }

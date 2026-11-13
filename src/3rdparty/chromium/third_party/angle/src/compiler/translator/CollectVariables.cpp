@@ -43,12 +43,14 @@ BlockType GetBlockType(TQualifier qualifier)
     switch (qualifier)
     {
         case EvqUniform:
-            return BlockType::BLOCK_UNIFORM;
+            return BlockType::kBlockUniform;
         case EvqBuffer:
-            return BlockType::BLOCK_BUFFER;
+            return BlockType::kBlockBuffer;
+        case EvqPixelLocalEXT:
+            return BlockType::kPixelLocalExt;
         default:
             UNREACHABLE();
-            return BlockType::BLOCK_UNIFORM;
+            return BlockType::kBlockUniform;
     }
 }
 
@@ -209,6 +211,7 @@ class CollectVariablesTraverser : public TIntermTraverser
     bool mHelperInvocationAdded;
     bool mFragCoordAdded;
     bool mLastFragDataAdded;
+    bool mLastFragColorAdded;
     bool mFragColorAdded;
     bool mFragDataAdded;
     bool mFragDepthAdded;
@@ -292,6 +295,7 @@ CollectVariablesTraverser::CollectVariablesTraverser(
       mHelperInvocationAdded(false),
       mFragCoordAdded(false),
       mLastFragDataAdded(false),
+      mLastFragColorAdded(false),
       mFragColorAdded(false),
       mFragDataAdded(false),
       mFragDepthAdded(false),
@@ -593,6 +597,9 @@ void CollectVariablesTraverser::visitSymbol(TIntermSymbol *symbol)
                 return;
             case EvqLastFragData:
                 recordBuiltInVaryingUsed(symbol->variable(), &mLastFragDataAdded, mInputVaryings);
+                return;
+            case EvqLastFragColor:
+                recordBuiltInVaryingUsed(symbol->variable(), &mLastFragColorAdded, mInputVaryings);
                 return;
             case EvqFragColor:
                 recordBuiltInFragmentOutputUsed(symbol->variable(), &mFragColorAdded);
@@ -909,8 +916,10 @@ ShaderVariable CollectVariablesTraverser::recordVarying(const TIntermSymbol &var
         case EvqFlatOut:
         case EvqNoPerspectiveOut:
         case EvqCentroidOut:
-        case EvqGeometryOut:
         case EvqSampleOut:
+        case EvqNoPerspectiveCentroidOut:
+        case EvqNoPerspectiveSampleOut:
+        case EvqGeometryOut:
             if (mSymbolTable->isVaryingInvariant(variable.variable()) || type.isInvariant())
             {
                 varying.isInvariant = true;
@@ -1010,14 +1019,20 @@ void CollectVariablesTraverser::recordInterfaceBlock(const char *instanceName,
         interfaceBlockType.isArray() ? interfaceBlockType.getOutermostArraySize() : 0;
 
     interfaceBlock->blockType = GetBlockType(interfaceBlockType.getQualifier());
-    if (interfaceBlock->blockType == BlockType::BLOCK_UNIFORM ||
-        interfaceBlock->blockType == BlockType::BLOCK_BUFFER)
+    if (interfaceBlock->blockType == BlockType::kBlockUniform ||
+        interfaceBlock->blockType == BlockType::kBlockBuffer)
     {
         // TODO(oetuaho): Remove setting isRowMajorLayout.
         interfaceBlock->isRowMajorLayout = false;
         interfaceBlock->binding          = blockType->blockBinding();
         interfaceBlock->layout           = GetBlockLayoutType(blockType->blockStorage());
     }
+
+    // Consider an SSBO readonly if all its fields are readonly.  Note that ANGLE doesn't keep the
+    // readonly qualifier applied to the interface block itself, but rather applies it to the
+    // fields.
+    ASSERT(!interfaceBlockType.getMemoryQualifier().readonly);
+    bool isReadOnly = true;
 
     // Gather field information
     bool anyFieldStaticallyUsed = false;
@@ -1047,10 +1062,20 @@ void CollectVariablesTraverser::recordInterfaceBlock(const char *instanceName,
         fieldVariable.isRowMajorLayout =
             (fieldType.getLayoutQualifier().matrixPacking == EmpRowMajor);
         interfaceBlock->fields.push_back(fieldVariable);
+
+        // The SSBO is not readonly if any field is not readonly.
+        if (!fieldType.getMemoryQualifier().readonly)
+        {
+            isReadOnly = false;
+        }
     }
     if (anyFieldStaticallyUsed)
     {
         interfaceBlock->staticUse = true;
+    }
+    if (interfaceBlock->blockType == BlockType::kBlockBuffer)
+    {
+        interfaceBlock->isReadOnly = isReadOnly;
     }
 }
 
@@ -1121,6 +1146,10 @@ bool CollectVariablesTraverser::visitDeclaration(Visit, TIntermDeclaration *node
                     break;
                 case EvqBuffer:
                     mShaderStorageBlocks->push_back(interfaceBlock);
+                    break;
+                case EvqPixelLocalEXT:
+                    // EXT_shader_pixel_local_storage is completely self-contained within the
+                    // shader, so we don't need to gather any info on it.
                     break;
                 default:
                     UNREACHABLE();
@@ -1231,8 +1260,9 @@ bool CollectVariablesTraverser::visitBinary(Visit, TIntermBinary *binaryNode)
         {
             MarkActive(ioBlockVar);
         }
-        else
+        else if (qualifier != EvqPixelLocalEXT)
         {
+
             if (!namedBlock)
             {
                 namedBlock = findNamedInterfaceBlock(interfaceBlock->name());

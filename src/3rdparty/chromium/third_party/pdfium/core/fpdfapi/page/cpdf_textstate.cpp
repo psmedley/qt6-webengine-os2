@@ -1,4 +1,4 @@
-// Copyright 2016 PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,10 @@
 #include "core/fpdfapi/page/cpdf_docpagedata.h"
 
 CPDF_TextState::CPDF_TextState() = default;
+
+CPDF_TextState::CPDF_TextState(const CPDF_TextState&) = default;
+
+CPDF_TextState& CPDF_TextState::operator=(const CPDF_TextState&) = default;
 
 CPDF_TextState::~CPDF_TextState() = default;
 
@@ -34,7 +38,9 @@ float CPDF_TextState::GetFontSize() const {
 }
 
 void CPDF_TextState::SetFontSize(float size) {
-  m_Ref.GetPrivateCopy()->m_FontSize = size;
+  if (!m_Ref || GetFontSize() != size) {
+    m_Ref.GetPrivateCopy()->m_FontSize = size;
+  }
 }
 
 pdfium::span<const float> CPDF_TextState::GetMatrix() const {
@@ -50,7 +56,9 @@ float CPDF_TextState::GetCharSpace() const {
 }
 
 void CPDF_TextState::SetCharSpace(float sp) {
-  m_Ref.GetPrivateCopy()->m_CharSpace = sp;
+  if (!m_Ref || GetCharSpace() != sp) {
+    m_Ref.GetPrivateCopy()->m_CharSpace = sp;
+  }
 }
 
 float CPDF_TextState::GetWordSpace() const {
@@ -58,7 +66,9 @@ float CPDF_TextState::GetWordSpace() const {
 }
 
 void CPDF_TextState::SetWordSpace(float sp) {
-  m_Ref.GetPrivateCopy()->m_WordSpace = sp;
+  if (!m_Ref || GetWordSpace() != sp) {
+    m_Ref.GetPrivateCopy()->m_WordSpace = sp;
+  }
 }
 
 float CPDF_TextState::GetFontSizeH() const {
@@ -70,7 +80,9 @@ TextRenderingMode CPDF_TextState::GetTextMode() const {
 }
 
 void CPDF_TextState::SetTextMode(TextRenderingMode mode) {
-  m_Ref.GetPrivateCopy()->m_TextMode = mode;
+  if (!m_Ref || GetTextMode() != mode) {
+    m_Ref.GetPrivateCopy()->m_TextMode = mode;
+  }
 }
 
 pdfium::span<const float> CPDF_TextState::GetCTM() const {
@@ -97,7 +109,7 @@ CPDF_TextState::TextData::TextData(const TextData& that)
     m_CTM[i] = that.m_CTM[i];
 
   if (m_pDocument && m_pFont) {
-    auto* pPageData = CPDF_DocPageData::FromDocument(m_pDocument.Get());
+    auto* pPageData = CPDF_DocPageData::FromDocument(m_pDocument);
     m_pFont = pPageData->GetFont(m_pFont->GetMutableFontDict());
   }
 }

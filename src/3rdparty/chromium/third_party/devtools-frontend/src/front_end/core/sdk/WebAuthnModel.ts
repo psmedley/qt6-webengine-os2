@@ -5,14 +5,25 @@
 import type * as ProtocolProxyApi from '../../generated/protocol-proxy-api.js';
 import type * as Protocol from '../../generated/protocol.js';
 
-import {Capability, type Target} from './Target.js';
 import {SDKModel} from './SDKModel.js';
+import {Capability, type Target} from './Target.js';
 
-export class WebAuthnModel extends SDKModel {
+export const enum Events {
+  CredentialAdded = 'CredentialAdded',
+  CredentialAsserted = 'CredentialAsserted',
+}
+
+export type EventTypes = {
+  [Events.CredentialAdded]: Protocol.WebAuthn.CredentialAddedEvent,
+  [Events.CredentialAsserted]: Protocol.WebAuthn.CredentialAssertedEvent,
+};
+
+export class WebAuthnModel extends SDKModel<EventTypes> {
   readonly #agent: ProtocolProxyApi.WebAuthnApi;
   constructor(target: Target) {
     super(target);
     this.#agent = target.webAuthnAgent();
+    target.registerWebAuthnDispatcher(new WebAuthnDispatcher(this));
   }
 
   setVirtualAuthEnvEnabled(enable: boolean): Promise<Object> {
@@ -44,6 +55,29 @@ export class WebAuthnModel extends SDKModel {
 
   async removeCredential(authenticatorId: Protocol.WebAuthn.AuthenticatorId, credentialId: string): Promise<void> {
     await this.#agent.invoke_removeCredential({authenticatorId, credentialId});
+  }
+
+  credentialAdded(params: Protocol.WebAuthn.CredentialAddedEvent): void {
+    this.dispatchEventToListeners(Events.CredentialAdded, params);
+  }
+
+  credentialAsserted(params: Protocol.WebAuthn.CredentialAssertedEvent): void {
+    this.dispatchEventToListeners(Events.CredentialAsserted, params);
+  }
+}
+
+class WebAuthnDispatcher implements ProtocolProxyApi.WebAuthnDispatcher {
+  readonly #model: WebAuthnModel;
+  constructor(model: WebAuthnModel) {
+    this.#model = model;
+  }
+
+  credentialAdded(params: Protocol.WebAuthn.CredentialAddedEvent): void {
+    this.#model.credentialAdded(params);
+  }
+
+  credentialAsserted(params: Protocol.WebAuthn.CredentialAssertedEvent): void {
+    this.#model.credentialAsserted(params);
   }
 }
 

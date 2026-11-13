@@ -1,4 +1,4 @@
-// Copyright 2019 PDFium Authors. All rights reserved.
+// Copyright 2019 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -152,7 +152,7 @@ pdfium::span<uint8_t> RLScanlineDecoder::GetNextLine() {
       UpdateOperator((uint8_t)copy_len);
     } else if (m_Operator > 128) {
       int fill = 0;
-      if (m_SrcOffset - 1 < m_SrcBuf.size() - 1) {
+      if (m_SrcOffset < m_SrcBuf.size()) {
         fill = m_SrcBuf[m_SrcOffset];
       }
       uint32_t duplicate_len = 257 - m_Operator;

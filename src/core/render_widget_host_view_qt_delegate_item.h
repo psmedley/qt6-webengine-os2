@@ -35,6 +35,8 @@ public:
     virtual void Destroy() = 0;
     virtual void Resize(int, int) { }
     virtual QWindow *Window() { return nullptr; }
+    virtual void SetCursor(const QCursor &) { }
+    virtual void unhandledWheelEvent(QWheelEvent *) { }
 };
 
 // Useful information keyboard and mouse QEvent propagation.
@@ -43,7 +45,7 @@ public:
 // but will still receive mouse input (all mouse QEvent moves and clicks will be given to the popup
 // RWHVQD instance, and the mouse interaction area covers the surface of the whole parent
 // QWebEngineView, and not only the smaller surface that an HTML select popup would occupy).
-class Q_WEBENGINECORE_PRIVATE_EXPORT RenderWidgetHostViewQtDelegateItem
+class Q_WEBENGINECORE_EXPORT RenderWidgetHostViewQtDelegateItem
         : public QQuickItem
         , public RenderWidgetHostViewQtDelegate
         , public Compositor::Observer
@@ -93,6 +95,7 @@ protected:
     void inputMethodEvent(QInputMethodEvent *event) override;
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
     void itemChange(ItemChange change, const ItemChangeData &value) override;
+    void releaseResources() override;
     QSGNode *updatePaintNode(QSGNode *, UpdatePaintNodeData *) override;
 
     void adapterClientChanged(WebContentsAdapterClient *client) override;
@@ -100,9 +103,8 @@ protected:
 
 private Q_SLOTS:
     void onBeforeRendering();
-    void onAfterRendering();
+    void onAfterFrameEnd();
     void onWindowPosChanged();
-    void releaseVulkanResources();
     void onHide();
 
 private:

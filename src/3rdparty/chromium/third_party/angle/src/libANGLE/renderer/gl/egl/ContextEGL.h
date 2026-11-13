@@ -26,14 +26,19 @@ class ContextEGL : public ContextGL
                RobustnessVideoMemoryPurgeStatus robustnessVideoMemoryPurgeStatus);
     ~ContextEGL() override;
 
-    angle::Result onMakeCurrent(const gl::Context *context) override;
-    angle::Result onUnMakeCurrent(const gl::Context *context) override;
+    void acquireExternalContext(const gl::Context *context) override;
+    void releaseExternalContext(const gl::Context *context) override;
 
     EGLContext getContext() const;
 
   private:
     std::shared_ptr<RendererEGL> mRendererEGL;
     std::unique_ptr<ExternalContextState> mExtState;
+
+    // Used to restore the default FBO's ID on unmaking an external context
+    // current, as when making an external context current ANGLE sets the
+    // default FBO's ID to that bound in the external context.
+    GLuint mPrevDefaultFramebufferID = 0;
 };
 }  // namespace rx
 

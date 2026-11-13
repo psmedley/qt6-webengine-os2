@@ -1,16 +1,29 @@
-// Copyright 2021 The Dawn Authors
+// Copyright 2021 The Dawn & Tint Authors
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef SRC_DAWN_NATIVE_WEBGPU_ABSL_FORMAT_H_
 #define SRC_DAWN_NATIVE_WEBGPU_ABSL_FORMAT_H_
@@ -18,6 +31,16 @@
 #include "absl/strings/str_format.h"
 #include "dawn/native/dawn_platform.h"
 #include "dawn/native/webgpu_absl_format_autogen.h"
+
+namespace dawn::detail {
+template <typename Tag, typename T>
+class TypedIntegerImpl;
+}  // namespace dawn::detail
+
+namespace dawn::ityp {
+template <typename Index, typename Value>
+class span;
+}  // namespace dawn::ityp
 
 namespace dawn::native {
 
@@ -29,9 +52,21 @@ struct Color;
 absl::FormatConvertResult<absl::FormatConversionCharSet::kString>
 AbslFormatConvert(const Color* value, const absl::FormatConversionSpec& spec, absl::FormatSink* s);
 
+struct Extent2D;
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const Extent2D* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s);
+
 struct Extent3D;
 absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
     const Extent3D* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s);
+
+struct Origin2D;
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const Origin2D* value,
     const absl::FormatConversionSpec& spec,
     absl::FormatSink* s);
 
@@ -44,6 +79,24 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
 struct BindingInfo;
 absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
     const BindingInfo& value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s);
+
+struct ImageCopyTexture;
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const ImageCopyTexture* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s);
+
+struct TextureDataLayout;
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const TextureDataLayout* value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s);
+
+struct ShaderModuleEntryPoint;
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const ShaderModuleEntryPoint* value,
     const absl::FormatConversionSpec& spec,
     absl::FormatSink* s);
 
@@ -60,14 +113,6 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
 class ApiObjectBase;
 absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
     const ApiObjectBase* value,
-    const absl::FormatConversionSpec& spec,
-    absl::FormatSink* s);
-
-// Special case for TextureViews, since frequently the texture will be the
-// thing that's labeled.
-class TextureViewBase;
-absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
-    const TextureViewBase* value,
     const absl::FormatConversionSpec& spec,
     absl::FormatSink* s);
 
@@ -124,6 +169,46 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConv
     InterpolationSampling value,
     const absl::FormatConversionSpec& spec,
     absl::FormatSink* s);
+
+enum class TextureComponentType;
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    TextureComponentType value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s);
+
+enum class PixelLocalMemberType;
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    PixelLocalMemberType value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s);
+
+template <typename I, typename T>
+absl::FormatConvertResult<absl::FormatConversionCharSet::kString> AbslFormatConvert(
+    const ityp::span<I, T>& values,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    s->Append("[");
+    bool first = true;
+    for (const auto& v : values) {
+        if (!first) {
+            s->Append(absl::StrFormat(", %s", v));
+        } else {
+            s->Append(absl::StrFormat("%s", v));
+        }
+        first = false;
+    }
+    s->Append("]");
+    return {true};
+}
+
+template <typename Tag, typename T>
+absl::FormatConvertResult<absl::FormatConversionCharSet::kNumeric> AbslFormatConvert(
+    const dawn::detail::TypedIntegerImpl<Tag, T>& value,
+    const absl::FormatConversionSpec& spec,
+    absl::FormatSink* s) {
+    s->Append(absl::StrFormat("%u", static_cast<T>(value)));
+    return {true};
+}
 
 }  // namespace dawn::native
 

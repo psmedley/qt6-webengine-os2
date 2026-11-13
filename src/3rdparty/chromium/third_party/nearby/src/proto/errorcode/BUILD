@@ -14,6 +14,8 @@
 
 # Proto for Nearby products
 
+load("@rules_cc//cc:defs.bzl", "cc_proto_library")
+
 licenses(["notice"])
 
 package(default_visibility = ["//visibility:public"])
@@ -21,11 +23,6 @@ package(default_visibility = ["//visibility:public"])
 proto_library(
     name = "error_code_enums_proto",
     srcs = ["error_code_enums.proto"],
-)
-
-java_lite_proto_library(
-    name = "error_code_enums_java_proto_lite",
-    deps = [":error_code_enums_proto"],
 )
 
 cc_proto_library(

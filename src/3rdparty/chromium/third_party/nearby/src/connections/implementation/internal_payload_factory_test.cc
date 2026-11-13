@@ -14,22 +14,26 @@
 
 #include "connections/implementation/internal_payload_factory.h"
 
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
-#include "gmock/gmock.h"
-#include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
+#include "connections/implementation/internal_payload.h"
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
-#include "connections/implementation/offline_frames.h"
+#include "connections/payload.h"
+#include "connections/payload_type.h"
 #include "internal/platform/byte_array.h"
+#include "internal/platform/exception.h"
+#include "internal/platform/file.h"
 #include "internal/platform/pipe.h"
 
-namespace location {
 namespace nearby {
 namespace connections {
 namespace {
 
+using ::location::nearby::connections::PayloadTransferFrame;
 constexpr char kText[] = "data chunk";
 
 TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromBytePayload) {
@@ -44,11 +48,9 @@ TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromBytePayload) {
 }
 
 TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromStreamPayload) {
-  auto pipe = std::make_shared<Pipe>();
+  auto [input, output] = CreatePipe();
   std::unique_ptr<InternalPayload> internal_payload =
-      CreateOutgoingInternalPayload(Payload{[pipe]() -> InputStream& {
-        return pipe->GetInputStream();  // NOLINT
-      }});
+      CreateOutgoingInternalPayload(Payload(std::move(input)));
   EXPECT_NE(internal_payload, nullptr);
   Payload payload = internal_payload->ReleasePayload();
   EXPECT_EQ(payload.AsFile(), nullptr);
@@ -71,6 +73,7 @@ TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromFilePayload) {
 
 TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromByteMessage) {
   PayloadTransferFrame frame;
+  std::string path = "C:\\Downloads";
   frame.set_packet_type(PayloadTransferFrame::DATA);
   std::int64_t payload_chunk_offset = 0;
   ByteArray data(kText);
@@ -84,7 +87,7 @@ TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromByteMessage) {
   header.set_total_size(512);
   *frame.mutable_payload_chunk() = std::move(payload_chunk);
   std::unique_ptr<InternalPayload> internal_payload =
-      CreateIncomingInternalPayload(frame);
+      CreateIncomingInternalPayload(frame, path);
   EXPECT_NE(internal_payload, nullptr);
   Payload payload = internal_payload->ReleasePayload();
   EXPECT_EQ(payload.AsFile(), nullptr);
@@ -94,30 +97,37 @@ TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromByteMessage) {
 
 TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromStreamMessage) {
   PayloadTransferFrame frame;
+  std::string path = "C:\\Downloads";
   frame.set_packet_type(PayloadTransferFrame::DATA);
   auto& header = *frame.mutable_payload_header();
   header.set_type(PayloadTransferFrame::PayloadHeader::STREAM);
   header.set_id(12345);
   header.set_total_size(0);
   std::unique_ptr<InternalPayload> internal_payload =
-      CreateIncomingInternalPayload(frame);
+      CreateIncomingInternalPayload(frame, path);
   EXPECT_NE(internal_payload, nullptr);
-  Payload payload = internal_payload->ReleasePayload();
-  EXPECT_EQ(payload.AsFile(), nullptr);
-  EXPECT_NE(payload.AsStream(), nullptr);
-  EXPECT_EQ(payload.AsBytes(), ByteArray());
-  EXPECT_EQ(payload.GetType(), PayloadType::kStream);
+  {
+    Payload payload = internal_payload->ReleasePayload();
+    EXPECT_EQ(payload.AsFile(), nullptr);
+    EXPECT_NE(payload.AsStream(), nullptr);
+    EXPECT_EQ(payload.AsBytes(), ByteArray());
+    EXPECT_EQ(payload.GetType(), PayloadType::kStream);
+  }
+  // Verifies that we can close InternalPayload after releasing (and destroying)
+  // the payload
+  internal_payload->Close();
 }
 
 TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromFileMessage) {
   PayloadTransferFrame frame;
+  std::string path = "C:\\Downloads";
   frame.set_packet_type(PayloadTransferFrame::DATA);
   auto& header = *frame.mutable_payload_header();
   header.set_type(PayloadTransferFrame::PayloadHeader::FILE);
   header.set_id(12345);
   header.set_total_size(512);
   std::unique_ptr<InternalPayload> internal_payload =
-      CreateIncomingInternalPayload(frame);
+      CreateIncomingInternalPayload(frame, path);
   EXPECT_NE(internal_payload, nullptr);
   Payload payload = internal_payload->ReleasePayload();
   EXPECT_NE(payload.AsFile(), nullptr);
@@ -129,25 +139,27 @@ TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromFileMessage) {
 TEST(InternalPayloadFactoryTest,
      InternalPayloadFromFileMessageWithoutIdReturnsNullptr) {
   PayloadTransferFrame frame;
+  std::string path = "C:\\Downloads";
   frame.set_packet_type(PayloadTransferFrame::DATA);
   auto& header = *frame.mutable_payload_header();
   header.set_type(PayloadTransferFrame::PayloadHeader::FILE);
   header.set_total_size(512);
   std::unique_ptr<InternalPayload> internal_payload =
-      CreateIncomingInternalPayload(frame);
+      CreateIncomingInternalPayload(frame, path);
   EXPECT_EQ(internal_payload, nullptr);
 }
 
 TEST(InternalPayloadFactoryTest,
      CanCreateInternalPayloadFromFileMessageWithFileNameNotSet) {
   PayloadTransferFrame frame;
+  std::string path = "C:\\Downloads";
   frame.set_packet_type(PayloadTransferFrame::DATA);
   auto& header = *frame.mutable_payload_header();
   header.set_type(PayloadTransferFrame::PayloadHeader::FILE);
   header.set_id(12345);
   header.set_total_size(512);
   std::unique_ptr<InternalPayload> internal_payload =
-      CreateIncomingInternalPayload(frame);
+      CreateIncomingInternalPayload(frame, path);
   EXPECT_NE(internal_payload, nullptr);
   Payload payload = internal_payload->ReleasePayload();
   EXPECT_EQ(payload.GetFileName(), "12345");
@@ -155,6 +167,7 @@ TEST(InternalPayloadFactoryTest,
 TEST(InternalPayloadFactoryTest,
      CanCreateInternalPayloadFromFileMessageWithFileNameSet) {
   PayloadTransferFrame frame;
+  std::string path = "C:\\Downloads";
   frame.set_packet_type(PayloadTransferFrame::DATA);
   auto& header = *frame.mutable_payload_header();
   header.set_type(PayloadTransferFrame::PayloadHeader::FILE);
@@ -162,7 +175,7 @@ TEST(InternalPayloadFactoryTest,
   header.set_total_size(512);
   header.set_file_name("test.file.name");
   std::unique_ptr<InternalPayload> internal_payload =
-      CreateIncomingInternalPayload(frame);
+      CreateIncomingInternalPayload(frame, path);
   EXPECT_NE(internal_payload, nullptr);
   auto test = internal_payload->GetFileName();
   Payload payload = internal_payload->ReleasePayload();
@@ -201,13 +214,11 @@ TEST(InternalPayloadFactoryTest,
      SkipToOffset_StreamPayloadValidOffset_SkipsOffset) {
   ByteArray contents("0123456789");
   constexpr size_t kOffset = 6;
-  auto pipe = std::make_shared<Pipe>();
+  auto [input, output] = CreatePipe();
   std::unique_ptr<InternalPayload> internal_payload =
-      CreateOutgoingInternalPayload(Payload{[pipe]() -> InputStream& {
-        return pipe->GetInputStream();  // NOLINT
-      }});
+      CreateOutgoingInternalPayload(Payload(std::move(input)));
   EXPECT_NE(internal_payload, nullptr);
-  pipe->GetOutputStream().Write(contents);
+  output->Write(contents);
 
   ExceptionOr<size_t> result = internal_payload->SkipToOffset(kOffset);
 
@@ -221,4 +232,3 @@ TEST(InternalPayloadFactoryTest,
 }  // namespace
 }  // namespace connections
 }  // namespace nearby
-}  // namespace location

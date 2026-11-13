@@ -6,83 +6,84 @@ import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import * as IconButton from '../../ui/components/icon_button/icon_button.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as VisualLogging from '../../ui/visual_logging/visual_logging.js';
 
 import {MobileThrottlingSelector} from './MobileThrottlingSelector.js';
 import {NetworkThrottlingSelector} from './NetworkThrottlingSelector.js';
-
 import {
-  ThrottlingPresets,
   type Conditions,
   type ConditionsList,
   type MobileThrottlingConditionsGroup,
   type NetworkThrottlingConditionsGroup,
+  ThrottlingPresets,
 } from './ThrottlingPresets.js';
 
 const UIStrings = {
   /**
-  *@description Text with two placeholders separated by a colon
-  *@example {Node removed} PH1
-  *@example {div#id1} PH2
-  */
+   *@description Text with two placeholders separated by a colon
+   *@example {Node removed} PH1
+   *@example {div#id1} PH2
+   */
   sS: '{PH1}: {PH2}',
   /**
-  *@description Text in Throttling Manager of the Network panel
-  */
+   *@description Text in Throttling Manager of the Network panel
+   */
   add: 'Add…',
   /**
-  *@description Accessibility label for custom add network throttling option
-  *@example {Custom} PH1
-  */
+   *@description Accessibility label for custom add network throttling option
+   *@example {Custom} PH1
+   */
   addS: 'Add {PH1}',
   /**
-  *@description Text to indicate the network connectivity is offline
-  */
+   *@description Text to indicate the network connectivity is offline
+   */
   offline: 'Offline',
   /**
-  *@description Text in Throttling Manager of the Network panel
-  */
+   *@description Text in Throttling Manager of the Network panel
+   */
   forceDisconnectedFromNetwork: 'Force disconnected from network',
   /**
-  *@description Text for throttling the network
-  */
+   *@description Text for throttling the network
+   */
   throttling: 'Throttling',
   /**
-  *@description Icon title in Throttling Manager of the Network panel
-  */
+   *@description Icon title in Throttling Manager of the Network panel
+   */
   cpuThrottlingIsEnabled: 'CPU throttling is enabled',
   /**
-  *@description Screen reader label for a select box that chooses the CPU throttling speed in the Performance panel
-  */
+   *@description Screen reader label for a select box that chooses the CPU throttling speed in the Performance panel
+   */
   cpuThrottling: 'CPU throttling',
   /**
-  *@description Text for no network throttling
-  */
+   *@description Text for no network throttling
+   */
   noThrottling: 'No throttling',
   /**
-  *@description Text in Throttling Manager of the Network panel
-  *@example {2} PH1
-  */
+   *@description Text in Throttling Manager of the Network panel
+   *@example {2} PH1
+   */
   dSlowdown: '{PH1}× slowdown',
   /**
-  *@description Tooltip text in Throttling Manager of the Performance panel
-  */
+   *@description Tooltip text in Throttling Manager of the Performance panel
+   */
   excessConcurrency: 'Exceeding the default value may degrade system performance.',
   /**
-  *@description Tooltip text in Throttling Manager of the Performance panel
-  */
+   *@description Tooltip text in Throttling Manager of the Performance panel
+   */
   resetConcurrency: 'Reset to the default value',
   /**
-  *@description Screen reader label for an check box that neables overriding navigator.hardwareConcurrency
-  */
+   *@description Label for an check box that neables overriding navigator.hardwareConcurrency
+   */
   hardwareConcurrency: 'Hardware concurrency',
   /**
-  *@description Screen reader label for an input box that overrides navigator.hardwareConcurrency
-  */
-  hardwareConcurrencyValue: 'Value of navigator.hardwareConcurrency',
+   *@description Tooltip text for an input box that overrides navigator.hardwareConcurrency on the page
+   */
+  hardwareConcurrencySettingTooltip: 'Override the value reported by navigator.hardwareConcurrency on the page',
   /**
-  *@description Icon title in Throttling Manager of the Performance panel
-  */
+   *@description Icon title in Throttling Manager of the Performance panel
+   */
   hardwareConcurrencyIsEnabled: 'Hardware concurrency override is enabled',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/mobile_throttling/ThrottlingManager.ts', UIStrings);
@@ -137,6 +138,12 @@ export class ThrottlingManager {
   decorateSelectWithNetworkThrottling(selectElement: HTMLSelectElement): NetworkThrottlingSelector {
     let options: (SDK.NetworkManager.Conditions|null)[] = [];
     const selector = new NetworkThrottlingSelector(populate, select, this.customNetworkConditionsSetting);
+    selectElement.setAttribute(
+        'jslog',
+        `${
+            VisualLogging.dropDown()
+                .track({change: true})
+                .context(this.currentNetworkThrottlingConditionsSetting.name)}`);
     selectElement.addEventListener('change', optionSelected, false);
     return selector;
 
@@ -151,13 +158,13 @@ export class ThrottlingManager {
           // The title is usually an i18nLazyString except for custom values that are stored in the local storage in the form of a string.
           const title = typeof conditions.title === 'function' ? conditions.title() : conditions.title;
           const option = new Option(title, title);
-          UI.ARIAUtils.setAccessibleName(option, i18nString(UIStrings.sS, {PH1: group.title, PH2: title}));
+          UI.ARIAUtils.setLabel(option, i18nString(UIStrings.sS, {PH1: group.title, PH2: title}));
           groupElement.appendChild(option);
           options.push(conditions);
         }
         if (i === groups.length - 1) {
           const option = new Option(i18nString(UIStrings.add), i18nString(UIStrings.add));
-          UI.ARIAUtils.setAccessibleName(option, i18nString(UIStrings.addS, {PH1: group.title}));
+          UI.ARIAUtils.setLabel(option, i18nString(UIStrings.addS, {PH1: group.title}));
           groupElement.appendChild(option);
           options.push(null);
         }
@@ -186,33 +193,34 @@ export class ThrottlingManager {
   createOfflineToolbarCheckbox(): UI.Toolbar.ToolbarCheckbox {
     const checkbox = new UI.Toolbar.ToolbarCheckbox(
         i18nString(UIStrings.offline), i18nString(UIStrings.forceDisconnectedFromNetwork), forceOffline.bind(this));
+    checkbox.element.setAttribute(
+        'jslog', `${VisualLogging.toggle().track({click: true}).context('disconnect-from-network')}`);
     SDK.NetworkManager.MultitargetNetworkManager.instance().addEventListener(
         SDK.NetworkManager.MultitargetNetworkManager.Events.ConditionsChanged, networkConditionsChanged);
-    checkbox.setChecked(
-        SDK.NetworkManager.MultitargetNetworkManager.instance().networkConditions() ===
-        SDK.NetworkManager.OfflineConditions);
+    checkbox.setChecked(SDK.NetworkManager.MultitargetNetworkManager.instance().isOffline());
 
     function forceOffline(this: ThrottlingManager): void {
       if (checkbox.checked()) {
         SDK.NetworkManager.MultitargetNetworkManager.instance().setNetworkConditions(
             SDK.NetworkManager.OfflineConditions);
       } else {
-        SDK.NetworkManager.MultitargetNetworkManager.instance().setNetworkConditions(
-            this.lastNetworkThrottlingConditions);
+        const newConditions =
+            (!this.lastNetworkThrottlingConditions.download && !this.lastNetworkThrottlingConditions.upload) ?
+            SDK.NetworkManager.NoThrottlingConditions :
+            this.lastNetworkThrottlingConditions;
+        SDK.NetworkManager.MultitargetNetworkManager.instance().setNetworkConditions(newConditions);
       }
     }
 
     function networkConditionsChanged(): void {
-      checkbox.setChecked(
-          SDK.NetworkManager.MultitargetNetworkManager.instance().networkConditions() ===
-          SDK.NetworkManager.OfflineConditions);
+      checkbox.setChecked(SDK.NetworkManager.MultitargetNetworkManager.instance().isOffline());
     }
 
     return checkbox;
   }
 
   createMobileThrottlingButton(): UI.Toolbar.ToolbarMenuButton {
-    const button = new UI.Toolbar.ToolbarMenuButton(appendItems);
+    const button = new UI.Toolbar.ToolbarMenuButton(appendItems, undefined, 'mobileThrottling');
     button.setTitle(i18nString(UIStrings.throttling));
     button.setGlyph('');
     button.turnIntoSelect();
@@ -234,8 +242,8 @@ export class ThrottlingManager {
           continue;
         }
         contextMenu.defaultSection().appendCheckboxItem(
-            conditions.title, selector.optionSelected.bind(selector, conditions as Conditions),
-            selectedIndex === index);
+            conditions.title, selector.optionSelected.bind(selector, conditions as Conditions), selectedIndex === index,
+            undefined, undefined, undefined, conditions.jslogContext);
       }
     }
 
@@ -255,29 +263,20 @@ export class ThrottlingManager {
       const option = options[index];
       if (option) {
         button.setText(option.title);
-        button.setTitle(option.description);
+        button.setTitle(`${option.title} ${option.description}`);
       }
     }
   }
 
   private updatePanelIcon(): void {
-    const cpuRate = this.cpuThrottlingManager.cpuThrottlingRate();
-
-    if (cpuRate === SDK.CPUThrottlingManager.CPUThrottlingRates.NoThrottling &&
-        !this.hardwareConcurrencyOverrideEnabled) {
-      UI.InspectorView.InspectorView.instance().setPanelIcon('timeline', null);
-      return;
-    }
-    const icon = UI.Icon.Icon.create('smallicon-warning');
-    const tooltips: string[] = [];
-    if (cpuRate !== SDK.CPUThrottlingManager.CPUThrottlingRates.NoThrottling) {
-      tooltips.push(i18nString(UIStrings.cpuThrottlingIsEnabled));
+    const warnings = [];
+    if (this.cpuThrottlingManager.cpuThrottlingRate() !== SDK.CPUThrottlingManager.CPUThrottlingRates.NoThrottling) {
+      warnings.push(i18nString(UIStrings.cpuThrottlingIsEnabled));
     }
     if (this.hardwareConcurrencyOverrideEnabled) {
-      tooltips.push(i18nString(UIStrings.hardwareConcurrencyIsEnabled));
+      warnings.push(i18nString(UIStrings.hardwareConcurrencyIsEnabled));
     }
-    icon.title = tooltips.join('\n');
-    UI.InspectorView.InspectorView.instance().setPanelIcon('timeline', icon);
+    UI.InspectorView.InspectorView.instance().setPanelWarnings('timeline', warnings);
   }
 
   setCPUThrottlingRate(rate: number): void {
@@ -318,15 +317,18 @@ export class ThrottlingManager {
     toggle: UI.Toolbar.ToolbarItem,
   } {
     const input = new UI.Toolbar.ToolbarItem(UI.UIUtils.createInput('devtools-text-input', 'number'));
-    input.setTitle(i18nString(UIStrings.hardwareConcurrencyValue));
+    input.setTitle(i18nString(UIStrings.hardwareConcurrencySettingTooltip));
     const inputElement = input.element as HTMLInputElement;
     inputElement.min = '1';
     input.setEnabled(false);
 
-    const toggle = new UI.Toolbar.ToolbarCheckbox(i18nString(UIStrings.hardwareConcurrency));
-    const reset = new UI.Toolbar.ToolbarButton('Reset concurrency', 'largeicon-undo');
+    const toggle = new UI.Toolbar.ToolbarCheckbox(
+        i18nString(UIStrings.hardwareConcurrency), i18nString(UIStrings.hardwareConcurrencySettingTooltip));
+    const reset = new UI.Toolbar.ToolbarButton('Reset concurrency', 'undo');
     reset.setTitle(i18nString(UIStrings.resetConcurrency));
-    const warning = new UI.Toolbar.ToolbarItem(UI.Icon.Icon.create('smallicon-warning'));
+    const icon = new IconButton.Icon.Icon();
+    icon.data = {iconName: 'warning-filled', color: 'var(--icon-warning)', width: '14px', height: '14px'};
+    const warning = new UI.Toolbar.ToolbarItem(icon);
     warning.setTitle(i18nString(UIStrings.excessConcurrency));
 
     toggle.inputElement.disabled = true;  // Prevent modification while still wiring things up asynchronously below
@@ -385,17 +387,8 @@ export class ThrottlingManager {
   }
 }
 
-let actionDelegateInstance: ActionDelegate;
 export class ActionDelegate implements UI.ActionRegistration.ActionDelegate {
-  static instance(opts: {forceNew: boolean|null} = {forceNew: null}): ActionDelegate {
-    const {forceNew} = opts;
-    if (!actionDelegateInstance || forceNew) {
-      actionDelegateInstance = new ActionDelegate();
-    }
-    return actionDelegateInstance;
-  }
-
-  handleAction(context: UI.Context.Context, actionId: string): boolean {
+  handleAction(_context: UI.Context.Context, actionId: string): boolean {
     if (actionId === 'network-conditions.network-online') {
       SDK.NetworkManager.MultitargetNetworkManager.instance().setNetworkConditions(
           SDK.NetworkManager.NoThrottlingConditions);

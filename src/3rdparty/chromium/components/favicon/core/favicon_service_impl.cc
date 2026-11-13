@@ -8,10 +8,9 @@
 #include <cmath>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/hash/hash.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "components/favicon/core/favicon_client.h"
 #include "components/favicon_base/favicon_util.h"
@@ -24,12 +23,31 @@
 
 namespace favicon {
 
+// static
+void FaviconServiceImpl::RunFaviconImageCallbackWithBitmapResults(
+    favicon_base::FaviconImageCallback callback,
+    int desired_size_in_dip,
+    const std::vector<favicon_base::FaviconRawBitmapResult>&
+        favicon_bitmap_results) {
+  TRACE_EVENT0("browser",
+               "FaviconServiceImpl::RunFaviconImageCallbackWithBitmapResults");
+  favicon_base::FaviconImageResult image_result;
+  image_result.image = favicon_base::SelectFaviconFramesFromPNGs(
+      favicon_bitmap_results, favicon_base::GetFaviconScales(),
+      desired_size_in_dip);
+
+  image_result.icon_url = image_result.image.IsEmpty()
+                              ? GURL()
+                              : favicon_bitmap_results[0].icon_url;
+  std::move(callback).Run(image_result);
+}
+
 FaviconServiceImpl::FaviconServiceImpl(
     std::unique_ptr<FaviconClient> favicon_client,
     history::HistoryService* history_service)
     : favicon_client_(std::move(favicon_client)),
       history_service_(history_service) {
-#if !defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_QTWEBENGINE)
   // TODO(https://crbug.com/1024959): convert to DCHECK once crash is resolved.
   CHECK(history_service_);
 #endif
@@ -44,7 +62,7 @@ base::CancelableTaskTracker::TaskId FaviconServiceImpl::GetFaviconImage(
   TRACE_EVENT0("browser", "FaviconServiceImpl::GetFaviconImage");
   favicon_base::FaviconResultsCallback callback_runner = base::BindOnce(
       &FaviconServiceImpl::RunFaviconImageCallbackWithBitmapResults,
-      base::Unretained(this), std::move(callback), gfx::kFaviconSize);
+      std::move(callback), gfx::kFaviconSize);
   return history_service_->GetFavicon(
       icon_url, favicon_base::IconType::kFavicon,
       GetPixelSizesForFaviconScales(gfx::kFaviconSize),
@@ -58,9 +76,10 @@ base::CancelableTaskTracker::TaskId FaviconServiceImpl::GetRawFavicon(
     favicon_base::FaviconRawBitmapCallback callback,
     base::CancelableTaskTracker* tracker) {
   TRACE_EVENT0("browser", "FaviconServiceImpl::GetRawFavicon");
-  favicon_base::FaviconResultsCallback callback_runner = base::BindOnce(
-      &FaviconServiceImpl::RunFaviconRawBitmapCallbackWithBitmapResults,
-      base::Unretained(this), std::move(callback), desired_size_in_pixel);
+  favicon_base::FaviconResultsCallback callback_runner =
+      base::BindOnce(&favicon_base::ResizeFaviconBitmapResult,
+                     desired_size_in_pixel)
+          .Then(std::move(callback));
 
   std::vector<int> desired_sizes_in_pixel;
   desired_sizes_in_pixel.push_back(desired_size_in_pixel);
@@ -94,7 +113,7 @@ FaviconServiceImpl::GetFaviconImageForPageURL(
       /*fallback_to_host=*/false,
       base::BindOnce(
           &FaviconServiceImpl::RunFaviconImageCallbackWithBitmapResults,
-          base::Unretained(this), std::move(callback), gfx::kFaviconSize),
+          std::move(callback), gfx::kFaviconSize),
       tracker);
 }
 
@@ -110,9 +129,9 @@ base::CancelableTaskTracker::TaskId FaviconServiceImpl::GetRawFaviconForPageURL(
   desired_sizes_in_pixel.push_back(desired_size_in_pixel);
   return GetFaviconForPageURLImpl(
       page_url, icon_types, desired_sizes_in_pixel, fallback_to_host,
-      base::BindOnce(
-          &FaviconServiceImpl::RunFaviconRawBitmapCallbackWithBitmapResults,
-          base::Unretained(this), std::move(callback), desired_size_in_pixel),
+      base::BindOnce(&favicon_base::ResizeFaviconBitmapResult,
+                     desired_size_in_pixel)
+          .Then(std::move(callback)),
       tracker);
 }
 
@@ -129,9 +148,8 @@ FaviconServiceImpl::GetLargestRawFaviconForPageURL(
     desired_sizes_in_pixel.push_back(0);
     return favicon_client_->GetFaviconForNativeApplicationURL(
         page_url, desired_sizes_in_pixel,
-        base::BindOnce(
-            &FaviconServiceImpl::RunFaviconRawBitmapCallbackWithBitmapResults,
-            base::Unretained(this), std::move(callback), 0),
+        base::BindOnce(&favicon_base::ResizeFaviconBitmapResult, 0)
+            .Then(std::move(callback)),
         tracker);
   }
   const GURL fetched_url(
@@ -184,9 +202,9 @@ FaviconServiceImpl::GetLargestRawFaviconForID(
   // Use 0 as |desired_size| to get the largest bitmap for |favicon_id| without
   // any resizing.
   int desired_size = 0;
-  favicon_base::FaviconResultsCallback callback_runner = base::BindOnce(
-      &FaviconServiceImpl::RunFaviconRawBitmapCallbackWithBitmapResults,
-      base::Unretained(this), std::move(callback), desired_size);
+  favicon_base::FaviconResultsCallback callback_runner =
+      base::BindOnce(&favicon_base::ResizeFaviconBitmapResult, desired_size)
+          .Then(std::move(callback));
 
   return history_service_->GetFaviconForID(favicon_id, desired_size,
                                            std::move(callback_runner), tracker);
@@ -290,37 +308,6 @@ FaviconServiceImpl::GetFaviconForPageURLImpl(
   return history_service_->GetFaviconsForURL(
       fetched_url, icon_types, desired_sizes_in_pixel, fallback_to_host,
       std::move(callback), tracker);
-}
-
-void FaviconServiceImpl::RunFaviconImageCallbackWithBitmapResults(
-    favicon_base::FaviconImageCallback callback,
-    int desired_size_in_dip,
-    const std::vector<favicon_base::FaviconRawBitmapResult>&
-        favicon_bitmap_results) {
-  TRACE_EVENT0("browser",
-               "FaviconServiceImpl::RunFaviconImageCallbackWithBitmapResults");
-  favicon_base::FaviconImageResult image_result;
-  image_result.image = favicon_base::SelectFaviconFramesFromPNGs(
-      favicon_bitmap_results, favicon_base::GetFaviconScales(),
-      desired_size_in_dip);
-  favicon_base::SetFaviconColorSpace(&image_result.image);
-
-  image_result.icon_url = image_result.image.IsEmpty()
-                              ? GURL()
-                              : favicon_bitmap_results[0].icon_url;
-  std::move(callback).Run(image_result);
-}
-
-void FaviconServiceImpl::RunFaviconRawBitmapCallbackWithBitmapResults(
-    favicon_base::FaviconRawBitmapCallback callback,
-    int desired_size_in_pixel,
-    const std::vector<favicon_base::FaviconRawBitmapResult>&
-        favicon_bitmap_results) {
-  TRACE_EVENT0(
-      "browser",
-      "FaviconServiceImpl::RunFaviconRawBitmapCallbackWithBitmapResults");
-  std::move(callback).Run(
-      ResizeFaviconBitmapResult(favicon_bitmap_results, desired_size_in_pixel));
 }
 
 }  // namespace favicon

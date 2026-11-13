@@ -9,15 +9,16 @@
 
 #include "base/check.h"
 #include "base/containers/contains.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/strings/utf_string_conversions.h"
-#include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "net/base/filename_util.h"
 #include "ui/base/clipboard/clipboard_format_type.h"
 #include "ui/base/clipboard/file_info.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/base/ui_base_features.h"
 #include "url/gurl.h"
 
 namespace ui {
@@ -33,20 +34,23 @@ std::unique_ptr<OSExchangeDataProvider> OSExchangeDataProviderNonBacked::Clone()
   return clone;
 }
 
-void OSExchangeDataProviderNonBacked::MarkOriginatedFromRenderer() {
-  // TODO(dcheng): Currently unneeded because ChromeOS Aura correctly separates
-  // URL and filename metadata, and does not implement the DownloadURL protocol.
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
-  originated_from_renderer_ = true;
-#endif
+void OSExchangeDataProviderNonBacked::MarkRendererTaintedFromOrigin(
+    const url::Origin& origin) {
+  tainted_by_renderer_origin_ = origin;
 }
 
-bool OSExchangeDataProviderNonBacked::DidOriginateFromRenderer() const {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  return false;
-#else
-  return originated_from_renderer_;
-#endif
+bool OSExchangeDataProviderNonBacked::IsRendererTainted() const {
+  return tainted_by_renderer_origin_.has_value();
+}
+
+absl::optional<url::Origin>
+OSExchangeDataProviderNonBacked::GetRendererTaintedOrigin() const {
+  // Platform-specific implementations of OSExchangeDataProvider do not
+  // roundtrip opaque origins, so match that behavior here.
+  if (tainted_by_renderer_origin_ && tainted_by_renderer_origin_->opaque()) {
+    return url::Origin();
+  }
+  return tainted_by_renderer_origin_;
 }
 
 void OSExchangeDataProviderNonBacked::MarkAsFromPrivileged() {
@@ -115,8 +119,10 @@ bool OSExchangeDataProviderNonBacked::GetURLAndTitle(
     std::u16string* title) const {
   if ((formats_ & OSExchangeData::URL) == 0) {
     title->clear();
-    return GetPlainTextURL(url) ||
-           (policy == FilenameToURLPolicy::CONVERT_FILENAMES &&
+    if (GetPlainTextURL(url)) {
+       return true;
+    }
+    return (policy == FilenameToURLPolicy::CONVERT_FILENAMES &&
             GetFileURL(url));
   }
 
@@ -125,14 +131,6 @@ bool OSExchangeDataProviderNonBacked::GetURLAndTitle(
 
   *url = url_;
   *title = title_;
-  return true;
-}
-
-bool OSExchangeDataProviderNonBacked::GetFilename(base::FilePath* path) const {
-  if ((formats_ & OSExchangeData::FILE_NAME) == 0)
-    return false;
-  DCHECK(!filenames_.empty());
-  *path = filenames_[0].path;
   return true;
 }
 
@@ -236,10 +234,11 @@ gfx::Vector2d OSExchangeDataProviderNonBacked::GetDragImageOffset() const {
 }
 
 bool OSExchangeDataProviderNonBacked::GetFileURL(GURL* url) const {
-  base::FilePath file_path;
-  if (!GetFilename(&file_path))
+  if (!HasFile()) {
     return false;
+  }
 
+  base::FilePath file_path = filenames_[0].path;
   GURL test_url = net::FilePathToFileURL(file_path);
   if (!test_url.is_valid())
     return false;
@@ -256,6 +255,12 @@ bool OSExchangeDataProviderNonBacked::GetPlainTextURL(GURL* url) const {
   GURL test_url(string_);
   if (!test_url.is_valid())
     return false;
+
+  if (base::FeatureList::IsEnabled(
+          features::kDragDropOnlySynthesizeHttpOrHttpsUrlsFromText) &&
+      IsRendererTainted() && !test_url.SchemeIsHTTPOrHTTPS()) {
+    return false;
+  }
 
   if (url)
     *url = test_url;
@@ -287,10 +292,8 @@ void OSExchangeDataProviderNonBacked::CopyData(
   provider->source_ =
       source_ ? std::make_unique<DataTransferEndpoint>(*source_.get())
               : nullptr;
+  provider->tainted_by_renderer_origin_ = tainted_by_renderer_origin_;
   provider->is_from_privileged_ = is_from_privileged_;
-#if !BUILDFLAG(IS_CHROMEOS_ASH)
-  provider->originated_from_renderer_ = originated_from_renderer_;
-#endif
 }
 
 }  // namespace ui
