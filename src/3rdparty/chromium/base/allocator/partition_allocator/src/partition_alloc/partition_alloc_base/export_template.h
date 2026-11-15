@@ -178,10 +178,14 @@
 
 PA_EXPORT_TEMPLATE_TEST(DEFAULT, );  // NOLINT
 PA_EXPORT_TEMPLATE_TEST(DEFAULT, __attribute__((visibility("default"))));
+// GCC for DOS-like targets (Windows, OS/2) defines __declspec to be a synonym
+// for __attribute__ so the below checks make no sense (are the same as above).
+#if !defined(__GNUC__) || !defined(__declspec)
 #if !defined(__MINGW32__)
 PA_EXPORT_TEMPLATE_TEST(EXPORT_DLLEXPORT, __declspec(dllexport));
 #endif
 PA_EXPORT_TEMPLATE_TEST(DEFAULT, __declspec(dllimport));
+#endif
 
 #undef PA_EXPORT_TEMPLATE_TEST
 #undef PA_EXPORT_TEMPLATE_TEST_DEFAULT_DEFAULT
