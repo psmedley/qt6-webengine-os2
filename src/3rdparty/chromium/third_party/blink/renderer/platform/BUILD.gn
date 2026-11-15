@@ -1881,7 +1881,8 @@ jumbo_component("platform") {
   }
 
   if (is_os2) {
-    sources += [ "audio/cpu/x86/audio_delay_dsp_kernel_sse2.cc" ]
+    # No AVX on OS/2 (see blink_x86_avx), but the SSE2 delay kernel is used.
+    sources += [ "audio/cpu/x86/delay_sse2.cc" ]
   }
 
   if (current_cpu == "arm64" || (current_cpu == "arm" && arm_use_neon)) {
