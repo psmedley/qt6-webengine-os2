@@ -91,12 +91,24 @@ async function compressFile(filename) {
   }
 }
 
+// Compressing every file at once runs one brotli encoder per file at the same
+// time. On 32-bit OS/2 that exhausts the process's memory: node dies in
+// native code (SIGABRT or a silent exit code 1) somewhere between 20 and 50
+// concurrent encoders. Compress a few files at a time instead.
+const MAX_CONCURRENT = 8;
+
 async function main(argv) {
   const fileListPosition = argv.indexOf('--file_list');
   const fileList = argv[fileListPosition + 1];
   const fileListContents = await readTextFile(fileList);
-  const files = fileListContents.split(' ');
-  await Promise.all(files.map(filename => filename.trim()).map(compressFile));
+  const files = fileListContents.split(' ').map(filename => filename.trim());
+  let next = 0;
+  async function worker() {
+    while (next < files.length) {
+      await compressFile(files[next++]);
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(MAX_CONCURRENT, files.length)}, worker));
 }
 
 main(process.argv).catch(err => {
