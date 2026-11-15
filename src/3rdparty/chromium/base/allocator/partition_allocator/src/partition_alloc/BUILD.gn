@@ -689,6 +689,10 @@ if (is_clang_or_gcc || is_msvc || is_mingw) {
         # OS/2 has no /dev/urandom.
         sources -= [ "partition_alloc_base/rand_util_posix.cc" ]
         sources += [ "partition_alloc_base/rand_util_os2.cc" ]
+
+        # OS/2 has no /proc/self/maps or ELF <link.h>.
+        sources -= [ "partition_alloc_base/debug/stack_trace_posix.cc" ]
+        sources += [ "partition_alloc_base/debug/stack_trace_os2.cc" ]
       }
 
       if (is_linux || is_chromeos) {
