@@ -663,8 +663,9 @@ std::string GetPathWithDriveLetter(std::string_view path) {
     return std::string(path);
 
 #if defined(OS_OS2)
-  // kLIBC's _getdrive() returns the drive letter itself ('A'..'Z').
-  char drive_letter = base::ToUpperASCII(_getdrive());
+  // kLIBC's _getdrive() returns the drive letter itself ('A'..'Z'), as an
+  // int, so cast it to pick the char overload of ToUpperASCII().
+  char drive_letter = base::ToUpperASCII(static_cast<char>(_getdrive()));
   DCHECK(drive_letter >= 'A' && drive_letter <= 'Z');
 #else
   int drive = _getdrive();
