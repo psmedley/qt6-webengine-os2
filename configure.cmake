@@ -488,9 +488,11 @@ add_check_for_support(
 )
 add_check_for_support(
     MODULES QtWebEngine
-    CONDITION NOT (Nodejs_ARCH STREQUAL "ia32") AND
-              NOT (Nodejs_ARCH STREQUAL "x86") AND
-              NOT (Nodejs_ARCH STREQUAL "arm")
+    # OS/2 is a 32-bit OS, so only a 32-bit Node.js exists there.
+    CONDITION OS2 OR
+              (NOT (Nodejs_ARCH STREQUAL "ia32") AND
+               NOT (Nodejs_ARCH STREQUAL "x86") AND
+               NOT (Nodejs_ARCH STREQUAL "arm"))
     MESSAGE "32bit version of Nodejs is not supported."
 )
 add_check_for_support(
