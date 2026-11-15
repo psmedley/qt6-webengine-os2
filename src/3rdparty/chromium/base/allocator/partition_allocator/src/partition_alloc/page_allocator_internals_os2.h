@@ -5,7 +5,11 @@
 #ifndef BASE_ALLOCATOR_PARTITION_ALLOCATOR_SRC_PARTITION_ALLOC_PAGE_ALLOCATOR_INTERNALS_OS2_H_
 #define BASE_ALLOCATOR_PARTITION_ALLOCATOR_SRC_PARTITION_ALLOC_PAGE_ALLOCATOR_INTERNALS_OS2_H_
 
+#include <atomic>
+#include <cstdint>
+
 #include "partition_alloc/oom.h"
+#include "partition_alloc/page_allocator.h"
 #include "partition_alloc/page_allocator_internal.h"
 #include "partition_alloc/partition_alloc_check.h"
 #include "partition_alloc/partition_alloc_base/notreached.h"
@@ -50,6 +54,15 @@ APIRET MyDosSetMem(PVOID base, ULONG length, ULONG flags) {
   return arc;
 }
 
+// kInaccessibleWillJitLater has no special meaning on OS/2 (there is no
+// MAP_JIT equivalent), so it is treated like kInaccessible.
+bool IsInaccessible(PageAccessibilityConfiguration accessibility) {
+  return accessibility.permissions ==
+             PageAccessibilityConfiguration::kInaccessible ||
+         accessibility.permissions ==
+             PageAccessibilityConfiguration::kInaccessibleWillJitLater;
+}
+
 } // namespace
 
 // |DosAllocMemEx| will fail if allocation at the hint address is blocked.
@@ -68,12 +81,11 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
       return PAG_READ | PAG_EXECUTE;
     case PageAccessibilityConfiguration::kReadWriteExecute:
       return PAG_READ | PAG_WRITE | PAG_EXECUTE;
-    default:
-      PA_NOTREACHED();
-      [[fallthrough]];
     case PageAccessibilityConfiguration::kInaccessible:
+    case PageAccessibilityConfiguration::kInaccessibleWillJitLater:
       return 0;
   }
+  PA_NOTREACHED();
 }
 
 uintptr_t SystemAllocPagesInternal(
@@ -85,8 +97,7 @@ uintptr_t SystemAllocPagesInternal(
   ULONG flags = GetAccessFlags(accessibility);
   if (flags == 0)
     flags = PAG_READ; // OS/2 requires at least one permission bit.
-  if (accessibility.permissions !=
-      PageAccessibilityConfiguration::kInaccessible)
+  if (!IsInaccessible(accessibility))
     flags |= PAG_COMMIT;
   if (hint)
     flags |= OBJ_LOCATION;
@@ -133,8 +144,7 @@ bool TrySetSystemPagesAccessInternal(
     size_t length,
     PageAccessibilityConfiguration accessibility) {
   void* ptr = reinterpret_cast<void*>(address);
-  if (accessibility.permissions ==
-      PageAccessibilityConfiguration::kInaccessible)
+  if (IsInaccessible(accessibility))
     return MyDosSetMem(ptr, length, PAG_DECOMMIT) == NO_ERROR;
   return MyDosSetMem(ptr, length, PAG_COMMIT |
                      GetAccessFlags(accessibility)) == NO_ERROR;
@@ -145,8 +155,7 @@ void SetSystemPagesAccessInternal(
     size_t length,
     PageAccessibilityConfiguration accessibility) {
   void* ptr = reinterpret_cast<void*>(address);
-  if (accessibility.permissions ==
-      PageAccessibilityConfiguration::kInaccessible) {
+  if (IsInaccessible(accessibility)) {
     APIRET arc = MyDosSetMem(ptr, length, PAG_DECOMMIT);
     if (arc != NO_ERROR) {
       // We check `arc` for `NO_ERROR` here so that in a crash
@@ -180,13 +189,20 @@ void DecommitSystemPagesInternal(
     PageAccessibilityDisposition accessibility_disposition) {
   // Ignore accessibility_disposition, because decommitting is equivalent to
   // making pages inaccessible.
-  SetSystemPagesAccess(address, length, PageAccessibilityConfiguration::kInaccessible);
+  SetSystemPagesAccess(address, length,
+                       PageAccessibilityConfiguration(
+                           PageAccessibilityConfiguration::kInaccessible));
 }
 
-void DecommitAndZeroSystemPagesInternal(uintptr_t address, size_t length) {
+bool DecommitAndZeroSystemPagesInternal(uintptr_t address,
+                                        size_t length,
+                                        PageTag page_tag) {
+  // Like VirtualFree(MEM_DECOMMIT) on Windows: decommitted pages are zero
+  // when committed again.
   PA_CHECK(static_cast<ULONG>(NO_ERROR) ==
            MyDosSetMem(reinterpret_cast<void*>(address), length,
                        PAG_DECOMMIT));
+  return true;
 }
 
 void RecommitSystemPagesInternal(
