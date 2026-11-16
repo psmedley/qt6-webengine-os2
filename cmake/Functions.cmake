@@ -1145,6 +1145,12 @@ function(get_architectures result)
     else()
         set(${result} ${CMAKE_SYSTEM_PROCESSOR})
     endif()
+    # On OS/2, CMake derives CMAKE_SYSTEM_PROCESSOR from uname, which with some
+    # toolchains reports the OS version (e.g. "2.45") instead of a CPU name.
+    # OS/2 is 32-bit x86 only, so use the name GN and the build layout expect.
+    if(OS2)
+        set(${result} i386)
+    endif()
     if(NOT ${result})
     message(FATAL_ERROR "No valid architectures found. In case of cross-compiling make sure you have CMAKE_SYSTEM_PROCESSOR in your toolchain file.")
     endif()
