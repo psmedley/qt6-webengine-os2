@@ -404,25 +404,28 @@ int Process::GetOSPriority() const {
   return getpriority(PRIO_PROCESS, static_cast<id_t>(process_));
 }
 
-#ifdef OS_OS2
-bool Process::CanBackgroundProcesses() {
+#if BUILDFLAG(IS_OS2)
+// static
+bool Process::CanSetPriority() {
   return true;
 }
 
-bool Process::IsProcessBackgrounded() const {
-   // See SetProcessBackgrounded().
-   DCHECK(IsValid());
-  return GetPriority() == kBackgroundPriority;
- }
+Process::Priority Process::GetPriority() const {
+  // See SetPriority().
+  DCHECK(IsValid());
+  return GetOSPriority() == kBackgroundPriority ? Priority::kBestEffort
+                                                : Priority::kUserBlocking;
+}
 
-bool Process::SetProcessBackgrounded(bool background) {
-  if (!CanBackgroundProcesses())
+bool Process::SetPriority(Priority priority) {
+  if (!CanSetPriority())
     return false;
 
-  int priority = background ? kBackgroundPriority : kForegroundPriority;
-  int result = setpriority(PRIO_PROCESS, process_, priority);
+  int os_priority = priority == Priority::kBestEffort ? kBackgroundPriority
+                                                      : kForegroundPriority;
+  int result = setpriority(PRIO_PROCESS, process_, os_priority);
   DPCHECK(result == 0);
   return result == 0;
- }
-#endif //OS_OS2
+}
+#endif  // BUILDFLAG(IS_OS2)
 }  // namespace base
