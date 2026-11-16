@@ -212,7 +212,12 @@ inline TimeNanos GetWallTimeNs() {
 }
 
 inline TimeNanos GetWallTimeRawNs() {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
+  // OS/2 lacks CLOCK_MONOTONIC_RAW.
+  return GetTimeInternalNs(kWallTimeClockSource);
+#else
   return GetTimeInternalNs(CLOCK_MONOTONIC_RAW);
+#endif
 }
 
 inline TimeNanos GetThreadCPUTimeNs() {
