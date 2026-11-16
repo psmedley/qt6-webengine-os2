@@ -14,7 +14,10 @@
 #include <string.h>
 #include <sys/param.h>
 #include <sys/stat.h>
+#if !defined(__OS2__)
+// OS/2 (kLIBC) has no <sys/syscall.h>; syscall() is only used on Linux below.
 #include <sys/syscall.h>
+#endif
 #include <sys/types.h>
 #include <unistd.h>
 
