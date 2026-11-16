@@ -29,7 +29,7 @@ if(QT_FEATURE_webengine_spellchecker AND NOT CMAKE_CROSSCOMPILING)
     set_target_properties(${dict_target_name} PROPERTIES CXX_STANDARD 20)
     qt_internal_extend_target(${dict_target_name} CONDITION OS2
         LINK_OPTIONS
-        @src/core/Release/2.45/convert_dict_archives.rsp @src/core/Release/2.45/convert_dict_objects.rsp
+        @src/core/Release/i386/convert_dict_archives.rsp @src/core/Release/i386/convert_dict_objects.rsp
         PUBLIC_LIBRARIES
         "-lssp"
     )
