@@ -11,6 +11,8 @@
 #include <string.h>
 #include <wchar.h>
 
+#include <string_view>
+
 #include "base/check.h"
 #include "base/strings/string_piece.h"
 
@@ -37,12 +39,13 @@ inline int vswprintf(wchar_t* buffer, size_t size,
 inline const char16_t* as_u16cstr(const wchar_t* str) {
   return reinterpret_cast<const char16_t*>(str);
 }
-inline const char16_t* as_u16cstr(WStringPiece str) {
+inline const char16_t* as_u16cstr(std::wstring_view str) {
   return reinterpret_cast<const char16_t*>(str.data());
 }
 // The following section contains overloads of the cross-platform APIs for
-// std::wstring and base::WStringPiece.
-BASE_EXPORT bool IsStringASCII(WStringPiece str);
+// std::wstring and std::wstring_view. (Chromium removed base::WStringPiece;
+// IsStringASCII(std::wstring_view) is defined for OS/2 in string_util.cc.)
+BASE_EXPORT bool IsStringASCII(std::wstring_view str);
 #endif
 
 }  // namespace base
