@@ -48,6 +48,7 @@
 //      - MACOS
 //    - FUCHSIA
 //    - EMSCRIPTEN
+//    - OS2
 #if defined(_WIN32) || defined(_WIN64)
 #include <winapifamily.h>
 #define DAWN_PLATFORM_IS_WINDOWS 1
@@ -88,6 +89,10 @@
 
 #elif defined(__EMSCRIPTEN__)
 #define DAWN_PLATFORM_IS_EMSCRIPTEN 1
+#define DAWN_PLATFORM_IS_POSIX 1
+
+#elif defined(__OS2__)
+#define DAWN_PLATFORM_IS_OS2 1
 #define DAWN_PLATFORM_IS_POSIX 1
 
 #else
@@ -230,6 +235,9 @@ static_assert(sizeof(sizeof(char)) == 4, "Expect sizeof(size_t) == 4");
 #endif
 #if !defined(DAWN_PLATFORM_IS_EMSCRIPTEN)
 #define DAWN_PLATFORM_IS_EMSCRIPTEN 0
+#endif
+#if !defined(DAWN_PLATFORM_IS_OS2)
+#define DAWN_PLATFORM_IS_OS2 0
 #endif
 
 #if !defined(DAWN_PLATFORM_IS_X86)

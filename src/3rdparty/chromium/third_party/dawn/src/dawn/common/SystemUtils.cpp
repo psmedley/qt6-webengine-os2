@@ -139,7 +139,7 @@ std::optional<std::string> GetExecutablePath() {
     buffer[size] = '\0';
     return buffer.data();
 }
-#elif DAWN_PLATFORM_IS(FUCHSIA)
+#elif DAWN_PLATFORM_IS(FUCHSIA) || DAWN_PLATFORM_IS(OS2)
 std::optional<std::string> GetExecutablePath() {
     // UNIMPLEMENTED
     return {};
@@ -194,7 +194,7 @@ std::optional<std::string> GetModulePath() {
 #endif
     return GetHModulePath(module);
 }
-#elif DAWN_PLATFORM_IS(FUCHSIA)
+#elif DAWN_PLATFORM_IS(FUCHSIA) || DAWN_PLATFORM_IS(OS2)
 std::optional<std::string> GetModulePath() {
     return {};
 }
