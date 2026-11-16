@@ -221,7 +221,16 @@ inline TimeNanos GetWallTimeRawNs() {
 }
 
 inline TimeNanos GetThreadCPUTimeNs() {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_OS2) && !defined(CLOCK_THREAD_CPUTIME_ID)
+  // OS/2 (kLIBC) lacks CLOCK_THREAD_CPUTIME_ID.
+#if defined(CLOCK_PROCESS_CPUTIME_ID)
+  return GetTimeInternalNs(CLOCK_PROCESS_CPUTIME_ID);
+#else
+  return GetTimeInternalNs(kWallTimeClockSource);
+#endif
+#else
   return GetTimeInternalNs(CLOCK_THREAD_CPUTIME_ID);
+#endif
 }
 #endif
 
