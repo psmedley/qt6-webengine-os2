@@ -457,6 +457,14 @@ pid_t GetTID() { return getthrid(); }
 
 pid_t GetTID() { return static_cast<pid_t>(_lwp_self()); }
 
+#elif defined(__OS2__)
+
+// kLIBC's pthread_t is an opaque pointer; use the EMX thread ID instead.
+// _gettid() is only declared by <stdlib.h> with _EMX_SOURCE.
+extern "C" int _gettid(void);
+
+pid_t GetTID() { return static_cast<pid_t>(_gettid()); }
+
 #elif defined(__native_client__)
 
 pid_t GetTID() {
