@@ -4,6 +4,8 @@
 
 #include "base/process/process_metrics.h"
 
+#include "base/notreached.h"
+
 namespace base {
 
 size_t GetSystemCommitCharge() {
