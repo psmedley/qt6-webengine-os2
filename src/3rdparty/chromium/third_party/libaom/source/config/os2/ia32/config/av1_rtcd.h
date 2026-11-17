@@ -713,7 +713,6 @@ static void setup_rtcd_internal(void)
     if (flags & HAS_SSE4_1) av1_build_compound_diffwtd_mask = av1_build_compound_diffwtd_mask_sse4_1;
     av1_build_compound_diffwtd_mask_d16 = av1_build_compound_diffwtd_mask_d16_c;
     if (flags & HAS_SSE4_1) av1_build_compound_diffwtd_mask_d16 = av1_build_compound_diffwtd_mask_d16_sse4_1;
-    }
     av1_calc_indices_dim1 = av1_calc_indices_dim1_sse2;
     av1_calc_indices_dim2 = av1_calc_indices_dim2_sse2;
     av1_convolve_2d_scale = av1_convolve_2d_scale_c;
@@ -800,7 +799,6 @@ static void setup_rtcd_internal(void)
     if (flags & HAS_SSE3) av1_nn_fast_softmax_16 = av1_nn_fast_softmax_16_sse3;
     av1_nn_predict = av1_nn_predict_c;
     if (flags & HAS_SSE3) av1_nn_predict = av1_nn_predict_sse3;
-    }
     av1_quantize_fp = av1_quantize_fp_sse2;
     av1_quantize_fp_32x32 = av1_quantize_fp_32x32_c;
     av1_quantize_fp_64x64 = av1_quantize_fp_64x64_c;
