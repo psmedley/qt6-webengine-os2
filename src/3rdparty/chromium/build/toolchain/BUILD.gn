@@ -9,6 +9,10 @@ import("//build/toolchain/rbe.gni")
 declare_args() {
   # Pool for non goma tasks.
   action_pool_depth = -1
+
+  # Max number of concurrent Node.js actions. On OS/2 running several
+  # node.exe processes at once can hang the system, so serialize them.
+  node_pool_depth = 1
 }
 
 if (current_toolchain == default_toolchain) {
@@ -22,6 +26,10 @@ if (current_toolchain == default_toolchain) {
 
   pool("action_pool") {
     depth = action_pool_depth
+  }
+
+  pool("node_pool") {
+    depth = node_pool_depth
   }
 
   pool("remote_action_pool") {

@@ -18,6 +18,11 @@ template("node_action") {
                              "script",
                            ])
 
+    if (host_os == "os2" && !defined(pool)) {
+      # Serialize node.exe invocations on OS/2 (see //build/toolchain:node_pool).
+      pool = "//build/toolchain:node_pool($default_toolchain)"
+    }
+
     _full_script_location = devtools_location_prepend + invoker.script
 
     inputs += [

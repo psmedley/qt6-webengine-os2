@@ -11,6 +11,11 @@ template("node") {
     forward_variables_from(invoker, "*", TESTONLY_AND_VISIBILITY)
     forward_variables_from(invoker, TESTONLY_AND_VISIBILITY)
 
+    if (host_os == "os2" && !defined(pool)) {
+      # Serialize node.exe invocations on OS/2 (see //build/toolchain:node_pool).
+      pool = "//build/toolchain:node_pool($default_toolchain)"
+    }
+
     # Declare dependencies to all involved tools.
     inputs += [
       "//third_party/node/node.py",

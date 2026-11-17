@@ -57,6 +57,11 @@ template("ts_library") {
                              "inputs",
                            ])
 
+    if (host_os == "os2") {
+      # Serialize node.exe invocations on OS/2 (see //build/toolchain:node_pool).
+      pool = "//build/toolchain:node_pool($default_toolchain)"
+    }
+
     inputs += [
       "//third_party/node/node.py",
       "//third_party/node/node_modules.py",
