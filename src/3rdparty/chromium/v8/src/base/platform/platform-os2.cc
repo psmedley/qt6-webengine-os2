@@ -271,7 +271,7 @@ void OS::SignalCodeMovingGC() {
 void OS::AdjustSchedulingParams() {}
 
 // static
-Stack::StackSlot Stack::GetStackStart() {
+Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
   PTIB ptib;
   if (DosGetInfoBlocks(&ptib, NULL))
     return nullptr;
