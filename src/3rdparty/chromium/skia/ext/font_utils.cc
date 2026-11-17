@@ -24,6 +24,10 @@
 #include "third_party/skia/include/ports/SkFontMgr_FontConfigInterface.h"
 #endif
 
+#if BUILDFLAG(IS_OS2)
+#include "third_party/skia/include/ports/SkFontMgr_fontconfig.h"
+#endif
+
 #if BUILDFLAG(IS_FUCHSIA)
 #include <fuchsia/fonts/cpp/fidl.h>
 #include <lib/sys/cpp/component_context.h>
@@ -63,6 +67,9 @@ static sk_sp<SkFontMgr> fontmgr_factory() {
 #elif BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
   sk_sp<SkFontConfigInterface> fci(SkFontConfigInterface::RefGlobal());
   return fci ? SkFontMgr_New_FCI(std::move(fci)) : nullptr;
+#elif BUILDFLAG(IS_OS2)
+  // OS/2 has no font service process; use fontconfig directly.
+  return SkFontMgr_New_FontConfig(nullptr);
 #elif BUILDFLAG(IS_FUCHSIA)
   fuchsia::fonts::ProviderSyncPtr provider;
   base::ComponentContextForProcess()->svc()->Connect(provider.NewRequest());

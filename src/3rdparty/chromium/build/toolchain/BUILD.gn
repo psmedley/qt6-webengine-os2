@@ -11,6 +11,14 @@ declare_args() {
   action_pool_depth = -1
 }
 
+if (host_os == "os2" && action_pool_depth == -1 && !(use_goma || use_remoteexec)) {
+  # On OS/2, running several script actions at once (python spawning
+  # node.exe, protoc.exe, ...) can hang the whole system. Run actions one
+  # at a time by default; compiles and links are unaffected. Override with
+  # action_pool_depth=N in the GN args.
+  action_pool_depth = 1
+}
+
 if (current_toolchain == default_toolchain) {
   if (action_pool_depth == -1 || (use_goma || use_remoteexec)) {
     action_pool_depth = exec_script("get_cpu_count.py", [], "value")
