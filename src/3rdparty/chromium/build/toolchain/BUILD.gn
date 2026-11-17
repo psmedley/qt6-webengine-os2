@@ -9,10 +9,14 @@ import("//build/toolchain/rbe.gni")
 declare_args() {
   # Pool for non goma tasks.
   action_pool_depth = -1
+}
 
-  # Max number of concurrent Node.js actions. On OS/2 running several
-  # node.exe processes at once can hang the system, so serialize them.
-  node_pool_depth = 1
+if (host_os == "os2" && action_pool_depth == -1 && !(use_goma || use_remoteexec)) {
+  # On OS/2, running several script actions at once (python spawning
+  # node.exe, protoc.exe, ...) can hang the whole system. Run actions one
+  # at a time by default; compiles and links are unaffected. Override with
+  # action_pool_depth=N in the GN args.
+  action_pool_depth = 1
 }
 
 if (current_toolchain == default_toolchain) {
@@ -26,10 +30,6 @@ if (current_toolchain == default_toolchain) {
 
   pool("action_pool") {
     depth = action_pool_depth
-  }
-
-  pool("node_pool") {
-    depth = node_pool_depth
   }
 
   pool("remote_action_pool") {
