@@ -369,6 +369,7 @@ gpu::ContextResult GLES2CommandBufferStub::Initialize(
     }
   }
 
+#if defined(USE_EGL)
   if (IsWebGLContextType(init_params.attribs.context_type)) {
     gl::GLDisplayEGL* display_egl = display->GetAs<gl::GLDisplayEGL>();
     if (display_egl) {
@@ -385,6 +386,7 @@ gpu::ContextResult GLES2CommandBufferStub::Initialize(
       }
     }
   }
+#endif  // defined(USE_EGL)
 
   manager->delegate()->DidCreateContextSuccessfully();
   initialized_ = true;
