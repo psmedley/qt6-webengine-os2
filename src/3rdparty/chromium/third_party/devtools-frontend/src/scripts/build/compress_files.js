@@ -47,7 +47,7 @@ async function readBinaryFile(filename) {
   return pfs.readFile(filename);
 }
 
-async function brotli(sourceData, compressedFilename) {
+async function brotli(sourceData, compressedFilename, brotliOptions) {
   const sizeBytes = sourceData.length;
 
   // This replicates the following compression logic:
@@ -70,10 +70,34 @@ async function brotli(sourceData, compressedFilename) {
   output.write(Buffer.from(brotliConst));
   output.write(Buffer.from(sizeHeader));
   return new Promise((resolve, reject) => {
-    pipeline(Readable.from(sourceData), zlib.createBrotliCompress(), output, err => {
+    pipeline(Readable.from(sourceData), zlib.createBrotliCompress(brotliOptions), output, err => {
       return err ? reject(err) : resolve();
     });
   });
+}
+
+// The default encoder (quality 11, 4 MB window) needs a lot of memory. If it
+// fails (ERR_BROTLI_COMPRESSION_FAILED, seen on 32-bit OS/2), retry with
+// cheaper settings; any valid brotli stream decompresses the same way.
+const BROTLI_FALLBACKS = [
+  undefined,
+  {params: {[zlib.constants.BROTLI_PARAM_QUALITY]: 9,
+            [zlib.constants.BROTLI_PARAM_LGWIN]: 20}},
+  {params: {[zlib.constants.BROTLI_PARAM_QUALITY]: 5,
+            [zlib.constants.BROTLI_PARAM_LGWIN]: 16}},
+];
+
+async function brotliWithFallback(sourceData, compressedFilename) {
+  let lastError;
+  for (const options of BROTLI_FALLBACKS) {
+    try {
+      await brotli(sourceData, compressedFilename, options);
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
 }
 
 async function compressFile(filename) {
@@ -86,7 +110,7 @@ async function compressFile(filename) {
   // compression has finished, so an interrupted run can't leave a matching
   // .hash next to a missing or truncated .compressed file.
   if (prevHash !== currHash || !fileExists(compressedFilename)) {
-    await brotli(sourceData, compressedFilename);
+    await brotliWithFallback(sourceData, compressedFilename);
     await writeTextFile(hashFilename, currHash);
   }
 }
