@@ -12,6 +12,7 @@
 
 #include "build/build_config.h"
 #include "ui/gl/gl_export.h"
+#include "ui/gl/gpu_preference.h"
 
 #if defined(USE_EGL)
 #include <EGL/egl.h>
