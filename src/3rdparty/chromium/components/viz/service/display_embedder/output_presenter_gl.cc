@@ -109,7 +109,7 @@ gl::OverlayImage PresenterImageGL::GetOverlayImage(
 #elif BUILDFLAG(IS_ANDROID)
   return scoped_overlay_read_access_->GetAHardwareBufferFenceSync();
 #else
-  LOG(FATAL) << "GetOverlayImage() is not implemented on this platform".
+  LOG(FATAL) << "GetOverlayImage() is not implemented on this platform";
 #endif
 }
 
