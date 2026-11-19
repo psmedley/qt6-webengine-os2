@@ -4,8 +4,8 @@
 
 #include "gpu/ipc/service/image_transport_surface.h"
 
-#include "base/logging.h"
-#include "gpu/ipc/service/pass_through_image_transport_surface.h"
+#include "base/check_op.h"
+#include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_surface_stub.h"
 #include "ui/gl/init/gl_factory.h"
@@ -13,7 +13,17 @@
 namespace gpu {
 
 // static
-scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
+scoped_refptr<gl::Presenter> ImageTransportSurface::CreatePresenter(
+    gl::GLDisplay* display,
+    base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
+    SurfaceHandle surface_handle) {
+  // No surfaceless (overlay) presentation on OS/2; callers fall back to
+  // CreateNativeGLSurface().
+  return nullptr;
+}
+
+// static
+scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeGLSurface(
     gl::GLDisplay* display,
     base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
     SurfaceHandle surface_handle,
@@ -23,13 +33,8 @@ scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
     return new gl::GLSurfaceStub;
   }
 
-  scoped_refptr<gl::GLSurface> surface =
-      gl::init::CreateViewGLSurface(display, surface_handle);
-
-  if (!surface)
-    return surface;
-  return base::MakeRefCounted<PassThroughImageTransportSurface>(
-      delegate, surface.get(), false);
+  DCHECK_NE(surface_handle, kNullSurfaceHandle);
+  return gl::init::CreateViewGLSurface(display, surface_handle);
 }
 
 }  // namespace gpu
