@@ -478,6 +478,7 @@ int PhysicalSocket::DoReadFromSocket(void* buffer,
       // An error occured or shut down.
       return received;
     }
+#if defined(SCM_TIMESTAMP)  // Not available on OS/2; timestamp stays -1.
     if (timestamp) {
       struct cmsghdr* cmsg;
       for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
@@ -492,6 +493,7 @@ int PhysicalSocket::DoReadFromSocket(void* buffer,
         }
       }
     }
+#endif  // defined(SCM_TIMESTAMP)
     if (out_addr) {
       SocketAddressFromSockAddrStorage(addr_storage, out_addr);
     }
@@ -723,6 +725,7 @@ bool SocketDispatcher::Initialize() {
   ioctlsocket(s_, FIONBIO, &argp);
 #elif defined(WEBRTC_POSIX)
   fcntl(s_, F_SETFL, fcntl(s_, F_GETFL, 0) | O_NONBLOCK);
+#if defined(SO_TIMESTAMP)  // Not available on OS/2.
   if (!IsScmTimeStampExperimentDisabled()) {
     int value = 1;
     // Attempt to get receive packet timestamp from the socket.
@@ -731,6 +734,7 @@ bool SocketDispatcher::Initialize() {
       RTC_DLOG(LS_ERROR) << "::setsockopt failed. errno: " << LAST_SYSTEM_ERROR;
     }
   }
+#endif  // defined(SO_TIMESTAMP)
 #endif
 
 #if defined(WEBRTC_IOS)
