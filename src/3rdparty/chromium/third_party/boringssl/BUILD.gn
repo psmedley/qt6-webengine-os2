@@ -113,8 +113,10 @@ if (enable_rust_boringssl) {
   }
 }
 
-if (is_msan) {
+if (is_msan || is_os2) {
   # MSan instrumentation is incompatible with assembly optimizations.
+  # OS/2 (OMF objects) is not covered by the GAS assembly, which only targets
+  # ELF and Mach-O, so it uses the C implementations.
   # BoringSSL's GAS-compatible assembly knows how to detect MSan, but the NASM
   # assembly does not, so we check for MSan explicitly.
   source_set("boringssl_asm") {

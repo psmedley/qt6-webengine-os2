@@ -6,6 +6,9 @@
 
 #include <stdlib.h>
 
+#include <algorithm>
+
+#include "base/containers/span.h"
 #include "base/lazy_instance.h"
 
 namespace {
@@ -40,20 +43,25 @@ double RandDoubleAvoidAllocation() {
 
 }  // namespace internal
 
-void RandBytes(void* output, size_t output_length) {
+void RandBytes(span<uint8_t> output) {
   // trigger a thread-safe one-time srandomdev() call.
   g_bsd_random.Pointer();
-  char* output_ptr = static_cast<char*>(output);
+  uint8_t* output_ptr = output.data();
+  size_t output_length = output.size();
   while (output_length > 0) {
-    // Random retuns a 31 bit random number, use the first 24 bits.
-    size_t len = std::min(output_length, 3U);
+    // random() returns a 31 bit random number, use the low 24 bits.
+    size_t len = std::min(output_length, static_cast<size_t>(3));
     long r = random();
     output_length -= len;
     while (len--) {
-      *output_ptr++ = r;
+      *output_ptr++ = static_cast<uint8_t>(r);
       r >>= 8;
     }
   }
+}
+
+void RandBytes(void* output, size_t output_length) {
+  RandBytes(make_span(static_cast<uint8_t*>(output), output_length));
 }
 
 }  // namespace base

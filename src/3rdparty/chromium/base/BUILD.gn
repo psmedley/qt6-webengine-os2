@@ -2318,6 +2318,7 @@ jumbo_component("base") {
       "process/process_metrics_os2.cc",
       "rand_util_os2.cc",
       "system/sys_info_os2.cc",
+      "task/thread_pool/semaphore/semaphore_posix.cc",
       "threading/platform_thread_os2.cc",
     ]
     sources -= [
