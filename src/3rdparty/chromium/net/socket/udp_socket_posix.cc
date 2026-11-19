@@ -612,6 +612,7 @@ int UDPSocketPosix::SetRecvEcn() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   unsigned int ecn = 1;
+#if defined(IPV6_RECVTCLASS)  // Not available on OS/2 (no IPv6).
   if (addr_family_ == AF_INET6) {
     if (setsockopt(socket_, IPPROTO_IPV6, IPV6_RECVTCLASS, &ecn, sizeof(ecn)) !=
         0) {
@@ -628,9 +629,15 @@ int UDPSocketPosix::SetRecvEcn() {
       return OK;
     }
   }
+#endif  // defined(IPV6_RECVTCLASS)
 
+#if defined(IP_RECVTOS)
   int rv = setsockopt(socket_, IPPROTO_IP, IP_RECVTOS, &ecn, sizeof(ecn));
   return rv == 0 ? OK : MapSystemError(errno);
+#else
+  // ECN reporting isn't supported (e.g. OS/2); carry on without it.
+  return OK;
+#endif
 }
 
 void UDPSocketPosix::SetMsgConfirm(bool confirm) {

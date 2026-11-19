@@ -87,6 +87,10 @@ int SetSocketSendBufferSize(SocketDescriptor fd, int32_t size) {
 }
 
 int SetIPv6Only(SocketDescriptor fd, bool ipv6_only) {
+#if BUILDFLAG(IS_OS2) && (!defined(IPPROTO_IPV6) || !defined(IPV6_V6ONLY))
+  // No IPv6 support in the OS/2 TCP/IP stack.
+  return ERR_NOT_IMPLEMENTED;
+#else
 #if BUILDFLAG(IS_WIN)
   DWORD on = ipv6_only ? 1 : 0;
 #elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -95,6 +99,7 @@ int SetIPv6Only(SocketDescriptor fd, bool ipv6_only) {
   int rv = setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
                       reinterpret_cast<const char*>(&on), sizeof(on));
   return rv == -1 ? MapSystemError(errno) : OK;
+#endif  // BUILDFLAG(IS_OS2) && ...
 }
 
 }  // namespace net
