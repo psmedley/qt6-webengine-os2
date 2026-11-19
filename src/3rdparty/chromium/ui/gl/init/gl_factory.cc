@@ -228,6 +228,7 @@ GLDisplay* InitializeGLOneOffPlatformImplementation(
   GLDisplay* display = InitializeGLOneOffPlatform(gpu_preference);
   bool initialized = !!display;
 
+#if defined(USE_EGL)
   if (!initialized) {
     DVLOG(1) << "Initialization failed. Attempting to initialize default "
                 "GLDisplayEGL.";
@@ -235,6 +236,7 @@ GLDisplay* InitializeGLOneOffPlatformImplementation(
     display = InitializeGLOneOffPlatform(gl::GpuPreference::kDefault);
     initialized = !!display;
   }
+#endif
   if (!initialized && fallback_to_software_gl) {
     ShutdownGL(nullptr, /*due_to_fallback=*/true);
     if (InitializeStaticGLBindings(GetSoftwareGLImplementation())) {

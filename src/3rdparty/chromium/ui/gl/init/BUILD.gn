@@ -83,5 +83,9 @@ jumbo_component("init") {
       "gl_factory_os2.cc",
       "gl_initializer_os2.cc",
     ]
+
+    # EGL/ANGLE display setup; OS/2 has no EGL.
+    sources -= [ "gl_display_initializer.cc" ]
+    public -= [ "gl_display_initializer.h" ]
   }
 }
