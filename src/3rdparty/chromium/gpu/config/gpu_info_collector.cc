@@ -163,6 +163,7 @@ int StringContainsName(const std::string& str,
   return -1;
 }
 
+#if defined(USE_EGL)
 std::string GetDisplayTypeString(gl::DisplayType type) {
   switch (type) {
     case gl::DEFAULT:
@@ -208,6 +209,7 @@ std::string GetDisplayTypeString(gl::DisplayType type) {
       return "";
   }
 }
+#endif  // defined(USE_EGL)
 
 #if BUILDFLAG(USE_DAWN)
 std::string GetDawnAdapterTypeString(wgpu::AdapterType type) {
@@ -574,7 +576,9 @@ bool CollectBasicGraphicsInfo(const base::CommandLine* command_line,
 bool CollectGraphicsInfoGL(GPUInfo* gpu_info, gl::GLDisplay* display) {
   TRACE_EVENT0("startup", "gpu_info_collector::CollectGraphicsInfoGL");
   DCHECK_NE(gl::GetGLImplementationParts(), gl::kGLImplementationNone);
+#if defined(USE_EGL)
   gl::GLDisplayEGL* egl_display = display->GetAs<gl::GLDisplayEGL>();
+#endif
 
   // Now that we can check GL extensions, update passthrough support info.
   if (!gl::PassthroughCommandDecoderSupported()) {
@@ -593,10 +597,12 @@ bool CollectGraphicsInfoGL(GPUInfo* gpu_info, gl::GLDisplay* display) {
     return false;
   }
 
+#if defined(USE_EGL)
   if (egl_display) {
     gpu_info->display_type =
         GetDisplayTypeString(egl_display->GetDisplayType());
   }
+#endif
   gpu_info->gl_renderer = GetGLString(GL_RENDERER);
   gpu_info->gl_vendor = GetGLString(GL_VENDOR);
   gpu_info->gl_version = GetGLString(GL_VERSION);
