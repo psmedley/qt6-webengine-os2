@@ -21,6 +21,8 @@
 #endif
 #if defined(WEBRTC_POSIX) && !defined(__native_client__)
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #if defined(WEBRTC_ANDROID)
 #include "rtc_base/ifaddrs_android.h"
 #else
@@ -51,7 +53,10 @@ bool HasIPv4Enabled() {
 }
 
 bool HasIPv6Enabled() {
-#if defined(WINUWP)
+#if defined(WEBRTC_NO_INET6)
+  // Built without IPv6 support (e.g. OS/2).
+  return false;
+#elif defined(WINUWP)
   // WinUWP always has IPv6 capability.
   return true;
 #elif defined(WEBRTC_WIN)
