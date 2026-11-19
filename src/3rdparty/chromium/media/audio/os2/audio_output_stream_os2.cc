@@ -108,8 +108,8 @@ ULONG AudioOutputStreamOS2::Callback(PVOID buf, ULONG size) {
   DCHECK(callback_);
 
   int frames_filled =
-      callback_->OnMoreData(base::TimeDelta(), base::TimeTicks::Now(),
-                            0, audio_bus_.get());
+      callback_->OnMoreData(base::TimeDelta(), base::TimeTicks::Now(), {},
+                            audio_bus_.get());
 
   uint32_t used = frames_filled * audio_bus_->channels() * kOS2BitsPerSample / 8;
 
