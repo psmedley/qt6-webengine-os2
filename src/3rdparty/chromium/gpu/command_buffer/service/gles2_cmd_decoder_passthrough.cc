@@ -2080,8 +2080,14 @@ GLES2DecoderPassthroughImpl::LazySharedContextState::~LazySharedContextState() {
 }
 
 bool GLES2DecoderPassthroughImpl::LazySharedContextState::Initialize() {
-  auto gl_surface = gl::init::CreateOffscreenGLSurface(
-      impl_->context_->GetGLDisplayEGL(), gfx::Size());
+#if defined(USE_EGL)
+  gl::GLDisplay* gl_display = impl_->context_->GetGLDisplayEGL();
+#else
+  // No EGL (e.g. OS/2): use the platform's default GLDisplay.
+  gl::GLDisplay* gl_display = gl::GetDefaultDisplay();
+#endif
+  auto gl_surface =
+      gl::init::CreateOffscreenGLSurface(gl_display, gfx::Size());
   if (!gl_surface) {
     impl_->InsertError(
         GL_INVALID_OPERATION,
