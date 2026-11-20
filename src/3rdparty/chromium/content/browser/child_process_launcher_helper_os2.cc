@@ -17,18 +17,18 @@
 namespace content {
 namespace internal {
 
-absl::optional<mojo::NamedPlatformChannel>
-ChildProcessLauncherHelper::CreateNamedPlatformChannelOnClientThread() {
-  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
-  return absl::nullopt;
+std::optional<mojo::NamedPlatformChannel>
+ChildProcessLauncherHelper::CreateNamedPlatformChannelOnLauncherThread() {
+  DCHECK(CurrentlyOnProcessLauncherTaskRunner());
+  return std::nullopt;
 }
 
 void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
     base::Process process,
-    const ChildProcessLauncherPriority& priority) {
+    base::Process::Priority priority) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
-  if (process.CanBackgroundProcesses())
-    process.SetProcessBackgrounded(priority.is_background());
+  if (process.CanSetPriority())
+    process.SetPriority(priority);
 }
 
 ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
@@ -55,7 +55,12 @@ ChildProcessLauncherHelper::GetFilesToMap() {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
   return CreateDefaultPosixFilesToMap(
       child_process_id(), mojo_channel_->remote_endpoint(),
-      /*files_to_preload=*/{}, GetProcessType(), command_line());
+      file_data_->files_to_preload, GetProcessType(), command_line());
+}
+
+bool ChildProcessLauncherHelper::IsUsingLaunchOptions() {
+  // No zygote on OS/2: children are always started with base::LaunchProcess.
+  return true;
 }
 
 bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
@@ -73,7 +78,7 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
 
 ChildProcessLauncherHelper::Process
 ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
-    const base::LaunchOptions& options,
+    const base::LaunchOptions* options,
     std::unique_ptr<FileMappedForLaunch> files_to_register,
     bool* is_synchronous_launch,
     int* launch_result) {
@@ -82,7 +87,7 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
 
   // TODO: Implement sandboxed/isolated subprocess launching on OS/2.
   Process process;
-  process.process = base::LaunchProcess(*command_line(), options);
+  process.process = base::LaunchProcess(*command_line(), *options);
   *launch_result = process.process.IsValid() ? LAUNCH_RESULT_SUCCESS
                                              : LAUNCH_RESULT_FAILURE;
   return process;
@@ -90,7 +95,9 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
 
 void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
     const ChildProcessLauncherHelper::Process& process,
-    const base::LaunchOptions& options) {
+    const base::LaunchOptions* options) {
+  // Reset any FDs still held open.
+  file_data_.reset();
 }
 
 // static
@@ -98,6 +105,8 @@ void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
     ChildProcessLauncherHelper::Process process) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
   process.process.Terminate(RESULT_CODE_NORMAL_EXIT, false);
+  // On POSIX, we must additionally reap the child.
+  base::EnsureProcessTerminated(std::move(process.process));
 }
 
 // static
