@@ -40,7 +40,8 @@ void ConfigAutomaticGainControl(const AudioProcessingSettings& settings,
     apm_config.gain_controller2.enabled = false;
     return;
   }
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_OS2)
   // Use the Hybrid AGC setup, which combines the AGC1 input volume controller
   // and the AGC2 digital adaptive controller.
 
