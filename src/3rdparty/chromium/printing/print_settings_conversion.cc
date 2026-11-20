@@ -315,11 +315,13 @@ std::unique_ptr<PrintSettings> PrintSettingsFromJobSettings(
     }
   }
 
+#if BUILDFLAG(IS_CHROMEOS)
   const std::string* oauth_token =
       job_settings.FindString(kSettingChromeOSAccessOAuthToken);
   if (oauth_token) {
     settings->set_oauth_token(*oauth_token);
   }
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   const std::string* pin_value = job_settings.FindString(kSettingPinValue);
   if (pin_value) {
