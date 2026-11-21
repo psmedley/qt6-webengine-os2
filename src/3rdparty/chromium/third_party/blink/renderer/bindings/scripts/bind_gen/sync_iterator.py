@@ -29,7 +29,9 @@ def make_constructors(cg_context):
     assert isinstance(cg_context, CodeGenContext)
 
     decls = ListNode([
-        CxxFuncDefNode(name=cg_context.class_name,
+        # Not cg_context.class_name ("SyncIterator<T>"): a template-id isn't allowed
+        # as a constructor name in C++20 (GCC -Wtemplate-id-cdtor).
+        CxxFuncDefNode(name="SyncIterator",
                        arg_decls=["IterationSourceBase* source", "Kind kind"],
                        return_type="",
                        explicit=True,
