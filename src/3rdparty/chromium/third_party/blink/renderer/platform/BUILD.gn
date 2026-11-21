@@ -1615,6 +1615,13 @@ jumbo_component("platform") {
     "peerconnection/rtc_video_decoder_factory.cc",
   ]
 
+  if (is_os2) {
+    # Compiled with '#pragma GCC target("no-sse")' on OS/2 (GCC >= 10 stack
+    # alignment problems). The pragma must precede every include, which it
+    # can't in a jumbo unit (always_inline target mismatch with base/check.h).
+    jumbo_excluded_sources += [ "graphics/parkable_image_manager.cc" ]
+  }
+
   if (is_mac) {
     sources += [
       "audio/mac/fft_frame_mac.cc",
