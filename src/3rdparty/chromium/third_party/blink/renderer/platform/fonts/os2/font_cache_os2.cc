@@ -24,6 +24,7 @@
 
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 
+#include "skia/ext/font_utils.h"
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
 
 namespace blink {
@@ -49,7 +50,9 @@ scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
     UChar32 c,
     const SimpleFontData* font_data_to_substitute,
     FontFallbackPriority fallback_priority) {
-  sk_sp<SkFontMgr> font_mgr(SkFontMgr::RefDefault());
+  // SkFontMgr::RefDefault() is gone; use the same manager as FontCacheSkia.
+  sk_sp<SkFontMgr> font_mgr =
+      font_manager_ ? font_manager_ : skia::DefaultFontMgr();
   AtomicString family_name = GetFamilyNameForCharacter(
       font_mgr.get(), c, font_description, nullptr, fallback_priority);
   if (family_name.empty())
