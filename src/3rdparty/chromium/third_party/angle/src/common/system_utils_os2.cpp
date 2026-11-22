@@ -46,4 +46,10 @@ double GetCurrentSystemTime()
     return currentTime.tv_sec + currentTime.tv_nsec * 1e-9;
 }
 
+void SetCurrentThreadName(const char *name)
+{
+    // OS/2 has no API to name threads; base::PlatformThread::SetName on OS/2
+    // only records the name in ThreadIdNameManager as well.
+}
+
 }  // namespace angle

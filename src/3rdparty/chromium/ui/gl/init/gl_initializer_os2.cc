@@ -14,7 +14,7 @@
 namespace gl {
 namespace init {
 
-GLDisplay* InitializeGLOneOffPlatform(uint64_t) {
+GLDisplay* InitializeGLOneOffPlatform(gl::GpuPreference gpu_preference) {
   // TODO: Implement it on OS/2.
 
   switch (GetGLImplementation()) {

@@ -67,10 +67,8 @@ scoped_refptr<GLSurface> CreateViewGLSurface(GLDisplay* display,
   return nullptr;
 }
 
-scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
-    GLDisplay* display,
-    const gfx::Size& size,
-    GLSurfaceFormat format) {
+scoped_refptr<GLSurface> CreateOffscreenGLSurface(GLDisplay* display,
+                                                  const gfx::Size& size) {
   TRACE_EVENT0("gpu", "gl::init::CreateOffscreenGLSurface");
 
   // TODO: Implement it on OS/2.
