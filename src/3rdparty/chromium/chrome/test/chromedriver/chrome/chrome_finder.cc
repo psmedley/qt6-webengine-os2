@@ -76,6 +76,10 @@ void GetApplicationDirs(std::vector<base::FilePath>* locations) {
 void GetApplicationDirs(std::vector<base::FilePath>* locations) {
   // On Android we won't be able to find Chrome executable
 }
+#elif BUILDFLAG(IS_OS2)
+void GetApplicationDirs(std::vector<base::FilePath>* locations) {
+  // No standard install locations for Chrome on OS/2.
+}
 #endif
 
 void GetPathsFromEnvironment(std::vector<base::FilePath>* paths) {
