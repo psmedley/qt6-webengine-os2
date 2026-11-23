@@ -527,8 +527,11 @@ Status LaunchDesktopChrome(network::mojom::URLLoaderFactory* factory,
 #if !BUILDFLAG(IS_WIN)
   if (!capabilities.log_path.empty())
     options.environment["CHROME_LOG_FILE"] = capabilities.log_path;
+#if !BUILDFLAG(IS_OS2)
+  // OS/2's LaunchOptions has no process group support.
   if (capabilities.detach)
     options.new_process_group = true;
+#endif
 #endif
 
   PipeBuilder pipe_builder;
