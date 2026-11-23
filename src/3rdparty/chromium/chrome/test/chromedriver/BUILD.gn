@@ -348,6 +348,10 @@ source_set("lib") {
     sources += [ "keycode_text_conversion_win.cc" ]
   }
 
+  if (is_os2) {
+    sources += [ "keycode_text_conversion_os2.cc" ]
+  }
+
   deps = [
     ":automation_client_lib",
     "//base",
