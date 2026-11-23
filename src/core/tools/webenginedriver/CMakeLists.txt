@@ -1,7 +1,7 @@
 # Copyright (C) 2023 The Qt Company Ltd.
 # SPDX-License-Identifier: BSD-3-Clause
 
-if(WIN32)
+if(WIN32 OR OS2)
     set(WEBENGINEDRIVER_EXECUTABLE webenginedriver.exe)
 else()
     set(WEBENGINEDRIVER_EXECUTABLE webenginedriver)
