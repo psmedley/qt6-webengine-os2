@@ -292,6 +292,13 @@ struct BASE_EXPORT LaunchOptions {
   std::string process_name_suffix;
 #endif  // BUILDFLAG(IS_FUCHSIA)
 
+#if BUILDFLAG(IS_OS2)
+  // LIBCx shared memory handles (SHMEM) to make accessible in the child with
+  // shmem_give() right after it is spawned. The handle values stay the same in
+  // the child, so they may be passed to it on the command line.
+  std::vector<int> shmem_handles_to_give;
+#endif  // BUILDFLAG(IS_OS2)
+
 #if BUILDFLAG(IS_POSIX)
   // If not empty, launch the specified executable instead of
   // cmdline.GetProgram(). This is useful when it is necessary to pass a custom

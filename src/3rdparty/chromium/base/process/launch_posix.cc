@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #if defined(OS_OS2)
+#include <libcx/shmem.h>
 #include <libcx/spawn2.h>
 #include <sys/socket.h>
 #include <sys/fmutex.h>
@@ -405,6 +406,16 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     DPLOG(ERROR) << "LaunchProcess: failed to spawn2: " << executable_path
                  << ": " << strerror(errno);
     return Process();
+  }
+
+  // Give the child access to shared memory handles it is told about (e.g. on
+  // the command line). The child may start using them before this completes,
+  // so users of these handles in the child must tolerate a short delay.
+  for (int shmem_handle : options.shmem_handles_to_give) {
+    if (shmem_give(shmem_handle, pid, 0) != 0) {
+      DPLOG(ERROR) << "LaunchProcess: shmem_give(" << shmem_handle << ", "
+                   << pid << ") failed";
+    }
   }
 
   if (options.wait) {

@@ -1094,6 +1094,8 @@ std::string FieldTrialList::SerializeSharedMemoryRegionMetadata(
   // Tell the child that the handle is looked up.
   ss << "r,";
 #elif BUILDFLAG(IS_OS2)
+  // Give the child access to the handle once it is spawned (shmem_give).
+  launch_options->shmem_handles_to_give.push_back(shm.GetPlatformHandle());
   // Tell the child process the address of the shared memory object.
   uintptr_t uintptr_handle = static_cast<uintptr_t>(shm.GetPlatformHandle());
   ss << uintptr_handle << ",";
@@ -1168,6 +1170,18 @@ FieldTrialList::DeserializeSharedMemoryRegionMetadata(
   win::ScopedHandle scoped_handle(handle);
 #elif BUILDFLAG(IS_OS2)
   SHMEM handle = static_cast<SHMEM>(field_trial_handle);
+  // The parent gives us access to the handle with shmem_give() right after
+  // spawning us, which may race with this code. Wait for it for a while.
+  {
+    int flags;
+    int attempts = 0;
+    while (shmem_get_info(handle, &flags, nullptr, nullptr) == -1) {
+      if (++attempts > 500) {  // ~5 seconds
+        return base::unexpected(SharedMemError::kInvalidHandle);
+      }
+      PlatformThread::Sleep(Milliseconds(10));
+    }
+  }
   os2::ScopedShmemHandle scoped_handle(handle);
 #elif BUILDFLAG(IS_APPLE) && BUILDFLAG(USE_BLINK)
   auto* rendezvous = MachPortRendezvousClient::GetInstance();
