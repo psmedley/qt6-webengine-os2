@@ -33,7 +33,9 @@ BASE_FEATURE(kMojoInlineMessagePayloads,
              "MojoInlineMessagePayloads",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_OS2)
+// OS/2: ChannelPosix passes SHMEM/socket handles via LIBCx in the legacy
+// Mojo Core message extra header; this is not implemented for ipcz messages.
 BASE_FEATURE(kMojoIpcz, "MojoIpcz", base::FEATURE_DISABLED_BY_DEFAULT);
 #else
 BASE_FEATURE(kMojoIpcz, "MojoIpcz", base::FEATURE_ENABLED_BY_DEFAULT);
