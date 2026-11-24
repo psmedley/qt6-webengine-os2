@@ -951,7 +951,7 @@ File FILEToFile(FILE* file_stream) {
 
 std::optional<uint64_t> ReadFile(const FilePath& filename, span<char> buffer) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
-  int fd = HANDLE_EINTR(open(filename.value().c_str(), O_RDONLY));
+  int fd = HANDLE_EINTR(open(filename.value().c_str(), O_RDONLY | O_BINARY));
   if (fd < 0) {
     return std::nullopt;
   }
@@ -976,7 +976,10 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   if (size < 0)
     return -1;
-  int fd = HANDLE_EINTR(creat(filename.value().c_str(), 0666));
+  // Not creat(): on OS/2 (kLIBC) that opens the file in text mode, which
+  // turns every LF byte into CR LF and corrupts binary data.
+  int fd = HANDLE_EINTR(open(filename.value().c_str(),
+                             O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666));
   if (fd < 0)
     return -1;
 
@@ -1095,7 +1098,7 @@ bool AllocateFileRegion(File* file, int64_t offset, size_t size) {
 bool AppendToFile(const FilePath& filename, span<const uint8_t> data) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   bool ret = true;
-  int fd = HANDLE_EINTR(open(filename.value().c_str(), O_WRONLY | O_APPEND));
+  int fd = HANDLE_EINTR(open(filename.value().c_str(), O_WRONLY | O_APPEND | O_BINARY));
   if (fd < 0) {
     VPLOG(1) << "Unable to create file " << filename.value();
     return false;
