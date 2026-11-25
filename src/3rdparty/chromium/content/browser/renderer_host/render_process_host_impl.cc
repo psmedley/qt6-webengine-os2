@@ -5609,6 +5609,13 @@ void RenderProcessHostImpl::ProvideStatusFileForRenderer() {
 #endif
 
 void RenderProcessHostImpl::ProvideSwapFileForRenderer() {
+#if BUILDFLAG(IS_OS2)
+  // LIBCx can only pass sockets and shared memory between processes, not
+  // regular file descriptors, so the renderer would receive an fd number that
+  // is invalid (or refers to an unrelated file) there. The renderer works
+  // without a swap file and keeps parked data in memory.
+  return;
+#endif
   if (!blink::features::IsParkableStringsToDiskEnabled() &&
       !blink::features::IsParkableImagesToDiskEnabled()) {
     return;
