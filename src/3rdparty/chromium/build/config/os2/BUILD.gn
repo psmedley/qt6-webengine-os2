@@ -17,6 +17,12 @@ config("compiler") {
     "-mstackrealign",
     "-fno-common",
 
+    # Only assume the ABI alignment of static data. By default (compat) GCC
+    # raises the alignment of static objects (e.g. to 16 bytes) and then uses
+    # aligned SSE stores such as MOVAPS on them. The OMF objects/linker do not
+    # keep that alignment, so those stores fault at run time.
+    "-malign-data=abi",
+
     # Lower cc1plus peak memory. GCC sizes its garbage collector thresholds
     # from the amount of physical RAM, which lets the heap grow far before
     # collecting; large (jumbo) Blink and V8 translation units can then
